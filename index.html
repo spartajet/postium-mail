@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Postium Mail - Modern Email Client</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            html,
+            body {
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+
+            #root {
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+
+            /* Fluent UI 原生风格 */
+            body {
+                font-family:
+                    "Segoe UI",
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    Roboto,
+                    "Helvetica Neue",
+                    sans-serif;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            /* 禁用文本选择，除了可输入区域 */
+            body {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+            }
+
+            input,
+            textarea,
+            [contenteditable="true"] {
+                -webkit-user-select: text;
+                -moz-user-select: text;
+                -ms-user-select: text;
+                user-select: text;
+            }
+
+            /* 自定义滚动条样式 - Windows 11 风格 */
+            ::-webkit-scrollbar {
+                width: 12px;
+                height: 12px;
+            }
+
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            ::-webkit-scrollbar-thumb {
+                background-color: rgba(0, 0, 0, 0.2);
+                border-radius: 6px;
+                border: 3px solid transparent;
+                background-clip: padding-box;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background-color: rgba(0, 0, 0, 0.3);
+            }
+
+            ::-webkit-scrollbar-thumb:active {
+                background-color: rgba(0, 0, 0, 0.4);
+            }
+
+            /* 暗色模式滚动条 */
+            @media (prefers-color-scheme: dark) {
+                ::-webkit-scrollbar-thumb {
+                    background-color: rgba(255, 255, 255, 0.2);
+                }
+
+                ::-webkit-scrollbar-thumb:hover {
+                    background-color: rgba(255, 255, 255, 0.3);
+                }
+
+                ::-webkit-scrollbar-thumb:active {
+                    background-color: rgba(255, 255, 255, 0.4);
+                }
+            }
+
+            /* 加载动画 */
+            .app-loading {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                background: #f3f3f3;
+                z-index: 9999;
+                transition: opacity 0.3s ease;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .app-loading {
+                    background: #202020;
+                }
+            }
+
+            .app-loading.fade-out {
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .loading-spinner {
+                width: 48px;
+                height: 48px;
+                border: 3px solid #e0e0e0;
+                border-top-color: #0078d4;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .loading-spinner {
+                    border-color: #404040;
+                    border-top-color: #60cdff;
+                }
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .loading-text {
+                margin-top: 16px;
+                font-size: 14px;
+                color: #605e5c;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                .loading-text {
+                    color: #d2d0ce;
+                }
+            }
+
+            /* 防止拖拽图片 */
+            img {
+                -webkit-user-drag: none;
+                -khtml-user-drag: none;
+                -moz-user-drag: none;
+                -o-user-drag: none;
+                user-drag: none;
+            }
+
+            /* 禁用右键菜单（可选） */
+            body {
+                /* context-menu: none; */
+            }
+
+            /* Panel resize handle 样式优化 */
+            [data-panel-resize-handle-enabled] {
+                position: relative;
+                outline: none;
+            }
+
+            [data-panel-resize-handle-enabled]:after {
+                content: "";
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: -3px;
+                right: -3px;
+            }
+
+            /* 修复 Fluent UI 对话框的 z-index */
+            .ms-Dialog-main {
+                z-index: 1000;
+            }
+
+            .ms-Overlay {
+                z-index: 999;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="root">
+            <!-- 加载动画 -->
+            <div class="app-loading" id="app-loading">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading Postium Mail...</div>
+            </div>
+        </div>
+        <script type="module" src="/src/main.tsx"></script>
+        <script>
+            // 在应用加载完成后移除加载动画
+            window.addEventListener("DOMContentLoaded", () => {
+                setTimeout(() => {
+                    const loader = document.getElementById("app-loading");
+                    if (loader) {
+                        loader.classList.add("fade-out");
+                        setTimeout(() => {
+                            loader.remove();
+                        }, 300);
+                    }
+                }, 500);
+            });
+        </script>
+    </body>
+</html>
