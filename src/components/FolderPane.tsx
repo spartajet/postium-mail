@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
   makeStyles,
   tokens,
@@ -187,6 +188,7 @@ const folderIcons: Record<string, React.ReactElement> = {
 
 export const FolderPane: React.FC = () => {
   const styles = useStyles();
+  const { t } = useTranslation();
   const {
     accounts,
     activeAccountIds,
@@ -198,6 +200,38 @@ export const FolderPane: React.FC = () => {
     setCurrentAccount,
     labels,
   } = useEmailStore();
+
+  // Helper function to get localized folder names
+  const getLocalizedFolderName = (
+    folderName: string,
+    folderType?: string,
+  ): string => {
+    const folderNameLower = folderName.toLowerCase();
+    const folderTypeKey = folderType?.toLowerCase() || folderNameLower;
+
+    // Map common folder names to translation keys
+    const folderTranslationMap: { [key: string]: string } = {
+      inbox: t("sidebar.inbox"),
+      sent: t("sidebar.sent"),
+      "sent items": t("sidebar.sent"),
+      drafts: t("sidebar.drafts"),
+      spam: t("sidebar.spam"),
+      junk: t("sidebar.spam"),
+      trash: t("sidebar.trash"),
+      deleted: t("sidebar.trash"),
+      "deleted items": t("sidebar.trash"),
+      starred: t("sidebar.starred"),
+      important: t("sidebar.important"),
+      "all mail": t("sidebar.allMail"),
+      archive: t("sidebar.archive"),
+    };
+
+    return (
+      folderTranslationMap[folderTypeKey] ||
+      folderTranslationMap[folderNameLower] ||
+      folderName
+    );
+  };
 
   const handleAccountClick = (accountId: string) => {
     setCurrentAccount(accountId);
@@ -245,7 +279,7 @@ export const FolderPane: React.FC = () => {
                 className={styles.folderName}
                 weight={isSelected ? "semibold" : "regular"}
               >
-                {folder.name}
+                {getLocalizedFolderName(folder.name, folder.type)}
               </Text>
             </div>
           </TreeItemLayout>
@@ -288,7 +322,7 @@ export const FolderPane: React.FC = () => {
       {/* Multiple Account Section */}
       {accounts.length > 1 && (
         <div className={styles.accountSection}>
-          <Caption1Strong>Accounts</Caption1Strong>
+          <Caption1Strong>{t("sidebar.folders").toUpperCase()}</Caption1Strong>
           <div className={styles.accountList}>
             {accounts.map((account) => {
               const isActive = activeAccountIds.has(account.id);
@@ -365,7 +399,7 @@ export const FolderPane: React.FC = () => {
       {/* Labels Section */}
       {currentAccountLabels.length > 0 && (
         <div className={styles.labelSection}>
-          <Caption1Strong>Labels</Caption1Strong>
+          <Caption1Strong>{t("sidebar.labels").toUpperCase()}</Caption1Strong>
           <div className={styles.labelList}>
             {currentAccountLabels.map((label) => (
               <div key={label.id} className={styles.labelItem}>

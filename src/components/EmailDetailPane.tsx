@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
   makeStyles,
   tokens,
@@ -19,6 +20,7 @@ import {
   MenuList,
   MenuItem,
 } from "@fluentui/react-components";
+import { SelectableContent } from "./SelectableContent";
 import {
   ArrowReply20Regular,
   ArrowReplyAll20Regular,
@@ -33,6 +35,7 @@ import {
   Flag20Filled,
   AttachRegular,
   ArrowDownload20Filled,
+  Mail20Regular,
   bundleIcon,
 } from "@fluentui/react-icons";
 import { format } from "date-fns";
@@ -99,7 +102,25 @@ const useStyles = makeStyles({
   },
   body: {
     marginTop: tokens.spacingVerticalL,
-    lineHeight: "1.6",
+    lineHeight: tokens.lineHeightBase400,
+    color: tokens.colorNeutralForeground1,
+  },
+  noEmailContainer: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    ...shorthands.gap(tokens.spacingVerticalL),
+    color: tokens.colorNeutralForeground3,
+  },
+  noEmailIcon: {
+    fontSize: "48px",
+    color: tokens.colorNeutralForeground4,
+  },
+  noEmailText: {
+    textAlign: "center",
+    maxWidth: "300px",
   },
   attachments: {
     marginTop: tokens.spacingVerticalL,
@@ -141,6 +162,7 @@ const useStyles = makeStyles({
 
 export const EmailDetailPane: React.FC = () => {
   const styles = useStyles();
+  const { t } = useTranslation();
   const {
     currentEmail,
     toggleStar,
@@ -153,8 +175,14 @@ export const EmailDetailPane: React.FC = () => {
   if (!currentEmail) {
     return (
       <div className={styles.root}>
-        <div className={styles.emptyState}>
-          <Text size={400}>Select an email to view</Text>
+        <div className={styles.noEmailContainer}>
+          <Mail20Regular className={styles.noEmailIcon} />
+          <div className={styles.noEmailText}>
+            <Text size={500} weight="semibold" block>
+              {t("emailDetail.noEmailSelected")}
+            </Text>
+            <Caption1 block>{t("emailDetail.selectEmailToView")}</Caption1>
+          </div>
         </div>
       </div>
     );
@@ -202,19 +230,19 @@ export const EmailDetailPane: React.FC = () => {
       <Toolbar className={styles.toolbar} size="small">
         <div style={{ display: "flex", gap: tokens.spacingHorizontalXS }}>
           <ToolbarButton icon={<ArrowReply20Regular />} onClick={handleReply}>
-            Reply
+            {t("emailDetail.reply")}
           </ToolbarButton>
           <ToolbarButton
             icon={<ArrowReplyAll20Regular />}
             onClick={handleReplyAll}
           >
-            Reply All
+            {t("emailDetail.replyAll")}
           </ToolbarButton>
           <ToolbarButton
             icon={<ArrowForward20Regular />}
             onClick={handleForward}
           >
-            Forward
+            {t("emailDetail.forward")}
           </ToolbarButton>
           <ToolbarDivider />
           <ToolbarButton
@@ -243,11 +271,11 @@ export const EmailDetailPane: React.FC = () => {
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem>Mark as unread</MenuItem>
-                <MenuItem>Move to folder</MenuItem>
-                <MenuItem>Add label</MenuItem>
-                <MenuItem>Mark as spam</MenuItem>
-                <MenuItem>Block sender</MenuItem>
+                <MenuItem>{t("emailList.markAsUnread")}</MenuItem>
+                <MenuItem>{t("emailDetail.moveToFolder")}</MenuItem>
+                <MenuItem>{t("emailDetail.addLabel")}</MenuItem>
+                <MenuItem>{t("emailDetail.spam")}</MenuItem>
+                <MenuItem>{t("emailDetail.blockSender")}</MenuItem>
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -316,13 +344,13 @@ export const EmailDetailPane: React.FC = () => {
 
         <Divider />
 
-        <div className={styles.body}>
+        <SelectableContent className={styles.body}>
           {currentEmail.bodyHtml ? (
             <div dangerouslySetInnerHTML={{ __html: currentEmail.bodyHtml }} />
           ) : (
             <Body1>{currentEmail.body}</Body1>
           )}
-        </div>
+        </SelectableContent>
 
         {currentEmail.attachments && currentEmail.attachments.length > 0 && (
           <div className={styles.attachments}>

@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   makeStyles,
   tokens,
@@ -30,9 +31,8 @@ import {
   bundleIcon,
 } from "@fluentui/react-icons";
 import { FixedSizeList as List } from "react-window";
-import { format, isToday, isYesterday, formatDistanceToNow } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { useEmailStore } from "../stores/useEmailStore";
-import { Email } from "../types/email";
 
 const MailIcon = bundleIcon(Mail20Filled, Mail20Regular);
 const MailReadIcon = bundleIcon(MailRead20Filled, MailRead20Regular);
@@ -162,6 +162,7 @@ const useStyles = makeStyles({
 
 export const EmailListPane: React.FC = () => {
   const styles = useStyles();
+  const { t } = useTranslation();
   const {
     emails,
     currentAccountId,
@@ -446,7 +447,9 @@ export const EmailListPane: React.FC = () => {
             </>
           )}
         </div>
-        <Caption1>{currentAccountEmails.length} emails</Caption1>
+        <Caption1>
+          {t("emailList.totalEmails", { count: currentAccountEmails.length })}
+        </Caption1>
       </Toolbar>
 
       <div className={styles.listContainer}>
