@@ -253,139 +253,143 @@ export const EmailListPane: React.FC = () => {
     }
   }, [selectedEmailIds, archiveEmails, clearSelection]);
 
-  const EmailRow = React.memo(
-    ({ index, style }: { index: number; style: React.CSSProperties }) => {
-      const email = currentAccountEmails[index];
-      if (!email) return null;
+  const EmailRow = ({
+    index,
+    style,
+  }: {
+    index: number;
+    style: React.CSSProperties;
+  }) => {
+    const email = currentAccountEmails[index];
+    if (!email) return null;
 
-      const isSelected = selectedEmailIds.has(email.id);
-      const isCurrent = currentEmail?.id === email.id;
+    const isSelected = selectedEmailIds.has(email.id);
+    const isCurrent = currentEmail?.id === email.id;
 
-      return (
-        <div
-          style={style}
-          className={`${styles.emailItem} ${
-            isCurrent ? styles.emailItemSelected : ""
-          } ${!email.isRead ? styles.emailItemUnread : ""}`}
-          onClick={() => selectEmail(email)}
-        >
-          <Checkbox
-            className={styles.checkbox}
-            checked={isSelected}
-            onChange={() => {
-              toggleEmailSelection(email.id);
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
+    return (
+      <div
+        style={style}
+        className={`${styles.emailItem} ${
+          isCurrent ? styles.emailItemSelected : ""
+        } ${!email.isRead ? styles.emailItemUnread : ""}`}
+        onClick={() => selectEmail(email)}
+      >
+        <Checkbox
+          className={styles.checkbox}
+          checked={isSelected}
+          onChange={() => {
+            toggleEmailSelection(email.id);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
 
-          <Avatar
-            className={styles.avatar}
-            name={email.from.name || email.from.email}
-            size={36}
-            color="colorful"
-          />
+        <Avatar
+          className={styles.avatar}
+          name={email.from.name || email.from.email}
+          size={36}
+          color="colorful"
+        />
 
-          <div className={styles.emailContent}>
-            <div className={styles.emailHeader}>
-              <div className={styles.emailSender}>
-                <Text
-                  className={styles.senderName}
-                  weight={email.isRead ? "regular" : "semibold"}
-                  size={300}
-                >
-                  {email.from.name || email.from.email}
-                </Text>
-                {email.to.length > 1 && (
-                  <Caption1>+{email.to.length - 1}</Caption1>
-                )}
-              </div>
-              <div className={styles.emailMeta}>
-                {email.hasAttachments && (
-                  <AttachRegular
-                    fontSize={16}
-                    color={tokens.colorNeutralForeground3}
-                  />
-                )}
-                {email.isImportant && (
-                  <Badge color="important" size="extra-small">
-                    Important
-                  </Badge>
-                )}
-                <Caption1>{formatEmailDate(email.date)}</Caption1>
-              </div>
+        <div className={styles.emailContent}>
+          <div className={styles.emailHeader}>
+            <div className={styles.emailSender}>
+              <Text
+                className={styles.senderName}
+                weight={email.isRead ? "regular" : "semibold"}
+                size={300}
+              >
+                {email.from.name || email.from.email}
+              </Text>
+              {email.to.length > 1 && (
+                <Caption1>+{email.to.length - 1}</Caption1>
+              )}
             </div>
-
-            <Text
-              className={styles.emailSubject}
-              weight={email.isRead ? "regular" : "semibold"}
-              size={300}
-            >
-              {email.subject}
-            </Text>
-
-            <Caption1 className={styles.emailPreview}>
-              {email.preview || email.body.substring(0, 100)}
-            </Caption1>
-
-            {email.labels && email.labels.length > 0 && (
-              <div className={styles.emailLabels}>
-                {email.labels.slice(0, 3).map((label) => (
-                  <Badge
-                    key={label.id}
-                    size="extra-small"
-                    appearance="tint"
-                    style={{
-                      backgroundColor: label.color + "20",
-                      color: label.color,
-                    }}
-                  >
-                    {label.name}
-                  </Badge>
-                ))}
-                {email.labels.length > 3 && (
-                  <Caption1>+{email.labels.length - 3}</Caption1>
-                )}
-              </div>
-            )}
+            <div className={styles.emailMeta}>
+              {email.hasAttachments && (
+                <AttachRegular
+                  fontSize={16}
+                  color={tokens.colorNeutralForeground3}
+                />
+              )}
+              {email.isImportant && (
+                <Badge color="important" size="extra-small">
+                  Important
+                </Badge>
+              )}
+              <Caption1>{formatEmailDate(email.date)}</Caption1>
+            </div>
           </div>
 
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ display: "flex", gap: "4px" }}
+          <Text
+            className={styles.emailSubject}
+            weight={email.isRead ? "regular" : "semibold"}
+            size={300}
           >
-            <Tooltip
-              content={email.isStarred ? "Unstar" : "Star"}
-              relationship="label"
-            >
-              <Button
-                appearance="subtle"
-                icon={email.isStarred ? <StarIcon /> : <Star20Regular />}
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleStar(email.id);
-                }}
-              />
-            </Tooltip>
-            <Tooltip
-              content={email.isFlagged ? "Unflag" : "Flag"}
-              relationship="label"
-            >
-              <Button
-                appearance="subtle"
-                icon={email.isFlagged ? <FlagIcon /> : <Flag20Regular />}
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFlag(email.id);
-                }}
-              />
-            </Tooltip>
-          </div>
+            {email.subject}
+          </Text>
+
+          <Caption1 className={styles.emailPreview}>
+            {email.preview || email.body.substring(0, 100)}
+          </Caption1>
+
+          {email.labels && email.labels.length > 0 && (
+            <div className={styles.emailLabels}>
+              {email.labels.slice(0, 3).map((label) => (
+                <Badge
+                  key={label.id}
+                  size="extra-small"
+                  appearance="tint"
+                  style={{
+                    backgroundColor: label.color + "20",
+                    color: label.color,
+                  }}
+                >
+                  {label.name}
+                </Badge>
+              ))}
+              {email.labels.length > 3 && (
+                <Caption1>+{email.labels.length - 3}</Caption1>
+              )}
+            </div>
+          )}
         </div>
-      );
-    },
-  );
+
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: "flex", gap: "4px" }}
+        >
+          <Tooltip
+            content={email.isStarred ? "Unstar" : "Star"}
+            relationship="label"
+          >
+            <Button
+              appearance="subtle"
+              icon={email.isStarred ? <StarIcon /> : <Star20Regular />}
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleStar(email.id);
+              }}
+            />
+          </Tooltip>
+          <Tooltip
+            content={email.isFlagged ? "Unflag" : "Flag"}
+            relationship="label"
+          >
+            <Button
+              appearance="subtle"
+              icon={email.isFlagged ? <FlagIcon /> : <Flag20Regular />}
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFlag(email.id);
+              }}
+            />
+          </Tooltip>
+        </div>
+      </div>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -453,6 +457,7 @@ export const EmailListPane: React.FC = () => {
       </Toolbar>
 
       <div className={styles.listContainer}>
+        {/* @ts-ignore - react-window types incompatible with React 18 */}
         <List
           height={window.innerHeight - 120}
           itemCount={currentAccountEmails.length}
