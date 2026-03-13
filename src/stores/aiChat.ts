@@ -310,6 +310,29 @@ export const useAIChatStore = defineStore("aiChat", () => {
     addAssistantMessage(content);
   }
 
+  // 添加消息
+  function addMessage(message: Omit<ChatMessage, "id" | "timestamp">) {
+    const newMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      timestamp: new Date(),
+      ...message,
+    };
+    messages.value.push(newMessage);
+    return newMessage;
+  }
+
+  // 更新消息结果
+  function updateMessageResult(
+    messageId: string,
+    result: { success: number; failed: number }
+  ) {
+    const message = messages.value.find((m) => m.id === messageId);
+    if (message) {
+      message.actionResult = result;
+      message.pendingAction = undefined;
+    }
+  }
+
   // 添加助手消息
   function addAssistantMessage(
     content: string,
@@ -504,6 +527,8 @@ export const useAIChatStore = defineStore("aiChat", () => {
     quickPrompts,
 
     // Actions
+    addMessage,
+    updateMessageResult,
     sendMessage,
     processMessage,
     confirmAction,
