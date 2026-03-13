@@ -90,7 +90,7 @@ export default {
     // 狀態列
     statusBar: {
         connected: '已連線',
-        unread: '封未讀',
+        unread: '{count} 封未讀',
     },
 
     // 側邊欄

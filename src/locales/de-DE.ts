@@ -90,7 +90,7 @@ export default {
     // Statusleiste
     statusBar: {
         connected: 'Verbunden',
-        unread: 'ungelesen',
+        unread: '{count} ungelesen',
     },
 
     // Seitenleiste

@@ -90,7 +90,7 @@ export default {
     // Barre d'état
     statusBar: {
         connected: 'Connecté',
-        unread: 'non lu',
+        unread: '{count} non lu',
     },
 
     // Barre latérale

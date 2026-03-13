@@ -90,7 +90,7 @@ export default {
     // 状态栏
     statusBar: {
         connected: '已连接',
-        unread: '封未读',
+        unread: '{count} 封未读',
     },
 
     // 侧边栏

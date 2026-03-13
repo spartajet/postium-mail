@@ -90,7 +90,7 @@ export default {
     // Status Bar
     statusBar: {
         connected: 'Connected',
-        unread: 'unread',
+        unread: '{count} unread',
     },
 
     // Sidebar
