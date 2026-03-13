@@ -90,7 +90,7 @@ export default {
     // ステータスバー
     statusBar: {
         connected: '接続済み',
-        unread: '件の未読',
+        unread: '{count}件の未読',
     },
 
     // サイドバー
