@@ -160,10 +160,18 @@ const storagePercent = computed(
                 <span class="logo-text">Postium</span>
             </div>
             <div class="header-actions">
-                <button class="icon-btn" @click="openSettings" :title="t('settings.title')">
+                <button
+                    class="icon-btn"
+                    @click="openSettings"
+                    :title="t('settings.title')"
+                >
                     <SettingsOutlined :size="18" />
                 </button>
-                <button class="icon-btn" @click="toggleTheme" :title="t('settings.theme')">
+                <button
+                    class="icon-btn"
+                    @click="toggleTheme"
+                    :title="t('settings.theme')"
+                >
                     <LightModeOutlined v-if="uiStore.isDarkTheme" :size="18" />
                     <DarkModeOutlined v-else :size="18" />
                 </button>
@@ -250,7 +258,7 @@ const storagePercent = computed(
                         <div class="add-option-icon">
                             <AddOutlined :size="20" />
                         </div>
-                        <span>{{ t('sidebar.addAccount') }}</span>
+                        <span>{{ t("sidebar.addAccount") }}</span>
                     </div>
                 </div>
             </div>
@@ -259,7 +267,7 @@ const storagePercent = computed(
         <!-- Compose Button -->
         <button class="compose-btn" @click="openCompose">
             <EditOutlined :size="20" />
-            <span>{{ t('email.compose') }}</span>
+            <span>{{ t("email.compose") }}</span>
         </button>
 
         <!-- Navigation -->
@@ -293,7 +301,7 @@ const storagePercent = computed(
 
             <!-- Views -->
             <div class="nav-section">
-                <div class="nav-section-header">{{ t('nav.views') }}</div>
+                <div class="nav-section-header">{{ t("nav.views") }}</div>
                 <div class="nav-items">
                     <a
                         v-for="item in viewNavItems"
@@ -316,7 +324,7 @@ const storagePercent = computed(
 
             <!-- Labels -->
             <div class="nav-section">
-                <div class="nav-section-header">{{ t('nav.labels') }}</div>
+                <div class="nav-section-header">{{ t("nav.labels") }}</div>
                 <div class="nav-items">
                     <a
                         v-for="label in labels"
@@ -343,7 +351,9 @@ const storagePercent = computed(
                     ></div>
                 </div>
                 <div class="storage-text">
-                    {{ t('sidebar.storageUsed') }} {{ storageUsed }} {{ t('sidebar.storageTotal') }} / {{ storageTotal }} {{ t('sidebar.storageTotal') }}
+                    {{ t("sidebar.storageUsed") }} {{ storageUsed }}
+                    {{ t("sidebar.storageTotal") }} / {{ storageTotal }}
+                    {{ t("sidebar.storageTotal") }}
                 </div>
             </div>
         </div>

@@ -212,15 +212,6 @@ export default {
             title: '輸入事件標題',
             notes: '新增備註...',
         },
-        weekDays: {
-            sun: '日',
-            mon: '一',
-            tue: '二',
-            wed: '三',
-            thu: '四',
-            fri: '五',
-            sat: '六',
-        },
     },
 
     // 工作流程

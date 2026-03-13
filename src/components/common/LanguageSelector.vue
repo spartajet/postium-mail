@@ -39,6 +39,7 @@ function handleLanguageChange(languageCode: string) {
         trigger="click"
         :options="languageOptions"
         @select="handleLanguageChange"
+        placement="bottom-end"
     >
         <button class="language-selector-btn" :title="currentLanguage?.name">
             <span class="language-flag">{{ currentLanguageFlag }}</span>
@@ -67,5 +68,18 @@ function handleLanguageChange(languageCode: string) {
 .language-flag {
     font-size: 14px;
     line-height: 1;
+}
+
+:deep(.n-dropdown-option) {
+    border-radius: 4px;
+    margin: 2px 0;
+}
+
+:deep(.n-dropdown-option:hover) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="light"] :deep(.n-dropdown-option:hover) {
+    background-color: rgba(0, 0, 0, 0.06) !important;
 }
 </style>
