@@ -348,4 +348,31 @@ const storagePercent = computed(
 
 <style scoped>
 /* 组件使用全局样式，此处仅添加作用域样式如有需要 */
+
+/* 重写 nav-badge 为圆角正方形 */
+.nav-item :deep(.nav-badge) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    max-width: 20px;
+    border-radius: 4px;
+    line-height: 1;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/* 确保 label-dot 是圆形 */
+.label-item :deep(.label-dot) {
+    width: 8px !important;
+    height: 8px !important;
+    min-width: 8px !important;
+    max-width: 8px !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+    flex-shrink: 0 !important;
+}
 </style>
