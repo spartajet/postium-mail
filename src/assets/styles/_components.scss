@@ -1478,7 +1478,7 @@
   left: 0;
   right: 0;
   margin-top: $spacing-xs;
-  background: var(--bg-elevated);
+  background: rgb(45, 45, 48);
   border: 1px solid var(--border-subtle);
   border-radius: $radius-md;
   box-shadow: var(--shadow-lg);
@@ -1487,6 +1487,10 @@
   visibility: hidden;
   transform: translateY(-10px);
   transition: all $transition-fast;
+}
+
+[data-theme="light"] .custom-select-options {
+  background: rgb(255, 255, 255);
 }
 
 .custom-select.open .custom-select-options {
