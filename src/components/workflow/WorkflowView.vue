@@ -2,6 +2,28 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useWorkflowStore, useUIStore } from "@/stores";
 import type { NodeType, WorkflowNode } from "@/types";
+import {
+    AccountTreeOutlined,
+    SaveOutlined,
+    FolderOpenOutlined,
+    PlayArrowOutlined,
+    CheckCircleOutlined,
+    DownloadOutlined,
+    UploadOutlined,
+    DeleteOutlined,
+    RemoveOutlined,
+    AddOutlined,
+    RestartAltOutlined,
+    CloseOutlined,
+    BoltOutlined,
+    CallSplitOutlined,
+    EmailOutlined,
+    ScheduleOutlined,
+    AutoAwesomeOutlined,
+    ContentCopyOutlined,
+    DeviceHubOutlined,
+    MenuOutlined,
+} from "@vicons/material";
 
 // Stores
 const workflowStore = useWorkflowStore();
@@ -317,15 +339,7 @@ onUnmounted(() => {
         <div class="workflow-toolbar">
             <div class="toolbar-left">
                 <h2 class="toolbar-title">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                    >
-                        <path
-                            d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 9h-2v2H9v-2H7v-2h2V7h2v2h2v2zm0-6V3.5L17.5 9H13z"
-                        />
-                    </svg>
+                    <AccountTreeOutlined :size="24" />
                     <span>工作流编辑器</span>
                 </h2>
 
@@ -341,74 +355,13 @@ onUnmounted(() => {
                             @click="action.action"
                             :title="action.label"
                         >
-                            <svg
-                                v-if="action.icon === 'save'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'folder-open'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'play'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'check-circle'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'download'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'upload'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="action.icon === 'trash'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
-                                />
-                            </svg>
+                            <SaveOutlined v-if="action.icon === 'save'" :size="16" />
+                            <FolderOpenOutlined v-else-if="action.icon === 'folder-open'" :size="16" />
+                            <PlayArrowOutlined v-else-if="action.icon === 'play'" :size="16" />
+                            <CheckCircleOutlined v-else-if="action.icon === 'check-circle'" :size="16" />
+                            <DownloadOutlined v-else-if="action.icon === 'download'" :size="16" />
+                            <UploadOutlined v-else-if="action.icon === 'upload'" :size="16" />
+                            <DeleteOutlined v-else-if="action.icon === 'trash'" :size="16" />
                             <span class="btn-label">{{ action.label }}</span>
                         </button>
                     </template>
@@ -423,13 +376,7 @@ onUnmounted(() => {
                         @click="handleZoomOut"
                         title="缩小"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                        >
-                            <path d="M19 13H5v-2h14v2z" />
-                        </svg>
+                        <RemoveOutlined :size="16" />
                     </button>
                     <span class="zoom-level"
                         >{{ Math.round(zoom * 100) }}%</span
@@ -439,28 +386,14 @@ onUnmounted(() => {
                         @click="handleZoomIn"
                         title="放大"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                        >
-                            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                        </svg>
+                        <AddOutlined :size="16" />
                     </button>
                     <button
                         class="icon-btn-sm"
                         @click="handleZoomReset"
                         title="重置"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                        >
-                            <path
-                                d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"
-                            />
-                        </svg>
+                        <RestartAltOutlined :size="16" />
                     </button>
                 </div>
 
@@ -478,15 +411,7 @@ onUnmounted(() => {
                 <div class="panel-header">
                     <h3>可用节点</h3>
                     <button class="icon-btn-sm" @click="showNodePanel = false">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                        >
-                            <path
-                                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                            />
-                        </svg>
+                        <CloseOutlined :size="16" />
                     </button>
                 </div>
 
@@ -506,64 +431,12 @@ onUnmounted(() => {
                                 color: nodeType.color,
                             }"
                         >
-                            <svg
-                                v-if="nodeType.icon === 'bolt'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="nodeType.icon === 'git-branch'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M6 3v6h1v3H6v6h7v-3h-1v-3h3v-2h-3V8h1V3H6zm9 12h1v3h3v-3h1v-2h-5v2z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="nodeType.icon === 'play'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
-                            <svg
-                                v-else-if="nodeType.icon === 'mail'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="nodeType.icon === 'clock'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
-                                />
-                            </svg>
-                            <svg
-                                v-else-if="nodeType.icon === 'sparkles'"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z"
-                                />
-                            </svg>
+                            <BoltOutlined v-if="nodeType.icon === 'bolt'" :size="20" />
+                            <CallSplitOutlined v-else-if="nodeType.icon === 'git-branch'" :size="20" />
+                            <PlayArrowOutlined v-else-if="nodeType.icon === 'play'" :size="20" />
+                            <EmailOutlined v-else-if="nodeType.icon === 'mail'" :size="20" />
+                            <ScheduleOutlined v-else-if="nodeType.icon === 'clock'" :size="20" />
+                            <AutoAwesomeOutlined v-else-if="nodeType.icon === 'sparkles'" :size="20" />
                         </div>
                         <div class="node-info">
                             <div class="node-label">{{ nodeType.label }}</div>
@@ -627,16 +500,7 @@ onUnmounted(() => {
                                     color: getNodeColor(node.type),
                                 }"
                             >
-                                <svg
-                                    v-if="getNodeIcon(node.type) === 'bolt'"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                >
-                                    <path
-                                        d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"
-                                    />
-                                </svg>
+                                <BoltOutlined v-if="getNodeIcon(node.type) === 'bolt'" :size="20" />
                             </div>
                             <div class="node-title">{{ node.label }}</div>
                             <div class="node-actions">
@@ -645,30 +509,14 @@ onUnmounted(() => {
                                     @click.stop="duplicateNode(node.id)"
                                     title="复制"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                        fill="currentColor"
-                                    >
-                                        <path
-                                            d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
-                                        />
-                                    </svg>
+                                    <ContentCopyOutlined :size="14" />
                                 </button>
                                 <button
                                     class="icon-btn-xs danger"
                                     @click.stop="deleteNode(node.id)"
                                     title="删除"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                        fill="currentColor"
-                                    >
-                                        <path
-                                            d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                                        />
-                                    </svg>
+                                    <CloseOutlined :size="14" />
                                 </button>
                             </div>
                         </div>
@@ -729,15 +577,7 @@ onUnmounted(() => {
                     v-if="workflowStore.nodes.length === 0"
                     class="empty-state"
                 >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                    >
-                        <path
-                            d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 9h-2v2H9v-2H7v-2h2V7h2v2h2v2zm0-6V3.5L17.5 9H13z"
-                        />
-                    </svg>
+                    <DeviceHubOutlined :size="64" />
                     <h3>还没有节点</h3>
                     <p>从左侧面板拖拽节点到画布开始创建工作流</p>
                     <button
@@ -758,15 +598,7 @@ onUnmounted(() => {
                         class="icon-btn-sm"
                         @click="showConfigPanel = false"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                        >
-                            <path
-                                d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                            />
-                        </svg>
+                        <CloseOutlined :size="16" />
                     </button>
                 </div>
 
@@ -1046,13 +878,7 @@ onUnmounted(() => {
             @click="showNodePanel = true"
             title="显示节点面板"
         >
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-            >
-                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
-            </svg>
+            <MenuOutlined :size="24" />
         </button>
     </div>
 </template>
@@ -1093,7 +919,8 @@ onUnmounted(() => {
     margin: 0;
 }
 
-.toolbar-title svg {
+.toolbar-title svg,
+.toolbar-title i {
     width: 24px;
     height: 24px;
     color: var(--primary);
@@ -1132,7 +959,8 @@ onUnmounted(() => {
     border-color: var(--accent);
 }
 
-.toolbar-btn svg {
+.toolbar-btn svg,
+.toolbar-btn i {
     width: 16px;
     height: 16px;
 }
@@ -1250,7 +1078,8 @@ onUnmounted(() => {
     flex-shrink: 0;
 }
 
-.node-icon svg {
+.node-icon svg,
+.node-icon i {
     width: 20px;
     height: 20px;
 }
@@ -1359,7 +1188,8 @@ onUnmounted(() => {
     border-radius: 6px;
 }
 
-.node-header .node-icon svg {
+.node-header .node-icon svg,
+.node-header .node-icon i {
     width: 16px;
     height: 16px;
 }
@@ -1404,7 +1234,8 @@ onUnmounted(() => {
     color: var(--accent);
 }
 
-.icon-btn-xs svg {
+.icon-btn-xs svg,
+.icon-btn-xs i {
     width: 14px;
     height: 14px;
 }
@@ -1482,7 +1313,8 @@ onUnmounted(() => {
     pointer-events: none;
 }
 
-.empty-state svg {
+.empty-state svg,
+.empty-state i {
     width: 64px;
     height: 64px;
     color: var(--text-muted);
@@ -1621,7 +1453,8 @@ onUnmounted(() => {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.toggle-panel-btn svg {
+.toggle-panel-btn svg,
+.toggle-panel-btn i {
     width: 20px;
     height: 20px;
 }
@@ -1698,7 +1531,8 @@ onUnmounted(() => {
     color: var(--text-primary);
 }
 
-.icon-btn-sm svg {
+.icon-btn-sm svg,
+.icon-btn-sm i {
     width: 16px;
     height: 16px;
 }

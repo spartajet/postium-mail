@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import type { CalendarEvent } from "@/types";
 import { format } from "date-fns";
+import { CalendarTodayOutlined, CloseOutlined } from "@vicons/material";
 
 // Props
 interface Props {
@@ -131,28 +132,11 @@ function handleOverlayClick(e: MouseEvent) {
                     <!-- 头部 -->
                     <div class="modal-header">
                         <h3>
-                            <svg
-                                class="modal-icon"
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"
-                                />
-                            </svg>
+                            <CalendarTodayOutlined class="modal-icon" :size="24" />
                             {{ isEditMode ? "编辑事务" : "新建事务" }}
                         </h3>
                         <button class="icon-btn" @click="handleClose">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"
-                                />
-                            </svg>
+                            <CloseOutlined :size="20" />
                         </button>
                     </div>
 
@@ -328,8 +312,6 @@ function handleOverlayClick(e: MouseEvent) {
 }
 
 .modal-icon {
-    width: 24px;
-    height: 24px;
     color: var(--primary);
 }
 
@@ -350,11 +332,6 @@ function handleOverlayClick(e: MouseEvent) {
 .icon-btn:hover {
     background: var(--bg-glass-hover);
     color: var(--text-primary);
-}
-
-.icon-btn svg {
-    width: 20px;
-    height: 20px;
 }
 
 .modal-body {
