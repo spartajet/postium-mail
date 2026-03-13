@@ -56,7 +56,10 @@ const quickActions = computed(() => [
 
 // 关闭模态框
 function closeModal() {
-  uiStore.closeAIChatModal()
+  // 使用 nextTick 确保所有待处理的更新完成后再关闭
+  nextTick(() => {
+    uiStore.closeAIChatModal()
+  })
 }
 
 // 发送消息
