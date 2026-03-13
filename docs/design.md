@@ -129,6 +129,42 @@
 | enabled | INTEGER | 0 / 1 |
 | created_at | INTEGER | Unix 时间戳 |
 
+#### contacts
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| name | TEXT NOT NULL | 联系人姓名 |
+| emails | TEXT NOT NULL | JSON 数组，邮箱地址列表 |
+| phones | TEXT | JSON 数组，电话号码列表 |
+| company | TEXT | 公司名称 |
+| title | TEXT | 职位/头衔 |
+| notes | TEXT | 备注信息 |
+| avatar | TEXT | 头像图片路径 |
+| starred | INTEGER | 0 / 1，是否星标 |
+| created_at | INTEGER | Unix 时间戳 |
+| updated_at | INTEGER | Unix 时间戳 |
+
+#### contact_groups
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| name | TEXT NOT NULL | 分组名称 |
+| color | TEXT | hex 颜色值 |
+| created_at | INTEGER | Unix 时间戳 |
+
+#### contact_group_members (联系人-分组关联表)
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| contact_id | INTEGER | 联系人 ID，外键到 contacts(id) |
+| group_id | INTEGER | 分组 ID，外键到 contact_groups(id) |
+| created_at | INTEGER | Unix 时间戳 |
+
+> 联系人与分组是多对多关系，一个联系人可以属于多个分组。
+
 ### 2.3 数据库迁移（SeaORM Migrate）
 
 所有关系型表的创建与变更均通过 **SeaORM Migration** 管理，禁止手动执行 DDL。
@@ -149,7 +185,10 @@ src-tauri/
     │   ├── m20240001_000003_create_attachments.rs
     │   ├── m20240001_000004_create_calendar_events.rs
     │   ├── m20240001_000005_create_workflows.rs
-    │   └── m20240001_000006_create_emails_fts.rs   # FTS5 虚拟表（raw SQL）
+    │   ├── m20240001_000006_create_emails_fts.rs   # FTS5 虚拟表（raw SQL）
+    │   ├── m20240001_000007_create_contacts.rs
+    │   ├── m20240001_000008_create_contact_groups.rs
+    │   └── m20240001_000009_create_contact_group_members.rs
     └── ...
 ```
 
@@ -381,6 +420,55 @@ interface ChatMessage {
 }
 ```
 
+### 3.6 联系人（Contact）
+
+```typescript
+interface Contact {
+  id: number
+  name: string
+  emails: ContactEmail[]
+  phones: string[]
+  company?: string
+  title?: string
+  groupIds: number[]      // 分组 ID 列表
+  notes?: string
+  avatar?: string         // 头像路径
+  starred: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface ContactEmail {
+  email: string
+  label?: 'personal' | 'work' | 'other'  // 邮箱类型标签
+  isPrimary: boolean      // 是否为主要邮箱
+}
+
+interface ContactGroup {
+  id: number
+  name: string
+  color: string           // hex 颜色值
+  createdAt: Date
+  contactCount?: number   // 该分组下的联系人数量（计算属性）
+}
+```
+
+### 3.7 联系人表单数据（ContactFormData）
+
+```typescript
+interface ContactFormData {
+  name: string
+  emails: ContactEmail[]
+  phones: string[]
+  company?: string
+  title?: string
+  groupIds: number[]
+  notes?: string
+  starred?: boolean
+}
+```
+```
+
 ---
 
 ## 四、Pinia Store 划分
@@ -393,6 +481,7 @@ interface ChatMessage {
 | `useUIStore` | 主题、当前视图、模态框开关、Toast 队列 |
 | `useWorkflowStore` | 工作流节点和连线 |
 | `useAIChatStore` | 对话消息历史、会话上下文、流式输出状态 |
+| `useContactStore` | 联系人列表、分组管理、搜索/过滤状态 |
 
 ---
 
@@ -430,6 +519,15 @@ src/
 │   │   ├── EmailResultCard.vue    # 查询结果邮件卡片
 │   │   ├── ActionConfirm.vue      # 操作确认组件
 │   │   └── QuickPrompts.vue       # 快捷指令按钮组
+│   ├── contacts/
+│   │   ├── ContactView.vue        # 通讯录主视图（双栏布局）
+│   │   ├── ContactList.vue        # 联系人列表
+│   │   ├── ContactCard.vue        # 单个联系人卡片
+│   │   ├── ContactDetail.vue      # 联系人详情面板
+│   │   ├── ContactModal.vue       # 添加/编辑联系人模态框
+│   │   ├── ContactGroupList.vue   # 分组列表
+│   │   ├── ContactGroupModal.vue  # 分组管理模态框
+│   │   └── ContactSearch.vue      # 搜索组件
 │   ├── settings/
 │   │   └── SettingsModal.vue
 │   └── common/
@@ -441,7 +539,8 @@ src/
 │   ├── calendar.ts
 │   ├── workflow.ts
 │   ├── ui.ts
-│   └── aiChat.ts
+│   ├── aiChat.ts
+│   └── contact.ts
 ├── composables/
 │   ├── useAI.ts            # AI 基础调用封装（流式输出）
 │   ├── useAIChat.ts        # 对话逻辑、意图解析、操作执行
@@ -511,6 +610,7 @@ const themeOverrides = {
 ### P2 - 效率功能
 
 - [ ] 个人日程（日历视图 + 事务 CRUD）
+- [ ] **通讯录管理（联系人 CRUD + 分组 + 搜索）**
 - [ ] AI 智能分类（自动打标签）
 - [ ] 搜索与过滤（FTS5 关键词 + 筛选条件）
 - [ ] 键盘快捷键
@@ -525,6 +625,10 @@ const themeOverrides = {
 - [ ] 虚拟滚动优化
 - [ ] AI 对话框 —— 日程操作（"帮我把这封邮件的会议加到日历"）
 - [ ] AI 对话框 —— 跨账号批量操作
+- [ ] **通讯录导入/导出（vCard 格式）**
+- [ ] **写信时联系人自动补全**
+- [ ] **邮件发件人显示联系人姓名**
+- [ ] **通讯录与系统通讯录同步（可选）**
 
 ---
 
