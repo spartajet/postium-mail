@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import { useCalendarStore } from "@/stores/calendar";
 import { useUIStore } from "@/stores/ui";
+import { ChevronLeftOutlined, ChevronRightOutlined, AddOutlined } from "@vicons/material";
 import CalendarGrid from "./CalendarGrid.vue";
 import EventModal from "./EventModal.vue";
 
@@ -91,26 +92,10 @@ onMounted(async () => {
                     <h2>{{ monthTitle }}</h2>
                     <div class="calendar-nav">
                         <button class="icon-btn" @click="handlePrevMonth" title="上个月">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"
-                                />
-                            </svg>
+                            <ChevronLeftOutlined :size="20" />
                         </button>
                         <button class="icon-btn" @click="handleNextMonth" title="下个月">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                            >
-                                <path
-                                    d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"
-                                />
-                            </svg>
+                            <ChevronRightOutlined :size="20" />
                         </button>
                         <button class="btn btn-ghost" @click="handleToday">
                             今天
@@ -118,13 +103,7 @@ onMounted(async () => {
                     </div>
                 </div>
                 <button class="btn btn-primary" @click="handleNewEvent">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                    >
-                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                    </svg>
+                    <AddOutlined :size="16" />
                     <span>新建事务</span>
                 </button>
             </div>
@@ -236,11 +215,6 @@ onMounted(async () => {
     border: none;
 }
 
-.btn svg {
-    width: 16px;
-    height: 16px;
-}
-
 .btn-primary {
     background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
     color: white;
@@ -279,11 +253,6 @@ onMounted(async () => {
 .icon-btn:hover {
     background: var(--bg-glass-hover);
     color: var(--text-primary);
-}
-
-.icon-btn svg {
-    width: 20px;
-    height: 20px;
 }
 
 @media (max-width: 768px) {

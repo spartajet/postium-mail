@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useUIStore } from '@/stores'
+import { CheckCircleOutlined, ErrorOutlined, InfoOutlined, CloseOutlined } from '@vicons/material'
 
 // Store
 const uiStore = useUIStore()
@@ -7,20 +8,6 @@ const uiStore = useUIStore()
 // 关闭 Toast
 function handleClose(id: number) {
   uiStore.removeToast(id)
-}
-
-// 获取图标
-function getIcon(type: string): string {
-  switch (type) {
-    case 'success':
-      return 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'
-    case 'error':
-      return 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z'
-    case 'info':
-      return 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z'
-    default:
-      return 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z'
-  }
 }
 </script>
 
@@ -33,14 +20,12 @@ function getIcon(type: string): string {
           :key="toast.id"
           :class="['toast', toast.type]"
         >
-          <svg class="toast-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-            <path :d="getIcon(toast.type)" />
-          </svg>
+          <CheckCircleOutlined v-if="toast.type === 'success'" class="toast-icon" :size="20" />
+          <ErrorOutlined v-else-if="toast.type === 'error'" class="toast-icon" :size="20" />
+          <InfoOutlined v-else class="toast-icon" :size="20" />
           <span class="toast-message">{{ toast.message }}</span>
           <button class="toast-close" @click="handleClose(toast.id)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-            </svg>
+            <CloseOutlined :size="16" />
           </button>
         </div>
       </TransitionGroup>
@@ -87,8 +72,6 @@ function getIcon(type: string): string {
 }
 
 .toast-icon {
-  width: 20px;
-  height: 20px;
   flex-shrink: 0;
 }
 
@@ -129,11 +112,6 @@ function getIcon(type: string): string {
 .toast-close:hover {
   background: var(--bg-glass-hover);
   color: var(--text-primary);
-}
-
-.toast-close svg {
-  width: 16px;
-  height: 16px;
 }
 
 /* Transition animations */

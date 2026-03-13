@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import {
+    MinimizeOutlined,
+    WebAssetOutlined,
+    WebAssetOffOutlined,
+    CloseOutlined,
+} from "@vicons/material";
 
 const isMaximized = ref(false);
 const isReady = ref(false);
@@ -22,8 +28,12 @@ async function initTauri() {
     } catch (error: any) {
         // 检查错误类型
         if (error?.message?.includes("__TAURI__")) {
-            console.warn("[WindowControls] ⚠️ Not running in Tauri environment");
-            console.warn("[WindowControls] 💡 Use 'yarn tauri dev' instead of 'yarn dev'");
+            console.warn(
+                "[WindowControls] ⚠️ Not running in Tauri environment",
+            );
+            console.warn(
+                "[WindowControls] 💡 Use 'yarn tauri dev' instead of 'yarn dev'",
+            );
         } else {
             console.error("[WindowControls] ❌ Tauri init error:", error);
         }
@@ -102,11 +112,13 @@ onMounted(async () => {
 
         // 监听窗口变化
         try {
-            appWindow.onResized(async () => {
-                await updateWindowState();
-            }).then((unlisten: any) => {
-                unlistenResized = unlisten;
-            });
+            appWindow
+                .onResized(async () => {
+                    await updateWindowState();
+                })
+                .then((unlisten: any) => {
+                    unlistenResized = unlisten;
+                });
         } catch (error) {
             console.error("[WindowControls] Failed to setup listener:", error);
         }
@@ -125,14 +137,8 @@ onUnmounted(() => {
 <template>
     <div class="window-controls">
         <!-- 最小化按钮 -->
-        <button
-            class="control-btn"
-            @click="minimizeWindow"
-            title="最小化"
-        >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19 13H5v-2h14v2z"/>
-            </svg>
+        <button class="control-btn" @click="minimizeWindow" title="最小化">
+            <MinimizeOutlined :size="14" />
         </button>
 
         <!-- 最大化/还原按钮 -->
@@ -141,23 +147,13 @@ onUnmounted(() => {
             @click="toggleMaximize"
             :title="isMaximized ? '还原' : '最大化'"
         >
-            <svg v-if="!isMaximized" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 4h16v16H4V4zm2 2v12h12V6H6z"/>
-            </svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 4h12v12H4V4zm2 2v8h8V6H6z"/>
-            </svg>
+            <WebAssetOutlined v-if="!isMaximized" :size="14" />
+            <WebAssetOffOutlined v-else :size="14" />
         </button>
 
         <!-- 关闭按钮 -->
-        <button
-            class="control-btn close-btn"
-            @click="closeWindow"
-            title="关闭"
-        >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
-            </svg>
+        <button class="control-btn close-btn" @click="closeWindow" title="关闭">
+            <CloseOutlined :size="12" />
         </button>
     </div>
 </template>
@@ -174,8 +170,9 @@ onUnmounted(() => {
 }
 
 .control-btn {
-    width: 46px;
+    width: 40px;
     height: 100%;
+    padding: 0 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -187,18 +184,13 @@ onUnmounted(() => {
     -webkit-app-region: no-drag;
 }
 
-.control-btn svg {
-    width: 14px;
-    height: 14px;
-}
-
 .control-btn:hover {
     background: var(--bg-glass-hover);
     color: var(--text-primary);
 }
 
 .control-btn.close-btn:hover {
-    background: #E81123;
+    background: #e81123;
     color: white;
 }
 </style>
