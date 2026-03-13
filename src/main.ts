@@ -7,12 +7,15 @@ import App from "./App.vue";
 import "@/assets/styles/global.scss";
 
 // 导入语言包
-import { messages, defaultLocale } from "@/locales";
+import { messages, defaultLocale, getSavedLocale } from "@/locales";
+
+// 从 localStorage 读取保存的语言，如果没有则使用默认语言
+const initialLocale = getSavedLocale();
 
 // 创建 i18n 实例
 const i18n = createI18n({
     legacy: false, // 使用 Composition API 模式
-    locale: defaultLocale, // 默认语言
+    locale: initialLocale, // 使用保存的语言或默认语言
     fallbackLocale: defaultLocale, // 回退语言
     messages,
 });
