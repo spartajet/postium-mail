@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, h } from 'vue'
+import { computed, ref, h, nextTick } from 'vue'
 import { useUIStore } from '@/stores'
 import { useI18n } from 'vue-i18n'
 import { availableLanguages } from '@/locales'
@@ -114,7 +114,10 @@ const shortcuts = [
 
 // 关闭模态框
 function closeModal() {
-  uiStore.closeSettingsModal()
+  // 使用 nextTick 确保所有待处理的更新完成后再关闭
+  nextTick(() => {
+    uiStore.closeSettingsModal()
+  })
 }
 
 // 更新菜单 key

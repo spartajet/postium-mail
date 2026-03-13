@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, nextTick } from "vue";
 import { useUIStore, useEmailStore, useAccountStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import type { ComposeForm } from "@/types";
@@ -66,8 +66,11 @@ const quickActions = computed(() => [
 
 // 关闭模态框
 function handleClose() {
-    uiStore.closeComposeModal();
-    resetForm();
+    // 使用 nextTick 确保所有待处理的更新完成后再关闭
+    nextTick(() => {
+        uiStore.closeComposeModal();
+        resetForm();
+    });
 }
 
 // 重置表单
