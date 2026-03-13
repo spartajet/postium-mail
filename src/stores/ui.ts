@@ -133,6 +133,7 @@ export const useUIStore = defineStore("ui", () => {
     const saved = localStorage.getItem("postium-theme") as ThemeType | null;
     if (saved) {
       theme.value = saved;
+      settings.value.theme = saved; // 同步到 settings
     }
     applyTheme();
   }
@@ -346,6 +347,8 @@ export const useUIStore = defineStore("ui", () => {
   // 保存设置
   function saveSettings() {
     localStorage.setItem("postium-settings", JSON.stringify(settings.value));
+    // 同时保存主题到单独的键（向后兼容）
+    saveThemePreference();
   }
 
   // 加载设置
@@ -425,10 +428,24 @@ export const useUIStore = defineStore("ui", () => {
 
   // 初始化 UI Store
   function init() {
-    loadThemePreference();
+    // 先尝试从设置中加载（包含主题和语言）
     loadSettings();
+
+    // 如果设置中没有主题，尝试从旧的主题偏好中加载（向后兼容）
+    if (!localStorage.getItem("postium-settings")) {
+      loadThemePreference();
+    } else {
+      // 应用已加载的主题
+      applyTheme();
+    }
+
+    // 应用已加载的语言
     applyLanguage();
+
+    // 监听系统主题变化
     watchSystemTheme();
+
+    // 监听断点变化
     watchBreakpoints();
   }
 

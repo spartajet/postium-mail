@@ -31,6 +31,34 @@ export const messages = {
 // 默认语言
 export const defaultLocale: LanguageCode = 'zh-CN';
 
+// localStorage 键
+const SETTINGS_KEY = 'postium-settings';
+
+// 获取保存的语言设置
+export function getSavedLocale(): LanguageCode {
+    if (typeof window === 'undefined') {
+        return defaultLocale;
+    }
+
+    try {
+        const saved = localStorage.getItem(SETTINGS_KEY);
+        if (saved) {
+            const settings = JSON.parse(saved);
+            if (settings.language && typeof settings.language === 'string') {
+                // 验证保存的语言是否在支持列表中
+                const isValid = availableLanguages.some(lang => lang.code === settings.language);
+                if (isValid) {
+                    return settings.language as LanguageCode;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load saved language:', e);
+    }
+
+    return defaultLocale;
+}
+
 // 获取语言配置
 export function getLanguageConfig(code: string) {
     return availableLanguages.find(lang => lang.code === code);
