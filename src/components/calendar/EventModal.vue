@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import type { CalendarEvent } from "@/types";
 import { format } from "date-fns";
 import { CalendarTodayOutlined, CloseOutlined } from "@vicons/material";
+
+// i18n
+const { t } = useI18n();
 
 // Props
 interface Props {
@@ -32,23 +36,23 @@ const form = ref({
 });
 
 // 颜色选项
-const colorOptions = [
-    { value: "#7C3AED", label: "紫色" },
-    { value: "#3B82F6", label: "蓝色" },
-    { value: "#10B981", label: "绿色" },
-    { value: "#F59E0B", label: "橙色" },
-    { value: "#EF4444", label: "红色" },
-    { value: "#EC4899", label: "粉色" },
-];
+const colorOptions = computed(() => [
+    { value: "#7C3AED", label: t("calendar.colorOptions.purple") },
+    { value: "#3B82F6", label: t("calendar.colorOptions.blue") },
+    { value: "#10B981", label: t("calendar.colorOptions.green") },
+    { value: "#F59E0B", label: t("calendar.colorOptions.orange") },
+    { value: "#EF4444", label: t("calendar.colorOptions.red") },
+    { value: "#EC4899", label: t("calendar.colorOptions.pink") },
+]);
 
 // 重复选项
-const repeatOptions = [
-    { value: "none", label: "不重复" },
-    { value: "daily", label: "每天" },
-    { value: "weekly", label: "每周" },
-    { value: "monthly", label: "每月" },
-    { value: "yearly", label: "每年" },
-];
+const repeatOptions = computed(() => [
+    { value: "none", label: t("calendar.repeatOptions.none") },
+    { value: "daily", label: t("calendar.repeatOptions.daily") },
+    { value: "weekly", label: t("calendar.repeatOptions.weekly") },
+    { value: "monthly", label: t("calendar.repeatOptions.monthly") },
+    { value: "yearly", label: t("calendar.repeatOptions.yearly") },
+]);
 
 // 是否是编辑模式
 const isEditMode = computed(() => !!props.event);
@@ -133,7 +137,11 @@ function handleOverlayClick(e: MouseEvent) {
                     <div class="modal-header">
                         <h3>
                             <CalendarTodayOutlined class="modal-icon" :size="24" />
-                            {{ isEditMode ? "编辑事务" : "新建事务" }}
+                            {{
+                                isEditMode
+                                    ? t("calendar.editEvent")
+                                    : t("calendar.newEvent")
+                            }}
                         </h3>
                         <button class="icon-btn" @click="handleClose">
                             <CloseOutlined :size="20" />
@@ -144,26 +152,26 @@ function handleOverlayClick(e: MouseEvent) {
                     <div class="modal-body">
                         <!-- 标题 -->
                         <div class="form-group">
-                            <label>标题</label>
+                            <label>{{ t("calendar.title") }}</label>
                             <input
                                 v-model="form.title"
                                 type="text"
-                                placeholder="输入事务标题"
+                                :placeholder="t('calendar.placeholder.title')"
                             />
                         </div>
 
                         <!-- 日期和时间 -->
                         <div class="form-row">
                             <div class="form-group">
-                                <label>日期</label>
+                                <label>{{ t("calendar.date") }}</label>
                                 <input v-model="form.date" type="date" />
                             </div>
                             <div class="form-group">
-                                <label>开始时间</label>
+                                <label>{{ t("calendar.startTime") }}</label>
                                 <input v-model="form.startTime" type="time" />
                             </div>
                             <div class="form-group">
-                                <label>结束时间</label>
+                                <label>{{ t("calendar.endTime") }}</label>
                                 <input v-model="form.endTime" type="time" />
                             </div>
                         </div>
@@ -171,7 +179,7 @@ function handleOverlayClick(e: MouseEvent) {
                         <!-- 重复 -->
                         <div class="form-row">
                             <div class="form-group">
-                                <label>重复</label>
+                                <label>{{ t("calendar.repeat") }}</label>
                                 <select v-model="form.repeat">
                                     <option
                                         v-for="option in repeatOptions"
@@ -186,14 +194,14 @@ function handleOverlayClick(e: MouseEvent) {
                                 v-if="form.repeat !== 'none'"
                                 class="form-group"
                             >
-                                <label>结束日期</label>
+                                <label>{{ t("calendar.repeatEnd") }}</label>
                                 <input v-model="form.repeatEnd" type="date" />
                             </div>
                         </div>
 
                         <!-- 颜色 -->
                         <div class="form-group">
-                            <label>颜色</label>
+                            <label>{{ t("calendar.color") }}</label>
                             <div class="color-picker">
                                 <label
                                     v-for="color in colorOptions"
@@ -215,10 +223,10 @@ function handleOverlayClick(e: MouseEvent) {
 
                         <!-- 备注 -->
                         <div class="form-group">
-                            <label>备注</label>
+                            <label>{{ t("calendar.notes") }}</label>
                             <textarea
                                 v-model="form.notes"
-                                placeholder="添加备注..."
+                                :placeholder="t('calendar.placeholder.notes')"
                                 rows="3"
                             ></textarea>
                         </div>
@@ -231,18 +239,18 @@ function handleOverlayClick(e: MouseEvent) {
                             class="btn btn-danger"
                             @click="handleDelete"
                         >
-                            删除
+                            {{ t("common.delete") }}
                         </button>
                         <div class="footer-right">
                             <button class="btn btn-ghost" @click="handleClose">
-                                取消
+                                {{ t("common.cancel") }}
                             </button>
                             <button
                                 class="btn btn-primary"
                                 :disabled="!form.title.trim()"
                                 @click="handleSave"
                             >
-                                保存
+                                {{ t("common.save") }}
                             </button>
                         </div>
                     </div>

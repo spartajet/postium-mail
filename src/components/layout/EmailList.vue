@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useEmailStore, useUIStore } from "@/stores";
+import { useI18n } from "vue-i18n";
 import { formatDistanceToNow } from "date-fns";
-import { zhCN } from "date-fns/locale";
 import {
     SearchOutlined,
     CloseOutlined,
@@ -12,10 +12,17 @@ import {
     EmailOutlined,
     AttachFileOutlined,
 } from "@vicons/material";
+import { useDateLocale } from "@/composables/useDateLocale";
 
 // Stores
 const emailStore = useEmailStore();
 const uiStore = useUIStore();
+
+// i18n
+const { t } = useI18n();
+
+// 日期格式化
+const { currentDateLocale } = useDateLocale();
 
 // 搜索关键词
 const searchQuery = ref("");
@@ -24,7 +31,7 @@ const searchQuery = ref("");
 function formatDate(date: Date): string {
     return formatDistanceToNow(new Date(date), {
         addSuffix: false,
-        locale: zhCN,
+        locale: currentDateLocale.value,
     });
 }
 
@@ -41,7 +48,7 @@ function handleEmailClick(email: any) {
 // 刷新邮件列表
 async function handleRefresh() {
     await emailStore.fetchEmails();
-    uiStore.showSuccess("邮件列表已刷新");
+    uiStore.showSuccess(t('email.refreshSuccess'));
 }
 
 // 清除搜索
@@ -60,7 +67,7 @@ function clearSearch() {
                 <input
                     v-model="searchQuery"
                     class="search-input"
-                    placeholder="搜索邮件..."
+                    :placeholder="t('email.searchPlaceholder')"
                     @input="handleSearch"
                 />
                 <button
@@ -75,13 +82,13 @@ function clearSearch() {
 
             <!-- 工具栏 -->
             <div class="list-toolbar">
-                <button class="icon-btn-sm" title="刷新" @click="handleRefresh">
+                <button class="icon-btn-sm" :title="t('common.refresh')" @click="handleRefresh">
                     <RefreshOutlined :size="18" />
                 </button>
-                <button class="icon-btn-sm" title="过滤">
+                <button class="icon-btn-sm" :title="t('common.filter')">
                     <FilterListOutlined :size="18" />
                 </button>
-                <button class="icon-btn-sm" title="全选">
+                <button class="icon-btn-sm" :title="t('common.selectAll')">
                     <CheckBoxOutlineBlankOutlined :size="18" />
                 </button>
             </div>
@@ -102,8 +109,8 @@ function clearSearch() {
                 class="empty-state"
             >
                 <EmailOutlined :size="48" />
-                <h3>没有邮件</h3>
-                <p>此文件夹中没有邮件</p>
+                <h3>{{ t('email.noEmails') }}</h3>
+                <p>{{ t('email.noEmails') }}</p>
             </div>
 
             <!-- 邮件项列表 -->

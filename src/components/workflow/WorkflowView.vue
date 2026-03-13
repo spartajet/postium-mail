@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import { useWorkflowStore, useUIStore } from "@/stores";
 import type { NodeType, WorkflowNode } from "@/types";
 import {
@@ -24,6 +25,9 @@ import {
     DeviceHubOutlined,
     MenuOutlined,
 } from "@vicons/material";
+
+// i18n
+const { t } = useI18n();
 
 // Stores
 const workflowStore = useWorkflowStore();
@@ -55,53 +59,53 @@ const nodeTypes = computed(() => workflowStore.nodeTypes);
 const selectedNode = computed(() => workflowStore.selectedNode);
 
 // 工具栏操作
-const toolbarActions = [
+const toolbarActions = computed(() => [
     {
         id: "save",
-        label: "保存",
+        label: t('workflow.save'),
         icon: "save",
         action: handleSave,
     },
     {
         id: "load",
-        label: "加载",
+        label: t('workflow.load'),
         icon: "folder-open",
         action: handleLoad,
     },
     {
         id: "run",
-        label: "运行",
+        label: t('workflow.run'),
         icon: "play",
         action: handleRun,
     },
     {
         id: "validate",
-        label: "验证",
+        label: t('workflow.config'),
         icon: "check-circle",
         action: handleValidate,
     },
     { id: "divider" },
     {
         id: "export",
-        label: "导出",
+        label: t('common.operations'),
         icon: "download",
         action: handleExport,
     },
     {
         id: "import",
-        label: "导入",
+        label: t('common.operations'),
         icon: "upload",
         action: handleImport,
     },
     { id: "divider" },
     {
         id: "clear",
-        label: "清空",
+        label: t('workflow.clear'),
         icon: "trash",
         action: handleClear,
         danger: true,
     },
-];
+]);
 
 // 处理画布拖拽
 function handleCanvasMouseDown(event: MouseEvent) {
@@ -198,12 +202,12 @@ function duplicateNode(nodeId: string) {
 // 工具栏操作
 async function handleSave() {
     await workflowStore.saveWorkflow();
-    uiStore.showSuccess("工作流已保存");
+    uiStore.showSuccess(t('workflow.save'));
 }
 
 async function handleLoad() {
     await workflowStore.loadWorkflow();
-    uiStore.showSuccess("工作流已加载");
+    uiStore.showSuccess(t('workflow.load'));
 }
 
 function handleRun() {
@@ -212,16 +216,16 @@ function handleRun() {
         uiStore.showError(validation.errors[0]);
         return;
     }
-    uiStore.showInfo("工作流开始运行");
+    uiStore.showInfo(t('workflow.run'));
     // TODO: 实现工作流运行逻辑
 }
 
 function handleValidate() {
     const validation = workflowStore.validateWorkflow();
     if (validation.valid) {
-        uiStore.showSuccess("工作流验证通过");
+        uiStore.showSuccess(t('workflow.config'));
     } else {
-        uiStore.showError(`验证失败: ${validation.errors.join(", ")}`);
+        uiStore.showError(`${t('workflow.config')}: ${validation.errors.join(", ")}`);
     }
 }
 
@@ -234,7 +238,7 @@ function handleExport() {
     a.download = `workflow-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    uiStore.showSuccess("工作流已导出");
+    uiStore.showSuccess(t('workflow.save'));
 }
 
 function handleImport() {
@@ -250,9 +254,9 @@ function handleImport() {
             const json = event.target?.result as string;
             const success = workflowStore.importWorkflow(json);
             if (success) {
-                uiStore.showSuccess("工作流已导入");
+                uiStore.showSuccess(t('workflow.load'));
             } else {
-                uiStore.showError("导入失败：文件格式不正确");
+                uiStore.showError(t('toast.error'));
             }
         };
         reader.readAsText(file);
@@ -261,11 +265,11 @@ function handleImport() {
 }
 
 function handleClear() {
-    if (confirm("确定要清空所有节点吗？")) {
+    if (confirm(t('workflow.clear') + "?")) {
         workflowStore.clearWorkflow();
         selectedNodeId.value = null;
         showConfigPanel.value = false;
-        uiStore.showSuccess("工作流已清空");
+        uiStore.showSuccess(t('workflow.clear'));
     }
 }
 
@@ -340,7 +344,7 @@ onUnmounted(() => {
             <div class="toolbar-left">
                 <h2 class="toolbar-title">
                     <AccountTreeOutlined :size="24" />
-                    <span>工作流编辑器</span>
+                    <span>{{ t('workflow.title') }}</span>
                 </h2>
 
                 <div class="toolbar-actions">
@@ -374,7 +378,7 @@ onUnmounted(() => {
                     <button
                         class="icon-btn-sm"
                         @click="handleZoomOut"
-                        title="缩小"
+                        :title="t('common.operations')"
                     >
                         <RemoveOutlined :size="16" />
                     </button>
@@ -384,14 +388,14 @@ onUnmounted(() => {
                     <button
                         class="icon-btn-sm"
                         @click="handleZoomIn"
-                        title="放大"
+                        :title="t('common.operations')"
                     >
                         <AddOutlined :size="16" />
                     </button>
                     <button
                         class="icon-btn-sm"
                         @click="handleZoomReset"
-                        title="重置"
+                        :title="t('common.operations')"
                     >
                         <RestartAltOutlined :size="16" />
                     </button>
@@ -399,7 +403,7 @@ onUnmounted(() => {
 
                 <!-- 节点数量 -->
                 <div class="node-count">
-                    <span>{{ workflowStore.nodeCount }} 个节点</span>
+                    <span>{{ workflowStore.nodeCount }} {{ t('workflow.nodes') }}</span>
                 </div>
             </div>
         </div>
@@ -409,7 +413,7 @@ onUnmounted(() => {
             <!-- 节点面板 -->
             <div v-if="showNodePanel" class="node-panel">
                 <div class="panel-header">
-                    <h3>可用节点</h3>
+                    <h3>{{ t('workflow.addNode') }}</h3>
                     <button class="icon-btn-sm" @click="showNodePanel = false">
                         <CloseOutlined :size="16" />
                     </button>
@@ -440,7 +444,7 @@ onUnmounted(() => {
                         </div>
                         <div class="node-info">
                             <div class="node-label">{{ nodeType.label }}</div>
-                            <div class="node-desc">拖拽到画布添加</div>
+                            <div class="node-desc">{{ t('workflow.addNode') }}</div>
                         </div>
                     </div>
                 </div>
@@ -450,7 +454,7 @@ onUnmounted(() => {
                         class="btn btn-ghost btn-sm"
                         @click="showNodePanel = false"
                     >
-                        隐藏面板
+                        {{ t('common.close') }}
                     </button>
                 </div>
             </div>
@@ -507,14 +511,14 @@ onUnmounted(() => {
                                 <button
                                     class="icon-btn-xs"
                                     @click.stop="duplicateNode(node.id)"
-                                    title="复制"
+                                    :title="t('common.edit')"
                                 >
                                     <ContentCopyOutlined :size="14" />
                                 </button>
                                 <button
                                     class="icon-btn-xs danger"
                                     @click.stop="deleteNode(node.id)"
-                                    title="删除"
+                                    :title="t('common.delete')"
                                 >
                                     <CloseOutlined :size="14" />
                                 </button>
@@ -526,39 +530,39 @@ onUnmounted(() => {
                             <div class="node-type">{{ node.type }}</div>
                             <div class="node-config">
                                 <div v-if="node.type === 'trigger'">
-                                    <span class="config-label">事件:</span>
+                                    <span class="config-label">{{ t('workflow.nodeTypes.trigger') }}:</span>
                                     <span class="config-value">{{
                                         node.config.event || "email_received"
                                     }}</span>
                                 </div>
                                 <div v-else-if="node.type === 'condition'">
-                                    <span class="config-label">条件:</span>
+                                    <span class="config-label">{{ t('workflow.nodeTypes.condition') }}:</span>
                                     <span class="config-value"
                                         >{{ node.config.field }}
                                         {{ node.config.operator }}</span
                                     >
                                 </div>
                                 <div v-else-if="node.type === 'action'">
-                                    <span class="config-label">动作:</span>
+                                    <span class="config-label">{{ t('workflow.nodeTypes.action') }}:</span>
                                     <span class="config-value">{{
                                         node.config.action
                                     }}</span>
                                 </div>
                                 <div v-else-if="node.type === 'email'">
-                                    <span class="config-label">邮件:</span>
+                                    <span class="config-label">{{ t('email.subject') }}:</span>
                                     <span class="config-value">{{
-                                        node.config.template || "未配置"
+                                        node.config.template || t('common.noData')
                                     }}</span>
                                 </div>
                                 <div v-else-if="node.type === 'delay'">
-                                    <span class="config-label">延迟:</span>
+                                    <span class="config-label">{{ t('calendar.date') }}:</span>
                                     <span class="config-value"
                                         >{{ node.config.duration }}
                                         {{ node.config.unit }}</span
                                     >
                                 </div>
                                 <div v-else-if="node.type === 'ai'">
-                                    <span class="config-label">模型:</span>
+                                    <span class="config-label">{{ t('ai.model') }}:</span>
                                     <span class="config-value">{{
                                         node.config.model
                                     }}</span>
@@ -567,8 +571,8 @@ onUnmounted(() => {
                         </div>
 
                         <!-- 连接点 -->
-                        <div class="node-connector input" title="输入"></div>
-                        <div class="node-connector output" title="输出"></div>
+                        <div class="node-connector input" :title="t('email.from')"></div>
+                        <div class="node-connector output" :title="t('email.to')"></div>
                     </div>
                 </div>
 
@@ -578,14 +582,14 @@ onUnmounted(() => {
                     class="empty-state"
                 >
                     <DeviceHubOutlined :size="64" />
-                    <h3>还没有节点</h3>
-                    <p>从左侧面板拖拽节点到画布开始创建工作流</p>
+                    <h3>{{ t('common.noData') }}</h3>
+                    <p>{{ t('workflow.addNode') }}</p>
                     <button
                         v-if="!showNodePanel"
                         class="btn btn-primary"
                         @click="showNodePanel = true"
                     >
-                        显示节点面板
+                        {{ t('workflow.addNode') }}
                     </button>
                 </div>
             </div>
@@ -593,7 +597,7 @@ onUnmounted(() => {
             <!-- 配置面板 -->
             <div v-if="showConfigPanel && selectedNode" class="config-panel">
                 <div class="panel-header">
-                    <h3>节点配置</h3>
+                    <h3>{{ t('workflow.config') }}</h3>
                     <button
                         class="icon-btn-sm"
                         @click="showConfigPanel = false"
@@ -865,7 +869,7 @@ onUnmounted(() => {
                         class="btn btn-danger btn-sm"
                         @click="deleteNode(selectedNode.id)"
                     >
-                        删除节点
+                        {{ t('workflow.deleteNode') }}
                     </button>
                 </div>
             </div>
@@ -876,7 +880,7 @@ onUnmounted(() => {
             v-if="!showNodePanel"
             class="toggle-panel-btn"
             @click="showNodePanel = true"
-            title="显示节点面板"
+            :title="t('workflow.addNode')"
         >
             <MenuOutlined :size="24" />
         </button>

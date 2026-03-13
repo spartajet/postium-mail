@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, computed } from "vue";
 import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
+import { useI18n } from "vue-i18n";
 import { CheckCircleOutlined, LightModeOutlined, DarkModeOutlined } from "@vicons/material";
+import { NConfigProvider, NGlobalStyle, darkTheme, lightTheme } from "naive-ui";
+import { getNaiveUILocale, getNaiveUIDateLocale } from "@/locales/naive-ui-locales";
 
 // 组件导入
 import WindowControls from "@/components/layout/WindowControls.vue";
@@ -10,6 +13,7 @@ import EmailList from "@/components/layout/EmailList.vue";
 import EmailDetail from "@/components/layout/EmailDetail.vue";
 import ComposeModal from "@/components/compose/ComposeModal.vue";
 import ToastContainer from "@/components/common/ToastContainer.vue";
+import LanguageSelector from "@/components/common/LanguageSelector.vue";
 import CalendarView from "@/components/calendar/CalendarView.vue";
 import WorkflowView from "@/components/workflow/WorkflowView.vue";
 import AIChatModal from "@/components/aiChat/AIChatModal.vue";
@@ -19,6 +23,13 @@ import SettingsModal from "@/components/settings/SettingsModal.vue";
 const emailStore = useEmailStore();
 const accountStore = useAccountStore();
 const uiStore = useUIStore();
+
+// i18n
+const { t } = useI18n();
+
+// Naive UI locale 配置
+const naiveLocale = computed(() => getNaiveUILocale(uiStore.currentLocale));
+const naiveDateLocale = computed(() => getNaiveUIDateLocale(uiStore.currentLocale));
 
 // 是否是邮件视图
 const isEmailView = computed(() => uiStore.currentView === "email");
@@ -47,88 +58,96 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="app" :data-theme="uiStore.appliedTheme">
-        <!-- 背景装饰 -->
-        <div class="bg-orbs">
-            <div class="orb orb-1"></div>
-            <div class="orb orb-2"></div>
-            <div class="orb orb-3"></div>
+    <NConfigProvider
+        :theme="uiStore.isDarkTheme ? darkTheme : lightTheme"
+        :locale="naiveLocale"
+        :date-locale="naiveDateLocale"
+    >
+        <div class="app" :data-theme="uiStore.appliedTheme">
+            <!-- 背景装饰 -->
+            <div class="bg-orbs">
+                <div class="orb orb-1"></div>
+                <div class="orb orb-2"></div>
+                <div class="orb orb-3"></div>
+            </div>
+
+            <!-- 悬浮窗口控制按钮 -->
+            <WindowControls />
+
+            <!-- 主布局容器 -->
+            <div class="main-layout">
+                <AppSidebar />
+
+                <!-- 内容区域 -->
+                <div class="content-area">
+                    <!-- 邮件视图 -->
+                    <div v-if="isEmailView" class="email-view">
+                        <EmailList />
+                        <EmailDetail />
+                    </div>
+
+                    <!-- 日历视图 -->
+                    <div v-else-if="isCalendarView" class="calendar-view">
+                        <CalendarView />
+                    </div>
+
+                    <!-- 工作流视图 -->
+                    <div v-else-if="isWorkflowView" class="workflow-view">
+                        <WorkflowView />
+                    </div>
+                </div>
+            </div>
+
+            <!-- 状态栏 -->
+            <footer class="status-bar">
+                <div class="status-bar-left">
+                    <div class="status-item">
+                        <CheckCircleOutlined :size="14" />
+                        <span>{{ t('statusBar.connected') }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span>{{ t('statusBar.unread', { count: emailStore.unreadCount }) }}</span>
+                    </div>
+                </div>
+                <div class="status-bar-right">
+                    <div class="status-item">
+                        <span>{{
+                            new Date().toLocaleDateString(uiStore.currentLocale, {
+                                month: "long",
+                                day: "numeric",
+                            })
+                        }}</span>
+                    </div>
+                    <div class="status-item">
+                        <span>{{
+                            new Date().toLocaleTimeString(uiStore.currentLocale, {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                            })
+                        }}</span>
+                    </div>
+                    <LanguageSelector />
+                    <button
+                        class="icon-btn"
+                        @click="uiStore.toggleTheme"
+                        :title="t('settings.theme')"
+                    >
+                        <LightModeOutlined v-if="uiStore.isDarkTheme" :size="16" />
+                        <DarkModeOutlined v-else :size="16" />
+                    </button>
+                </div>
+            </footer>
+
+            <!-- 模态框 -->
+            <ComposeModal />
+            <AIChatModal v-if="uiStore.modals.aiChat" />
+            <SettingsModal v-if="uiStore.modals.settings" />
+
+            <!-- Toast 通知 -->
+            <ToastContainer />
         </div>
-
-        <!-- 悬浮窗口控制按钮 -->
-        <WindowControls />
-
-        <!-- 主布局容器 -->
-        <div class="main-layout">
-            <AppSidebar />
-
-            <!-- 内容区域 -->
-            <div class="content-area">
-                <!-- 邮件视图 -->
-                <div v-if="isEmailView" class="email-view">
-                    <EmailList />
-                    <EmailDetail />
-                </div>
-
-                <!-- 日历视图 -->
-                <div v-else-if="isCalendarView" class="calendar-view">
-                    <CalendarView />
-                </div>
-
-                <!-- 工作流视图 -->
-                <div v-else-if="isWorkflowView" class="workflow-view">
-                    <WorkflowView />
-                </div>
-            </div>
-        </div>
-
-        <!-- 状态栏 -->
-        <footer class="status-bar">
-            <div class="status-bar-left">
-                <div class="status-item">
-                    <CheckCircleOutlined :size="14" />
-                    <span>已连接</span>
-                </div>
-                <div class="status-item">
-                    <span>{{ emailStore.unreadCount }} 封未读</span>
-                </div>
-            </div>
-            <div class="status-bar-right">
-                <div class="status-item">
-                    <span>{{
-                        new Date().toLocaleDateString("zh-CN", {
-                            month: "long",
-                            day: "numeric",
-                        })
-                    }}</span>
-                </div>
-                <div class="status-item">
-                    <span>{{
-                        new Date().toLocaleTimeString("zh-CN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        })
-                    }}</span>
-                </div>
-                <button
-                    class="icon-btn"
-                    @click="uiStore.toggleTheme"
-                    title="切换主题"
-                >
-                    <LightModeOutlined v-if="uiStore.isDarkTheme" :size="16" />
-                    <DarkModeOutlined v-else :size="16" />
-                </button>
-            </div>
-        </footer>
-
-        <!-- 模态框 -->
-        <ComposeModal />
-        <AIChatModal v-if="uiStore.modals.aiChat" />
-        <SettingsModal v-if="uiStore.modals.settings" />
-
-        <!-- Toast 通知 -->
-        <ToastContainer />
-    </div>
+        <NGlobalStyle />
+    </NConfigProvider>
 </template>
 
 <style scoped>

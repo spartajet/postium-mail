@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
+import { useI18n } from "vue-i18n";
 import { useCalendarStore } from "@/stores/calendar";
 import { useUIStore } from "@/stores/ui";
 import { ChevronLeftOutlined, ChevronRightOutlined, AddOutlined } from "@vicons/material";
@@ -7,6 +8,7 @@ import CalendarGrid from "./CalendarGrid.vue";
 import EventModal from "./EventModal.vue";
 
 // Stores
+const { t } = useI18n();
 const calendarStore = useCalendarStore();
 const uiStore = useUIStore();
 
@@ -14,11 +16,19 @@ const uiStore = useUIStore();
 const monthTitle = computed(() => {
     const year = calendarStore.currentDate.getFullYear();
     const month = calendarStore.currentDate.getMonth() + 1;
-    return `${year}年${month}月`;
+    return t('calendar.monthFormat', { year, month });
 });
 
 // 星期标题
-const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+const weekDays = computed(() => [
+    t('calendar.weekDays.sun'),
+    t('calendar.weekDays.mon'),
+    t('calendar.weekDays.tue'),
+    t('calendar.weekDays.wed'),
+    t('calendar.weekDays.thu'),
+    t('calendar.weekDays.fri'),
+    t('calendar.weekDays.sat'),
+]);
 
 // 上一个月
 function handlePrevMonth() {
@@ -64,14 +74,14 @@ function handleCloseModal() {
 async function handleSaveEvent(eventData: any) {
     await calendarStore.saveEvent(eventData);
     showEventModal.value = false;
-    uiStore.showSuccess("事件已保存");
+    uiStore.showSuccess(t('calendar.saved'));
 }
 
 // 删除事件
 async function handleDeleteEvent(eventId: string) {
     await calendarStore.deleteEvent(eventId);
     showEventModal.value = false;
-    uiStore.showSuccess("事件已删除");
+    uiStore.showSuccess(t('calendar.deleted'));
 }
 
 // 事件模态框显示状态
@@ -91,20 +101,20 @@ onMounted(async () => {
                 <div class="calendar-title">
                     <h2>{{ monthTitle }}</h2>
                     <div class="calendar-nav">
-                        <button class="icon-btn" @click="handlePrevMonth" title="上个月">
+                        <button class="icon-btn" @click="handlePrevMonth" :title="t('calendar.prevMonth')">
                             <ChevronLeftOutlined :size="20" />
                         </button>
-                        <button class="icon-btn" @click="handleNextMonth" title="下个月">
+                        <button class="icon-btn" @click="handleNextMonth" :title="t('calendar.nextMonth')">
                             <ChevronRightOutlined :size="20" />
                         </button>
                         <button class="btn btn-ghost" @click="handleToday">
-                            今天
+                            {{ t('calendar.today') }}
                         </button>
                     </div>
                 </div>
                 <button class="btn btn-primary" @click="handleNewEvent">
                     <AddOutlined :size="16" />
-                    <span>新建事务</span>
+                    <span>{{ t('calendar.newEvent') }}</span>
                 </button>
             </div>
 

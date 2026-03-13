@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { useUIStore } from "@/stores";
 import { useWindowControl } from "@/composables/useWindowControl";
+import { useI18n } from "vue-i18n";
 
 // Stores
 const uiStore = useUIStore();
+
+// i18n
+const { t } = useI18n();
 
 // Window control
 const {
@@ -48,7 +52,7 @@ const {
                 class="control-btn minimize-btn"
                 @click.stop="minimizeWindow"
                 :disabled="!isTauriEnv"
-                title="最小化"
+                :title="t('window.minimize')"
             >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -63,7 +67,7 @@ const {
                 class="control-btn maximize-btn"
                 @click.stop="toggleMaximize"
                 :disabled="!isTauriEnv"
-                :title="isMaximized ? '还原' : '最大化'"
+                :title="isMaximized ? t('window.restore') : t('window.maximize')"
             >
                 <svg
                     v-if="!isMaximized"
@@ -91,7 +95,7 @@ const {
                 class="control-btn close-btn"
                 @click.stop="closeWindow"
                 :disabled="!isTauriEnv"
-                title="关闭"
+                :title="t('window.close')"
             >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"

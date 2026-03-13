@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from "vue";
+import { useI18n } from "vue-i18n";
 import {
     MinimizeOutlined,
     WebAssetOutlined,
     WebAssetOffOutlined,
     CloseOutlined,
 } from "@vicons/material";
+
+// i18n
+const { t } = useI18n();
 
 const isMaximized = ref(false);
 const isReady = ref(false);
@@ -137,7 +141,11 @@ onUnmounted(() => {
 <template>
     <div class="window-controls">
         <!-- 最小化按钮 -->
-        <button class="control-btn" @click="minimizeWindow" title="最小化">
+        <button
+            class="control-btn"
+            @click="minimizeWindow"
+            :title="t('window.minimize')"
+        >
             <MinimizeOutlined :size="14" />
         </button>
 
@@ -145,14 +153,18 @@ onUnmounted(() => {
         <button
             class="control-btn"
             @click="toggleMaximize"
-            :title="isMaximized ? '还原' : '最大化'"
+            :title="isMaximized ? t('window.restore') : t('window.maximize')"
         >
             <WebAssetOutlined v-if="!isMaximized" :size="14" />
             <WebAssetOffOutlined v-else :size="14" />
         </button>
 
         <!-- 关闭按钮 -->
-        <button class="control-btn close-btn" @click="closeWindow" title="关闭">
+        <button
+            class="control-btn close-btn"
+            @click="closeWindow"
+            :title="t('window.close')"
+        >
             <CloseOutlined :size="12" />
         </button>
     </div>

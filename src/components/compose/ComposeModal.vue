@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useUIStore, useEmailStore, useAccountStore } from "@/stores";
+import { useI18n } from "vue-i18n";
 import type { ComposeForm } from "@/types";
 import { mockAICompose, delay } from "@/mocks";
 import {
@@ -28,6 +29,9 @@ const uiStore = useUIStore();
 const emailStore = useEmailStore();
 const accountStore = useAccountStore();
 
+// i18n
+const { t } = useI18n();
+
 // 表单数据
 const form = ref<ComposeForm>({
     to: "",
@@ -53,12 +57,12 @@ const isAILoading = ref(false);
 const isSending = ref(false);
 
 // 快捷操作
-const quickActions = [
-    { id: "generate", label: "生成草稿", icon: "create" },
-    { id: "improve", label: "改进文笔", icon: "improve" },
-    { id: "shorten", label: "精简内容", icon: "shorten" },
-    { id: "formal", label: "正式化", icon: "formal" },
-];
+const quickActions = computed(() => [
+    { id: "generate", label: t('ai.generate'), icon: "create" },
+    { id: "improve", label: t('ai.improve'), icon: "improve" },
+    { id: "shorten", label: t('ai.shorten'), icon: "shorten" },
+    { id: "formal", label: t('ai.formal'), icon: "formal" },
+]);
 
 // 关闭模态框
 function handleClose() {
@@ -83,7 +87,7 @@ function resetForm() {
 // 发送邮件
 async function handleSend() {
     if (!form.value.to || !form.value.subject) {
-        uiStore.showError("请填写收件人和主题");
+        uiStore.showError(t('email.to') + t('email.subject'));
         return;
     }
 
@@ -109,10 +113,10 @@ async function handleSend() {
             accountId: accountStore.currentAccount?.id || "acc-1",
         });
 
-        uiStore.showSuccess("邮件已发送");
+        uiStore.showSuccess(t('email.sent'));
         handleClose();
     } catch (error) {
-        uiStore.showError("发送失败，请重试");
+        uiStore.showError(t('toast.error'));
     } finally {
         isSending.value = false;
     }
@@ -127,7 +131,7 @@ async function handleSaveDraft() {
         sender: "我",
         senderEmail: accountStore.currentAccount?.email || "me@postium.com",
         recipient: form.value.to,
-        subject: form.value.subject || "(无主题)",
+        subject: form.value.subject || `(${t('email.noEmails')})`,
         preview: form.value.body.slice(0, 100),
         body: form.value.body,
         date: new Date(),
@@ -139,7 +143,7 @@ async function handleSaveDraft() {
         accountId: accountStore.currentAccount?.id || "acc-1",
     });
 
-    uiStore.showSuccess("草稿已保存");
+    uiStore.showSuccess(t('email.drafts'));
     handleClose();
 }
 
@@ -155,7 +159,7 @@ async function handleAIQuickAction(actionId: string) {
         await delay(800);
         const result = mockAICompose(actionId as any, form.value.body);
         form.value.body = result;
-        uiStore.showSuccess("AI 已生成内容");
+        uiStore.showSuccess(t('ai.generate'));
     } finally {
         isAILoading.value = false;
     }
@@ -171,7 +175,7 @@ async function handleAIPrompt() {
         const result = mockAICompose("generate", aiPrompt.value);
         form.value.body = result;
         aiPrompt.value = "";
-        uiStore.showSuccess("AI 已生成内容");
+        uiStore.showSuccess(t('ai.generate'));
     } finally {
         isAILoading.value = false;
     }
@@ -184,7 +188,7 @@ function execCommand(command: string, value?: string) {
 
 // 插入链接
 function handleInsertLink() {
-    const url = window.prompt("输入链接地址");
+    const url = window.prompt(t('email.subject'));
     if (url) {
         execCommand("createLink", url);
     }
@@ -192,7 +196,7 @@ function handleInsertLink() {
 
 // 插入图片
 function handleInsertImage() {
-    const url = window.prompt("输入图片地址");
+    const url = window.prompt(t('email.subject'));
     if (url) {
         execCommand("insertImage", url);
     }
@@ -212,19 +216,19 @@ function handleInsertImage() {
                     <div class="modal-header">
                         <h3>
                             <EditOutlined class="modal-icon" :size="20" />
-                            写信
+                            {{ t('email.compose') }}
                         </h3>
                         <div class="modal-controls">
-                            <button class="icon-btn-sm" title="最小化">
+                            <button class="icon-btn-sm" :title="t('common.operations')">
                                 <MinimizeOutlined :size="16" />
                             </button>
-                            <button class="icon-btn-sm" title="最大化">
+                            <button class="icon-btn-sm" :title="t('common.operations')">
                                 <WebAssetOutlined :size="16" />
                             </button>
                             <button
                                 class="icon-btn-sm"
                                 @click="handleClose"
-                                title="关闭"
+                                :title="t('common.close')"
                             >
                                 <CloseOutlined :size="16" />
                             </button>
@@ -234,16 +238,16 @@ function handleInsertImage() {
                     <!-- 表单字段 -->
                     <div class="compose-fields">
                         <div class="compose-field">
-                            <label>收件人</label>
+                            <label>{{ t('email.to') }}</label>
                             <input
                                 v-model="form.to"
                                 type="email"
-                                placeholder="输入邮箱地址"
+                                :placeholder="t('email.to')"
                             />
                             <button
                                 class="icon-btn-sm"
                                 @click="showCcBcc = !showCcBcc"
-                                title="抄送/密送"
+                                :title="t('email.cc')"
                             >
                                 <ExpandMoreOutlined :size="18" />
                             </button>
@@ -251,29 +255,29 @@ function handleInsertImage() {
 
                         <template v-if="showCcBcc">
                             <div class="compose-field">
-                                <label>抄送</label>
+                                <label>{{ t('email.cc') }}</label>
                                 <input
                                     v-model="form.cc"
                                     type="email"
-                                    placeholder="抄送邮箱地址"
+                                    :placeholder="t('email.cc')"
                                 />
                             </div>
                             <div class="compose-field">
-                                <label>密送</label>
+                                <label>{{ t('email.bcc') }}</label>
                                 <input
                                     v-model="form.bcc"
                                     type="email"
-                                    placeholder="密送邮箱地址"
+                                    :placeholder="t('email.bcc')"
                                 />
                             </div>
                         </template>
 
                         <div class="compose-field">
-                            <label>主题</label>
+                            <label>{{ t('email.subject') }}</label>
                             <input
                                 v-model="form.subject"
                                 type="text"
-                                placeholder="输入主题"
+                                :placeholder="t('email.subject')"
                             />
                         </div>
                     </div>
@@ -283,7 +287,7 @@ function handleInsertImage() {
                         <div class="ai-compose-header" @click="toggleAIPanel">
                             <div class="ai-badge">
                                 <AutoAwesomeOutlined :size="16" />
-                                <span>AI 写作助手</span>
+                                <span>AI {{ t('ai.provider') }}</span>
                             </div>
                             <ExpandMoreOutlined
                                 class="chevron"
@@ -318,7 +322,7 @@ function handleInsertImage() {
                                 <input
                                     v-model="aiPrompt"
                                     type="text"
-                                    placeholder="输入指令，如：帮我写一封感谢信..."
+                                    :placeholder="t('ai.generate')"
                                     @keyup.enter="handleAIPrompt"
                                 />
                                 <button
@@ -336,28 +340,28 @@ function handleInsertImage() {
                     <div class="editor-toolbar">
                         <button
                             class="toolbar-btn"
-                            title="粗体"
+                            :title="t('editor.bold')"
                             @click="execCommand('bold')"
                         >
                             <FormatBoldOutlined :size="18" />
                         </button>
                         <button
                             class="toolbar-btn"
-                            title="斜体"
+                            :title="t('editor.italic')"
                             @click="execCommand('italic')"
                         >
                             <FormatItalicOutlined :size="18" />
                         </button>
                         <button
                             class="toolbar-btn"
-                            title="下划线"
+                            :title="t('editor.underline')"
                             @click="execCommand('underline')"
                         >
                             <FormatUnderlinedOutlined :size="18" />
                         </button>
                         <button
                             class="toolbar-btn"
-                            title="删除线"
+                            :title="t('editor.strikethrough')"
                             @click="execCommand('strikeThrough')"
                         >
                             <StrikethroughSOutlined :size="18" />
@@ -367,14 +371,14 @@ function handleInsertImage() {
 
                         <button
                             class="toolbar-btn"
-                            title="无序列表"
+                            :title="t('editor.unorderedList')"
                             @click="execCommand('insertUnorderedList')"
                         >
                             <FormatListBulletedOutlined :size="18" />
                         </button>
                         <button
                             class="toolbar-btn"
-                            title="有序列表"
+                            :title="t('editor.orderedList')"
                             @click="execCommand('insertOrderedList')"
                         >
                             <FormatListNumberedOutlined :size="18" />
@@ -384,7 +388,7 @@ function handleInsertImage() {
 
                         <button
                             class="toolbar-btn"
-                            title="插入链接"
+                            :title="t('editor.insertLink')"
                             @click="handleInsertLink"
                         >
                             <LinkOutlined :size="18" />
@@ -392,13 +396,16 @@ function handleInsertImage() {
 
                         <button
                             class="toolbar-btn"
-                            title="插入图片"
+                            :title="t('editor.insertImage')"
                             @click="handleInsertImage"
                         >
                             <ImageOutlined :size="18" />
                         </button>
 
-                        <button class="toolbar-btn" title="添加附件">
+                        <button
+                            class="toolbar-btn"
+                            :title="t('editor.addAttachment')"
+                        >
                             <AttachFileOutlined :size="18" />
                         </button>
                     </div>
@@ -411,7 +418,7 @@ function handleInsertImage() {
                         <div
                             class="compose-editor"
                             contenteditable="true"
-                            data-placeholder="在此输入邮件内容..."
+                            :data-placeholder="t('email.editorPlaceholder')"
                             v-html="form.body"
                             @input="
                                 form.body = (
@@ -429,13 +436,17 @@ function handleInsertImage() {
                             @click="handleSend"
                         >
                             <SendOutlined :size="16" />
-                            <span>{{ isSending ? "发送中..." : "发送" }}</span>
+                            <span>{{
+                                isSending
+                                    ? t("email.sending")
+                                    : t("email.sent")
+                            }}</span>
                         </button>
                         <button class="btn btn-ghost" @click="handleSaveDraft">
-                            存为草稿
+                            {{ t("email.saveDraft") }}
                         </button>
                         <button class="btn btn-ghost" @click="handleClose">
-                            取消
+                            {{ t("common.cancel") }}
                         </button>
                     </div>
                 </div>
