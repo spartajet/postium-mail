@@ -3,6 +3,7 @@ import { onMounted, computed } from "vue";
 import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
 
 // 组件导入
+import WindowControls from "@/components/layout/WindowControls.vue";
 import AppSidebar from "@/components/layout/AppSidebar.vue";
 import EmailList from "@/components/layout/EmailList.vue";
 import EmailDetail from "@/components/layout/EmailDetail.vue";
@@ -52,6 +53,9 @@ onMounted(async () => {
             <div class="orb orb-2"></div>
             <div class="orb orb-3"></div>
         </div>
+
+        <!-- 悬浮窗口控制按钮 -->
+        <WindowControls />
 
         <!-- 主布局容器 -->
         <div class="main-layout">

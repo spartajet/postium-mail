@@ -113,7 +113,7 @@ const storagePercent = computed(
 <template>
     <aside class="sidebar">
         <!-- Header -->
-        <div class="sidebar-header">
+        <div class="sidebar-header" data-tauri-drag-region>
             <div class="logo">
                 <div class="logo-icon">
                     <svg

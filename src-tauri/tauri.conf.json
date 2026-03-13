@@ -14,12 +14,14 @@
       {
         "title": "postium-mail",
         "width": 1600,
-        "height": 1000
+        "height": 1000,
+        "decorations": false
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,

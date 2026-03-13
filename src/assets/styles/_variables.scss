@@ -84,6 +84,7 @@ $spacing-3xl: 48px;
 $sidebar-width: 260px;
 $list-width: 380px;
 $header-height: 56px;
+$title-bar-height: 40px;
 $status-bar-height: 32px;
 
 // ========================================
@@ -226,6 +227,7 @@ $z-index-toast: 800;
   --sidebar-width: #{$sidebar-width};
   --list-width: #{$list-width};
   --header-height: #{$header-height};
+  --title-bar-height: #{$title-bar-height};
   --status-bar-height: #{$status-bar-height};
 
   // Border Radius
