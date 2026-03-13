@@ -1,6 +1,8 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { Toast, Settings } from "@/types";
+import { i18n } from "@/main";
+import type { LanguageCode } from "@/locales";
 
 export type ViewType =
   | "email"
@@ -144,6 +146,26 @@ export const useUIStore = defineStore("ui", () => {
       }
     });
   }
+
+  // ========================================
+  // Language Actions
+  // ========================================
+
+  // 设置语言
+  function setLanguage(newLanguage: LanguageCode) {
+    settings.value.language = newLanguage;
+    applyLanguage();
+    saveSettings();
+  }
+
+  // 应用语言到 i18n
+  function applyLanguage() {
+    const currentLanguage = settings.value.language as LanguageCode;
+    i18n.global.locale.value = currentLanguage;
+  }
+
+  // 获取当前语言
+  const currentLocale = computed(() => settings.value.language as LanguageCode);
 
   // ========================================
   // View Actions
@@ -405,6 +427,7 @@ export const useUIStore = defineStore("ui", () => {
   function init() {
     loadThemePreference();
     loadSettings();
+    applyLanguage();
     watchSystemTheme();
     watchBreakpoints();
   }
@@ -431,12 +454,17 @@ export const useUIStore = defineStore("ui", () => {
     appliedTheme,
     isDarkTheme,
     hasOpenModal,
+    currentLocale,
 
     // Theme Actions
     setTheme,
     toggleTheme,
     applyTheme,
     loadThemePreference,
+
+    // Language Actions
+    setLanguage,
+    applyLanguage,
 
     // View Actions
     setView,

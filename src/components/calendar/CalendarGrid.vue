@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import type { CalendarEvent } from "@/types";
+
+// i18n
+const { t } = useI18n();
 
 // Props
 interface Props {
@@ -79,7 +83,7 @@ function isToday(date: Date): boolean {
                     v-if="day.events.length > 3"
                     class="more-events"
                 >
-                    +{{ day.events.length - 3 }} 更多
+                    +{{ day.events.length - 3 }} {{ t('calendar.moreEvents') }}
                 </div>
             </div>
         </div>

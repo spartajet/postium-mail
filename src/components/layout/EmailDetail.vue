@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, h } from "vue";
+import { ref, watch, h, computed } from "vue";
 import { useEmailStore, useUIStore } from "@/stores";
+import { useI18n } from "vue-i18n";
 import { format } from "date-fns";
-import { zhCN } from "date-fns/locale";
 import { mockAISummary } from "@/mocks";
+import { useDateLocale } from "@/composables/useDateLocale";
 import {
     EmailOutlined,
     KeyboardArrowUpOutlined,
@@ -26,14 +27,21 @@ import {
 const emailStore = useEmailStore();
 const uiStore = useUIStore();
 
+// i18n
+const { t } = useI18n();
+
+// 日期格式化
+const { currentDateLocale } = useDateLocale();
+
 // AI 摘要
 const aiSummary = ref("");
 const isLoadingSummary = ref(false);
 
 // 格式化完整日期
 function formatFullDate(date: Date): string {
+    const locale = currentDateLocale.value;
     return format(new Date(date), "yyyy年MM月dd日 EEEE HH:mm", {
-        locale: zhCN,
+        locale,
     });
 }
 
@@ -84,8 +92,8 @@ function handleToggleStar() {
     if (emailStore.currentEmail) {
         emailStore.toggleStar(emailStore.currentEmail.id);
         const action = emailStore.currentEmail.starred
-            ? "已添加星标"
-            : "已移除星标";
+            ? t('email.starred')
+            : t('email.archive');
         uiStore.showSuccess(action);
     }
 }
@@ -94,7 +102,7 @@ function handleToggleStar() {
 function handleDelete() {
     if (emailStore.currentEmail) {
         emailStore.deleteEmail(emailStore.currentEmail.id);
-        uiStore.showSuccess("邮件已移至垃圾箱");
+        uiStore.showSuccess(t('email.trash'));
     }
 }
 
@@ -102,7 +110,7 @@ function handleDelete() {
 function handleArchive() {
     if (emailStore.currentEmail) {
         emailStore.moveEmail(emailStore.currentEmail.id, "trash");
-        uiStore.showSuccess("邮件已归档");
+        uiStore.showSuccess(t('email.archive'));
     }
 }
 
@@ -119,29 +127,29 @@ function handleNavigate(direction: "prev" | "next") {
 function handleAIAction(action: string) {
     switch (action) {
         case "reply":
-            uiStore.showInfo("正在生成智能回复...");
+            uiStore.showInfo(t('ai.generate'));
             break;
         case "summary":
             loadAISummary();
             break;
         case "translate":
-            uiStore.showInfo("正在翻译邮件...");
+            uiStore.showInfo(t('ai.translate'));
             break;
         case "tasks":
-            uiStore.showInfo("正在提取任务...");
+            uiStore.showInfo(t('ai.tasks'));
             break;
         default:
-            uiStore.showInfo(`执行操作: ${action}`);
+            uiStore.showInfo(`${t('common.operations')}: ${action}`);
     }
 }
 
 // AI 操作列表
-const aiActions = [
-    { id: "reply", label: "智能回复", icon: "reply" },
-    { id: "summary", label: "总结", icon: "summary" },
-    { id: "translate", label: "翻译", icon: "translate" },
-    { id: "tasks", label: "提取任务", icon: "tasks" },
-];
+const aiActions = computed(() => [
+    { id: "reply", label: t('ai.smartReply'), icon: "reply" },
+    { id: "summary", label: t('ai.summary'), icon: "summary" },
+    { id: "translate", label: t('ai.translate'), icon: "translate" },
+    { id: "tasks", label: t('ai.tasks'), icon: "tasks" },
+]);
 </script>
 
 <template>
@@ -151,8 +159,8 @@ const aiActions = [
             <div class="empty-icon">
                 <EmailOutlined :size="48" />
             </div>
-            <h3>选择一封邮件</h3>
-            <p>从左侧列表中选择邮件查看详情</p>
+            <h3>{{ t('email.noEmails') }}</h3>
+            <p>{{ t('email.noEmails') }}</p>
         </div>
 
         <!-- 邮件详情 -->
@@ -164,7 +172,7 @@ const aiActions = [
                         class="icon-btn"
                         :disabled="!emailStore.hasPreviousEmail"
                         @click="handleNavigate('prev')"
-                        title="上一封"
+                        :title="t('email.from')"
                     >
                         <KeyboardArrowUpOutlined :size="20" />
                     </button>
@@ -172,7 +180,7 @@ const aiActions = [
                         class="icon-btn"
                         :disabled="!emailStore.hasNextEmail"
                         @click="handleNavigate('next')"
-                        title="下一封"
+                        :title="t('email.to')"
                     >
                         <KeyboardArrowDownOutlined :size="20" />
                     </button>
@@ -210,7 +218,7 @@ const aiActions = [
                         {{ formatFullDate(emailStore.currentEmail.date) }}
                     </div>
                     <div class="email-to">
-                        收件人: {{ emailStore.currentEmail.recipient }}
+                        {{ t('email.to') }}: {{ emailStore.currentEmail.recipient }}
                     </div>
                 </div>
             </div>
@@ -220,7 +228,7 @@ const aiActions = [
                 <div class="ai-card-header">
                     <div class="ai-badge">
                         <AutoAwesomeOutlined :size="16" />
-                        <span>AI 摘要</span>
+                        <span>{{ t('ai.summary') }}</span>
                     </div>
                 </div>
                 <div class="ai-card-content">
@@ -255,11 +263,7 @@ const aiActions = [
             >
                 <div class="attachments-header">
                     <AttachFileOutlined :size="18" />
-                    <span
-                        >附件 ({{
-                            emailStore.currentEmail.attachments.length
-                        }})</span
-                    >
+                    <span>{{ t('email.attachments') }} ({{ emailStore.currentEmail.attachments.length }})</span>
                 </div>
                 <div class="attachments-list">
                     <div
@@ -285,20 +289,20 @@ const aiActions = [
 
             <!-- 操作按钮栏 -->
             <div class="detail-actions">
-                <button class="icon-btn" @click="handleReply" title="回复">
+                <button class="icon-btn" @click="handleReply" :title="t('email.reply')">
                     <ReplyOutlined :size="18" />
                 </button>
                 <button
                     class="icon-btn"
                     @click="handleForward"
-                    title="转发"
+                    :title="t('email.forward')"
                 >
                     <ForwardOutlined :size="18" />
                 </button>
                 <button
                     class="icon-btn"
                     @click="handleToggleStar"
-                    title="星标"
+                    :title="t('email.starred')"
                 >
                     <StarOutlined
                         v-if="emailStore.currentEmail.starred"
@@ -310,14 +314,14 @@ const aiActions = [
                 <button
                     class="icon-btn"
                     @click="handleArchive"
-                    title="归档"
+                    :title="t('email.archive')"
                 >
                     <ArchiveOutlined :size="18" />
                 </button>
                 <button
                     class="icon-btn danger"
                     @click="handleDelete"
-                    title="删除"
+                    :title="t('common.delete')"
                 >
                     <DeleteOutlined :size="18" />
                 </button>
@@ -327,7 +331,7 @@ const aiActions = [
             <div class="ai-actions">
                 <div class="ai-actions-label">
                     <AutoAwesomeOutlined :size="16" />
-                    <span>AI 助手</span>
+                    <span>AI {{ t('ai.provider') }}</span>
                 </div>
                 <div class="ai-actions-buttons">
                     <button

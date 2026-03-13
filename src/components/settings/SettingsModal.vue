@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, h } from 'vue'
 import { useUIStore } from '@/stores'
+import { useI18n } from 'vue-i18n'
+import { availableLanguages } from '@/locales'
 import {
-  NConfigProvider,
-  NGlobalStyle,
-  darkTheme,
-  lightTheme,
   NButton,
   NInput,
   NSelect,
@@ -42,15 +40,18 @@ import {
 // Store
 const uiStore = useUIStore()
 
+// i18n
+const { t } = useI18n()
+
 // 菜单配置
 const menuOptions: MenuOption[] = [
   {
-    label: '通用',
+    label: computed(() => t('settings.general')),
     key: 'general',
     icon: () => h(NIcon, null, { default: () => h(SettingsOutlined) })
   },
   {
-    label: '通知',
+    label: computed(() => t('settings.notifications')),
     key: 'notifications',
     icon: () => h(NIcon, null, { default: () => h(NotificationsOutlined) })
   },
@@ -60,12 +61,12 @@ const menuOptions: MenuOption[] = [
     icon: () => h(NIcon, null, { default: () => h(AutoAwesomeOutlined) })
   },
   {
-    label: '外观',
+    label: computed(() => t('settings.appearance')),
     key: 'appearance',
     icon: () => h(NIcon, null, { default: () => h(PaletteOutlined) })
   },
   {
-    label: '快捷键',
+    label: computed(() => t('settings.shortcuts')),
     key: 'shortcuts',
     icon: () => h(NIcon, null, { default: () => h(KeyboardOutlined) })
   }
@@ -84,11 +85,17 @@ const formData = ref({
 })
 
 // 语言选项
-const languageOptions = [
-  { label: '简体中文', value: 'zh-CN' },
-  { label: 'English', value: 'en-US' },
-  { label: '日本語', value: 'ja-JP' }
-]
+const languageOptions = computed(() =>
+  availableLanguages.map(lang => ({
+    label: `${lang.flag} ${lang.name}`,
+    value: lang.code
+  }))
+)
+
+// 语言切换处理
+function handleLanguageChange(value: string) {
+  uiStore.setLanguage(value as any)
+}
 
 // AI 提供商选项
 const aiProviderOptions = [
@@ -145,9 +152,7 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
 </script>
 
 <template>
-  <NConfigProvider :theme="uiStore.isDarkTheme ? darkTheme : lightTheme">
-    <NGlobalStyle />
-    <div class="settings-modal-overlay" @click.self="closeModal">
+  <div class="settings-modal-overlay" @click.self="closeModal">
       <NLayout class="settings-modal" has-sider>
         <!-- 左侧菜单 -->
         <NLayoutSider
@@ -176,13 +181,14 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
         <NLayoutContent class="settings-content">
           <!-- 通用设置 -->
           <div v-if="currentPanel === 'general'" class="panel">
-            <NCard title="通用设置" :bordered="false">
+            <NCard :title="`${t('settings.general')} ${t('settings.title')}`" :bordered="false">
               <NSpace vertical size="large">
                 <div>
-                  <div class="setting-label">语言</div>
+                  <div class="setting-label">{{ t('settings.language') }}</div>
                   <NSelect
                     v-model:value="formData.language"
                     :options="languageOptions"
+                    @update:value="handleLanguageChange"
                   />
                 </div>
               </NSpace>
@@ -191,24 +197,24 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
 
           <!-- 通知设置 -->
           <div v-else-if="currentPanel === 'notifications'" class="panel">
-            <NCard title="通知设置" :bordered="false">
+            <NCard :title="`${t('settings.notifications')} ${t('settings.title')}`" :bordered="false">
               <NSpace vertical size="large">
                 <NListItem>
-                  <NThing title="启用通知" description="接收新邮件和系统通知" />
+                  <NThing :title="t('notifications.enabled')" />
                   <template #suffix>
                     <NSwitch v-model:value="formData.notifications.enabled" />
                   </template>
                 </NListItem>
                 <NDivider />
                 <NListItem>
-                  <NThing title="声音提醒" description="收到通知时播放声音" />
+                  <NThing :title="t('notifications.sound')" />
                   <template #suffix>
                     <NSwitch v-model:value="formData.notifications.sound" />
                   </template>
                 </NListItem>
                 <NDivider />
                 <NListItem>
-                  <NThing title="桌面通知" description="显示桌面通知提醒" />
+                  <NThing :title="t('notifications.desktop')" />
                   <template #suffix>
                     <NSwitch v-model:value="formData.notifications.desktop" />
                   </template>
@@ -222,23 +228,23 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
             <NCard title="AI 设置" :bordered="false">
               <NSpace vertical size="large">
                 <div>
-                  <div class="setting-label">AI 提供商</div>
+                  <div class="setting-label">{{ t('ai.provider') }}</div>
                   <NSelect
                     v-model:value="formData.ai.provider"
                     :options="aiProviderOptions"
                   />
                 </div>
                 <div>
-                  <div class="setting-label">API 密钥</div>
+                  <div class="setting-label">{{ t('ai.apiKey') }}</div>
                   <NInput
                     v-model:value="formData.ai.apiKey"
                     type="password"
                     show-password-on="click"
-                    placeholder="输入 API 密钥"
+                    :placeholder="t('ai.apiKey')"
                   />
                 </div>
                 <div>
-                  <div class="setting-label">模型</div>
+                  <div class="setting-label">{{ t('ai.model') }}</div>
                   <NInput
                     v-model:value="formData.ai.model"
                     placeholder="例如: gpt-4, claude-3-opus"
@@ -250,17 +256,17 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
 
           <!-- 外观设置 -->
           <div v-else-if="currentPanel === 'appearance'" class="panel">
-            <NCard title="外观设置" :bordered="false">
+            <NCard :title="`${t('settings.appearance')} ${t('settings.title')}`" :bordered="false">
               <NSpace vertical size="large">
                 <div>
-                  <div class="setting-label">主题</div>
+                  <div class="setting-label">{{ t('settings.theme') }}</div>
                   <NRadioGroup v-model:value="formData.theme" @update:value="setTheme">
                     <NSpace vertical>
                       <NRadio value="light">
                         <template #default>
                           <div class="theme-option">
                             <NIcon><WbSunnyOutlined /></NIcon>
-                            <span>浅色</span>
+                            <span>{{ t('settings.light') }}</span>
                           </div>
                         </template>
                       </NRadio>
@@ -268,7 +274,7 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
                         <template #default>
                           <div class="theme-option">
                             <NIcon><BedtimeOutlined /></NIcon>
-                            <span>深色</span>
+                            <span>{{ t('settings.dark') }}</span>
                           </div>
                         </template>
                       </NRadio>
@@ -276,7 +282,7 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
                         <template #default>
                           <div class="theme-option">
                             <NIcon><ComputerOutlined /></NIcon>
-                            <span>跟随系统</span>
+                            <span>{{ t('settings.system') }}</span>
                           </div>
                         </template>
                       </NRadio>
@@ -304,14 +310,13 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
           <!-- 底部按钮 -->
           <div class="settings-footer">
             <NSpace>
-              <NButton @click="cancelSettings">取消</NButton>
-              <NButton type="primary" @click="saveSettings">保存</NButton>
+              <NButton @click="cancelSettings">{{ t('common.cancel') }}</NButton>
+              <NButton type="primary" @click="saveSettings">{{ t('common.save') }}</NButton>
             </NSpace>
           </div>
         </NLayoutContent>
       </NLayout>
     </div>
-  </NConfigProvider>
 </template>
 
 <style scoped>

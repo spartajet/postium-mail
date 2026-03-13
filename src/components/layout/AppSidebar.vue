@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, h } from "vue";
 import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
+import { useI18n } from "vue-i18n";
 import type { EmailFolder } from "@/types";
 import {
     EmailOutlined,
@@ -25,6 +26,9 @@ const emailStore = useEmailStore();
 const accountStore = useAccountStore();
 const uiStore = useUIStore();
 
+// i18n
+const { t } = useI18n();
+
 // 图标组件映射
 const iconMap: Record<string, any> = {
     inbox: InboxOutlined,
@@ -47,63 +51,63 @@ const renderIcon = (iconName: string) => {
 const navItems = computed(() => [
     {
         id: "inbox",
-        label: "收件箱",
+        label: t("email.inbox"),
         icon: "inbox",
         count: emailStore.folderCounts.inbox,
     },
     {
         id: "starred",
-        label: "星标邮件",
+        label: t("email.starred"),
         icon: "star",
         count: emailStore.folderCounts.starred,
     },
     {
         id: "sent",
-        label: "已发送",
+        label: t("email.sent"),
         icon: "send",
         count: emailStore.folderCounts.sent,
     },
     {
         id: "drafts",
-        label: "草稿",
+        label: t("email.drafts"),
         icon: "file",
         count: emailStore.folderCounts.drafts,
     },
     {
         id: "spam",
-        label: "垃圾邮件",
+        label: t("email.spam"),
         icon: "alert",
         count: emailStore.folderCounts.spam,
     },
     {
         id: "trash",
-        label: "已删除",
+        label: t("email.trash"),
         icon: "trash",
         count: emailStore.folderCounts.trash,
     },
 ]);
 
 // 视图导航项
-const viewNavItems = [
+const viewNavItems = computed(() => [
     {
         id: "calendar",
-        label: "日历",
+        label: t("nav.calendar"),
         icon: "calendar",
     },
     {
         id: "workflow",
-        label: "工作流",
+        label: t("nav.workflow"),
         icon: "workflow",
     },
-];
+]);
 
 // 标签配置
-const labels = [
-    { id: "urgent", name: "紧急", color: "#EF4444" },
-    { id: "work", name: "工作", color: "#3B82F6" },
-    { id: "personal", name: "个人", color: "#10B981" },
-    { id: "finance", name: "财务", color: "#F59E0B" },
-];
+const labels = computed(() => [
+    { id: "urgent", name: t("sidebar.labels.urgent"), color: "#EF4444" },
+    { id: "work", name: t("sidebar.labels.work"), color: "#3B82F6" },
+    { id: "personal", name: t("sidebar.labels.personal"), color: "#10B981" },
+    { id: "finance", name: t("sidebar.labels.finance"), color: "#F59E0B" },
+]);
 
 // 选中的导航项
 const activeNav = computed(() => emailStore.currentFolder);
@@ -156,10 +160,10 @@ const storagePercent = computed(
                 <span class="logo-text">Postium</span>
             </div>
             <div class="header-actions">
-                <button class="icon-btn" @click="openSettings" title="设置">
+                <button class="icon-btn" @click="openSettings" :title="t('settings.title')">
                     <SettingsOutlined :size="18" />
                 </button>
-                <button class="icon-btn" @click="toggleTheme" title="切换主题">
+                <button class="icon-btn" @click="toggleTheme" :title="t('settings.theme')">
                     <LightModeOutlined v-if="uiStore.isDarkTheme" :size="18" />
                     <DarkModeOutlined v-else :size="18" />
                 </button>
@@ -246,7 +250,7 @@ const storagePercent = computed(
                         <div class="add-option-icon">
                             <AddOutlined :size="20" />
                         </div>
-                        <span>添加账号</span>
+                        <span>{{ t('sidebar.addAccount') }}</span>
                     </div>
                 </div>
             </div>
@@ -255,7 +259,7 @@ const storagePercent = computed(
         <!-- Compose Button -->
         <button class="compose-btn" @click="openCompose">
             <EditOutlined :size="20" />
-            <span>写信</span>
+            <span>{{ t('email.compose') }}</span>
         </button>
 
         <!-- Navigation -->
@@ -289,7 +293,7 @@ const storagePercent = computed(
 
             <!-- Views -->
             <div class="nav-section">
-                <div class="nav-section-header">视图</div>
+                <div class="nav-section-header">{{ t('nav.views') }}</div>
                 <div class="nav-items">
                     <a
                         v-for="item in viewNavItems"
@@ -312,7 +316,7 @@ const storagePercent = computed(
 
             <!-- Labels -->
             <div class="nav-section">
-                <div class="nav-section-header">标签</div>
+                <div class="nav-section-header">{{ t('nav.labels') }}</div>
                 <div class="nav-items">
                     <a
                         v-for="label in labels"
@@ -339,7 +343,7 @@ const storagePercent = computed(
                     ></div>
                 </div>
                 <div class="storage-text">
-                    已用 {{ storageUsed }} GB / {{ storageTotal }} GB
+                    {{ t('sidebar.storageUsed') }} {{ storageUsed }} {{ t('sidebar.storageTotal') }} / {{ storageTotal }} {{ t('sidebar.storageTotal') }}
                 </div>
             </div>
         </div>

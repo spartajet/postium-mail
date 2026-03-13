@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAIChatStore, useEmailStore, useUIStore } from '@/stores'
 import type { ChatMessage } from '@/types'
 
 import {
-  NConfigProvider,
-  NGlobalStyle,
-  darkTheme,
-  lightTheme,
   NButton,
   NInput,
   NIcon,
@@ -27,6 +24,9 @@ import {
   ErrorOutlined
 } from '@vicons/material'
 
+// i18n
+const { t, locale } = useI18n()
+
 // Stores
 const aiChatStore = useAIChatStore()
 const emailStore = useEmailStore()
@@ -45,6 +45,14 @@ const isSending = ref(false)
 // 计算属性
 const messages = computed(() => aiChatStore.messages)
 const isLoading = computed(() => aiChatStore.isLoading)
+
+// 快捷操作
+const quickActions = computed(() => [
+  { label: t('ai.chat.quickActions.archiveRead'), prompt: t('ai.chat.quickActions.archiveReadPrompt') },
+  { label: t('ai.chat.quickActions.markSpam'), prompt: t('ai.chat.quickActions.markSpamPrompt') },
+  { label: t('ai.chat.quickActions.organizeWork'), prompt: t('ai.chat.quickActions.organizeWorkPrompt') },
+  { label: t('ai.chat.quickActions.findImportant'), prompt: t('ai.chat.quickActions.findImportantPrompt') }
+])
 
 // 关闭模态框
 function closeModal() {
@@ -71,7 +79,7 @@ async function sendMessage() {
     await aiChatStore.sendMessage(content)
   } catch (error) {
     console.error('发送消息失败:', error)
-    uiStore.showError('AI 响应失败，请重试')
+    uiStore.showError(t('ai.chat.actions.failed'))
   } finally {
     isSending.value = false
   }
@@ -88,7 +96,7 @@ async function handlePendingAction(message: ChatMessage) {
   const { type, description, affectedCount, emailIds } = message.pendingAction
 
   // 确认操作
-  const confirmed = confirm(`${description}\n\n确定要对 ${affectedCount} 封邮件执行此操作吗？`)
+  const confirmed = confirm(`${description}\n\n${t('ai.chat.actions.confirm', { count: affectedCount })}`)
   if (!confirmed) return
 
   try {
@@ -114,7 +122,7 @@ async function handlePendingAction(message: ChatMessage) {
         result = await emailStore.unstarEmails(emailIds)
         break
       default:
-        throw new Error(`未知操作类型: ${type}`)
+        throw new Error(t('ai.chat.actions.unknownType'))
     }
 
     // 更新消息状态
@@ -123,10 +131,10 @@ async function handlePendingAction(message: ChatMessage) {
       failed: result.failed || 0
     })
 
-    uiStore.showSuccess(`操作完成: 成功 ${result.success || 0}, 失败 ${result.failed || 0}`)
+    uiStore.showSuccess(t('ai.chat.actions.result', { success: result.success || 0, failed: result.failed || 0 }))
   } catch (error) {
     console.error('执行操作失败:', error)
-    uiStore.showError('操作失败，请重试')
+    uiStore.showError(t('ai.chat.actions.operationFailed'))
   }
 }
 
@@ -139,19 +147,11 @@ function scrollToBottom() {
 
 // 格式化时间
 function formatTime(date: Date) {
-  return new Date(date).toLocaleTimeString('zh-CN', {
+  return new Date(date).toLocaleTimeString(locale.value, {
     hour: '2-digit',
     minute: '2-digit'
   })
 }
-
-// 快捷操作
-const quickActions = [
-  { label: '归档所有已读邮件', prompt: '帮我归档所有已读邮件' },
-  { label: '标记垃圾邮件', prompt: '识别并标记垃圾邮件' },
-  { label: '整理工作邮件', prompt: '整理所有工作相关的邮件' },
-  { label: '查找重要邮件', prompt: '查找最近一周的重要邮件' }
-]
 
 async function handleQuickAction(prompt: string) {
   userInput.value = prompt
@@ -160,9 +160,7 @@ async function handleQuickAction(prompt: string) {
 </script>
 
 <template>
-  <NConfigProvider :theme="uiStore.isDarkTheme ? darkTheme : lightTheme">
-    <NGlobalStyle />
-    <div class="ai-chat-modal-overlay" @click.self="closeModal">
+  <div class="ai-chat-modal-overlay" @click.self="closeModal">
       <NCard class="ai-chat-modal" :bordered="false">
         <template #header>
           <div class="modal-header">
@@ -170,7 +168,7 @@ async function handleQuickAction(prompt: string) {
               <NIcon>
                 <SmartToyOutlined />
               </NIcon>
-              <h3>AI 助手</h3>
+              <h3>{{ t('ai.chat.title') }}</h3>
             </div>
             <NButton text @click="closeModal">
               <template #icon>
@@ -189,8 +187,8 @@ async function handleQuickAction(prompt: string) {
             <NIcon size="64" :depth="3">
               <SmartToyOutlined />
             </NIcon>
-            <h3>你好！我是 AI 助手</h3>
-            <p>我可以帮你处理邮件，请选择一个快捷操作或直接提问</p>
+            <h3>{{ t('ai.chat.welcome') }}</h3>
+            <p>{{ t('ai.chat.welcomeDesc') }}</p>
             <NSpace vertical :size="12">
               <NButton
                 v-for="action in quickActions"
@@ -242,14 +240,14 @@ async function handleQuickAction(prompt: string) {
                       </NIcon>
                       <span>{{ message.pendingAction.description }}</span>
                       <strong>{{ message.pendingAction.affectedCount }}</strong>
-                      <span>封邮件</span>
+                      <span>{{ t('ai.chat.actions.emails') }}</span>
                     </div>
                     <NButton
                       type="primary"
                       size="small"
                       @click="handlePendingAction(message)"
                     >
-                      执行操作
+                      {{ t('ai.chat.actions.execute') }}
                     </NButton>
                   </div>
 
@@ -259,8 +257,10 @@ async function handleQuickAction(prompt: string) {
                       <ErrorOutlined />
                     </NIcon>
                     <span>
-                      成功 {{ message.actionResult.success }},
-                      失败 {{ message.actionResult.failed }}
+                      {{ t('ai.chat.actions.result', {
+                        success: message.actionResult.success,
+                        failed: message.actionResult.failed
+                      }) }}
                     </span>
                   </div>
                 </div>
@@ -277,7 +277,7 @@ async function handleQuickAction(prompt: string) {
                 </NAvatar>
                 <div class="message-bubble">
                   <NSpin size="small" />
-                  <span>AI 正在思考...</span>
+                  <span>{{ t('ai.chat.thinking') }}</span>
                 </div>
               </div>
             </div>
@@ -292,7 +292,7 @@ async function handleQuickAction(prompt: string) {
               v-model:value="userInput"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 4 }"
-              placeholder="输入消息... (Ctrl+Enter 发送)"
+              :placeholder="t('ai.chat.inputPlaceholder')"
               @keydown.ctrl.enter="sendMessage"
             />
             <NButton
@@ -306,13 +306,12 @@ async function handleQuickAction(prompt: string) {
                   <SendOutlined />
                 </NIcon>
               </template>
-              发送
+              {{ t('ai.chat.sendMessage') }}
             </NButton>
           </div>
         </template>
       </NCard>
     </div>
-  </NConfigProvider>
 </template>
 
 <style scoped>
