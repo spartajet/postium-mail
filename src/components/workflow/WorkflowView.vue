@@ -978,14 +978,26 @@ onUnmounted(() => {
 
                         <label class="config-label">提示词</label>
                         <textarea
-                            :value="(selectedNode.config.prompt as string) || ''"
-                            @input="(e) => {
-                                if (selectedNode && e.target) {
-                                    workflowStore.updateNode(selectedNode.id, {
-                                        config: { ...selectedNode.config, prompt: (e.target as HTMLTextAreaElement).value }
-                                    })
+                            :value="
+                                (selectedNode.config.prompt as string) || ''
+                            "
+                            @input="
+                                (e) => {
+                                    if (selectedNode && e.target) {
+                                        workflowStore.updateNode(
+                                            selectedNode.id,
+                                            {
+                                                config: {
+                                                    ...selectedNode.config,
+                                                    prompt: (
+                                                        e.target as HTMLTextAreaElement
+                                                    ).value,
+                                                },
+                                            },
+                                        );
+                                    }
                                 }
-                            }"
+                            "
                             class="config-textarea"
                             placeholder="输入 AI 提示词"
                             rows="4"
