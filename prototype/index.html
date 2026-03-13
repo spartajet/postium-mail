@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Postium - AI-Powered Email Client</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+</head>
+<body>
+    <!-- Background Gradient Orbs -->
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <!-- Logo -->
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                            <polyline points="22,6 12,13 2,6"/>
+                        </svg>
+                    </div>
+                    <span class="logo-text">Postium</span>
+                </div>
+                <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Account Selector -->
+            <div class="account-selector-wrapper">
+                <div class="custom-select" id="accountSelector">
+                    <div class="custom-select-trigger">
+                        <div class="selected-account">
+                            <div class="selected-account-avatar" id="selectedAccountAvatar">P</div>
+                            <div class="selected-account-info">
+                                <span class="selected-account-name" id="selectedAccountName">个人邮箱</span>
+                                <span class="selected-account-email" id="selectedAccountEmail">me@postium.com</span>
+                            </div>
+                        </div>
+                        <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="custom-select-options" id="accountOptions">
+                        <!-- Account options will be rendered here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compose Button -->
+            <button class="compose-btn" id="composeBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>写邮件</span>
+            </button>
+
+            <!-- Navigation -->
+            <nav class="nav">
+                <div class="nav-section">
+                    <div class="nav-items">
+                        <a href="#" class="nav-item active" data-folder="inbox">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+                                <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+                            </svg>
+                            <span>收件箱</span>
+                            <span class="nav-badge">12</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="starred">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                            </svg>
+                            <span>星标邮件</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="sent">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"/>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            </svg>
+                            <span>已发送</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="drafts">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <span>草稿箱</span>
+                            <span class="nav-badge">3</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="spam">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                            </svg>
+                            <span>垃圾邮件</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="trash">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                            <span>已删除</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- AI Assistant -->
+                <div class="nav-section">
+                    <div class="nav-section-header">
+                        <span>AI助手</span>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#" class="nav-item" data-folder="schedule">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                                <line x1="16" y1="2" x2="16" y2="6"/>
+                                <line x1="8" y1="2" x2="8" y2="6"/>
+                                <line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                            <span>个人日程</span>
+                        </a>
+                        <a href="#" class="nav-item" data-folder="workflow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                            <span>工作流程</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Labels -->
+                <div class="nav-section">
+                    <div class="nav-section-header">
+                        <span>AI智能分类</span>
+                        <button class="icon-btn-sm" aria-label="Add label">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="nav-items">
+                        <a href="#" class="nav-item label-item" data-label="urgent">
+                            <span class="label-dot urgent"></span>
+                            <span>紧急</span>
+                        </a>
+                        <a href="#" class="nav-item label-item" data-label="work">
+                            <span class="label-dot work"></span>
+                            <span>工作</span>
+                        </a>
+                        <a href="#" class="nav-item label-item" data-label="personal">
+                            <span class="label-dot personal"></span>
+                            <span>个人</span>
+                        </a>
+                        <a href="#" class="nav-item label-item" data-label="finance">
+                            <span class="label-dot finance"></span>
+                            <span>财务</span>
+                        </a>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Storage -->
+            <div class="sidebar-footer">
+                <div class="storage">
+                    <div class="storage-bar">
+                        <div class="storage-fill" style="width: 45%"></div>
+                    </div>
+                    <span class="storage-text">已使用 4.5 GB / 10 GB</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Email List Panel -->
+        <div class="list-panel" id="listPanel">
+            <!-- List Header -->
+            <div class="list-header">
+                <div class="search-container">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input type="text" class="search-input" placeholder="搜索邮件..." id="searchInput">
+                    <kbd class="search-shortcut">⌘K</kbd>
+                </div>
+                <div class="list-toolbar">
+                    <button class="icon-btn" aria-label="Refresh" id="refreshBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"/>
+                            <polyline points="1 20 1 14 7 14"/>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" aria-label="Filter" id="filterBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" aria-label="Sort" id="sortBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="4" y1="6" x2="20" y2="6"/>
+                            <line x1="4" y1="12" x2="16" y2="12"/>
+                            <line x1="4" y1="18" x2="12" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Email List -->
+            <div class="email-list" id="emailList">
+                <!-- Email items will be rendered here -->
+            </div>
+        </div>
+
+        <!-- Email Detail Panel -->
+        <div class="detail-panel" id="detailPanel">
+            <!-- Empty State -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                        <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                </div>
+                <h3>选择一封邮件</h3>
+                <p>从列表中选择邮件以查看内容</p>
+            </div>
+
+            <!-- Email Detail -->
+            <div class="email-detail" id="emailDetail" style="display: none;">
+                <!-- Detail Header -->
+                <div class="detail-header">
+                    <div class="detail-nav">
+                        <button class="icon-btn" id="prevEmail" aria-label="Previous email">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="15 18 9 12 15 6"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" id="nextEmail" aria-label="Next email">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="detail-actions">
+                        <button class="icon-btn" id="replyBtn" aria-label="Reply">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 17 4 12 9 7"/>
+                                <path d="M20 18v-2a4 4 0 0 0-4-4H4"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" id="replyAllBtn" aria-label="Reply all">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="7 17 2 12 7 7"/>
+                                <polyline points="13 17 8 12 13 7"/>
+                                <path d="M22 18v-2a4 4 0 0 0-4-4H8"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" id="forwardBtn" aria-label="Forward">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="15 17 20 12 15 7"/>
+                                <path d="M4 18v-2a4 4 0 0 1 4-4h12"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" id="starBtn" aria-label="Star">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn danger" id="deleteBtn" aria-label="Delete">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                        <button class="icon-btn" id="moreBtn" aria-label="More options">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="1"/>
+                                <circle cx="19" cy="12" r="1"/>
+                                <circle cx="5" cy="12" r="1"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Email Subject -->
+                <div class="detail-subject" id="detailSubject"></div>
+
+                <!-- Email Meta -->
+                <div class="detail-meta">
+                    <div class="sender-info">
+                        <div class="sender-avatar" id="senderAvatar">AI</div>
+                        <div class="sender-details">
+                            <span class="sender-name" id="senderName"></span>
+                            <span class="sender-email" id="senderEmail"></span>
+                        </div>
+                    </div>
+                    <div class="email-meta-info">
+                        <span class="email-date" id="emailDate"></span>
+                        <span class="email-to">to <span id="recipientEmail"></span></span>
+                    </div>
+                </div>
+
+                <!-- AI Summary Card -->
+                <div class="ai-card" id="aiSummaryCard">
+                    <div class="ai-card-header">
+                        <div class="ai-badge">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                                <circle cx="7.5" cy="14.5" r="1.5"/>
+                                <circle cx="16.5" cy="14.5" r="1.5"/>
+                            </svg>
+                            <span>AI 摘要</span>
+                        </div>
+                        <button class="icon-btn-sm" id="regenerateSummary" aria-label="Regenerate">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"/>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="ai-card-content" id="aiSummaryContent">
+                        <!-- AI summary will be rendered here -->
+                    </div>
+                </div>
+
+                <!-- Email Body -->
+                <div class="detail-body" id="detailBody">
+                    <!-- Email content will be rendered here -->
+                </div>
+
+                <!-- Attachments -->
+                <div class="attachments-section" id="attachmentsSection" style="display: none;">
+                    <div class="attachments-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                        <span>附件</span>
+                    </div>
+                    <div class="attachments-list" id="attachmentsList"></div>
+                </div>
+
+                <!-- AI Actions -->
+                <div class="ai-actions">
+                    <span class="ai-actions-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        AI 操作
+                    </span>
+                    <div class="ai-actions-buttons">
+                        <button class="ai-action-btn" data-action="smart-reply">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            智能回复
+                        </button>
+                        <button class="ai-action-btn" data-action="summarize">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="8" y1="6" x2="21" y2="6"/>
+                                <line x1="8" y1="12" x2="21" y2="12"/>
+                                <line x1="8" y1="18" x2="21" y2="18"/>
+                                <line x1="3" y1="6" x2="3.01" y2="6"/>
+                                <line x1="3" y1="12" x2="3.01" y2="12"/>
+                                <line x1="3" y1="18" x2="3.01" y2="18"/>
+                            </svg>
+                            生成摘要
+                        </button>
+                        <button class="ai-action-btn" data-action="translate">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                            翻译
+                        </button>
+                        <button class="ai-action-btn" data-action="extract-tasks">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 11l3 3L22 4"/>
+                                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                            </svg>
+                            提取任务
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compose Modal -->
+    <div class="modal-overlay" id="composeModal">
+        <div class="modal compose-window">
+            <div class="modal-header">
+                <h3>新邮件</h3>
+                <div class="modal-controls">
+                    <button class="icon-btn-sm" id="minimizeCompose" aria-label="Minimize">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn-sm" id="maximizeCompose" aria-label="Maximize">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn-sm" id="closeCompose" aria-label="Close">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="compose-fields">
+                    <div class="compose-field">
+                        <label>收件人</label>
+                        <input type="text" id="composeTo" placeholder="收件人邮箱">
+                    </div>
+                    <div class="compose-field">
+                        <label>主题</label>
+                        <input type="text" id="composeSubject" placeholder="邮件主题">
+                    </div>
+                </div>
+
+                <!-- AI Compose Assistant -->
+                <div class="ai-compose-panel">
+                    <div class="ai-compose-header" id="aiComposeToggle">
+                        <div class="ai-badge">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                            </svg>
+                            <span>AI 写作助手</span>
+                        </div>
+                        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="ai-compose-body" id="aiComposeBody">
+                        <div class="ai-quick-actions">
+                            <button class="ai-quick-btn" data-action="generate">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                </svg>
+                                生成草稿
+                            </button>
+                            <button class="ai-quick-btn" data-action="improve">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                                改进写作
+                            </button>
+                            <button class="ai-quick-btn" data-action="shorten">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="4 14 10 14 10 20"/>
+                                    <polyline points="20 10 14 10 14 4"/>
+                                    <line x1="14" y1="10" x2="21" y2="3"/>
+                                    <line x1="3" y1="21" x2="10" y2="14"/>
+                                </svg>
+                                精简内容
+                            </button>
+                            <button class="ai-quick-btn" data-action="formal">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="16" y1="13" x2="8" y2="13"/>
+                                    <line x1="16" y1="17" x2="8" y2="17"/>
+                                </svg>
+                                更加正式
+                            </button>
+                        </div>
+                        <div class="ai-prompt-box">
+                            <input type="text" id="aiPrompt" placeholder="描述你想写的内容...">
+                            <button class="ai-send-btn" id="aiSendPrompt">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="22" y1="2" x2="11" y2="13"/>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Editor Toolbar -->
+                <div class="editor-toolbar">
+                    <button class="toolbar-btn" data-command="bold" aria-label="Bold">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>
+                            <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" data-command="italic" aria-label="Italic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="19" y1="4" x2="10" y2="4"/>
+                            <line x1="14" y1="20" x2="5" y2="20"/>
+                            <line x1="15" y1="4" x2="9" y2="20"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" data-command="underline" aria-label="Underline">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/>
+                            <line x1="4" y1="21" x2="20" y2="21"/>
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" data-command="insertUnorderedList" aria-label="Bullet list">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="8" y1="6" x2="21" y2="6"/>
+                            <line x1="8" y1="12" x2="21" y2="12"/>
+                            <line x1="8" y1="18" x2="21" y2="18"/>
+                            <circle cx="4" cy="6" r="1" fill="currentColor"/>
+                            <circle cx="4" cy="12" r="1" fill="currentColor"/>
+                            <circle cx="4" cy="18" r="1" fill="currentColor"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" data-command="insertOrderedList" aria-label="Numbered list">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="10" y1="6" x2="21" y2="6"/>
+                            <line x1="10" y1="12" x2="21" y2="12"/>
+                            <line x1="10" y1="18" x2="21" y2="18"/>
+                            <text x="4" y="8" font-size="8" fill="currentColor">1</text>
+                            <text x="4" y="14" font-size="8" fill="currentColor">2</text>
+                            <text x="4" y="20" font-size="8" fill="currentColor">3</text>
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="toolbar-btn" data-command="createLink" aria-label="Insert link">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" id="attachFileBtn" aria-label="Attach file">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Editor -->
+                <div class="compose-editor" id="composeEditor" contenteditable="true" placeholder="写下你的内容..."></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="saveDraft">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    保存草稿
+                </button>
+                <button class="btn btn-primary" id="sendEmail">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                    发送
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Smart Reply Modal -->
+    <div class="modal-overlay" id="smartReplyModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="modal-icon">
+                        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                    </svg>
+                    智能回复建议
+                </h3>
+                <button class="icon-btn" id="closeSmartReply" aria-label="Close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">基于邮件内容的 AI 生成回复建议：</p>
+                <div class="reply-suggestions" id="replySuggestions">
+                    <!-- Suggestions will be rendered here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Full Width Calendar View (Hidden by default) -->
+    <div class="calendar-full-view" id="calendarFullView" style="display: none;">
+        <div class="calendar-header">
+            <button class="icon-btn" id="prevMonth" aria-label="上个月">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"/>
+                </svg>
+            </button>
+            <h2 class="calendar-title" id="calendarTitle">2024年3月</h2>
+            <button class="icon-btn" id="nextMonth" aria-label="下个月">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            </button>
+            <button class="btn btn-primary" id="addEventBtn" style="margin-left: auto;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                添加事务
+            </button>
+        </div>
+        <div class="calendar-grid-header">
+            <div class="calendar-day-name">日</div>
+            <div class="calendar-day-name">一</div>
+            <div class="calendar-day-name">二</div>
+            <div class="calendar-day-name">三</div>
+            <div class="calendar-day-name">四</div>
+            <div class="calendar-day-name">五</div>
+            <div class="calendar-day-name">六</div>
+        </div>
+        <div class="calendar-grid" id="calendarGrid">
+            <!-- Calendar days will be rendered here -->
+        </div>
+    </div>
+
+    <!-- Workflow Full View (Hidden by default) -->
+    <div class="workflow-full-view" id="workflowFullView" style="display: none;">
+        <div class="workflow-header">
+            <h2 class="workflow-title">工作流程编辑器</h2>
+            <div class="workflow-actions">
+                <button class="btn btn-primary" id="saveWorkflowBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    保存工作流
+                </button>
+                <button class="btn btn-secondary" id="clearWorkflowBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    清空
+                </button>
+            </div>
+        </div>
+        <div class="workflow-content">
+            <!-- Workflow Node Palette -->
+            <div class="workflow-palette">
+                <h4 class="palette-title">可用节点</h4>
+                <div class="palette-nodes">
+                    <div class="palette-node" draggable="true" data-type="trigger">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+                            <polyline points="2 17 12 22 22 17"/>
+                            <polyline points="2 12 12 17 22 12"/>
+                        </svg>
+                        <span>触发器</span>
+                    </div>
+                    <div class="palette-node" draggable="true" data-type="condition">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+                            <path d="M8 12h8"/>
+                        </svg>
+                        <span>条件判断</span>
+                    </div>
+                    <div class="palette-node" draggable="true" data-type="action">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <path d="M9 12h6"/>
+                            <path d="M12 9v6"/>
+                        </svg>
+                        <span>动作</span>
+                    </div>
+                    <div class="palette-node" draggable="true" data-type="email">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                            <polyline points="22 6 12 13 2 6"/>
+                        </svg>
+                        <span>发送邮件</span>
+                    </div>
+                    <div class="palette-node" draggable="true" data-type="delay">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <span>延迟</span>
+                    </div>
+                    <div class="palette-node" draggable="true" data-type="ai">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                        </svg>
+                        <span>AI 处理</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Canvas -->
+            <div class="workflow-canvas" id="workflowCanvas">
+                <div class="canvas-grid" id="canvasGrid">
+                    <!-- Workflow nodes will be dropped here -->
+                </div>
+                <div class="canvas-empty-state" id="canvasEmptyState">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    <p>从左侧拖拽节点到此处开始构建工作流</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Modal -->
+    <div class="modal-overlay" id="eventModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="eventModalTitle">添加事务</h3>
+                <button class="icon-btn" id="closeEventModal" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="event-form">
+                    <div class="form-group">
+                        <label>事务标题</label>
+                        <input type="text" id="eventTitle" placeholder="输入事务标题">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>日期</label>
+                            <input type="date" id="eventDate">
+                        </div>
+                        <div class="form-group">
+                            <label>开始时间</label>
+                            <input type="time" id="eventStartTime">
+                        </div>
+                        <div class="form-group">
+                            <label>结束时间</label>
+                            <input type="time" id="eventEndTime">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>重复</label>
+                        <select id="eventRepeat">
+                            <option value="none">不重复</option>
+                            <option value="daily">每天</option>
+                            <option value="weekly">每周</option>
+                            <option value="monthly">每月</option>
+                            <option value="yearly">每年</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="repeatEndDateGroup" style="display: none;">
+                        <label>重复结束日期</label>
+                        <input type="date" id="eventRepeatEnd">
+                    </div>
+                    <div class="form-group">
+                        <label>颜色标签</label>
+                        <div class="color-picker">
+                            <label class="color-option">
+                                <input type="radio" name="eventColor" value="#7C3AED" checked>
+                                <span class="color-dot" style="background: #7C3AED;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="eventColor" value="#F43F5E">
+                                <span class="color-dot" style="background: #F43F5E;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="eventColor" value="#10B981">
+                                <span class="color-dot" style="background: #10B981;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="eventColor" value="#F59E0B">
+                                <span class="color-dot" style="background: #F59E0B;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="eventColor" value="#3B82F6">
+                                <span class="color-dot" style="background: #3B82F6;"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <textarea id="eventNotes" rows="3" placeholder="添加备注..."></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="deleteEventBtn" style="display: none;">删除</button>
+                <div style="margin-left: auto;">
+                    <button class="btn btn-ghost" id="cancelEventBtn">取消</button>
+                    <button class="btn btn-primary" id="saveEventBtn">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Account Modal -->
+    <div class="modal-overlay" id="accountModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="accountModalTitle">添加邮箱账号</h3>
+                <button class="icon-btn" id="closeAccountModal" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="event-form">
+                    <div class="form-group">
+                        <label>账号名称</label>
+                        <input type="text" id="accountName" placeholder="例如: 工作邮箱">
+                    </div>
+                    <div class="form-group">
+                        <label>邮箱地址</label>
+                        <input type="email" id="accountEmail" placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label>邮箱提供商</label>
+                        <select id="accountProvider">
+                            <option value="gmail">Gmail</option>
+                            <option value="outlook">Outlook / Hotmail</option>
+                            <option value="icloud">iCloud</option>
+                            <option value="yahoo">Yahoo Mail</option>
+                            <option value="imap">IMAP / 自定义</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>颜色标签</label>
+                        <div class="color-picker">
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#7C3AED" checked>
+                                <span class="color-dot" style="background: #7C3AED;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#F43F5E">
+                                <span class="color-dot" style="background: #F43F5E;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#10B981">
+                                <span class="color-dot" style="background: #10B981;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#F59E0B">
+                                <span class="color-dot" style="background: #F59E0B;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#3B82F6">
+                                <span class="color-dot" style="background: #3B82F6;"></span>
+                            </label>
+                            <label class="color-option">
+                                <input type="radio" name="accountColor" value="#EC4899">
+                                <span class="color-dot" style="background: #EC4899;"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="account-info-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        <span>添加邮箱账号后，系统将自动配置IMAP和SMTP设置</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" id="cancelAccountBtn">取消</button>
+                <button class="btn btn-primary" id="saveAccountBtn">添加账号</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>设置</h3>
+                <button class="icon-btn" id="closeSettingsModal" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-layout">
+                    <!-- Left Menu -->
+                    <div class="settings-sidebar">
+                        <div class="settings-menu-item active" data-category="general">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m5.08 5.08l4.24 4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m5.08-5.08l4.24-4.24"/>
+                            </svg>
+                            <span>通用</span>
+                        </div>
+                        <div class="settings-menu-item" data-category="notifications">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            </svg>
+                            <span>通知</span>
+                        </div>
+                        <div class="settings-menu-item" data-category="ai">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                            </svg>
+                            <span>AI 助手</span>
+                        </div>
+                        <div class="settings-menu-item" data-category="language">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                            <span>语言</span>
+                        </div>
+                    </div>
+
+                    <!-- Right Content -->
+                    <div class="settings-content">
+                        <!-- General Settings -->
+                        <div class="settings-panel active" id="panel-general">
+                            <h4 class="settings-panel-title">通用设置</h4>
+                            <div class="settings-sections">
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>主题模式</span>
+                                        <span class="settings-item-desc">选择应用的主题</span>
+                                    </div>
+                                    <div class="theme-selector">
+                                        <button class="theme-option" data-theme="light">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <circle cx="12" cy="12" r="5"/>
+                                                <line x1="12" y1="1" x2="12" y2="3"/>
+                                                <line x1="12" y1="21" x2="12" y2="23"/>
+                                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                                                <line x1="1" y1="12" x2="3" y2="12"/>
+                                                <line x1="21" y1="12" x2="23" y2="12"/>
+                                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                                            </svg>
+                                            <span>浅色</span>
+                                        </button>
+                                        <button class="theme-option" data-theme="dark">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                                            </svg>
+                                            <span>深色</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notifications Settings -->
+                        <div class="settings-panel" id="panel-notifications">
+                            <h4 class="settings-panel-title">通知设置</h4>
+                            <div class="settings-sections">
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>新邮件通知</span>
+                                        <span class="settings-item-desc">收到新邮件时显示通知</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="emailNotifToggle" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>声音提醒</span>
+                                        <span class="settings-item-desc">收到新邮件时播放提示音</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="soundNotifToggle">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AI Settings -->
+                        <div class="settings-panel" id="panel-ai">
+                            <h4 class="settings-panel-title">AI 助手设置</h4>
+                            <div class="settings-sections">
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>智能摘要</span>
+                                        <span class="settings-item-desc">自动生成邮件内容摘要</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="aiSummaryToggle" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>智能回复建议</span>
+                                        <span class="settings-item-desc">基于邮件内容生成回复建议</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="aiReplyToggle" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Language Settings -->
+                        <div class="settings-panel" id="panel-language">
+                            <h4 class="settings-panel-title">语言设置</h4>
+                            <div class="settings-sections">
+                                <div class="settings-item">
+                                    <div class="settings-item-label">
+                                        <span>界面语言</span>
+                                    </div>
+                                    <select class="settings-select" id="languageSelect">
+                                        <option value="zh-CN">简体中文</option>
+                                        <option value="en-US">English</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+
+    <!-- Status Bar -->
+    <footer class="status-bar">
+        <div class="status-bar-left">
+            <span class="status-item" id="connectionStatus">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+                    <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6z"/>
+                    <circle cx="12" cy="12" r="2"/>
+                </svg>
+                <span>已连接</span>
+            </span>
+            <span class="status-item" id="emailCount">
+                <span>12 封未读邮件</span>
+            </span>
+        </div>
+        <div class="status-bar-right">
+            <button class="icon-btn" id="themeToggle" aria-label="Toggle theme">
+                <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"/>
+                    <line x1="12" y1="1" x2="12" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="23"/>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                    <line x1="1" y1="12" x2="3" y2="12"/>
+                    <line x1="21" y1="12" x2="23" y2="12"/>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+                <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+            </button>
+            <span class="status-item" id="currentTime"></span>
+        </div>
+    </footer>
+</body>
+</html>
