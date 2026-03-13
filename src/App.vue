@@ -1,160 +1,133 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { onMounted } from "vue";
+import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
 
-const greetMsg = ref("");
-const name = ref("");
+// 组件导入
+import AppSidebar from "@/components/layout/AppSidebar.vue";
+import EmailList from "@/components/layout/EmailList.vue";
+import EmailDetail from "@/components/layout/EmailDetail.vue";
+import ComposeModal from "@/components/compose/ComposeModal.vue";
+import ToastContainer from "@/components/common/ToastContainer.vue";
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
-}
+// Stores
+const emailStore = useEmailStore();
+const accountStore = useAccountStore();
+const uiStore = useUIStore();
+
+// 初始化应用
+onMounted(async () => {
+    // 初始化 UI Store（主题、断点等）
+    uiStore.init();
+
+    // 加载账号数据
+    await accountStore.fetchAccounts();
+
+    // 加载邮件数据
+    await emailStore.fetchEmails(accountStore.currentAccount?.id);
+});
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
+    <div class="app" :data-theme="uiStore.appliedTheme">
+        <!-- 背景装饰 -->
+        <div class="bg-orbs">
+            <div class="orb orb-1"></div>
+            <div class="orb orb-2"></div>
+            <div class="orb orb-3"></div>
+        </div>
 
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
+        <!-- 主布局 -->
+        <div class="main-content">
+            <AppSidebar />
+            <EmailList />
+            <EmailDetail />
+        </div>
+
+        <!-- 模态框 -->
+        <ComposeModal />
+
+        <!-- Toast 通知 -->
+        <ToastContainer />
+
+        <!-- 状态栏 -->
+        <footer class="status-bar">
+            <div class="status-bar-left">
+                <div class="status-item">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
+                        />
+                    </svg>
+                    <span>已连接</span>
+                </div>
+                <div class="status-item">
+                    <span>{{ emailStore.unreadCount }} 封未读</span>
+                </div>
+            </div>
+            <div class="status-bar-right">
+                <div class="status-item">
+                    <span>{{
+                        new Date().toLocaleDateString("zh-CN", {
+                            month: "long",
+                            day: "numeric",
+                        })
+                    }}</span>
+                </div>
+                <div class="status-item">
+                    <span>{{
+                        new Date().toLocaleTimeString("zh-CN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                        })
+                    }}</span>
+                </div>
+                <button
+                    class="icon-btn"
+                    @click="uiStore.toggleTheme"
+                    title="切换主题"
+                >
+                    <svg
+                        v-if="uiStore.isDarkTheme"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"
+                        />
+                    </svg>
+                    <svg
+                        v-else
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"
+                        />
+                    </svg>
+                </button>
+            </div>
+        </footer>
     </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-  </main>
 </template>
 
 <style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
 }
 
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
 }
-
-</style>
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
 </style>
