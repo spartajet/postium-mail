@@ -177,45 +177,6 @@ const aiActions = [
                         <KeyboardArrowDownOutlined :size="20" />
                     </button>
                 </div>
-
-                <div class="detail-actions">
-                    <button class="icon-btn" @click="handleReply" title="回复">
-                        <ReplyOutlined :size="18" />
-                    </button>
-                    <button
-                        class="icon-btn"
-                        @click="handleForward"
-                        title="转发"
-                    >
-                        <ForwardOutlined :size="18" />
-                    </button>
-                    <button
-                        class="icon-btn"
-                        @click="handleToggleStar"
-                        title="星标"
-                    >
-                        <StarOutlined
-                            v-if="emailStore.currentEmail.starred"
-                            :size="18"
-                            style="color: #f59e0b"
-                        />
-                        <StarBorderOutlined v-else :size="18" />
-                    </button>
-                    <button
-                        class="icon-btn"
-                        @click="handleArchive"
-                        title="归档"
-                    >
-                        <ArchiveOutlined :size="18" />
-                    </button>
-                    <button
-                        class="icon-btn danger"
-                        @click="handleDelete"
-                        title="删除"
-                    >
-                        <DeleteOutlined :size="18" />
-                    </button>
-                </div>
             </div>
 
             <!-- 邮件主题 -->
@@ -322,6 +283,46 @@ const aiActions = [
                 </div>
             </div>
 
+            <!-- 操作按钮栏 -->
+            <div class="detail-actions">
+                <button class="icon-btn" @click="handleReply" title="回复">
+                    <ReplyOutlined :size="18" />
+                </button>
+                <button
+                    class="icon-btn"
+                    @click="handleForward"
+                    title="转发"
+                >
+                    <ForwardOutlined :size="18" />
+                </button>
+                <button
+                    class="icon-btn"
+                    @click="handleToggleStar"
+                    title="星标"
+                >
+                    <StarOutlined
+                        v-if="emailStore.currentEmail.starred"
+                        :size="18"
+                        style="color: #f59e0b"
+                    />
+                    <StarBorderOutlined v-else :size="18" />
+                </button>
+                <button
+                    class="icon-btn"
+                    @click="handleArchive"
+                    title="归档"
+                >
+                    <ArchiveOutlined :size="18" />
+                </button>
+                <button
+                    class="icon-btn danger"
+                    @click="handleDelete"
+                    title="删除"
+                >
+                    <DeleteOutlined :size="18" />
+                </button>
+            </div>
+
             <!-- AI 操作栏 -->
             <div class="ai-actions">
                 <div class="ai-actions-label">
@@ -352,6 +353,15 @@ const aiActions = [
     display: flex;
     flex-direction: column;
     height: 100%;
+}
+
+.detail-actions {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .skeleton-text {
