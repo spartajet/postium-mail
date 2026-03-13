@@ -44,14 +44,14 @@ const uiStore = useUIStore()
 const { t } = useI18n()
 
 // 菜单配置
-const menuOptions: MenuOption[] = [
+const menuOptions = computed<MenuOption[]>(() => [
   {
-    label: computed(() => t('settings.general')),
+    label: t('settings.general'),
     key: 'general',
     icon: () => h(NIcon, null, { default: () => h(SettingsOutlined) })
   },
   {
-    label: computed(() => t('settings.notifications')),
+    label: t('settings.notifications'),
     key: 'notifications',
     icon: () => h(NIcon, null, { default: () => h(NotificationsOutlined) })
   },
@@ -61,16 +61,16 @@ const menuOptions: MenuOption[] = [
     icon: () => h(NIcon, null, { default: () => h(AutoAwesomeOutlined) })
   },
   {
-    label: computed(() => t('settings.appearance')),
+    label: t('settings.appearance'),
     key: 'appearance',
     icon: () => h(NIcon, null, { default: () => h(PaletteOutlined) })
   },
   {
-    label: computed(() => t('settings.shortcuts')),
+    label: t('settings.shortcuts'),
     key: 'shortcuts',
     icon: () => h(NIcon, null, { default: () => h(KeyboardOutlined) })
   }
-]
+])
 
 // 当前面板
 const currentPanel = computed(() => uiStore.settingsPanel)
