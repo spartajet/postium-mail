@@ -268,6 +268,95 @@ export const useEmailStore = defineStore('email', () => {
     clearSelection()
   }
 
+  // 批量归档邮件
+  async function archiveEmails(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        await moveEmail(id, 'archive')
+        results.success++
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
+  // 批量删除邮件
+  async function deleteEmails(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        await deleteEmail(id)
+        results.success++
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
+  // 批量标记已读
+  async function markAsReadBatch(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        await markAsRead(id)
+        results.success++
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
+  // 批量标记未读
+  async function markAsUnreadBatch(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        await markAsUnread(id)
+        results.success++
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
+  // 批量星标
+  async function starEmails(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        await toggleStar(id)
+        results.success++
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
+  // 批量取消星标
+  async function unstarEmails(emailIds: string[]) {
+    const results = { success: 0, failed: 0 }
+    for (const id of emailIds) {
+      try {
+        const email = emails.value.find(e => e.id === id)
+        if (email && email.starred) {
+          await toggleStar(id)
+          results.success++
+        } else {
+          results.success++
+        }
+      } catch {
+        results.failed++
+      }
+    }
+    return results
+  }
+
   return {
     // State
     emails,
@@ -310,5 +399,11 @@ export const useEmailStore = defineStore('email', () => {
     addEmail,
     updateEmail,
     clearEmails,
+    archiveEmails,
+    deleteEmails,
+    markAsReadBatch,
+    markAsUnreadBatch,
+    starEmails,
+    unstarEmails,
   }
 })

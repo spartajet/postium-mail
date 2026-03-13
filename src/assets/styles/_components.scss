@@ -11,7 +11,15 @@
 
 .app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
   overflow: hidden;
   position: relative;
 }
@@ -22,7 +30,6 @@
 
 .sidebar {
   width: $sidebar-width;
-  height: 100vh;
   background: var(--bg-glass);
   border-right: 1px solid var(--border-subtle);
   display: flex;
@@ -62,6 +69,11 @@
   font-size: $font-size-lg;
   font-weight: $font-weight-bold;
   color: var(--text-primary);
+}
+
+.header-actions {
+  display: flex;
+  gap: $spacing-xs;
 }
 
 // ========================================
