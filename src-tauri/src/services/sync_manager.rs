@@ -160,11 +160,6 @@ impl SyncManager {
         let mut total_errors = 0;
 
         for folder in &folders {
-            // 跳过虚拟文件夹
-            if folder.name == "starred" {
-                continue;
-            }
-
             self.emit_progress(account_id, SyncProgress {
                 stage: SyncStage::SyncingEmails,
                 folder: Some(folder.name.clone()),
