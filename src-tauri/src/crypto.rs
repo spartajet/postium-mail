@@ -1,182 +1,153 @@
-use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    Aes256Gcm, Nonce,
-};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
+use tauri_plugin_stronghold::stronghold::Stronghold as TauriStronghold;
 use tokio::sync::Mutex;
 
-// 使用 base64 v0.22 的新 API
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-
-/// Stronghold 安全存储包装
-/// 使用 AES-256-GCM 加密的文件存储作为 Stronghold 的替代方案
+/// 真正的 IOTA Stronghold 安全存储
 pub struct SecureVault {
-    data_path: std::path::PathBuf,
-    cipher: Aes256Gcm,
-    cache: Arc<Mutex<HashMap<String, String>>>,
+    stronghold: Arc<Mutex<TauriStronghold>>,
+    client_path: Vec<u8>,
 }
 
 impl SecureVault {
-    /// 创建新的 SecureVault 实例
+    /// 创建新的 SecureVault 实例，使用 IOTA Stronghold
     pub async fn new() -> Result<Self> {
         // 确定数据目录
-        let data_dir = dirs::data_local_dir()
-            .ok_or_else(|| anyhow!("无法获取数据目录"))?;
+        let data_dir = dirs::data_local_dir().ok_or_else(|| anyhow!("无法获取数据目录"))?;
 
         let app_data_dir = data_dir.join("postium-mail");
-        std::fs::create_dir_all(&app_data_dir)
-            .map_err(|e| anyhow!("创建数据目录失败: {}", e))?;
+        std::fs::create_dir_all(&app_data_dir).map_err(|e| anyhow!("创建数据目录失败: {}", e))?;
 
-        let data_path = app_data_dir.join("vault.enc");
+        let snapshot_path = app_data_dir.join("vault.stronghold");
 
-        // 加密密钥（实际应用中应该从用户密码或系统密钥链派生）
+        // 使用固定密钥派生（实际应用中应该从用户密码派生）
         let key_bytes: [u8; 32] = [
-            0x70, 0x6f, 0x73, 0x74, 0x69, 0x75, 0x6d, 0x2d,
-            0x6d, 0x61, 0x69, 0x6c, 0x2d, 0x73, 0x65, 0x63,
-            0x72, 0x65, 0x74, 0x2d, 0x6b, 0x65, 0x79, 0x2d,
-            0x33, 0x32, 0x2d, 0x62, 0x79, 0x74, 0x65, 0x73,
+            0x70, 0x6f, 0x73, 0x74, 0x69, 0x75, 0x6d, 0x2d, 0x6d, 0x61, 0x69, 0x6c, 0x2d, 0x73,
+            0x65, 0x63, 0x72, 0x65, 0x74, 0x2d, 0x6b, 0x65, 0x79, 0x2d, 0x33, 0x32, 0x2d, 0x62,
+            0x79, 0x74, 0x65, 0x73,
         ];
-        let cipher = Aes256Gcm::new(&key_bytes.into());
 
-        // 加载现有数据
-        let mut cache = HashMap::new();
-        if data_path.exists() {
-            let encrypted_data = std::fs::read(&data_path)
-                .map_err(|e| anyhow!("读取 vault 失败: {}", e))?;
+        let stronghold = TauriStronghold::new(snapshot_path, key_bytes.to_vec())
+            .map_err(|e| anyhow!("Stronghold 初始化失败: {}", e))?;
 
-            if !encrypted_data.is_empty() {
-                let decrypted = Self::decrypt_data(&cipher, &encrypted_data)?;
-                cache = serde_json::from_str(&decrypted)
-                    .unwrap_or_default();
-            }
+        let client_path = b"postium-mail-client".to_vec();
+        let stronghold_arc = Arc::new(Mutex::new(stronghold));
+
+        {
+            let stronghold = stronghold_arc.lock().await;
+            stronghold
+                .create_client(client_path.clone())
+                .map_err(|e| anyhow!("创建 Stronghold 客户端失败: {}", e))?;
         }
 
         Ok(Self {
-            data_path,
-            cipher,
-            cache: Arc::new(Mutex::new(cache)),
+            stronghold: stronghold_arc,
+            client_path,
         })
     }
 
-    /// 解密数据
-    fn decrypt_data(cipher: &Aes256Gcm, encrypted: &[u8]) -> Result<String> {
-        let combined = BASE64_STANDARD.decode(encrypted)
-            .map_err(|e| anyhow!("Base64 解码失败: {}", e))?;
-
-        if combined.len() < 12 {
-            return Err(anyhow!("加密数据格式错误"));
-        }
-
-        let (nonce_bytes, ciphertext) = combined.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        let plaintext = cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow!("解密失败: {}", e))?;
-
-        String::from_utf8(plaintext)
-            .map_err(|e| anyhow!("UTF-8 转换失败: {}", e))
-    }
-
-    /// 加密数据
-    fn encrypt_data(cipher: &Aes256Gcm, data: &str) -> Result<Vec<u8>> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher
-            .encrypt(&nonce, data.as_bytes())
-            .map_err(|e| anyhow!("加密失败: {}", e))?;
-
-        let mut combined = nonce.to_vec();
-        combined.extend_from_slice(&ciphertext);
-        Ok(BASE64_STANDARD.encode(&combined).into_bytes())
-    }
-
-    /// 保存到磁盘
-    async fn persist(&self) -> Result<()> {
-        let cache = self.cache.lock().await;
-        let json = serde_json::to_string(&*cache)
-            .map_err(|e| anyhow!("序列化失败: {}", e))?;
-        drop(cache);
-
-        let encrypted = Self::encrypt_data(&self.cipher, &json)?;
-        std::fs::write(&self.data_path, encrypted)
-            .map_err(|e| anyhow!("写入 vault 失败: {}", e))?;
-
+    /// 保存密码到 Stronghold
+    pub async fn store_password(&self, key: &str, password: &str) -> Result<()> {
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
+        client
+            .store()
+            .insert(key.as_bytes().to_vec(), password.as_bytes().to_vec(), None)
+            .map_err(|e| anyhow!("存储密码失败: {}", e))?;
         Ok(())
     }
 
-    /// 保存密码
-    pub async fn store_password(&self, key: &str, password: &str) -> Result<()> {
-        let mut cache = self.cache.lock().await;
-        cache.insert(key.to_string(), password.to_string());
-        drop(cache);
-        self.persist().await
-    }
-
-    /// 获取密码
+    /// 从 Stronghold 获取密码
     pub async fn get_password(&self, key: &str) -> Result<Option<String>> {
-        let cache = self.cache.lock().await;
-        Ok(cache.get(key).cloned())
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
+        match client.store().get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let password =
+                    String::from_utf8(bytes).map_err(|e| anyhow!("密码 UTF-8 转换失败: {}", e))?;
+                Ok(Some(password))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(anyhow!("获取密码失败: {}", e)),
+        }
     }
 
     /// 删除密码
     pub async fn remove_password(&self, key: &str) -> Result<()> {
-        let mut cache = self.cache.lock().await;
-        cache.remove(key);
-        drop(cache);
-        self.persist().await
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
+        client
+            .store()
+            .delete(key.as_bytes())
+            .map_err(|e| anyhow!("删除密码失败: {}", e))?;
+        Ok(())
     }
 
-    /// 存储 OAuth Token（JSON 序列化）
+    /// 存储 OAuth Token 到 Stronghold（JSON 序列化）
     pub async fn store_token(&self, account_id: i32, token: &OAuthToken) -> Result<()> {
         let key = format!("oauth_token_{}", account_id);
-        let json = serde_json::to_string(token)
-            .map_err(|e| anyhow!("Token 序列化失败: {}", e))?;
+        let json = serde_json::to_string(token).map_err(|e| anyhow!("Token 序列化失败: {}", e))?;
 
-        let mut cache = self.cache.lock().await;
-        cache.insert(key, json);
-        drop(cache);
-        self.persist().await
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
+        client
+            .store()
+            .insert(key.as_bytes().to_vec(), json.as_bytes().to_vec(), None)
+            .map_err(|e| anyhow!("存储 Token 失败: {}", e))?;
+        Ok(())
     }
 
-    /// 获取 OAuth Token
+    /// 从 Stronghold 获取 OAuth Token
     pub async fn get_token(&self, account_id: i32) -> Result<Option<OAuthToken>> {
         let key = format!("oauth_token_{}", account_id);
-        let cache = self.cache.lock().await;
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
 
-        match cache.get(&key) {
-            Some(json) => {
-                let token: OAuthToken = serde_json::from_str(json)
+        match client.store().get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let json = String::from_utf8(bytes)
+                    .map_err(|e| anyhow!("Token JSON UTF-8 转换失败: {}", e))?;
+                let token: OAuthToken = serde_json::from_str(&json)
                     .map_err(|e| anyhow!("Token 反序列化失败: {}", e))?;
                 Ok(Some(token))
             }
-            None => Ok(None),
+            Ok(None) => Ok(None),
+            Err(e) => Err(anyhow!("获取 Token 失败: {}", e)),
         }
     }
 
     /// 删除 OAuth Token
     pub async fn remove_token(&self, account_id: i32) -> Result<()> {
         let key = format!("oauth_token_{}", account_id);
-        let mut cache = self.cache.lock().await;
-        cache.remove(&key);
-        drop(cache);
-        self.persist().await
+        let stronghold = self.stronghold.lock().await;
+        let client = stronghold
+            .get_client(self.client_path.clone())
+            .map_err(|e| anyhow!("获取 Stronghold 客户端失败: {}", e))?;
+        client
+            .store()
+            .delete(key.as_bytes())
+            .map_err(|e| anyhow!("删除 Token 失败: {}", e))?;
+        Ok(())
     }
-}
 
-/// 获取 Stronghold vault 路径
-pub fn get_vault_path() -> Result<String> {
-    let data_dir = dirs::data_local_dir()
-        .ok_or_else(|| anyhow!("无法获取数据目录"))?;
-
-    let app_data_dir = data_dir.join("postium-mail");
-    std::fs::create_dir_all(&app_data_dir)
-        .map_err(|e| anyhow!("创建数据目录失败: {}", e))?;
-
-    let snapshot_path = app_data_dir.join("vault.stronghold");
-    Ok(snapshot_path.to_string_lossy().to_string())
+    /// 保存 Stronghold 快照
+    pub async fn save(&self) -> Result<()> {
+        let stronghold = self.stronghold.lock().await;
+        stronghold
+            .save()
+            .map_err(|e| anyhow!("保存 Stronghold 失败: {}", e))
+    }
 }
 
 /// OAuth Token 信息
@@ -187,71 +158,64 @@ pub struct OAuthToken {
     pub expires_at: i64, // Unix 时间戳
 }
 
-/// 密码加密器（备用方案）
-/// 使用 AES-256-GCM 加密算法
-pub struct PasswordEncryptor {
-    cipher: Aes256Gcm,
-}
+/// 获取 Stronghold vault 路径（仅用于日志显示）
+pub fn get_vault_path() -> Result<String> {
+    let data_dir = dirs::data_local_dir().ok_or_else(|| anyhow!("无法获取数据目录"))?;
 
-impl PasswordEncryptor {
-    /// 使用设备特定密钥创建新的加密器
-    pub fn new() -> Result<Self> {
-        let key_bytes: [u8; 32] = [
-            0x70, 0x6f, 0x73, 0x74, 0x69, 0x75, 0x6d, 0x2d,
-            0x6d, 0x61, 0x69, 0x6c, 0x2d, 0x73, 0x65, 0x63,
-            0x72, 0x65, 0x74, 0x2d, 0x6b, 0x65, 0x79, 0x2d,
-            0x33, 0x32, 0x2d, 0x62, 0x79, 0x74, 0x65, 0x73,
-        ];
-        let cipher = Aes256Gcm::new(&key_bytes.into());
-        Ok(Self { cipher })
-    }
+    let app_data_dir = data_dir.join("postium-mail");
+    std::fs::create_dir_all(&app_data_dir).map_err(|e| anyhow!("创建数据目录失败: {}", e))?;
 
-    /// 加密密码
-    pub fn encrypt(&self, password: &str) -> Result<String> {
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = self.cipher
-            .encrypt(&nonce, password.as_bytes())
-            .map_err(|e| anyhow!("加密失败: {}", e))?;
-
-        let mut combined = nonce.to_vec();
-        combined.extend_from_slice(&ciphertext);
-        Ok(BASE64_STANDARD.encode(&combined))
-    }
-
-    /// 解密密码
-    pub fn decrypt(&self, encrypted: &str) -> Result<String> {
-        let combined = BASE64_STANDARD.decode(encrypted)
-            .map_err(|e| anyhow!("Base64 解码失败: {}", e))?;
-
-        if combined.len() < 12 {
-            return Err(anyhow!("加密数据格式错误"));
-        }
-
-        let (nonce_bytes, ciphertext) = combined.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        let plaintext = self.cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow!("解密失败: {}", e))?;
-
-        String::from_utf8(plaintext)
-            .map_err(|e| anyhow!("UTF-8 转换失败: {}", e))
-    }
+    Ok(app_data_dir
+        .join("vault.stronghold")
+        .to_string_lossy()
+        .to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_encrypt_decrypt() {
-        let encryptor = PasswordEncryptor::new().unwrap();
-        let password = "test_password_123";
+    #[tokio::test]
+    async fn test_stronghold_store_retrieve() {
+        let vault = SecureVault::new().await.unwrap();
 
-        let encrypted = encryptor.encrypt(password).unwrap();
-        assert_ne!(encrypted, password);
+        // 测试存储和获取密码
+        vault
+            .store_password("test_key", "test_password_123")
+            .await
+            .unwrap();
 
-        let decrypted = encryptor.decrypt(&encrypted).unwrap();
-        assert_eq!(decrypted, password);
+        let retrieved = vault.get_password("test_key").await.unwrap();
+        assert_eq!(retrieved, Some("test_password_123".to_string()));
+
+        // 测试删除
+        vault.remove_password("test_key").await.unwrap();
+        let deleted = vault.get_password("test_key").await.unwrap();
+        assert_eq!(deleted, None);
+    }
+
+    #[tokio::test]
+    async fn test_token_storage() {
+        let vault = SecureVault::new().await.unwrap();
+
+        let token = OAuthToken {
+            access_token: "access123".to_string(),
+            refresh_token: "refresh456".to_string(),
+            expires_at: 1234567890,
+        };
+
+        // 存储 token
+        vault.store_token(1, &token).await.unwrap();
+
+        // 获取 token
+        let retrieved = vault.get_token(1).await.unwrap().unwrap();
+        assert_eq!(retrieved.access_token, "access123");
+        assert_eq!(retrieved.refresh_token, "refresh456");
+        assert_eq!(retrieved.expires_at, 1234567890);
+
+        // 删除 token
+        vault.remove_token(1).await.unwrap();
+        let deleted = vault.get_token(1).await.unwrap();
+        assert!(deleted.is_none());
     }
 }

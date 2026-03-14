@@ -122,6 +122,7 @@ pub struct CreateAccountRequest {
     pub oauth_provider: Option<String>,  // 'microsoft' | 'google'
     pub oauth_token: Option<String>,  // access_token（仅 OAuth）
     pub oauth_refresh_token: Option<String>,  // refresh_token（仅 OAuth）
+    pub oauth_expires_at: Option<i64>,  // token 过期时间（仅 OAuth）
 }
 
 // 预设的服务商配置

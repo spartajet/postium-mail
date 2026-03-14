@@ -39,10 +39,7 @@ lettre = "0.11"
 mail-parser = "0.9"
 native-tls = "0.2"
 
-# 密码加密
-aes-gcm = "0.10"
 base64 = "0.22"
-
 # OAuth 2.0 相关（最新版本）
 oauth2 = "5.0"
 reqwest = { version = "0.13", features = ["json"] }
@@ -50,6 +47,7 @@ url = "2.5"
 
 getrandom = "0.4"
 hex = "0.4"
+iota_stronghold = "=1.0"
 sha2 = "0.10"
 # Stronghold 安全存储
 tauri-plugin-stronghold = "2"

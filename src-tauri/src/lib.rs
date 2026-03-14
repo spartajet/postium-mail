@@ -26,7 +26,7 @@ impl DatabaseState {
 }
 
 // Stronghold Vault 状态
-struct VaultState(crypto::SecureVault);
+struct VaultState(std::sync::Arc<tokio::sync::Mutex<crypto::SecureVault>>);
 
 // OAuth 服务状态
 struct OAuthState(services::oauth_service::OAuthService);
@@ -42,19 +42,9 @@ async fn add_account(
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
+    let vault = &vault_state.0;
 
-    // 使用 Stronghold 存储密码
-    let password_key = format!("account_password_{}", account.email);
-    vault_state.0.store_password(&password_key, &account.password).await
-        .map_err(|e| e.to_string())?;
-
-    // 保存账号信息到数据库（不包含明文密码）
-    let account_without_password = models::account::CreateAccountRequest {
-        password: String::new(),
-        ..account
-    };
-
-    services::account_service::create(&db, account_without_password)
+    services::account_service::create(&db, vault, account)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -91,21 +81,9 @@ async fn update_account(
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
+    let vault = &vault_state.0;
 
-    // 如果提供了新密码，更新到 Stronghold
-    if !account.password.is_empty() {
-        let password_key = format!("account_password_{}", account.email);
-        vault_state.0.store_password(&password_key, &account.password).await
-            .map_err(|e| e.to_string())?;
-    }
-
-    // 更新账号信息到数据库
-    let account_without_password = models::account::CreateAccountRequest {
-        password: String::new(),
-        ..account
-    };
-
-    services::account_service::update(&db, id, account_without_password)
+    services::account_service::update(&db, vault, id, account)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -118,14 +96,9 @@ async fn delete_account(
     id: i32,
 ) -> Result<(), String> {
     let db = db_state.clone_conn();
+    let vault = &vault_state.0;
 
-    // 获取账号邮箱以删除密码
-    if let Ok(Some(account)) = services::account_service::get_by_id(&db, id).await {
-        let password_key = format!("account_password_{}", account.email);
-        let _ = vault_state.0.remove_password(&password_key).await;
-    }
-
-    services::account_service::delete(&db, id)
+    services::account_service::delete(&db, vault, id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -138,7 +111,8 @@ async fn test_account_connection(
     // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
     let password = if account.password.is_empty() {
-        vault_state.0.get_password(&password_key).await
+        let vault = vault_state.0.lock().await;
+        vault.get_password(&password_key).await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "密码未找到".to_string())?
     } else {
@@ -205,7 +179,8 @@ async fn exchange_oauth_code(
 
             // 将 Token 存储到 Stronghold
             let temp_account_id = email.len() as i32;
-            vault_state.0.store_token(temp_account_id, &token).await
+            let vault = vault_state.0.lock().await;
+            vault.store_token(temp_account_id, &token).await
                 .map_err(|e| e.to_string())?;
 
             Ok(models::account::AccountDto {
@@ -374,7 +349,8 @@ async fn sync_account(
 
     // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
-    let _password = vault_state.0.get_password(&password_key).await
+    let vault = vault_state.0.lock().await;
+    let _password = vault.get_password(&password_key).await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
@@ -430,7 +406,8 @@ async fn send_email(
 
     // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
-    let password = vault_state.0.get_password(&password_key).await
+    let vault = vault_state.0.lock().await;
+    let password = vault.get_password(&password_key).await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
@@ -505,11 +482,11 @@ pub fn run() {
                     .expect("无法获取 vault 路径");
                 tracing::info!("Stronghold vault: {}", vault_path);
 
-                // 初始化 SecureVault（使用 iota_stronghold）
+                // 初始化 SecureVault（使用 IOTA Stronghold）
                 let vault = crypto::SecureVault::new()
                     .await
                     .expect("SecureVault 初始化失败");
-                app.manage(VaultState(vault));
+                app.manage(VaultState(std::sync::Arc::new(tokio::sync::Mutex::new(vault))));
 
                 // 建立数据库连接
                 let db = database::establish_connection()
@@ -530,7 +507,7 @@ pub fn run() {
                 ));
 
                 tracing::info!("Postium Mail 后端初始化完成");
-                tracing::info!("密码存储: AES-256-GCM 加密文件 (vault.enc)");
+                tracing::info!("密码存储: Tauri Stronghold (官方安全存储)");
             });
 
             Ok(())
