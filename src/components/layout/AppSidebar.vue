@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, h } from "vue";
-import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
+import { useEmailStore, useAccountStore, useUIStore, useSyncStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import type { EmailFolder } from "@/types";
 import {
@@ -26,6 +26,7 @@ import {
 const emailStore = useEmailStore();
 const accountStore = useAccountStore();
 const uiStore = useUIStore();
+const syncStore = useSyncStore();
 
 // i18n
 const { t } = useI18n();
@@ -155,6 +156,25 @@ async function syncAccountEmail() {
     }
 }
 
+// 手动同步所有账号
+async function syncAllAccounts() {
+    if (!accountStore.currentAccount) {
+        console.log('[AppSidebar] 没有当前账号，跳过同步');
+        return;
+    }
+
+    console.log('[AppSidebar] 开始同步账号:', accountStore.currentAccount.id);
+
+    try {
+        await syncStore.syncAccount(accountStore.currentAccount.id);
+        await emailStore.fetchEmails();
+        uiStore.showSuccess('同步完成');
+    } catch (error) {
+        console.error('[AppSidebar] 同步失败:', error);
+        uiStore.showError('同步失败');
+    }
+}
+
 // 格式化存储空间
 const storageUsed = ref(4.5);
 const storageTotal = ref(10);
@@ -183,11 +203,11 @@ const storagePercent = computed(
                 </button>
                 <button
                     class="icon-btn"
-                    @click="toggleTheme"
-                    :title="t('settings.theme')"
+                    @click="syncAllAccounts"
+                    :disabled="syncStore.hasAnySyncing"
+                    :title="syncStore.hasAnySyncing ? '同步中...' : '手动同步'"
                 >
-                    <LightModeOutlined v-if="uiStore.isDarkTheme" :size="18" />
-                    <DarkModeOutlined v-else :size="18" />
+                    <SyncOutlined :size="18" :class="{ spinning: syncStore.hasAnySyncing }" />
                 </button>
             </div>
         </div>
@@ -390,6 +410,20 @@ const storagePercent = computed(
 
 <style scoped>
 /* 组件使用全局样式，此处仅添加作用域样式如有需要 */
+
+/* 头部同步按钮旋转动画 */
+.icon-btn.spinning :deep(svg) {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
 
 /* 同步按钮样式 */
 .sync-btn {

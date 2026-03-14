@@ -103,13 +103,17 @@ pub async fn delete(db: &DbConn, id: i32) -> Result<()> {
 
 /// 映射 IMAP 文件夹名称到标准名称
 pub fn map_folder_name(imap_name: &str) -> String {
-    match imap_name.to_uppercase().as_str() {
+    // 处理嵌套文件夹（如 [Gmail]/Spam）
+    let parts: Vec<&str> = imap_name.split('/').collect();
+    let folder_name = parts.last().unwrap_or(&imap_name);
+
+    match folder_name.to_uppercase().as_str() {
         "INBOX" => "inbox".to_string(),
-        "SENT" | "SENT ITEMS" | "SENT MAIL" | "已发送" => "sent".to_string(),
-        "DRAFT" | "DRAFTS" | "草稿箱" | "草稿" => "drafts".to_string(),
-        "TRASH" | "DELETED" | "DELETED ITEMS" | "已删除" | "垃圾箱" => "trash".to_string(),
-        "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" => "spam".to_string(),
-        "ARCHIVE" | "ARCHIVES" | "归档" => "archive".to_string(),
+        "SENT" | "SENT ITEMS" | "SENT MAIL" | "已发送" | "SENDEN" => "sent".to_string(),
+        "DRAFT" | "DRAFTS" | "草稿箱" | "草稿" | "ENTWURFE" => "drafts".to_string(),
+        "TRASH" | "DELETED" | "DELETED ITEMS" | "已删除" | "垃圾箱" | "GELÖSCHTE" | "PAPER" => "trash".to_string(),
+        "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" | "POSTINI" => "spam".to_string(),
+        "ARCHIVE" | "ARCHIVES" | "归档" | "ALL MAIL" => "archive".to_string(),
         _ => imap_name.to_string(),
     }
 }

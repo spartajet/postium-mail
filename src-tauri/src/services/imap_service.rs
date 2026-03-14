@@ -85,11 +85,12 @@ impl ImapClient {
             tracing::debug!("处理文件夹: name='{}', starts_with('.'): {}, contains('/'): {}",
                 name_str, name_str.starts_with('.'), name_str.contains('/'));
 
-            // 过滤掉系统文件夹，只保留用户文件夹
-            if !name_str.starts_with('.') && !name_str.contains('/') {
+            // 只过滤掉以 . 开头的系统文件夹
+            // 允许包含 / 的嵌套文件夹（如 Gmail 的 [Gmail]/Spam）
+            if !name_str.starts_with('.') {
                 folder_names.push(name_str);
             } else {
-                tracing::debug!("跳过文件夹: {}", name_str);
+                tracing::debug!("跳过系统文件夹: {}", name_str);
             }
         }
 
@@ -522,7 +523,8 @@ impl ImapService {
                 "spam" | "trash" => {
                     if folder_upper.contains(target)
                         || folder_upper.contains("JUNK") && target == "spam"
-                        || (folder_upper.contains("DELETED") || folder_upper.contains("TRASH") || folder_upper.contains("GELÖSCHTE")) && target == "trash" {
+                        || folder_upper.contains("垃圾邮件") && target == "spam"
+                        || (folder_upper.contains("DELETED") || folder_upper.contains("TRASH") || folder_upper.contains("GELÖSCHTE") || folder_upper.contains("垃圾箱")) && target == "trash" {
                         return Some(folder.clone());
                     }
                 }
