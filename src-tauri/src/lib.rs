@@ -3,7 +3,7 @@ mod crypto;
 mod database;
 mod migration;
 mod models;
-mod services;
+pub mod services;
 
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
@@ -378,11 +378,29 @@ async fn sync_account(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
-    // 连接 IMAP 并同步（暂时使用占位实现）
+    // 连接 IMAP 并同步
     let mut imap_service = services::imap_service::ImapService::new();
+
+    // 连接到服务器
+    let host = account.imap_host.unwrap_or_else(|| {
+        match account.provider.as_str() {
+            "gmail" => "imap.gmail.com".to_string(),
+            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
+            "icloud" => "imap.mail.me.com".to_string(),
+            "yahoo" => "imap.mail.yahoo.com".to_string(),
+            _ => "imap.example.com".to_string(),
+        }
+    });
+
+    let port = account.imap_port.unwrap_or(993) as u16;
+    let auth = services::imap_service::ImapAuth::Password(_password);
+
+    imap_service.connect(&host, port, &account.email, auth)
+        .map_err(|e| e.to_string())?;
 
     // 同步收件箱
     let count = imap_service.sync_folder(account_id, &db, "INBOX")
+        .await
         .map_err(|e| e.to_string())?;
 
     imap_service.logout()

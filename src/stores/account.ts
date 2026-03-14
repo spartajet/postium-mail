@@ -284,6 +284,26 @@ export const useAccountStore = defineStore('account', () => {
     currentAccount.value = null
   }
 
+  // 同步账号邮件
+  async function syncAccount(accountId?: string) {
+    const id = accountId ? parseInt(accountId) : (currentAccount.value ? parseInt(currentAccount.value.id) : null)
+    if (!id) {
+      throw new Error('没有可同步的账号')
+    }
+
+    try {
+      const count = await invoke<number>('sync_account', { accountId: id })
+
+      // 更新账号同步时间
+      await fetchAccounts()
+
+      return count
+    } catch (error) {
+      console.error('同步账号失败:', error)
+      throw error
+    }
+  }
+
   // ========================================
   // Helper Functions
   // ========================================
@@ -314,5 +334,6 @@ export const useAccountStore = defineStore('account', () => {
     toggleDropdown,
     closeDropdown,
     clearAccounts,
+    syncAccount,
   }
 })
