@@ -4,11 +4,11 @@ use crate::models::{sync_state, SyncStateEntity};
 
 /// 获取账号的所有同步状态
 pub async fn get_by_account(db: &DbConn, account_id: i32) -> Result<Vec<sync_state::Model>> {
-    Ok(SyncStateEntity::find()
+    SyncStateEntity::find()
         .filter(sync_state::Column::AccountId.eq(account_id))
         .all(db)
         .await
-        .map_err(|e| anyhow!("获取同步状态列表失败: {}", e))?)
+        .map_err(|e| anyhow!("获取同步状态列表失败: {}", e))
 }
 
 /// 获取账号的文件夹同步状态
@@ -17,12 +17,12 @@ pub async fn get_by_account_and_folder(
     account_id: i32,
     folder: &str,
 ) -> Result<Option<sync_state::Model>> {
-    Ok(SyncStateEntity::find()
+    SyncStateEntity::find()
         .filter(sync_state::Column::AccountId.eq(account_id))
         .filter(sync_state::Column::Folder.eq(folder))
         .one(db)
         .await
-        .map_err(|e| anyhow!("获取同步状态失败: {}", e))?)
+        .map_err(|e| anyhow!("获取同步状态失败: {}", e))
 }
 
 /// 创建或更新同步状态

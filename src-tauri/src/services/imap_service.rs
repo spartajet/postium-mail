@@ -20,7 +20,7 @@ impl ImapClient {
     pub fn connect(&mut self, host: &str, port: u16, email: &str, auth: ImapAuth) -> Result<()> {
         let start = Instant::now();
 
-        let tls_connector = native_tls::TlsConnector::builder()
+        let _tls_connector = native_tls::TlsConnector::builder()
             .build()
             .map_err(|e| anyhow!("TLS 构建失败: {}", e))?;
 
@@ -640,7 +640,7 @@ impl ImapService {
         db: &sea_orm::DbConn,
         account_id: i32,
         folder: &str,
-        uid: u32,
+        _uid: u32,
         email_data: &EmailData,
     ) -> Result<i32> {
         crate::services::email_service::save_email_from_imap(

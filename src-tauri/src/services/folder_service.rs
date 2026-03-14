@@ -4,19 +4,19 @@ use crate::models::{folder, FolderEntity};
 
 /// 获取账号的所有文件夹
 pub async fn get_by_account(db: &DbConn, account_id: i32) -> Result<Vec<folder::Model>> {
-    Ok(FolderEntity::find()
+    FolderEntity::find()
         .filter(folder::Column::AccountId.eq(account_id))
         .all(db)
         .await
-        .map_err(|e| anyhow!("获取文件夹列表失败: {}", e))?)
+        .map_err(|e| anyhow!("获取文件夹列表失败: {}", e))
 }
 
 /// 根据 ID 获取文件夹
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<folder::Model>> {
-    Ok(FolderEntity::find_by_id(id)
+    FolderEntity::find_by_id(id)
         .one(db)
         .await
-        .map_err(|e| anyhow!("获取文件夹失败: {}", e))?)
+        .map_err(|e| anyhow!("获取文件夹失败: {}", e))
 }
 
 /// 根据账号和 IMAP 名称获取文件夹
@@ -25,12 +25,12 @@ pub async fn get_by_imap_name(
     account_id: i32,
     imap_name: &str,
 ) -> Result<Option<folder::Model>> {
-    Ok(FolderEntity::find()
+    FolderEntity::find()
         .filter(folder::Column::AccountId.eq(account_id))
         .filter(folder::Column::ImapName.eq(imap_name))
         .one(db)
         .await
-        .map_err(|e| anyhow!("获取文件夹失败: {}", e))?)
+        .map_err(|e| anyhow!("获取文件夹失败: {}", e))
 }
 
 /// 查找或创建文件夹
@@ -55,10 +55,10 @@ pub async fn find_or_create(
         ..Default::default()
     };
 
-    Ok(new_folder
+    new_folder
         .insert(db)
         .await
-        .map_err(|e| anyhow!("创建文件夹失败: {}", e))?)
+        .map_err(|e| anyhow!("创建文件夹失败: {}", e))
 }
 
 /// 更新文件夹统计数据

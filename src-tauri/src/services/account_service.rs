@@ -17,19 +17,19 @@ pub async fn get_all(db: &DbConn) -> Result<Vec<account::AccountDto>> {
 
 /// 根据 ID 获取账号
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<account::Model>> {
-    Ok(AccountEntity::find_by_id(id)
+    AccountEntity::find_by_id(id)
         .one(db)
         .await
-        .map_err(|e| anyhow!("获取账号失败: {}", e))?)
+        .map_err(|e| anyhow!("获取账号失败: {}", e))
 }
 
 /// 根据邮箱获取账号
 pub async fn get_by_email(db: &DbConn, email: &str) -> Result<Option<account::Model>> {
-    Ok(AccountEntity::find()
+    AccountEntity::find()
         .filter(account::Column::Email.eq(email))
         .one(db)
         .await
-        .map_err(|e| anyhow!("获取账号失败: {}", e))?)
+        .map_err(|e| anyhow!("获取账号失败: {}", e))
 }
 
 /// 创建新账号
@@ -269,9 +269,9 @@ pub async fn update_last_sync(db: &DbConn, id: i32) -> Result<()> {
 
 /// 测试账号连接
 pub async fn test_connection(
-    db: &DbConn,
-    vault: &Arc<Mutex<SecureVault>>,
-    req: &account::CreateAccountRequest,
+    _db: &DbConn,
+    _vault: &Arc<Mutex<SecureVault>>,
+    _req: &account::CreateAccountRequest,
 ) -> Result<bool> {
     // TODO: 实现 IMAP 连接测试
     // 这里暂时返回 true，后续实现 IMAP 服务时需要真正测试连接
