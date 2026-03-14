@@ -1,6 +1,7 @@
 mod config;
 mod crypto;
 mod database;
+mod migration;
 mod models;
 mod services;
 
