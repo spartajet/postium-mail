@@ -73,11 +73,46 @@ impl SyncManager {
         })?;
 
         // 获取账号信息
-        let account = account_service::get_by_id(&self.db, account_id).await?
-            .ok_or_else(|| anyhow!("账号不存在"))?;
+        let account = match account_service::get_by_id(&self.db, account_id).await {
+            Ok(Some(acc)) => acc,
+            Ok(None) => {
+                let _ = self.emit_progress(account_id, SyncProgress {
+                    stage: SyncStage::Error,
+                    folder: None,
+                    current: 0,
+                    total: 0,
+                    message: "账号不存在".to_string(),
+                });
+                return Err(anyhow!("账号不存在"));
+            }
+            Err(e) => {
+                let msg = format!("获取账号信息失败: {}", e);
+                let _ = self.emit_progress(account_id, SyncProgress {
+                    stage: SyncStage::Error,
+                    folder: None,
+                    current: 0,
+                    total: 0,
+                    message: msg.clone(),
+                });
+                return Err(anyhow!(msg));
+            }
+        };
 
         // 获取密码（从 Stronghold）
-        let password = self.get_account_password(&account).await?;
+        let password = match self.get_account_password(&account).await {
+            Ok(pwd) => pwd,
+            Err(e) => {
+                let msg = format!("获取密码失败: {}", e);
+                let _ = self.emit_progress(account_id, SyncProgress {
+                    stage: SyncStage::Error,
+                    folder: None,
+                    current: 0,
+                    total: 0,
+                    message: msg.clone(),
+                });
+                return Err(anyhow!(msg));
+            }
+        };
 
         tracing::info!("准备连接 IMAP 服务器: email={}, host={:?}, port={:?}",
             account.email, account.imap_host, account.imap_port);
@@ -91,12 +126,22 @@ impl SyncManager {
 
         tracing::info!("开始 IMAP 连接: host={}, port={}", host, port);
 
-        imap_service.connect(
+        if let Err(e) = imap_service.connect(
             &host,
             port,
             &account.email,
             imap_service::ImapAuth::Password(password),
-        ).map_err(|e| anyhow!("连接 IMAP 服务器失败: {}", e))?;
+        ) {
+            let msg = format!("连接 IMAP 服务器失败: {}", e);
+            let _ = self.emit_progress(account_id, SyncProgress {
+                stage: SyncStage::Error,
+                folder: None,
+                current: 0,
+                total: 0,
+                message: msg.clone(),
+            });
+            return Err(anyhow!(msg));
+        }
 
         // 1. 同步文件夹列表
         self.emit_progress(account_id, SyncProgress {
@@ -411,6 +456,7 @@ impl SyncManager {
         };
 
         let payload = serde_json::json!({
+            "account_id": account_id,
             "stage": stage_str,
             "folder": progress.folder,
             "current": progress.current,

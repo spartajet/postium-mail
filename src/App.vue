@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, computed } from "vue";
-import { useEmailStore, useAccountStore, useUIStore } from "@/stores";
+import { useEmailStore, useAccountStore, useUIStore, useSyncStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import { CheckCircleOutlined, LightModeOutlined, DarkModeOutlined } from "@vicons/material";
-import { NConfigProvider, NGlobalStyle, darkTheme, lightTheme } from "naive-ui";
+import { NConfigProvider, NGlobalStyle, darkTheme, lightTheme, NProgress, NSpin } from "naive-ui";
 import { getNaiveUILocale, getNaiveUIDateLocale } from "@/locales/naive-ui-locales";
 
 // 组件导入
@@ -24,6 +24,7 @@ import SettingsModal from "@/components/settings/SettingsModal.vue";
 const emailStore = useEmailStore();
 const accountStore = useAccountStore();
 const uiStore = useUIStore();
+const syncStore = useSyncStore();
 
 // i18n
 const { t } = useI18n();
@@ -40,6 +41,25 @@ const isCalendarView = computed(() => uiStore.currentView === "calendar");
 
 // 是否是工作流视图
 const isWorkflowView = computed(() => uiStore.currentView === "workflow");
+
+// 同步进度
+const syncProgress = computed(() => {
+    const statuses = syncStore.allStatuses;
+    const hasAnySyncing = syncStore.hasAnySyncing;
+    console.log('[App] syncProgress computed:', { statuses, hasAnySyncing });
+    if (statuses.length === 0) return 0;
+    // 取所有同步账号的平均进度
+    return Math.floor(statuses.reduce((sum, s) => sum + s.progress, 0) / statuses.length);
+});
+
+// 同步消息
+const syncMessage = computed(() => {
+    const statuses = syncStore.allStatuses;
+    console.log('[App] syncMessage computed:', { statuses });
+    if (statuses.length === 0) return '';
+    const status = statuses[0];
+    return status.message || '同步中...';
+});
 
 // 处理账号添加成功事件
 async function handleAccountAdded() {
@@ -157,6 +177,17 @@ onMounted(async () => {
                     </div>
                     <div class="status-item">
                         <span>{{ t('statusBar.unread', { count: emailStore.unreadCount }) }}</span>
+                    </div>
+                    <!-- 同步进度显示 -->
+                    <div v-if="syncStore.hasAnySyncing" class="status-item sync-progress">
+                        <NSpin :size="14" />
+                        <NProgress
+                            type="line"
+                            :percentage="syncProgress"
+                            :show-indicator="false"
+                            :style="{ width: '100px', marginLeft: '8px' }"
+                        />
+                        <span class="sync-message">{{ syncMessage }}</span>
                     </div>
                 </div>
                 <div class="status-bar-right">
@@ -333,6 +364,23 @@ onMounted(async () => {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* 同步进度显示 */
+.status-item.sync-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.sync-message {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .icon-btn {

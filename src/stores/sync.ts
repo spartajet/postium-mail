@@ -85,6 +85,8 @@ export const useSyncStore = defineStore('sync', {
      * 开始监听指定账号的同步进度
      */
     startListening(accountId: number) {
+      console.log('[SyncStore] 开始监听同步进度:', accountId)
+
       // 如果已经在监听，先清理
       this.stopListening(accountId)
 
@@ -100,6 +102,7 @@ export const useSyncStore = defineStore('sync', {
       const unlisten = listen<SyncProgressEvent>(
         `sync-progress-${accountId}`,
         (event: any) => {
+          console.log('[SyncStore] 收到进度事件:', event.payload)
           const progress = event.payload
           this.handleProgressEvent(accountId, progress)
         }
@@ -124,6 +127,13 @@ export const useSyncStore = defineStore('sync', {
      * 处理同步进度事件
      */
     handleProgressEvent(accountId: number, progress: SyncProgressEvent) {
+      console.log('[SyncStore] 处理进度事件:', { accountId, progress })
+
+      // 确保 progress.account_id 也是数字类型
+      const eventAccountId = typeof progress.account_id === 'string'
+        ? parseInt(progress.account_id, 10)
+        : progress.account_id
+
       let stage: 'idle' | 'syncing' | 'completed' | 'error'
 
       switch (progress.stage) {
@@ -131,19 +141,21 @@ export const useSyncStore = defineStore('sync', {
         case 'syncing_folders':
         case 'syncing_emails':
           stage = 'syncing'
-          this.syncingAccounts.add(accountId)
+          this.syncingAccounts.add(eventAccountId)
           break
         case 'completed':
           stage = 'completed'
-          this.syncingAccounts.delete(accountId)
+          this.syncingAccounts.delete(eventAccountId)
           break
         case 'error':
           stage = 'error'
-          this.syncingAccounts.delete(accountId)
+          this.syncingAccounts.delete(eventAccountId)
           break
         default:
           stage = 'idle'
       }
+
+      console.log('[SyncStore] 转换后 stage:', stage, 'syncingAccounts:', Array.from(this.syncingAccounts))
 
       // 计算进度百分比
       let progressPercent = 0
@@ -152,31 +164,38 @@ export const useSyncStore = defineStore('sync', {
       }
 
       // 更新状态
-      this.syncStatuses.set(accountId, {
-        account_id: accountId,
+      this.syncStatuses.set(eventAccountId, {
+        account_id: eventAccountId,
         stage,
         progress: progressPercent,
         message: progress.message,
         current_folder: progress.folder,
       })
+
+      console.log('[SyncStore] 当前状态:', Array.from(this.syncStatuses.entries()))
     },
 
     /**
      * 同步指定账号
      */
-    async syncAccount(accountId: number): Promise<SyncResult | null> {
+    async syncAccount(accountId: number | string): Promise<SyncResult | null> {
       try {
+        // 确保 accountId 是数字类型
+        const numericAccountId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId
+
+        console.log('[SyncStore] syncAccount 调用:', { accountId, numericAccountId, type: typeof accountId })
+
         // 开始监听进度
-        this.startListening(accountId)
+        this.startListening(numericAccountId)
 
         // 调用后端同步命令
-        await invoke('sync_account_with_progress', { accountId })
+        await invoke('sync_account_with_progress', { accountId: numericAccountId })
 
         // 等待一小段时间，确保最后的进度事件已接收
         await new Promise(resolve => setTimeout(resolve, 500))
 
         // 获取最终状态
-        const status = this.syncStatuses.get(accountId)
+        const status = this.syncStatuses.get(numericAccountId)
         if (status?.stage === 'completed') {
           return {
             total_synced: status.progress || 0,
@@ -187,16 +206,27 @@ export const useSyncStore = defineStore('sync', {
         }
 
         return null
-      } catch (error) {
+      } catch (error: any) {
         console.error('同步失败:', error)
-        this.syncStatuses.set(accountId, {
-          account_id: accountId,
+
+        // 解析错误信息并提供友好的提示
+        let errorMessage = String(error)
+        if (errorMessage.includes('账号密码不存在') || errorMessage.includes('密码未找到')) {
+          errorMessage = '账号密码未保存，请删除账号后重新添加以设置密码'
+        } else if (errorMessage.includes('连接 IMAP 服务器失败')) {
+          errorMessage = '无法连接到邮件服务器，请检查网络或账号配置'
+        } else if (errorMessage.includes('账号不存在')) {
+          errorMessage = '账号不存在，请重新添加账号'
+        }
+
+        this.syncStatuses.set(numericAccountId, {
+          account_id: numericAccountId,
           stage: 'error',
           progress: 0,
-          message: String(error),
+          message: errorMessage,
           error: String(error),
         })
-        this.syncingAccounts.delete(accountId)
+        this.syncingAccounts.delete(numericAccountId)
         return null
       }
     },
