@@ -167,6 +167,17 @@ export const useEmailStore = defineStore('email', () => {
   const pageSize = ref(50)
   const totalEmails = ref(0)
 
+  // 文件夹统计数据（从后端获取）
+  interface FolderStat {
+    id: number
+    account_id: number
+    name: string
+    imap_name: string
+    email_count: number
+    unread_count: number
+  }
+  const folderStats = ref<Record<string, FolderStat>>({})
+
   // ========================================
   // Getters
   // ========================================
@@ -203,13 +214,19 @@ export const useEmailStore = defineStore('email', () => {
 
   // 各文件夹邮件数量
   const folderCounts = computed(() => {
+    // 使用 folderStats 中的数据，如果没有则返回 0
+    const getCount = (folderName: string, isUnread: boolean = false) => {
+      const stat = folderStats.value[folderName]
+      return stat ? (isUnread ? stat.unread_count : stat.email_count) : 0
+    }
+
     return {
-      inbox: emails.value.filter(e => e.folder === 'inbox' && e.unread).length,
-      starred: emails.value.filter(e => e.starred).length,
-      sent: emails.value.filter(e => e.folder === 'sent').length,
-      drafts: emails.value.filter(e => e.folder === 'drafts').length,
-      spam: emails.value.filter(e => e.folder === 'spam').length,
-      trash: emails.value.filter(e => e.folder === 'trash').length,
+      inbox: getCount('inbox', true),
+      starred: emails.value.filter(e => e.starred).length, // 星标邮件仍从当前邮件列表计算
+      sent: getCount('sent'),
+      drafts: getCount('drafts'),
+      spam: getCount('spam', true),
+      trash: getCount('trash', true),
     }
   })
 
@@ -313,6 +330,9 @@ export const useEmailStore = defineStore('email', () => {
       totalEmails.value = response.total
       currentPage.value = response.page
 
+      // 获取文件夹统计数据
+      await fetchFolderStats()
+
       console.log('[fetchEmails] ✅ 邮件列表更新完成')
       console.log('[fetchEmails] 当前邮件列表状态:', {
         totalCount: emails.value.length,
@@ -347,6 +367,38 @@ export const useEmailStore = defineStore('email', () => {
     } catch (error) {
       console.error('获取邮件详情失败:', error)
       throw error
+    }
+  }
+
+  // 获取文件夹统计数据
+  async function fetchFolderStats() {
+    console.log('[fetchFolderStats] ========== 开始获取文件夹统计 ==========')
+
+    const accountStore = useAccountStore()
+    if (!accountStore.currentAccount) {
+      console.log('[fetchFolderStats] ❌ 没有账号，跳过')
+      return
+    }
+
+    try {
+      const accountId = getAccountId()
+      console.log('[fetchFolderStats] 调用参数:', { accountId })
+
+      const stats = await invoke<FolderStat[]>('get_folder_stats', { accountId })
+
+      console.log('[fetchFolderStats] ✅ 获取成功，文件夹数量:', stats.length)
+
+      // 将数组转换为对象，以文件夹名称为键
+      const statsMap: Record<string, FolderStat> = {}
+      for (const stat of stats) {
+        statsMap[stat.name] = stat
+      }
+
+      folderStats.value = statsMap
+
+      console.log('[fetchFolderStats] ✅ 文件夹统计已更新:', Object.keys(statsMap))
+    } catch (error) {
+      console.error('[fetchFolderStats] ❌ 获取失败:', error)
     }
   }
 
@@ -734,6 +786,7 @@ export const useEmailStore = defineStore('email', () => {
     // Actions
     fetchEmails,
     fetchEmailDetail,
+    fetchFolderStats,
     syncAccount,
     selectEmail,
     setFolder,
