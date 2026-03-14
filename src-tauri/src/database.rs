@@ -31,5 +31,11 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
     // 然后运行迁移（为现有数据库添加新字段）
     crate::migration::m002_20250314_add_oauth_fields::run_migrations(db).await?;
 
+    // 添加同步相关表
+    crate::migration::m003_20250315_add_sync_tables::add_sync_tables(db).await?;
+
+    // 删除敏感字段（密码和 token 迁移到 Stronghold）
+    crate::migration::m004_20250315_remove_sensitive_fields::run_migrations(db).await?;
+
     Ok(())
 }

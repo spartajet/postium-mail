@@ -434,12 +434,21 @@ async function listenToSyncProgress(accountId: number) {
       message: string
     }
 
+    // 计算：如果 total 为 0，显示不确定进度（50%）
+    const hasTotal = progress.total > 0
+    const percentage = hasTotal
+      ? Math.floor((progress.current / progress.total) * 100)
+      : 50 // 不确定进度时显示 50%
+    const currentStep = hasTotal
+      ? Math.floor((progress.current / progress.total) * 3) + 1
+      : 2
+
     syncProgress.value = {
       stage: 'syncing',
-      currentStep: Math.floor((progress.current / progress.total) * 3) + 1,
+      currentStep,
       totalSteps: 3,
       message: progress.message,
-      percentage: Math.floor((progress.current / progress.total) * 100),
+      percentage,
     }
 
     if (progress.stage === 'completed') {

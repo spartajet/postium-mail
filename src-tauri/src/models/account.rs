@@ -16,17 +16,18 @@ pub struct Model {
     pub smtp_host: Option<String>,
     pub smtp_port: Option<i32>,
     pub smtp_ssl: Option<bool>,
-    pub password: String,                    // AES-256 加密
+    // 敏感字段已删除，存储在 Stronghold 中
+    // password: String,                    // 已删除
+    // oauth_token: Option<String>,         // 已删除
+    // oauth_refresh_token: Option<String>, // 已删除
     pub color: Option<String>,
     pub sync_enabled: bool,
     pub last_sync_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
-    // OAuth 2.0 相关字段
+    // OAuth 2.0 相关字段（仅保留非敏感字段）
     pub auth_type: String,                   // 'password' | 'oauth2'
     pub oauth_provider: Option<String>,      // 'microsoft' | 'google'
-    pub oauth_token: Option<String>,         // 加密存储
-    pub oauth_refresh_token: Option<String>, // 加密存储
     pub oauth_expires_at: Option<i64>,       // Unix 时间戳
 }
 

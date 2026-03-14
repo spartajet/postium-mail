@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Account, EmailProvider } from '@/types'
 import { invoke } from '@tauri-apps/api/core'
+import { useSyncStore } from './sync'
 
 // 后端 DTO 类型定义
 interface AccountDto {
@@ -303,17 +304,14 @@ export const useAccountStore = defineStore('account', () => {
       throw new Error('没有可同步的账号')
     }
 
-    try {
-      const count = await invoke<number>('sync_account', { accountId: id })
+    // 使用 sync store 进行同步
+    const syncStore = useSyncStore()
+    const result = await syncStore.syncAccount(id)
 
-      // 更新账号同步时间
-      await fetchAccounts()
+    // 更新账号列表
+    await fetchAccounts()
 
-      return count
-    } catch (error) {
-      console.error('同步账号失败:', error)
-      throw error
-    }
+    return result?.total_synced || 0
   }
 
   // ========================================

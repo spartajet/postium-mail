@@ -417,16 +417,7 @@ async fn move_email_to_folder(
 // 邮件同步 Commands
 // ============================================================
 
-/// 同步进度事件数据
-#[derive(Clone, serde::Serialize)]
-struct SyncProgressEvent {
-    stage: String,
-    current: usize,
-    total: usize,
-    message: String,
-}
-
-/// 带进度的账号同步命令
+/// 带进度的账号同步命令（使用 SyncManager）
 #[tauri::command]
 async fn sync_account_with_progress(
     db_state: tauri::State<'_, DatabaseState>,
@@ -434,155 +425,49 @@ async fn sync_account_with_progress(
     app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<(), String> {
-    let db = db_state.clone_conn();
+    let db = std::sync::Arc::new(db_state.clone_conn());
+    let vault = vault_state.0.clone();
 
-    // 获取账号信息
-    let account = services::account_service::get_by_id(&db, account_id)
+    // 创建 SyncManager
+    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle.clone(), vault);
+
+    // 执行同步
+    let result = sync_manager.sync_account(account_id)
         .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "账号不存在".to_string())?;
+        .map_err(|e| format!("同步失败: {}", e))?;
 
-    // 发送开始事件
-    let event_name = format!("sync-progress-{}", account_id);
-    app_handle
-        .emit(&event_name, SyncProgressEvent {
-            stage: "started".to_string(),
-            current: 0,
-            total: 100,
-            message: "开始同步...".to_string(),
-        })
-        .map_err(|e| format!("发送事件失败: {}", e))?;
-
-    // 从 Stronghold 获取密码
-    let password_key = format!("password_{}", account_id);
-    let vault = vault_state.0.lock().await;
-    let password = vault.get_password(&password_key).await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "密码未找到".to_string())?;
-    drop(vault);
-
-    // 连接 IMAP 并同步
-    let mut imap_service = services::imap_service::ImapService::new();
-
-    // 连接到服务器
-    let host = account.imap_host.unwrap_or_else(|| {
-        match account.provider.as_str() {
-            "gmail" => "imap.gmail.com".to_string(),
-            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
-            "icloud" => "imap.mail.me.com".to_string(),
-            "yahoo" => "imap.mail.yahoo.com".to_string(),
-            _ => "imap.example.com".to_string(),
-        }
-    });
-
-    let port = account.imap_port.unwrap_or(993) as u16;
-    let auth = services::imap_service::ImapAuth::Password(password);
-
-    imap_service.connect(&host, port, &account.email, auth)
-        .map_err(|e| format!("连接失败: {}", e))?;
-
-    // 定义进度回调
-    let app_handle_clone = app_handle.clone();
-    let event_name_for_callback = event_name.clone();
-    let progress_callback = move |current: usize, total: usize, message: String| {
-        let _ = app_handle_clone.emit(&event_name_for_callback, SyncProgressEvent {
-            stage: "syncing".to_string(),
-            current,
-            total,
-            message,
-        });
-    };
-
-    // 同步多个文件夹（INBOX, sent, drafts, spam, trash）
-    let count = imap_service.sync_multiple_folders(
+    tracing::info!(
+        "同步完成: 账号 {}, 同步了 {} 封邮件, {} 个文件夹, {} 个错误, 耗时 {}ms",
         account_id,
-        &db,
-        Box::new(progress_callback),
-    ).await
-    .map_err(|e| format!("同步失败: {}", e))?;
-
-    imap_service.logout()
-        .map_err(|e| format!("登出失败: {}", e))?;
-
-    // 更新最后同步时间
-    services::account_service::update_last_sync(&db, account_id)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 发送完成事件
-    app_handle
-        .emit(&event_name, SyncProgressEvent {
-            stage: "completed".to_string(),
-            current: 100,
-            total: 100,
-            message: format!("同步完成，已同步 {} 封邮件", count),
-        })
-        .map_err(|e| format!("发送事件失败: {}", e))?;
+        result.total_synced,
+        result.folders_synced,
+        result.errors,
+        result.duration_ms
+    );
 
     Ok(())
 }
 
+/// 同步账号（简化版，不发送进度事件）
 #[tauri::command]
 async fn sync_account(
     db_state: tauri::State<'_, DatabaseState>,
     vault_state: tauri::State<'_, VaultState>,
+    app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<usize, String> {
-    let db = db_state.clone_conn();
+    let db = std::sync::Arc::new(db_state.clone_conn());
+    let vault = vault_state.0.clone();
 
-    // 获取账号信息
-    let account = services::account_service::get_by_id(&db, account_id)
+    // 创建 SyncManager
+    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle, vault);
+
+    // 执行同步
+    let result = sync_manager.sync_account(account_id)
         .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "账号不存在".to_string())?;
+        .map_err(|e| format!("同步失败: {}", e))?;
 
-    // 从 Stronghold 获取密码
-    let password_key = format!("password_{}", account_id);
-    let vault = vault_state.0.lock().await;
-    let _password = vault.get_password(&password_key).await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "密码未找到".to_string())?;
-
-    // 连接 IMAP 并同步
-    let mut imap_service = services::imap_service::ImapService::new();
-
-    // 连接到服务器
-    let host = account.imap_host.unwrap_or_else(|| {
-        match account.provider.as_str() {
-            "gmail" => "imap.gmail.com".to_string(),
-            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
-            "icloud" => "imap.mail.me.com".to_string(),
-            "yahoo" => "imap.mail.yahoo.com".to_string(),
-            _ => "imap.example.com".to_string(),
-        }
-    });
-
-    let port = account.imap_port.unwrap_or(993) as u16;
-    let auth = services::imap_service::ImapAuth::Password(_password);
-
-    imap_service.connect(&host, port, &account.email, auth)
-        .map_err(|e| e.to_string())?;
-
-    // 同步多个文件夹（INBOX, sent, drafts, spam, trash）
-    let count = imap_service.sync_multiple_folders(
-        account_id,
-        &db,
-        Box::new(|_current, _total, _message| {
-            // 简单的回调，忽略进度更新
-        }),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    imap_service.logout()
-        .map_err(|e| e.to_string())?;
-
-    // 更新最后同步时间
-    services::account_service::update_last_sync(&db, account_id)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(count)
+    Ok(result.total_synced)
 }
 
 #[tauri::command]

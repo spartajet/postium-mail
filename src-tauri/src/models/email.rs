@@ -38,6 +38,13 @@ pub enum Relation {
     Account,
     #[sea_orm(has_many = "super::attachment::Entity")]
     Attachments,
+    #[sea_orm(
+        belongs_to = "super::folder::Entity",
+        from = "Column::Folder",
+        to = "super::folder::Column::Name",
+        on_delete = "Cascade"
+    )]
+    Folder,
 }
 
 impl Related<super::account::Entity> for Entity {
@@ -49,6 +56,12 @@ impl Related<super::account::Entity> for Entity {
 impl Related<super::attachment::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Attachments.def()
+    }
+}
+
+impl Related<super::folder::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Folder.def()
     }
 }
 
