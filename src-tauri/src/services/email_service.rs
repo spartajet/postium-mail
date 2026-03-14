@@ -408,7 +408,8 @@ pub async fn save_email_from_imap(
         account_id: Set(account_id),
         folder: Set(folder.to_string()),
         uid: Set(Some(email_data.uid)),
-        message_id: Set(Some(format!("<{}@postium.imap>", email_data.uid))),
+        // 在 message_id 中包含 folder，确保不同文件夹的相同 UID 不会冲突
+        message_id: Set(Some(format!("<{}.{}@postium.imap>", folder, email_data.uid))),
         subject: Set(Some(email_data.subject.clone())),
         sender_name: Set(Some(sender_name)),
         sender_email: Set(email_data.from.clone()),
