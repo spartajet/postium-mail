@@ -1,5 +1,5 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn};
 use anyhow::Result;
+use sea_orm::{ConnectionTrait, DbConn, Statement};
 
 /// 添加 OAuth 相关字段到 accounts 表
 pub async fn migrate_add_oauth_fields(db: &DbConn) -> Result<()> {
@@ -8,16 +8,18 @@ pub async fn migrate_add_oauth_fields(db: &DbConn) -> Result<()> {
         SELECT COUNT(*) as count FROM pragma_table_info('accounts') WHERE name='auth_type'
     "#;
 
-    let result = db.query_one(Statement::from_string(
-        db.get_database_backend(),
-        check_sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("检查列失败: {}", e))?;
+    let result = db
+        .query_one(Statement::from_string(
+            db.get_database_backend(),
+            check_sql.to_string(),
+        ))
+        .await
+        .map_err(|e| anyhow::anyhow!("检查列失败: {}", e))?;
 
     // 如果列不存在，则添加
     if let Some(row) = result {
-        let count: i64 = row.try_get_by("count")
+        let count: i64 = row
+            .try_get_by("count")
             .map_err(|e| anyhow::anyhow!("解析检查结果失败: {}", e))?;
 
         if count == 0 {

@@ -72,7 +72,7 @@ onMounted(async () => {
 
     // 根据当前视图加载数据
     if (isEmailView.value) {
-        await emailStore.fetchEmails(accountStore.currentAccount?.id);
+        await emailStore.fetchEmails();
     }
     // 日历数据会在 CalendarView 组件中加载
     // 工作流数据会在 WorkflowView 组件中加载

@@ -304,3 +304,80 @@ pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// 检查邮件是否已存在（通过 UID）
+pub async fn email_exists_by_uid(
+    db: &DbConn,
+    account_id: i32,
+    uid: i32,
+    folder: &str,
+) -> bool {
+    EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Uid.eq(Some(uid)))
+        .filter(email::Column::Folder.eq(folder))
+        .one(db)
+        .await
+        .map(|r| r.is_some())
+        .unwrap_or(false)
+}
+
+/// 保存从 IMAP 获取的邮件
+pub async fn save_email_from_imap(
+    db: &DbConn,
+    account_id: i32,
+    email_data: &crate::services::imap_service::EmailData,
+    folder: &str,
+) -> Result<i32> {
+    use sea_orm::ActiveValue::*;
+
+    // 解析收件人列表
+    let recipients: Vec<email::EmailAddress> = email_data.to
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(email::EmailAddress {
+                    name: None,
+                    email: s.to_string(),
+                })
+            }
+        })
+        .collect();
+
+    let recipient_emails = serde_json::to_string(&recipients)
+        .unwrap_or_default();
+
+    // 创建新邮件
+    let new_email = email::ActiveModel {
+        id: NotSet,
+        account_id: Set(account_id),
+        folder: Set(folder.to_string()),
+        uid: Set(Some(email_data.uid)),
+        message_id: Set(Some(format!("<{}@postium.imap>", email_data.uid))),
+        subject: Set(Some(email_data.subject.clone())),
+        sender_name: Set(Some(email_data.from.split('@').next().unwrap_or(&email_data.from).to_string())),
+        sender_email: Set(email_data.from.clone()),
+        recipient_emails: Set(recipient_emails),
+        cc_emails: Set(None),
+        bcc_emails: Set(None),
+        body_text: Set(Some(email_data.body_text.clone())),
+        body_html: Set(Some(email_data.body_html.clone())),
+        is_read: Set(email_data.flags.seen),
+        is_starred: Set(email_data.flags.flagged),
+        is_draft: Set(false),
+        sent_at: Set(email_data.date.timestamp()),
+        received_at: Set(email_data.date.timestamp()),
+        created_at: Set(chrono::Utc::now().timestamp()),
+        updated_at: Set(chrono::Utc::now().timestamp()),
+    };
+
+    let result = EmailEntity::insert(new_email)
+        .exec(db)
+        .await
+        .map_err(|e| anyhow!("保存邮件失败: {}", e))?;
+
+    Ok(result.last_insert_id as i32)
+}

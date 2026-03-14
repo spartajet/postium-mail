@@ -19,6 +19,7 @@ import {
     DeleteOutlined,
     CalendarTodayOutlined,
     AccountTreeOutlined,
+    SyncOutlined,
 } from "@vicons/material";
 
 // Stores
@@ -116,9 +117,9 @@ const activeNav = computed(() => emailStore.currentFolder);
 const activeView = computed(() => uiStore.currentView);
 
 // 切换邮件文件夹导航
-function handleNavClick(folder: EmailFolder) {
+async function handleNavClick(folder: EmailFolder) {
     uiStore.setView("email");
-    emailStore.setFolder(folder);
+    await emailStore.setFolder(folder);
 }
 
 // 切换视图导航
@@ -139,6 +140,19 @@ function openCompose() {
 // 打开设置模态框
 function openSettings() {
     uiStore.openSettingsModal();
+}
+
+// 同步账号邮件
+async function syncAccountEmail() {
+    if (!accountStore.currentAccount) return;
+
+    try {
+        await accountStore.syncAccount();
+        await emailStore.fetchEmails();
+        uiStore.showSuccess(t('email.syncSuccess'));
+    } catch (error) {
+        uiStore.showError(t('email.syncFailed'));
+    }
 }
 
 // 格式化存储空间
@@ -212,6 +226,20 @@ const storagePercent = computed(
                     </div>
                     <ExpandMoreOutlined class="select-arrow" :size="20" />
                 </div>
+
+                <!-- Sync Button -->
+                <button
+                    v-if="accountStore.currentAccount"
+                    class="sync-btn"
+                    @click.stop="syncAccountEmail"
+                    :disabled="emailStore.isSyncing"
+                    :title="t('email.sync')"
+                >
+                    <SyncOutlined
+                        :size="16"
+                        :class="{ spinning: emailStore.isSyncing }"
+                    />
+                </button>
 
                 <div
                     class="custom-select-options"
@@ -362,6 +390,49 @@ const storagePercent = computed(
 
 <style scoped>
 /* 组件使用全局样式，此处仅添加作用域样式如有需要 */
+
+/* 同步按钮样式 */
+.sync-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    z-index: 10;
+}
+
+.sync-btn:hover:not(:disabled) {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+}
+
+.sync-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sync-btn.spinning :deep(svg) {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
 
 /* 重写 nav-badge 为圆角正方形 */
 .nav-item :deep(.nav-badge) {
