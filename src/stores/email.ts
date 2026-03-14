@@ -456,6 +456,13 @@ export const useEmailStore = defineStore('email', () => {
     await fetchEmails(0)
   }
 
+  // 初始化：获取文件夹统计
+  async function initialize() {
+    console.log('[emailStore] ========== 初始化 Email Store ==========')
+    await fetchFolderStats()
+    console.log('[emailStore] ========== Email Store 初始化完成 ==========')
+  }
+
   // 搜索邮件
   function setSearchQuery(query: string) {
     searchQuery.value = query
@@ -787,6 +794,7 @@ export const useEmailStore = defineStore('email', () => {
     fetchEmails,
     fetchEmailDetail,
     fetchFolderStats,
+    initialize,
     syncAccount,
     selectEmail,
     setFolder,
