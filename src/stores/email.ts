@@ -233,6 +233,15 @@ export const useEmailStore = defineStore('email', () => {
 
   // 获取邮件列表
   async function fetchEmails(page = 0) {
+    const accountStore = useAccountStore()
+    if (!accountStore.currentAccount) {
+      // 没有账号时，清空邮件列表并返回
+      emails.value = []
+      totalEmails.value = 0
+      currentPage.value = 0
+      return
+    }
+
     isLoading.value = true
     try {
       const accountId = getAccountId()
@@ -282,7 +291,8 @@ export const useEmailStore = defineStore('email', () => {
   async function syncAccount() {
     const accountStore = useAccountStore()
     if (!accountStore.currentAccount) {
-      throw new Error('请先选择账号')
+      // 没有账号时，直接返回
+      return
     }
 
     isSyncing.value = true
