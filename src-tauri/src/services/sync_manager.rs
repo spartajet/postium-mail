@@ -216,6 +216,38 @@ impl SyncManager {
         // 4. 更新账号同步时间
         let _ = account_service::update_last_sync(&self.db, account_id).await;
 
+        // 4.5 更新所有文件夹的统计数据
+        for folder in &folders {
+            // 统计该文件夹的邮件数和未读数
+            let folder_id = folder.id;
+            let (email_count, unread_count) = {
+                let email_count = crate::services::email_service::count_by_folder(
+                    &self.db,
+                    account_id,
+                    &folder.name,
+                ).await.unwrap_or(0);
+
+                let unread_count = crate::services::email_service::count_unread_by_folder(
+                    &self.db,
+                    account_id,
+                    &folder.name,
+                ).await.unwrap_or(0);
+
+                (email_count, unread_count)
+            };
+
+            // 更新文件夹统计
+            let _ = crate::services::folder_service::update_stats(
+                &self.db,
+                folder_id,
+                email_count as i32,
+                unread_count,
+            ).await;
+
+            tracing::info!("更新文件夹统计: {} (ID: {}) - {} 封邮件, {} 未读",
+                folder.name, folder_id, email_count, unread_count);
+        }
+
         let duration = start_time.elapsed().as_millis() as u64;
 
         // 5. 发送完成事件
