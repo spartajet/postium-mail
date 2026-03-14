@@ -33,5 +33,12 @@ app.use(i18n);
 // 挂载应用
 app.mount("#app");
 
+// 初始化邮箱 store（获取文件夹统计）
+import { useEmailStore } from "@/stores";
+const emailStore = useEmailStore();
+emailStore.initialize().catch(err => {
+  console.error('初始化邮箱 store 失败:', err);
+});
+
 // 导出 i18n 实例供其他模块使用
 export { i18n };
