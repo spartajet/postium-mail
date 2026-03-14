@@ -92,11 +92,8 @@ mod tests {
                             info!("📁 {}", folder_name);
 
                             // 尝试选择文件夹获取更多信息
-                            match client.select_folder(folder_name) {
-                                Ok(count) => {
-                                    info!("   邮件数: {}", count);
-                                }
-                                Err(_) => {}
+                            if let Ok(count) = client.select_folder(folder_name) {
+                                info!("   邮件数: {}", count);
                             }
                         }
 
