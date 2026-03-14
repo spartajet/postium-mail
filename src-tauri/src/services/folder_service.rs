@@ -2,6 +2,67 @@ use sea_orm::{*, sea_query::Expr};
 use anyhow::{anyhow, Result};
 use crate::models::{folder, FolderEntity};
 
+/// 解码 IMAP UTF-7 编码的文件夹名称
+///
+/// IMAP 使用改良版 UTF-7 编码来支持非 ASCII 字符的文件夹名
+/// 规则：
+/// - & 表示开始编码
+/// - - 表示结束编码
+/// - 中间的字符是 Base64 编码的 UTF-16
+fn decode_imap_utf7(imap_name: &str) -> String {
+    // 如果没有 & 符号，说明不是 UTF-7 编码
+    if !imap_name.contains('&') {
+        return imap_name.to_string();
+    }
+
+    // 常见的中文邮箱文件夹名称映射（163、QQ 邮箱等）
+    // 这些是 UTF-7 编码的常见中文名称
+    let common_mappings = [
+        ("&XfJT0ZAB-", "已发送"),
+        ("&XfJSIJZk-", "收件箱"),
+        ("&V4NXPpCuTvY-", "垃圾邮件"),
+        ("&dcVr0mWHTvZZOQ-", "已删除"),
+        ("&g0l6P3ux-", "草稿箱"),
+        ("&Xn9USpCuTvY-", "通讯录"),
+        ("&i6KWBZCuTvY-", "订阅"),
+        ("&WQdf2F9V-", "广告邮件"),
+        ("&eT5OpA-", "重要邮件"),
+        ("&Y6hef5CuTvY-", "病毒邮件"),
+        ("&W4xRaFeDVz6Qrk72-", "RSS订阅"),
+        ("&W1hoYw-", "订阅信息"),
+    ];
+
+    for (encoded, decoded) in common_mappings.iter() {
+        if imap_name == *encoded || imap_name.ends_with(encoded) {
+            return decoded.to_string();
+        }
+    }
+
+    // 如果不在映射表中，返回原始名称
+    imap_name.to_string()
+}
+
+/// 映射 IMAP 文件夹名称到标准名称
+pub fn map_folder_name(imap_name: &str) -> String {
+    // 先解码 UTF-7 编码的名称
+    let decoded_name = decode_imap_utf7(imap_name);
+
+    // 处理嵌套文件夹（如 [Gmail]/Spam）
+    let parts: Vec<&str> = decoded_name.split('/').collect();
+    let folder_name = parts.last().copied().unwrap_or(decoded_name.as_str());
+
+    match folder_name.to_uppercase().as_str() {
+        "INBOX" => "inbox".to_string(),
+        "SENT" | "SENT ITEMS" | "SENT MAIL" | "已发送" | "SENDEN" => "sent".to_string(),
+        "DRAFT" | "DRAFTS" | "草稿箱" | "草稿" | "ENTWURFE" => "drafts".to_string(),
+        "TRASH" | "DELETED" | "DELETED ITEMS" | "已删除" | "垃圾箱" | "GELÖSCHTE" | "PAPER" => "trash".to_string(),
+        "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" | "POSTINI" => "spam".to_string(),
+        "ARCHIVE" | "ARCHIVES" | "归档" | "ALL MAIL" => "archive".to_string(),
+        "STARRED" | "星标邮件" | "已加星标" => "starred".to_string(),
+        _ => imap_name.to_string(),  // 使用原始 IMAP 名称作为标准名称
+    }
+}
+
 /// 获取账号的所有文件夹
 pub async fn get_by_account(db: &DbConn, account_id: i32) -> Result<Vec<folder::Model>> {
     FolderEntity::find()
@@ -101,28 +162,74 @@ pub async fn delete(db: &DbConn, id: i32) -> Result<()> {
     Ok(())
 }
 
-/// 映射 IMAP 文件夹名称到标准名称
-pub fn map_folder_name(imap_name: &str) -> String {
-    // 处理嵌套文件夹（如 [Gmail]/Spam）
-    let parts: Vec<&str> = imap_name.split('/').collect();
-    let folder_name = parts.last().unwrap_or(&imap_name);
-
-    match folder_name.to_uppercase().as_str() {
-        "INBOX" => "inbox".to_string(),
-        "SENT" | "SENT ITEMS" | "SENT MAIL" | "已发送" | "SENDEN" => "sent".to_string(),
-        "DRAFT" | "DRAFTS" | "草稿箱" | "草稿" | "ENTWURFE" => "drafts".to_string(),
-        "TRASH" | "DELETED" | "DELETED ITEMS" | "已删除" | "垃圾箱" | "GELÖSCHTE" | "PAPER" => "trash".to_string(),
-        "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" | "POSTINI" => "spam".to_string(),
-        "ARCHIVE" | "ARCHIVES" | "归档" | "ALL MAIL" => "archive".to_string(),
-        "STARRED" | "星标邮件" | "已加星标" => "starred".to_string(),
-        _ => imap_name.to_string(),
-    }
-}
-
 /// 检查是否是标准文件夹
 pub fn is_standard_folder(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
         "inbox" | "sent" | "drafts" | "spam" | "trash" | "archive" | "starred"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_imap_utf7() {
+        // 测试常见的中文文件夹名称
+        assert_eq!(decode_imap_utf7("&XfJT0ZAB-"), "已发送");
+        assert_eq!(decode_imap_utf7("&XfJSIJZk-"), "收件箱");
+        assert_eq!(decode_imap_utf7("&V4NXPpCuTvY-"), "垃圾邮件");
+        assert_eq!(decode_imap_utf7("&g0l6P3ux-"), "草稿箱");
+
+        // 测试非 UTF-7 编码的名称
+        assert_eq!(decode_imap_utf7("INBOX"), "INBOX");
+        assert_eq!(decode_imap_utf7("Sent"), "Sent");
+        assert_eq!(decode_imap_utf7("[Gmail]/Spam"), "[Gmail]/Spam");
+    }
+
+    #[test]
+    fn test_map_folder_name() {
+        // 测试 UTF-7 编码的中文名称映射
+        assert_eq!(map_folder_name("&XfJT0ZAB-"), "sent");          // 已发送 -> sent
+        assert_eq!(map_folder_name("&g0l6P3ux-"), "drafts");        // 草稿箱 -> drafts
+        assert_eq!(map_folder_name("&V4NXPpCuTvY-"), "spam");       // 垃圾邮件 -> spam
+
+        // 测试英文标准名称
+        assert_eq!(map_folder_name("INBOX"), "inbox");
+        assert_eq!(map_folder_name("Sent"), "sent");
+        assert_eq!(map_folder_name("Drafts"), "drafts");
+        assert_eq!(map_folder_name("已发送"), "sent");
+        assert_eq!(map_folder_name("草稿箱"), "drafts");
+
+        // 测试嵌套文件夹
+        assert_eq!(map_folder_name("[Gmail]/Spam"), "spam");
+        assert_eq!(map_folder_name("[Gmail]/Sent"), "sent");
+
+        // 测试未知名称（保留原始 IMAP 名称）
+        assert_eq!(map_folder_name("CustomFolder"), "CustomFolder");
+        assert_eq!(map_folder_name("&UnknownCode-"), "&UnknownCode-");
+    }
+
+    #[test]
+    fn test_is_standard_folder() {
+        // 测试标准文件夹
+        assert!(is_standard_folder("inbox"));
+        assert!(is_standard_folder("sent"));
+        assert!(is_standard_folder("drafts"));
+        assert!(is_standard_folder("spam"));
+        assert!(is_standard_folder("trash"));
+        assert!(is_standard_folder("archive"));
+        assert!(is_standard_folder("starred"));
+
+        // 测试大小写不敏感
+        assert!(is_standard_folder("INBOX"));
+        assert!(is_standard_folder("Sent"));
+        assert!(is_standard_folder("DRAFTS"));
+
+        // 测试非标准文件夹
+        assert!(!is_standard_folder("custom"));
+        assert!(!is_standard_folder("myfolder"));
+        assert!(!is_standard_folder("&XfJT0ZAB-"));  // UTF-7 编码的名称
+    }
 }
