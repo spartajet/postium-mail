@@ -4,6 +4,7 @@ import { useUIStore, useAccountStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio } from 'naive-ui'
 import OAuthLoginModal from './OAuthLoginModal.vue'
+import { extractAutoFillInfo, parseEmail, detectProviderFromEmail } from '@/utils/emailHelper'
 
 const uiStore = useUIStore()
 const accountStore = useAccountStore()
@@ -41,6 +42,11 @@ const loading = ref(false)
 const error = ref('')
 const success = ref('')
 
+// 自动判断相关状态
+const isProviderManuallySet = ref(false) // 是否由用户手动设置的服务商
+const isAuthTypeManuallySet = ref(false) // 是否由用户手动修改了认证方式
+const lastValidEmail = ref('') // 上一次有效的邮箱地址
+
 // OAuth 相关
 const showOAuthModal = ref(false)
 const oauthProvider = ref<'microsoft' | 'google'>('microsoft')
@@ -52,7 +58,36 @@ const canUseOAuth = computed(() => {
 })
 
 // 监听 provider 变化，自动设置邮箱前缀
-watch(() => form.value.provider, (newProvider) => {
+watch(() => form.value.provider, (newProvider, oldProvider) => {
+  // 如果是程序自动触发的（由邮箱地址变化导致），不标记为手动设置
+  if (lastValidEmail.value) {
+    const detected = detectProviderFromEmail(lastValidEmail.value)
+    if (detected === newProvider) {
+      // 这是自动触发的，不标记为手动
+      return
+    }
+  }
+
+  // 用户手动改变了服务商
+  if (oldProvider && newProvider !== oldProvider) {
+    isProviderManuallySet.value = true
+
+    // 清空自定义服务器配置（如果切换回已知服务商）
+    if (newProvider !== 'imap') {
+      form.value.imapHost = ''
+      form.value.smtpHost = ''
+    }
+
+    // 自动切换认证方式（Gmail/Outlook/Yahoo → oauth，其他 → password）
+    const recommendedAuthType = (newProvider === 'gmail' || newProvider === 'outlook' || newProvider === 'yahoo')
+      ? 'oauth' as const
+      : 'password' as const
+    if (form.value.authType !== recommendedAuthType) {
+      form.value.authType = recommendedAuthType
+    }
+  }
+
+  // 原有的自动填充邮箱前缀逻辑保持不变
   if (!form.value.email.includes('@')) {
     switch (newProvider) {
       case 'gmail':
@@ -72,14 +107,128 @@ watch(() => form.value.provider, (newProvider) => {
   }
 })
 
+// 监听邮箱地址变化，自动判断服务商和填充信息
+watch(() => form.value.email, (newEmail) => {
+  // 如果用户手动设置了服务商，不再自动判断
+  if (isProviderManuallySet.value) {
+    return
+  }
+
+  // 如果用户手动修改了认证方式，不再自动更改认证方式
+  const shouldUpdateAuthType = !isAuthTypeManuallySet.value
+
+  // 邮箱地址不完整，不触发
+  if (!newEmail || !newEmail.includes('@')) {
+    return
+  }
+
+  const { isValid } = parseEmail(newEmail)
+  if (!isValid) {
+    return
+  }
+
+  // 提取自动填充信息
+  const autoFillInfo = extractAutoFillInfo(newEmail, form.value.name)
+
+  // 自动设置服务商
+  if (autoFillInfo.provider !== form.value.provider) {
+    form.value.provider = autoFillInfo.provider
+  }
+
+  // 自动设置认证方式（仅在用户未手动修改时）
+  if (shouldUpdateAuthType && autoFillInfo.authType !== form.value.authType) {
+    form.value.authType = autoFillInfo.authType
+  }
+
+  // 自动填充账号名称（仅在名称为空时）
+  if (!form.value.name.trim() && autoFillInfo.name) {
+    form.value.name = autoFillInfo.name
+  }
+
+  // 如果是自定义服务商，自动配置服务器
+  if (autoFillInfo.isCustom && autoFillInfo.serverConfig) {
+    Object.assign(form.value, {
+      imapHost: autoFillInfo.serverConfig.imapHost,
+      smtpHost: autoFillInfo.serverConfig.smtpHost,
+      imapPort: autoFillInfo.serverConfig.imapPort,
+      smtpPort: autoFillInfo.serverConfig.smtpPort,
+      imapSsl: autoFillInfo.serverConfig.imapSsl,
+      smtpSsl: autoFillInfo.serverConfig.smtpSsl,
+    })
+  }
+
+  lastValidEmail.value = newEmail
+})
+
+// 监听 IMAP SSL 变化，自动切换端口
+watch(() => form.value.imapSsl, (newSsl) => {
+  // 只有当端口是默认值时才自动切换
+  if (newSsl && (form.value.imapPort === 143)) {
+    form.value.imapPort = 993
+  } else if (!newSsl && (form.value.imapPort === 993)) {
+    form.value.imapPort = 143
+  }
+})
+
+// 监听 SMTP SSL 变化，自动切换端口
+watch(() => form.value.smtpSsl, (newSsl) => {
+  if (newSsl && (form.value.smtpPort === 25 || form.value.smtpPort === 587)) {
+    form.value.smtpPort = 465
+  } else if (!newSsl && (form.value.smtpPort === 465)) {
+    form.value.smtpPort = 25
+  }
+})
+
 // 监听 show 变化，重置表单
 watch(show, (newShow) => {
   if (!newShow) {
     error.value = ''
     success.value = ''
     oauthToken.value = null
+    // 重置自动判断状态
+    isProviderManuallySet.value = false
+    isAuthTypeManuallySet.value = false
+    lastValidEmail.value = ''
+  } else {
+    // 打开时，重置为默认状态
+    isProviderManuallySet.value = false
+    isAuthTypeManuallySet.value = false
+    lastValidEmail.value = ''
   }
 })
+
+// 处理邮箱输入框失焦，更新服务器配置
+function handleEmailBlur() {
+  const email = form.value.email
+
+  // 邮箱地址不完整，不触发
+  if (!email || !email.includes('@')) {
+    return
+  }
+
+  const { isValid } = parseEmail(email)
+  if (!isValid) {
+    return
+  }
+
+  // 提取自动填充信息
+  const autoFillInfo = extractAutoFillInfo(email, form.value.name)
+
+  // 只更新服务器配置，不更新服务商和认证方式
+  if (autoFillInfo.isCustom && autoFillInfo.serverConfig) {
+    // 只有当当前是自定义服务商，或者服务器配置为空时才更新
+    if (form.value.provider === 'imap' || !form.value.imapHost || !form.value.smtpHost) {
+      Object.assign(form.value, {
+        imapHost: autoFillInfo.serverConfig.imapHost,
+        smtpHost: autoFillInfo.serverConfig.smtpHost,
+        imapPort: autoFillInfo.serverConfig.imapPort,
+        smtpPort: autoFillInfo.serverConfig.smtpPort,
+        imapSsl: autoFillInfo.serverConfig.imapSsl,
+        smtpSsl: autoFillInfo.serverConfig.smtpSsl,
+      })
+    }
+  }
+}
 
 async function handleSubmit() {
   error.value = ''
@@ -219,6 +368,7 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
           v-model:value="form.email"
           placeholder="user@example.com"
           :disabled="loading"
+          @blur="handleEmailBlur"
         />
       </NFormItem>
 
@@ -281,25 +431,31 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
             v-model:value="form.imapHost"
             placeholder="imap.example.com"
             :disabled="loading"
+            style="flex: 1"
           />
         </NFormItem>
 
-        <NFormItem label="IMAP 端口">
-          <NInputNumber
-            v-model:value="form.imapPort"
-            :min="1"
-            :max="65535"
-            placeholder="993"
-            :disabled="loading"
-            style="width: 100%"
-          />
-        </NFormItem>
-
-        <NFormItem label="IMAP SSL">
-          <NSwitch
-            v-model:value="form.imapSsl"
-            :disabled="loading"
-          />
+        <NFormItem label="IMAP 端口和加密">
+          <div style="display: flex; gap: 12px; align-items: center; width: 100%">
+            <NInputNumber
+              v-model:value="form.imapPort"
+              :min="1"
+              :max="65535"
+              placeholder="993"
+              :disabled="loading"
+              style="flex: 1"
+            />
+            <NSwitch
+              v-model:value="form.imapSsl"
+              :disabled="loading"
+            >
+              <template #checked>SSL</template>
+              <template #unchecked>非加密</template>
+            </NSwitch>
+            <span style="color: var(--text-tertiary); font-size: 12px">
+              {{ form.imapSsl ? '993' : '143' }}
+            </span>
+          </div>
         </NFormItem>
 
         <NFormItem label="SMTP 服务器">
@@ -307,25 +463,31 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
             v-model:value="form.smtpHost"
             placeholder="smtp.example.com"
             :disabled="loading"
+            style="flex: 1"
           />
         </NFormItem>
 
-        <NFormItem label="SMTP 端口">
-          <NInputNumber
-            v-model:value="form.smtpPort"
-            :min="1"
-            :max="65535"
-            placeholder="587"
-            :disabled="loading"
-            style="width: 100%"
-          />
-        </NFormItem>
-
-        <NFormItem label="SMTP SSL">
-          <NSwitch
-            v-model:value="form.smtpSsl"
-            :disabled="loading"
-          />
+        <NFormItem label="SMTP 端口和加密">
+          <div style="display: flex; gap: 12px; align-items: center; width: 100%">
+            <NInputNumber
+              v-model:value="form.smtpPort"
+              :min="1"
+              :max="65535"
+              placeholder="465"
+              :disabled="loading"
+              style="flex: 1"
+            />
+            <NSwitch
+              v-model:value="form.smtpSsl"
+              :disabled="loading"
+            >
+              <template #checked>SSL</template>
+              <template #unchecked>非加密</template>
+            </NSwitch>
+            <span style="color: var(--text-tertiary); font-size: 12px">
+              {{ form.smtpSsl ? '465' : '25' }}
+            </span>
+          </div>
         </NFormItem>
       </template>
 
