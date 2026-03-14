@@ -241,21 +241,22 @@ impl SyncManager {
         imap_service: &mut imap_service::ImapService,
         account_id: i32,
     ) -> Result<Vec<crate::models::folder::Model>> {
-        // 列出服务器上的所有文件夹
-        let server_folders = imap_service.list_folders().await?;
+        // 列出服务器上的所有文件夹及其 RFC 6154 属性
+        let server_folders = imap_service.list_folders_with_attributes().await?;
 
-        tracing::info!("从服务器获取到 {} 个文件夹: {:?}", server_folders.len(), server_folders);
+        tracing::info!("从服务器获取到 {} 个文件夹", server_folders.len());
 
         let mut synced_folders = Vec::new();
 
-        for server_folder in server_folders {
-            let imap_name = server_folder;
-            let standard_name = folder_service::map_folder_name(&imap_name);
+        for folder_info in server_folders {
+            let imap_name = &folder_info.name;
+            let standard_name = &folder_info.standard_name;
 
-            tracing::debug!("处理文件夹: imap_name={} -> standard_name={}", imap_name, standard_name);
+            tracing::debug!("处理文件夹: imap_name={}, special_use={:?}, standard_name={}",
+                imap_name, folder_info.special_use, standard_name);
 
             // 跳过非标准文件夹
-            if !folder_service::is_standard_folder(&standard_name) {
+            if !folder_service::is_standard_folder(standard_name) {
                 tracing::debug!("跳过非标准文件夹: {}", standard_name);
                 continue;
             }
@@ -264,11 +265,12 @@ impl SyncManager {
             let folder = folder_service::find_or_create(
                 &self.db,
                 account_id,
-                &standard_name,
-                &imap_name,
+                standard_name,
+                imap_name,
             ).await?;
 
-            tracing::info!("同步文件夹: {} (IMAP名称: {})", standard_name, imap_name);
+            tracing::info!("同步文件夹: {} (IMAP名称: {}, special_use: {:?})",
+                standard_name, imap_name, folder_info.special_use);
             synced_folders.push(folder);
         }
 
