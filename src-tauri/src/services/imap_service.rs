@@ -6,6 +6,36 @@ pub enum ImapAuth {
     Password(String),
 }
 
+/// RFC 6154 Special-Use Mailboxes 属性
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecialUse {
+    /// 所有邮件 (\All)
+    All,
+    /// 归档 (\Archive)
+    Archive,
+    /// 草稿 (\Drafts)
+    Drafts,
+    /// 已标记/星标 (\Flagged)
+    Flagged,
+    /// 垃圾邮件 (\Junk)
+    Junk,
+    /// 已发送 (\Sent)
+    Sent,
+    /// 已删除 (\Trash)
+    Trash,
+}
+
+/// 文件夹信息（包含 RFC 6154 special-use 属性）
+#[derive(Debug, Clone)]
+pub struct FolderInfo {
+    /// 文件夹名称（原始 IMAP 名称）
+    pub name: String,
+    /// RFC 6154 special-use 属性（如果有）
+    pub special_use: Option<SpecialUse>,
+    /// 标准名称（基于 special-use 或名称映射）
+    pub standard_name: String,
+}
+
 /// IMAP 客户端封装
 pub struct ImapClient {
     session: Option<imap::Session<Box<dyn imap::ImapConnection>>>,
@@ -70,6 +100,12 @@ impl ImapClient {
 
     /// 列出服务器上的所有文件夹
     pub fn list_folders(&mut self) -> Result<Vec<String>> {
+        let folders_info = self.list_folders_with_attributes()?;
+        Ok(folders_info.into_iter().map(|f| f.name).collect())
+    }
+
+    /// 列出服务器上的所有文件夹及其属性（RFC 6154）
+    pub fn list_folders_with_attributes(&mut self) -> Result<Vec<FolderInfo>> {
         let session = self.session()?;
 
         tracing::debug!("IMAP LIST: reference=None, pattern=*");
@@ -78,24 +114,61 @@ impl ImapClient {
 
         tracing::info!("IMAP 服务器返回 {} 个文件夹对象", folders.len());
 
-        let mut folder_names = Vec::new();
+        let mut folder_infos = Vec::new();
         for folder in folders.iter() {
-            // 获取文件夹名称（name() 直接返回 &str）
             let name_str = folder.name().to_string();
-            tracing::debug!("处理文件夹: name='{}', starts_with('.'): {}, contains('/'): {}",
-                name_str, name_str.starts_with('.'), name_str.contains('/'));
+
+            // 获取文件夹属性（RFC 6154 special-use）
+            let attributes = folder.attributes();
+
+            // 检查是否有 RFC 6154 的 special-use 属性
+            let special_use = attributes.iter().find_map(|attr| {
+                // 使用模式匹配检查属性类型
+                let attr_str = format!("{:?}", attr);
+                match attr_str.as_str() {
+                    attr if attr.contains("All") => Some(SpecialUse::All),
+                    attr if attr.contains("Archive") => Some(SpecialUse::Archive),
+                    attr if attr.contains("Drafts") => Some(SpecialUse::Drafts),
+                    attr if attr.contains("Flagged") => Some(SpecialUse::Flagged),
+                    attr if attr.contains("Junk") => Some(SpecialUse::Junk),
+                    attr if attr.contains("Sent") => Some(SpecialUse::Sent),
+                    attr if attr.contains("Trash") => Some(SpecialUse::Trash),
+                    _ => None,
+                }
+            });
+
+            // 根据特殊用途属性确定标准名称
+            let standard_name = match special_use {
+                Some(SpecialUse::All) => "archive".to_string(),
+                Some(SpecialUse::Archive) => "archive".to_string(),
+                Some(SpecialUse::Drafts) => "drafts".to_string(),
+                Some(SpecialUse::Flagged) => "starred".to_string(),
+                Some(SpecialUse::Junk) => "spam".to_string(),
+                Some(SpecialUse::Sent) => "sent".to_string(),
+                Some(SpecialUse::Trash) => "trash".to_string(),
+                None => {
+                    // 如果没有 RFC 6154 属性，使用名称映射作为后备
+                    crate::services::folder_service::map_folder_name(&name_str)
+                }
+            };
+
+            tracing::debug!("文件夹: name='{}', special_use={:?}, standard_name={}",
+                name_str, special_use, standard_name);
 
             // 只过滤掉以 . 开头的系统文件夹
-            // 允许包含 / 的嵌套文件夹（如 Gmail 的 [Gmail]/Spam）
             if !name_str.starts_with('.') {
-                folder_names.push(name_str);
+                folder_infos.push(FolderInfo {
+                    name: name_str,
+                    special_use,
+                    standard_name,
+                });
             } else {
                 tracing::debug!("跳过系统文件夹: {}", name_str);
             }
         }
 
-        tracing::info!("经过过滤后返回 {} 个文件夹: {:?}", folder_names.len(), folder_names);
-        Ok(folder_names)
+        tracing::info!("经过过滤后返回 {} 个文件夹", folder_infos.len());
+        Ok(folder_infos)
     }
 
     pub fn list_uids(&mut self, folder: &str, limit: usize) -> Result<Vec<u32>> {
@@ -611,6 +684,13 @@ impl ImapService {
         let client = self.client.as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
         client.list_folders()
+    }
+
+    /// 列出文件夹及其 RFC 6154 special-use 属性
+    pub async fn list_folders_with_attributes(&mut self) -> Result<Vec<FolderInfo>> {
+        let client = self.client.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        client.list_folders_with_attributes()
     }
 
     /// 列出 UIDs（用于首次同步）
