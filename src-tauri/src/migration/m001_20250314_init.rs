@@ -1,5 +1,5 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn};
 use anyhow::Result;
+use sea_orm::{ConnectionTrait, DbConn, Statement};
 
 /// 初始化数据库表结构
 pub async fn initialize(db: &DbConn) -> Result<()> {

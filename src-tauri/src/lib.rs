@@ -7,10 +7,9 @@ pub mod services;
 
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 // 时间处理
-use chrono;
 
 // 全局数据库连接（使用 Arc<Mutex<>> 实现共享）
 struct DatabaseState(Arc<Mutex<DbConn>>);
@@ -146,7 +145,7 @@ async fn test_email_connection(
     provider: String,
     imap_host: Option<String>,
     imap_port: Option<u16>,
-    imap_ssl: Option<bool>,
+    _imap_ssl: Option<bool>,
     _smtp_host: Option<String>,
     _smtp_port: Option<u16>,
     _smtp_ssl: Option<bool>,

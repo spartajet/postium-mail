@@ -16,10 +16,10 @@ pub async fn get_by_account(
         query = query.limit(limit);
     }
 
-    Ok(query
+    query
         .all(db)
         .await
-        .map_err(|e| anyhow!("获取同步错误列表失败: {}", e))?)
+        .map_err(|e| anyhow!("获取同步错误列表失败: {}", e))
 }
 
 /// 获取未解决的错误
@@ -37,10 +37,10 @@ pub async fn get_unresolved(
         query = query.limit(limit);
     }
 
-    Ok(query
+    query
         .all(db)
         .await
-        .map_err(|e| anyhow!("获取未解决错误失败: {}", e))?)
+        .map_err(|e| anyhow!("获取未解决错误失败: {}", e))
 }
 
 /// 记录同步错误
@@ -67,10 +67,10 @@ pub async fn create(
         ..Default::default()
     };
 
-    Ok(new_error
+    new_error
         .insert(db)
         .await
-        .map_err(|e| anyhow!("记录同步错误失败: {}", e))?)
+        .map_err(|e| anyhow!("记录同步错误失败: {}", e))
 }
 
 /// 标记错误为已解决

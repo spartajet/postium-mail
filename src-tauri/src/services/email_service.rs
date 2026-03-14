@@ -1,7 +1,6 @@
 use sea_orm::*;
 use anyhow::{anyhow, Result};
 use crate::models::{email, attachment, EmailEntity, AttachmentEntity};
-use serde_json::{json, Value};
 
 /// 邮件列表响应
 #[derive(Debug, Clone, serde::Serialize)]
@@ -191,22 +190,18 @@ pub async fn search(
     let limit = limit.unwrap_or(50);
 
     // 使用 FTS5 搜索
-    let sql = if let Some(acc_id) = account_id {
-        format!(
-            "SELECT e.* FROM emails e \
+    let sql = if let Some(_acc_id) = account_id {
+        "SELECT e.* FROM emails e \
              INNER JOIN emails_fts f ON e.id = f.rowid \
              WHERE emails_fts MATCH ? AND e.account_id = ? \
              ORDER BY e.received_at DESC \
-             LIMIT ?"
-        )
+             LIMIT ?".to_string()
     } else {
-        format!(
-            "SELECT e.* FROM emails e \
+        "SELECT e.* FROM emails e \
              INNER JOIN emails_fts f ON e.id = f.rowid \
              WHERE emails_fts MATCH ? \
              ORDER BY e.received_at DESC \
-             LIMIT ?"
-        )
+             LIMIT ?".to_string()
     };
 
     let stmt = if let Some(acc_id) = account_id {
