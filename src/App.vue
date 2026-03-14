@@ -42,6 +42,28 @@ const isWorkflowView = computed(() => uiStore.currentView === "workflow");
 
 // 初始化应用
 onMounted(async () => {
+    // 检查是否是 OAuth 回调
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const state = params.get('state')
+    const error = params.get('error')
+
+    // 如果是 OAuth 回调，向父窗口发送消息并关闭
+    if (code || error) {
+        if (window.opener) {
+            window.opener.postMessage({
+                code,
+                state,
+                error: error || undefined
+            }, window.location.origin)
+        }
+        // 等待消息发送后关闭窗口
+        setTimeout(() => {
+            window.close()
+        }, 100)
+        return
+    }
+
     // 初始化 UI Store（主题、断点等）
     uiStore.init();
 

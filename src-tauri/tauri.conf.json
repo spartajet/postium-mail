@@ -3,6 +3,11 @@
   "productName": "postium-mail",
   "version": "0.1.0",
   "identifier": "com.spartajet.postium-mail",
+  "plugins": {
+    "stronghold": {
+      "allowlist": ["vault"]
+    }
+  },
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",

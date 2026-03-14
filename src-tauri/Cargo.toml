@@ -46,7 +46,18 @@ native-tls = "0.2"
 
 # 密码加密
 aes-gcm = "0.10"
-base64 = "0.21"
+base64 = "0.22"
+
+# OAuth 2.0 相关（最新版本）
+oauth2 = "5.0"
+reqwest = { version = "0.13", features = ["json"] }
+url = "2.5"
+
+# Stronghold 安全存储
+tauri-plugin-stronghold = "2"
+getrandom = "0.4"
+hex = "0.4"
+sha2 = "0.10"
 
 # 错误处理
 anyhow = "1.0"

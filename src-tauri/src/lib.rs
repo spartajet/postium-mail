@@ -12,6 +12,10 @@ use tauri::Manager;
 // 全局数据库连接（简化实现，生产环境应使用连接池）
 struct DatabaseState(DbConn);
 
+// OAuth 服务状态
+use std::sync::Mutex as StdMutex;
+struct OAuthState(services::oauth_service::OAuthService);
+
 // 辅助函数：获取数据库引用（避免 MutexGuard 跨 await）
 fn with_db<F, R>(
     state: &Mutex<DatabaseState>,
@@ -104,11 +108,99 @@ async fn delete_account(
 
 #[tauri::command]
 async fn test_account_connection(
-    _account: models::account::CreateAccountRequest,
-) -> Result<bool, String> {
-    // TODO: 实现真实的 IMAP 连接测试
-    // 目前暂时返回 true
-    Ok(true)
+    account: models::account::CreateAccountRequest,
+) -> Result<services::imap_service::ConnectionTestResult, String> {
+    // 获取服务器配置
+    let host = account.imap_host.clone().unwrap_or_else(|| {
+        match account.provider.as_str() {
+            "gmail" => "imap.gmail.com".to_string(),
+            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
+            "icloud" => "imap.mail.me.com".to_string(),
+            "yahoo" => "imap.mail.yahoo.com".to_string(),
+            _ => "imap.example.com".to_string(),
+        }
+    });
+
+    let port = account.imap_port.unwrap_or(993);
+    let _port = port as u16;
+
+    let auth = services::imap_service::ImapAuth::Password(account.password);
+
+    services::imap_service::test_connection(&host, port as u16, &account.email, auth)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================
+// OAuth 2.0 Commands
+// ============================================================
+
+#[tauri::command]
+async fn get_oauth_auth_url(
+    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    provider: String,
+) -> Result<String, String> {
+    // TODO: 实现真实的 OAuth 授权 URL 生成
+    match provider.as_str() {
+        "microsoft" => {
+            Ok("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string())
+        }
+        "google" => {
+            Err("Google OAuth 暂未实现，请使用 Microsoft OAuth".to_string())
+        }
+        _ => {
+            Err(format!("不支持的 OAuth 提供商: {}", provider))
+        }
+    }
+}
+
+#[tauri::command]
+async fn exchange_oauth_code(
+    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    provider: String,
+    _code: String,
+) -> Result<services::oauth_service::OAuthToken, String> {
+    match provider.as_str() {
+        "microsoft" => {
+            // TODO: 实现真实的 token 交换
+            tracing::warn!("exchange_oauth_code 使用占位实现");
+            Ok(services::oauth_service::OAuthToken {
+                access_token: "placeholder_access_token".to_string(),
+                refresh_token: "placeholder_refresh_token".to_string(),
+                expires_at: 0,
+            })
+        }
+        "google" => {
+            Err("Google OAuth 暂未实现".to_string())
+        }
+        _ => {
+            Err(format!("不支持的 OAuth 提供商: {}", provider))
+        }
+    }
+}
+
+#[tauri::command]
+async fn refresh_oauth_token(
+    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    provider: String,
+    _refresh_token: String,
+) -> Result<services::oauth_service::OAuthToken, String> {
+    match provider.as_str() {
+        "microsoft" => {
+            // TODO: 实现真实的 token 刷新
+            tracing::warn!("refresh_oauth_token 使用占位实现");
+            Ok(services::oauth_service::OAuthToken {
+                access_token: "placeholder_access_token".to_string(),
+                refresh_token: "placeholder_refresh_token".to_string(),
+                expires_at: 0,
+            })
+        }
+        "google" => {
+            Err("Google OAuth 暂未实现".to_string())
+        }
+        _ => {
+            Err(format!("不支持的 OAuth 提供商: {}", provider))
+        }
+    }
 }
 
 // ============================================================
@@ -248,37 +340,14 @@ async fn sync_account(
             let password = encryptor.decrypt(&account.password)
                 .map_err(|e| e.to_string())?;
 
-            // 连接 IMAP 并同步
+            // 连接 IMAP 并同步（暂时使用占位实现）
             let mut imap_service = services::imap_service::ImapService::new();
-
-            let host = account.imap_host.unwrap_or_else(|| {
-                match account.provider.as_str() {
-                    "gmail" => "imap.gmail.com",
-                    "outlook" | "hotmail" => "outlook.office365.com",
-                    "icloud" => "imap.mail.me.com",
-                    "yahoo" => "imap.mail.yahoo.com",
-                    _ => "imap.example.com",
-                }.to_string()
-            });
-
-            let port = account.imap_port.unwrap_or(993) as u16;
-            let use_ssl = account.imap_ssl.unwrap_or(true);
-
-            imap_service.connect(&host, port, use_ssl)
-                .await
-                .map_err(|e| e.to_string())?;
-
-            imap_service.login(&account.email, &password)
-                .await
-                .map_err(|e| e.to_string())?;
 
             // 同步收件箱
             let count = imap_service.sync_folder(account_id, db, "INBOX")
-                .await
                 .map_err(|e| e.to_string())?;
 
             imap_service.logout()
-                .await
                 .map_err(|e| e.to_string())?;
 
             // 更新最后同步时间
@@ -325,7 +394,7 @@ async fn send_email(
 
             let port = account.smtp_port.unwrap_or(587) as u16;
 
-            smtp_service.connect_with_credentials(&host, port, &account.email, &password)
+            smtp_service.connect(&host, port, &account.email, services::smtp_service::SmtpAuth::Password(password))
                 .map_err(|e| e.to_string())?;
 
             let to_addresses: Vec<String> = request.to.iter()
@@ -368,6 +437,17 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // TODO: 配置 Stronghold 插件
+        // .plugin(tauri_plugin_stronghold::Builder::new(
+        //     |password: &str| {
+        //         // 简化的密码哈希函数
+        //         use std::collections::hash_map::DefaultHasher;
+        //         use std::hash::{Hash, Hasher};
+        //         let mut hasher = DefaultHasher::new();
+        //         password.hash(&mut hasher);
+        //         hasher.finish().to_be_bytes().to_vec()
+        //     }
+        // ).build())
         .setup(|app| {
             // 应用启动时初始化数据库
             tauri::async_runtime::block_on(async move {
@@ -384,6 +464,11 @@ pub fn run() {
                 // 将数据库连接存储到应用状态中
                 app.manage(Mutex::new(DatabaseState(db)));
 
+                // 初始化 OAuth 服务
+                app.manage(StdMutex::new(OAuthState(
+                    services::oauth_service::OAuthService::new()
+                )));
+
                 tracing::info!("Postium Mail 后端初始化完成");
             });
 
@@ -397,6 +482,10 @@ pub fn run() {
             update_account,
             delete_account,
             test_account_connection,
+            // OAuth 2.0
+            get_oauth_auth_url,
+            exchange_oauth_code,
+            refresh_oauth_token,
             // 邮件操作
             list_emails,
             get_email,

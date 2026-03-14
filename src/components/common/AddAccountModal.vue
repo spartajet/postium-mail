@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio } from 'naive-ui'
+import OAuthLoginModal from './OAuthLoginModal.vue'
 
 const emit = defineEmits<{
   (e: 'success'): void
@@ -30,12 +31,52 @@ const form = ref({
   smtpPort: 587,
   smtpSsl: true,
   color: '#7C3AED',
+  authType: 'password' as 'password' | 'oauth',
 })
 
 const loading = ref(false)
 const error = ref('')
+const success = ref('')
+
+// OAuth 相关
+const showOAuthModal = ref(false)
+const oauthProvider = ref<'microsoft' | 'google'>('microsoft')
+const oauthToken = ref<{ access_token: string, refresh_token: string, expires_at: number } | null>(null)
 
 const isCustom = computed(() => form.value.provider === 'imap')
+const canUseOAuth = computed(() => {
+  return form.value.provider === 'outlook' || form.value.provider === 'hotmail' || form.value.provider === 'gmail'
+})
+
+// 监听 provider 变化，自动设置邮箱前缀
+watch(() => form.value.provider, (newProvider) => {
+  if (!form.value.email.includes('@')) {
+    switch (newProvider) {
+      case 'gmail':
+        form.value.email = '@gmail.com'
+        break
+      case 'outlook':
+      case 'hotmail':
+        form.value.email = '@outlook.com'
+        break
+      case 'icloud':
+        form.value.email = '@icloud.com'
+        break
+      case 'yahoo':
+        form.value.email = '@yahoo.com'
+        break
+    }
+  }
+})
+
+// 监听 show 变化，重置表单
+watch(show, (newShow) => {
+  if (!newShow) {
+    error.value = ''
+    success.value = ''
+    oauthToken.value = null
+  }
+})
 
 async function handleSubmit() {
   error.value = ''
@@ -45,12 +86,19 @@ async function handleSubmit() {
     return
   }
 
-  if (!form.value.email.trim()) {
-    error.value = '请输入邮箱地址'
+  if (!form.value.email.trim() || form.value.email.startsWith('@')) {
+    error.value = '请输入完整的邮箱地址'
     return
   }
 
-  if (!form.value.password.trim()) {
+  // OAuth 模式下，如果还没有 token，不能提交
+  if (form.value.authType === 'oauth' && !oauthToken.value) {
+    error.value = '请先完成 OAuth 授权'
+    return
+  }
+
+  // 密码模式下，必须输入密码
+  if (form.value.authType === 'password' && !form.value.password.trim()) {
     error.value = '请输入密码'
     return
   }
@@ -58,44 +106,85 @@ async function handleSubmit() {
   loading.value = true
 
   try {
+    const accountData: any = {
+      name: form.value.name,
+      email: form.value.email,
+      provider: form.value.provider,
+      color: form.value.color,
+    }
+
+    if (form.value.authType === 'oauth' && oauthToken.value) {
+      // OAuth 模式
+      accountData.auth_type = 'oauth'
+      accountData.oauth_provider = oauthProvider.value
+      accountData.oauth_token = oauthToken.value.access_token
+      accountData.oauth_refresh_token = oauthToken.value.refresh_token
+      accountData.password = '' // OAuth 不需要密码
+    } else {
+      // 密码模式
+      accountData.password = form.value.password
+    }
+
+    // 自定义配置
+    if (isCustom.value) {
+      accountData.imap_host = form.value.imapHost
+      accountData.imap_port = form.value.imapPort
+      accountData.imap_ssl = form.value.imapSsl
+      accountData.smtp_host = form.value.smtpHost
+      accountData.smtp_port = form.value.smtpPort
+      accountData.smtp_ssl = form.value.smtpSsl
+    }
+
     await invoke('add_account', {
-      account: {
-        name: form.value.name,
-        email: form.value.email,
-        provider: form.value.provider,
-        password: form.value.password,
-        imapHost: isCustom.value ? form.value.imapHost : undefined,
-        imapPort: isCustom.value ? form.value.imapPort : undefined,
-        imapSsl: isCustom.value ? form.value.imapSsl : undefined,
-        smtpHost: isCustom.value ? form.value.smtpHost : undefined,
-        smtpPort: isCustom.value ? form.value.smtpPort : undefined,
-        smtpSsl: isCustom.value ? form.value.smtpSsl : undefined,
-        color: form.value.color,
-      }
+      account: accountData
     })
 
-    emit('success')
-    emit('update:show', false)
-
-    // 重置表单
-    form.value = {
-      name: '',
-      email: '',
-      provider: 'gmail',
-      password: '',
-      imapHost: '',
-      imapPort: 993,
-      imapSsl: true,
-      smtpHost: '',
-      smtpPort: 587,
-      smtpSsl: true,
-      color: '#7C3AED',
-    }
+    success.value = '账号添加成功！'
+    setTimeout(() => {
+      emit('success')
+      emit('update:show', false)
+      resetForm()
+    }, 1000)
   } catch (e: any) {
     error.value = String(e)
   } finally {
     loading.value = false
   }
+}
+
+function resetForm() {
+  form.value = {
+    name: '',
+    email: '',
+    provider: 'gmail',
+    password: '',
+    imapHost: '',
+    imapPort: 993,
+    imapSsl: true,
+    smtpHost: '',
+    smtpPort: 587,
+    smtpSsl: true,
+    color: '#7C3AED',
+    authType: 'password',
+  }
+  oauthToken.value = null
+  success.value = ''
+  error.value = ''
+}
+
+function startOAuthLogin() {
+  if (form.value.provider === 'outlook' || form.value.provider === 'hotmail') {
+    oauthProvider.value = 'microsoft'
+  } else if (form.value.provider === 'gmail') {
+    oauthProvider.value = 'google'
+  }
+  showOAuthModal.value = true
+}
+
+function handleOAuthSuccess(token: { access_token: string, refresh_token: string, expires_at: number }) {
+  oauthToken.value = token
+  success.value = 'OAuth 授权成功！'
+  error.value = ''
 }
 </script>
 
@@ -136,8 +225,40 @@ async function handleSubmit() {
         />
       </NFormItem>
 
-      <!-- 密码 -->
-      <NFormItem label="密码" path="password" :show-require-mark="true">
+      <!-- 认证方式 -->
+      <NFormItem label="认证方式" v-if="canUseOAuth">
+        <NRadioGroup v-model:value="form.authType" :disabled="loading">
+          <NRadio value="password">密码登录</NRadio>
+          <NRadio value="oauth">OAuth 2.0 授权</NRadio>
+        </NRadioGroup>
+      </NFormItem>
+
+      <!-- OAuth 登录按钮 -->
+      <template v-if="canUseOAuth && form.authType === 'oauth'">
+        <NFormItem>
+          <NButton
+            type="primary"
+            @click="startOAuthLogin"
+            :disabled="loading"
+            block
+          >
+            使用 {{ form.provider === 'gmail' ? 'Google' : 'Microsoft' }} 账号授权
+          </NButton>
+        </NFormItem>
+
+        <!-- OAuth 成功提示 -->
+        <NAlert v-if="oauthToken" type="success" :title="success">
+          授权成功！token 已获取，可以添加账号了。
+        </NAlert>
+      </template>
+
+      <!-- 密码输入 -->
+      <NFormItem
+        v-if="form.authType === 'password'"
+        label="密码"
+        path="password"
+        :show-require-mark="true"
+      >
         <NInput
           v-model:value="form.password"
           type="password"
@@ -216,7 +337,8 @@ async function handleSubmit() {
         </div>
       </NFormItem>
 
-      <!-- 错误提示 -->
+      <!-- 提示信息 -->
+      <NAlert v-if="success" type="success" :title="success" closable @close="success = ''" />
       <div v-if="error" class="error-message">
         {{ error }}
       </div>
@@ -226,11 +348,19 @@ async function handleSubmit() {
         <NButton @click="emit('update:show', false)" :disabled="loading">
           取消
         </NButton>
-        <NButton type="primary" attr-type="submit" :loading="loading">
+        <NButton type="primary" attr-type="submit" :loading="loading" :disabled="form.authType === 'oauth' && !oauthToken">
           添加
         </NButton>
       </div>
     </NForm>
+
+    <!-- OAuth 登录弹窗 -->
+    <OAuthLoginModal
+      :show="showOAuthModal"
+      :provider="oauthProvider"
+      @update:show="showOAuthModal = $event"
+      @success="handleOAuthSuccess"
+    />
   </NModal>
 </template>
 
