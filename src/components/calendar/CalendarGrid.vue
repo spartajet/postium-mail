@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { CalendarEvent } from "@/types";
 
@@ -16,7 +15,7 @@ interface Props {
     }>;
 }
 
-const props = defineProps<Props>();
+defineProps<Props>();
 
 // Emits
 const emit = defineEmits<{
@@ -38,16 +37,6 @@ function handleEventClick(event: CalendarEvent, e: Event) {
 // 格式化日期
 function formatDay(date: Date): number {
     return date.getDate();
-}
-
-// 检查是否是今天
-function isToday(date: Date): boolean {
-    const today = new Date();
-    return (
-        date.getFullYear() === today.getFullYear() &&
-        date.getMonth() === today.getMonth() &&
-        date.getDate() === today.getDate()
-    );
 }
 </script>
 

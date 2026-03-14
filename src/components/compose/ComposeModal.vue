@@ -4,6 +4,7 @@ import { useUIStore, useEmailStore, useAccountStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import type { ComposeForm } from "@/types";
 import { mockAICompose, delay } from "@/mocks";
+import RichTextEditor from "./RichTextEditor.vue";
 import {
     EditOutlined,
     MinimizeOutlined,
@@ -12,15 +13,6 @@ import {
     ExpandMoreOutlined,
     AutoAwesomeOutlined,
     SendOutlined,
-    FormatBoldOutlined,
-    FormatItalicOutlined,
-    FormatUnderlinedOutlined,
-    StrikethroughSOutlined,
-    FormatListBulletedOutlined,
-    FormatListNumberedOutlined,
-    LinkOutlined,
-    ImageOutlined,
-    AttachFileOutlined,
     RefreshOutlined
 } from "@vicons/material";
 
@@ -184,26 +176,6 @@ async function handleAIPrompt() {
     }
 }
 
-// 编辑器工具栏操作
-function execCommand(command: string, value?: string) {
-    document.execCommand(command, false, value);
-}
-
-// 插入链接
-function handleInsertLink() {
-    const url = window.prompt(t('email.subject'));
-    if (url) {
-        execCommand("createLink", url);
-    }
-}
-
-// 插入图片
-function handleInsertImage() {
-    const url = window.prompt(t('email.subject'));
-    if (url) {
-        execCommand("insertImage", url);
-    }
-}
 </script>
 
 <template>
@@ -339,97 +311,13 @@ function handleInsertImage() {
                         </div>
                     </div>
 
-                    <!-- 编辑器工具栏 -->
-                    <div class="editor-toolbar">
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.bold')"
-                            @click="execCommand('bold')"
-                        >
-                            <FormatBoldOutlined :size="18" />
-                        </button>
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.italic')"
-                            @click="execCommand('italic')"
-                        >
-                            <FormatItalicOutlined :size="18" />
-                        </button>
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.underline')"
-                            @click="execCommand('underline')"
-                        >
-                            <FormatUnderlinedOutlined :size="18" />
-                        </button>
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.strikethrough')"
-                            @click="execCommand('strikeThrough')"
-                        >
-                            <StrikethroughSOutlined :size="18" />
-                        </button>
-
-                        <div class="toolbar-divider"></div>
-
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.unorderedList')"
-                            @click="execCommand('insertUnorderedList')"
-                        >
-                            <FormatListBulletedOutlined :size="18" />
-                        </button>
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.orderedList')"
-                            @click="execCommand('insertOrderedList')"
-                        >
-                            <FormatListNumberedOutlined :size="18" />
-                        </button>
-
-                        <div class="toolbar-divider"></div>
-
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.insertLink')"
-                            @click="handleInsertLink"
-                        >
-                            <LinkOutlined :size="18" />
-                        </button>
-
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.insertImage')"
-                            @click="handleInsertImage"
-                        >
-                            <ImageOutlined :size="18" />
-                        </button>
-
-                        <button
-                            class="toolbar-btn"
-                            :title="t('editor.addAttachment')"
-                        >
-                            <AttachFileOutlined :size="18" />
-                        </button>
-                    </div>
-
-                    <!-- 编辑区域 -->
-                    <div
-                        class="modal-body"
-                        style="padding: 0; flex: 1; overflow: hidden"
-                    >
-                        <div
-                            class="compose-editor"
-                            contenteditable="true"
-                            :data-placeholder="t('email.editorPlaceholder')"
-                            v-html="form.body"
-                            @input="
-                                form.body = (
-                                    $event.target as HTMLElement
-                                ).innerHTML
-                            "
-                        ></div>
-                    </div>
+                    <!-- Tiptap 富文本编辑器 -->
+                    <RichTextEditor
+                        v-model="form.body"
+                        :placeholder="t('email.editorPlaceholder')"
+                        :editable="true"
+                        minHeight="300px"
+                    />
 
                     <!-- 底部操作栏 -->
                     <div class="modal-footer">

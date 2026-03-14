@@ -218,6 +218,11 @@
   resolved "https://registry.npmmirror.com/@tiptap/extension-code/-/extension-code-3.20.1.tgz"
   integrity sha512-509DHINIA/Gg+eTG7TEkfsS8RUiPLH5xZNyLRT0A1oaoaJmECKfrV6aAm05IdfTyqDqz6LW5pbnX6DdUC4keug==
 
+"@tiptap/extension-color@^3.20.1":
+  version "3.20.1"
+  resolved "https://registry.npmmirror.com/@tiptap/extension-color/-/extension-color-3.20.1.tgz"
+  integrity sha512-WpYGG+9zDQXFWdhZ/SPahcVR1aMMXubRSHEBaaLs0SEQ2dThEOYo5xXlVP0Cwat9OiQ+nqWnCFwBmc6mgIAiUA==
+
 "@tiptap/extension-document@^3.20.1":
   version "3.20.1"
   resolved "https://registry.npmmirror.com/@tiptap/extension-document/-/extension-document-3.20.1.tgz"
@@ -252,6 +257,11 @@
   version "3.20.1"
   resolved "https://registry.npmmirror.com/@tiptap/extension-horizontal-rule/-/extension-horizontal-rule-3.20.1.tgz"
   integrity sha512-rjFKFXNntdl0jay8oIGFvvykHlpyQTLmrH3Ag2fj3i8yh6MVvqhtaDomYQbw5sxECd5hBkL+T4n2d2DRuVw/QQ==
+
+"@tiptap/extension-image@^3.20.1":
+  version "3.20.1"
+  resolved "https://registry.npmmirror.com/@tiptap/extension-image/-/extension-image-3.20.1.tgz"
+  integrity sha512-/GPFSLNdYSZQ0E6VBXSAk0UFtDdn98HT1Aa2tO+STELqc5jAdFB42dfFnTC6KQzTvcUOUYkE2S1Q22YC5H2XNQ==
 
 "@tiptap/extension-italic@^3.20.1":
   version "3.20.1"
@@ -299,6 +309,16 @@
   version "3.20.1"
   resolved "https://registry.npmmirror.com/@tiptap/extension-strike/-/extension-strike-3.20.1.tgz"
   integrity sha512-EYgyma10lpsY+rwbVQL9u+gA7hBlKLSMFH7Zgd37FSxukOjr+HE8iKPQQ+SwbGejyDsPlLT8Z5Jnuxo5Ng90Pg==
+
+"@tiptap/extension-text-align@^3.20.1":
+  version "3.20.1"
+  resolved "https://registry.npmmirror.com/@tiptap/extension-text-align/-/extension-text-align-3.20.1.tgz"
+  integrity sha512-9816EFiTO7BvACGomYNI0pZIu5EOBVHrgqO33+sFjseQCvq+5FD6OPNLdHSkPzAmRrE0LUBvFZ93sjO4N+kJPg==
+
+"@tiptap/extension-text-style@^3.20.1":
+  version "3.20.1"
+  resolved "https://registry.npmmirror.com/@tiptap/extension-text-style/-/extension-text-style-3.20.1.tgz"
+  integrity sha512-3LQU92zX6tzl47EBskkAKeJXd6EWwYmBDE7jbd7InJqnt9NMAcj4DtXtXpI+e6Un5+8yzNjVA+fI5+5cFS3dSg==
 
 "@tiptap/extension-text@^3.20.1":
   version "3.20.1"

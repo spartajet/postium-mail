@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, h, computed } from "vue";
+import { ref, watch, computed } from "vue";
 import { useEmailStore, useUIStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import { format } from "date-fns";
@@ -15,7 +15,6 @@ import {
     StarBorderOutlined,
     ArchiveOutlined,
     DeleteOutlined,
-    CheckCircleOutlined,
     AttachFileOutlined,
     DescriptionOutlined,
     AutoAwesomeOutlined,
