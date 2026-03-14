@@ -6,27 +6,28 @@ mod models;
 mod services;
 
 use sea_orm::DbConn;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
-// 全局数据库连接（简化实现，生产环境应使用连接池）
-struct DatabaseState(DbConn);
+// 全局数据库连接（使用 Arc<Mutex<>> 实现共享）
+struct DatabaseState(Arc<Mutex<DbConn>>);
+
+impl DatabaseState {
+    fn clone_conn(&self) -> DbConn {
+        // DbConn 实现了 Clone，可以直接 clone
+        let guard = self.0.lock().unwrap_or_else(|e| {
+            tracing::error!("数据库 Mutex 已被污染: {}", e);
+            // 如果 Mutex 被污染，尝试恢复
+            e.into_inner()
+        });
+        // DbConn 是 DatabaseConnection 的类型别名，可以直接 clone
+        (*guard).clone()
+    }
+}
 
 // OAuth 服务状态
 use std::sync::Mutex as StdMutex;
 struct OAuthState(services::oauth_service::OAuthService);
-
-// 辅助函数：获取数据库引用（避免 MutexGuard 跨 await）
-fn with_db<F, R>(
-    state: &Mutex<DatabaseState>,
-    f: F,
-) -> R
-where
-    F: FnOnce(&DbConn) -> R,
-{
-    let db = state.lock().unwrap();
-    f(&db.0)
-}
 
 // ============================================================
 // 账号管理 Commands
@@ -34,76 +35,61 @@ where
 
 #[tauri::command]
 async fn add_account(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::account_service::create(db, account)
-                .await
-                .map(|a| a.into())
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::account_service::create(&db, account)
+        .await
+        .map(|a| a.into())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn list_accounts(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
 ) -> Result<Vec<models::account::AccountDto>, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::account_service::get_all(db)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::account_service::get_all(&db)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn get_account(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     id: i32,
 ) -> Result<Option<models::account::AccountDto>, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            match services::account_service::get_by_id(db, id).await {
-                Ok(Some(account)) => Ok(Some(account.into())),
-                Ok(None) => Ok(None),
-                Err(e) => Err(e.to_string()),
-            }
-        })
-    })
+    let db = state.clone_conn();
+    match services::account_service::get_by_id(&db, id).await {
+        Ok(Some(account)) => Ok(Some(account.into())),
+        Ok(None) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]
 async fn update_account(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     id: i32,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::account_service::update(db, id, account)
-                .await
-                .map(|a| a.into())
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::account_service::update(&db, id, account)
+        .await
+        .map(|a| a.into())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn delete_account(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     id: i32,
 ) -> Result<(), String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::account_service::delete(db, id)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::account_service::delete(&db, id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -122,7 +108,6 @@ async fn test_account_connection(
     });
 
     let port = account.imap_port.unwrap_or(993);
-    let _port = port as u16;
 
     let auth = services::imap_service::ImapAuth::Password(account.password);
 
@@ -209,112 +194,91 @@ async fn refresh_oauth_token(
 
 #[tauri::command]
 async fn list_emails(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     account_id: i32,
     folder: String,
     page: usize,
     limit: usize,
 ) -> Result<services::email_service::EmailListResponse, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::list(db, account_id, &folder, page, limit)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::list(&db, account_id, &folder, page, limit)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn get_email(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     id: i32,
 ) -> Result<models::email::EmailDetail, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::get_detail(db, id)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::get_detail(&db, id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn search_emails_fts(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     query: String,
     account_id: Option<i32>,
     limit: Option<u64>,
 ) -> Result<Vec<services::search_service::SearchResult>, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::search_service::SearchService::search_emails(
-                db,
-                account_id,
-                &query,
-                limit,
-            )
-            .await
-            .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::search_service::SearchService::search_emails(
+        &db,
+        account_id,
+        &query,
+        limit,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn mark_as_read(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     email_id: i32,
     is_read: bool,
 ) -> Result<(), String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::update_read_status(db, email_id, is_read)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::update_read_status(&db, email_id, is_read)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn toggle_star(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     email_id: i32,
 ) -> Result<bool, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::toggle_star(db, email_id)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::toggle_star(&db, email_id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn delete_emails(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     email_ids: Vec<i32>,
 ) -> Result<usize, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::batch_delete(db, email_ids)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::batch_delete(&db, email_ids)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn move_email_to_folder(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     email_id: i32,
     folder: String,
 ) -> Result<(), String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async {
-            services::email_service::move_to_folder(db, email_id, &folder)
-                .await
-                .map_err(|e| e.to_string())
-        })
-    })
+    let db = state.clone_conn();
+    services::email_service::move_to_folder(&db, email_id, &folder)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================
@@ -323,98 +287,94 @@ async fn move_email_to_folder(
 
 #[tauri::command]
 async fn sync_account(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     account_id: i32,
 ) -> Result<usize, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async move {
-            // 获取账号信息
-            let account = services::account_service::get_by_id(db, account_id)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "账号不存在".to_string())?;
+    let db = state.clone_conn();
 
-            // 解密密码
-            let encryptor = crypto::PasswordEncryptor::new()
-                .map_err(|e| e.to_string())?;
-            let password = encryptor.decrypt(&account.password)
-                .map_err(|e| e.to_string())?;
+    // 获取账号信息
+    let account = services::account_service::get_by_id(&db, account_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "账号不存在".to_string())?;
 
-            // 连接 IMAP 并同步（暂时使用占位实现）
-            let mut imap_service = services::imap_service::ImapService::new();
+    // 解密密码
+    let encryptor = crypto::PasswordEncryptor::new()
+        .map_err(|e| e.to_string())?;
+    let password = encryptor.decrypt(&account.password)
+        .map_err(|e| e.to_string())?;
 
-            // 同步收件箱
-            let count = imap_service.sync_folder(account_id, db, "INBOX")
-                .map_err(|e| e.to_string())?;
+    // 连接 IMAP 并同步（暂时使用占位实现）
+    let mut imap_service = services::imap_service::ImapService::new();
 
-            imap_service.logout()
-                .map_err(|e| e.to_string())?;
+    // 同步收件箱
+    let count = imap_service.sync_folder(account_id, &db, "INBOX")
+        .map_err(|e| e.to_string())?;
 
-            // 更新最后同步时间
-            services::account_service::update_last_sync(db, account_id)
-                .await
-                .map_err(|e| e.to_string())?;
+    imap_service.logout()
+        .map_err(|e| e.to_string())?;
 
-            Ok(count)
-        })
-    })
+    // 更新最后同步时间
+    services::account_service::update_last_sync(&db, account_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(count)
 }
 
 #[tauri::command]
 async fn send_email(
-    state: tauri::State<'_, Mutex<DatabaseState>>,
+    state: tauri::State<'_, DatabaseState>,
     request: models::email::SendEmailRequest,
 ) -> Result<String, String> {
-    with_db(&state, |db| {
-        tauri::async_runtime::block_on(async move {
-            // 获取账号信息
-            let account = services::account_service::get_by_id(db, request.account_id)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "账号不存在".to_string())?;
+    let db = state.clone_conn();
 
-            // 解密密码
-            let encryptor = crypto::PasswordEncryptor::new()
-                .map_err(|e| e.to_string())?;
-            let password = encryptor.decrypt(&account.password)
-                .map_err(|e| e.to_string())?;
+    // 获取账号信息
+    let account = services::account_service::get_by_id(&db, request.account_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "账号不存在".to_string())?;
 
-            // 连接 SMTP 并发送
-            let mut smtp_service = services::smtp_service::SmtpService::new();
+    // 解密密码
+    let encryptor = crypto::PasswordEncryptor::new()
+        .map_err(|e| e.to_string())?;
+    let password = encryptor.decrypt(&account.password)
+        .map_err(|e| e.to_string())?;
 
-            let host = account.smtp_host.unwrap_or_else(|| {
-                match account.provider.as_str() {
-                    "gmail" => "smtp.gmail.com",
-                    "outlook" | "hotmail" => "smtp-mail.outlook.com",
-                    "icloud" => "smtp.mail.me.com",
-                    "yahoo" => "smtp.mail.yahoo.com",
-                    _ => "smtp.example.com",
-                }.to_string()
-            });
+    // 连接 SMTP 并发送
+    let mut smtp_service = services::smtp_service::SmtpService::new();
 
-            let port = account.smtp_port.unwrap_or(587) as u16;
+    let host = account.smtp_host.unwrap_or_else(|| {
+        match account.provider.as_str() {
+            "gmail" => "smtp.gmail.com",
+            "outlook" | "hotmail" => "smtp-mail.outlook.com",
+            "icloud" => "smtp.mail.me.com",
+            "yahoo" => "smtp.mail.yahoo.com",
+            _ => "smtp.example.com",
+        }.to_string()
+    });
 
-            smtp_service.connect(&host, port, &account.email, services::smtp_service::SmtpAuth::Password(password))
-                .map_err(|e| e.to_string())?;
+    let port = account.smtp_port.unwrap_or(587) as u16;
 
-            let to_addresses: Vec<String> = request.to.iter()
-                .map(|a| a.email.clone())
-                .collect();
+    smtp_service.connect(&host, port, &account.email, services::smtp_service::SmtpAuth::Password(password))
+        .map_err(|e| e.to_string())?;
 
-            let message_id = smtp_service.send_email(
-                &account.email,
-                to_addresses,
-                &request.subject,
-                &request.body_html,
-                request.body_text.as_deref(),
-            ).map_err(|e| e.to_string())?;
+    let to_addresses: Vec<String> = request.to.iter()
+        .map(|a| a.email.clone())
+        .collect();
 
-            // TODO: 保存到已发送文件夹
-            tracing::info!("邮件已发送: {}", message_id);
+    let message_id = smtp_service.send_email(
+        &account.email,
+        to_addresses,
+        &request.subject,
+        &request.body_html,
+        request.body_text.as_deref(),
+    ).map_err(|e| e.to_string())?;
 
-            Ok(message_id)
-        })
-    })
+    // TODO: 保存到已发送文件夹
+    tracing::info!("邮件已发送: {}", message_id);
+
+    Ok(message_id)
 }
 
 // ============================================================
@@ -462,7 +422,7 @@ pub fn run() {
                     .expect("数据库初始化失败");
 
                 // 将数据库连接存储到应用状态中
-                app.manage(Mutex::new(DatabaseState(db)));
+                app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
                 // 初始化 OAuth 服务
                 app.manage(StdMutex::new(OAuthState(
