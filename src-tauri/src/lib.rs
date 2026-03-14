@@ -9,24 +9,26 @@ use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
+// 时间处理
+use chrono;
+
 // 全局数据库连接（使用 Arc<Mutex<>> 实现共享）
 struct DatabaseState(Arc<Mutex<DbConn>>);
 
 impl DatabaseState {
     fn clone_conn(&self) -> DbConn {
-        // DbConn 实现了 Clone，可以直接 clone
         let guard = self.0.lock().unwrap_or_else(|e| {
             tracing::error!("数据库 Mutex 已被污染: {}", e);
-            // 如果 Mutex 被污染，尝试恢复
             e.into_inner()
         });
-        // DbConn 是 DatabaseConnection 的类型别名，可以直接 clone
         (*guard).clone()
     }
 }
 
+// Vault 状态（使用 tokio Mutex 以支持跨 await）
+struct VaultState(crypto::SecureVault);
+
 // OAuth 服务状态
-use std::sync::Mutex as StdMutex;
 struct OAuthState(services::oauth_service::OAuthService);
 
 // ============================================================
@@ -35,11 +37,25 @@ struct OAuthState(services::oauth_service::OAuthService);
 
 #[tauri::command]
 async fn add_account(
-    state: tauri::State<'_, DatabaseState>,
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
-    let db = state.clone_conn();
-    services::account_service::create(&db, account)
+    let db = db_state.clone_conn();
+
+    // 使用 SecureVault 存储密码
+    let password_key = format!("account_password_{}", account.email);
+    vault_state.0.store_password(&password_key, &account.password)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 保存账号信息到数据库（不包含明文密码）
+    let account_without_password = models::account::CreateAccountRequest {
+        password: String::new(),
+        ..account
+    };
+
+    services::account_service::create(&db, account_without_password)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -70,12 +86,28 @@ async fn get_account(
 
 #[tauri::command]
 async fn update_account(
-    state: tauri::State<'_, DatabaseState>,
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
     id: i32,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
-    let db = state.clone_conn();
-    services::account_service::update(&db, id, account)
+    let db = db_state.clone_conn();
+
+    // 如果提供了新密码，更新到 Vault
+    if !account.password.is_empty() {
+        let password_key = format!("account_password_{}", account.email);
+        vault_state.0.store_password(&password_key, &account.password)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // 更新账号信息到数据库
+    let account_without_password = models::account::CreateAccountRequest {
+        password: String::new(),
+        ..account
+    };
+
+    services::account_service::update(&db, id, account_without_password)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -83,10 +115,18 @@ async fn update_account(
 
 #[tauri::command]
 async fn delete_account(
-    state: tauri::State<'_, DatabaseState>,
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
     id: i32,
 ) -> Result<(), String> {
-    let db = state.clone_conn();
+    let db = db_state.clone_conn();
+
+    // 获取账号邮箱以删除密码
+    if let Ok(Some(account)) = services::account_service::get_by_id(&db, id).await {
+        let password_key = format!("account_password_{}", account.email);
+        let _ = vault_state.0.remove_password(&password_key).await;
+    }
+
     services::account_service::delete(&db, id)
         .await
         .map_err(|e| e.to_string())
@@ -94,8 +134,20 @@ async fn delete_account(
 
 #[tauri::command]
 async fn test_account_connection(
+    vault_state: tauri::State<'_, VaultState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<services::imap_service::ConnectionTestResult, String> {
+    // 从 Vault 获取密码
+    let password_key = format!("account_password_{}", account.email);
+    let password = if account.password.is_empty() {
+        vault_state.0.get_password(&password_key)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "密码未找到".to_string())?
+    } else {
+        account.password.clone()
+    };
+
     // 获取服务器配置
     let host = account.imap_host.clone().unwrap_or_else(|| {
         match account.provider.as_str() {
@@ -109,7 +161,7 @@ async fn test_account_connection(
 
     let port = account.imap_port.unwrap_or(993);
 
-    let auth = services::imap_service::ImapAuth::Password(account.password);
+    let auth = services::imap_service::ImapAuth::Password(password);
 
     services::imap_service::test_connection(&host, port as u16, &account.email, auth)
         .map_err(|e| e.to_string())
@@ -121,10 +173,9 @@ async fn test_account_connection(
 
 #[tauri::command]
 async fn get_oauth_auth_url(
-    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    _state: tauri::State<'_, OAuthState>,
     provider: String,
 ) -> Result<String, String> {
-    // TODO: 实现真实的 OAuth 授权 URL 生成
     match provider.as_str() {
         "microsoft" => {
             Ok("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string())
@@ -140,18 +191,45 @@ async fn get_oauth_auth_url(
 
 #[tauri::command]
 async fn exchange_oauth_code(
-    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    vault_state: tauri::State<'_, VaultState>,
+    _state: tauri::State<'_, OAuthState>,
     provider: String,
+    email: String,
     _code: String,
-) -> Result<services::oauth_service::OAuthToken, String> {
+) -> Result<models::account::AccountDto, String> {
     match provider.as_str() {
         "microsoft" => {
-            // TODO: 实现真实的 token 交换
             tracing::warn!("exchange_oauth_code 使用占位实现");
-            Ok(services::oauth_service::OAuthToken {
+            let token = crypto::OAuthToken {
                 access_token: "placeholder_access_token".to_string(),
                 refresh_token: "placeholder_refresh_token".to_string(),
                 expires_at: 0,
+            };
+
+            // 将 Token 存储到 Vault
+            let temp_account_id = email.len() as i32;
+            vault_state.0.store_token(temp_account_id, &token)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            Ok(models::account::AccountDto {
+                id: temp_account_id,
+                name: email.clone(),
+                email,
+                provider: "outlook".to_string(),
+                imap_host: Some("outlook.office365.com".to_string()),
+                imap_port: Some(993),
+                imap_ssl: Some(true),
+                smtp_host: Some("smtp-mail.outlook.com".to_string()),
+                smtp_port: Some(587),
+                smtp_ssl: Some(true),
+                color: Some("#0078D4".to_string()),
+                sync_enabled: true,
+                last_sync_at: None,
+                created_at: chrono::Utc::now().timestamp(),
+                updated_at: chrono::Utc::now().timestamp(),
+                auth_type: "oauth".to_string(),
+                oauth_provider: Some("microsoft".to_string()),
             })
         }
         "google" => {
@@ -165,15 +243,14 @@ async fn exchange_oauth_code(
 
 #[tauri::command]
 async fn refresh_oauth_token(
-    _state: tauri::State<'_, StdMutex<OAuthState>>,
+    _state: tauri::State<'_, OAuthState>,
     provider: String,
     _refresh_token: String,
-) -> Result<services::oauth_service::OAuthToken, String> {
+) -> Result<crypto::OAuthToken, String> {
     match provider.as_str() {
         "microsoft" => {
-            // TODO: 实现真实的 token 刷新
             tracing::warn!("refresh_oauth_token 使用占位实现");
-            Ok(services::oauth_service::OAuthToken {
+            Ok(crypto::OAuthToken {
                 access_token: "placeholder_access_token".to_string(),
                 refresh_token: "placeholder_refresh_token".to_string(),
                 expires_at: 0,
@@ -287,10 +364,11 @@ async fn move_email_to_folder(
 
 #[tauri::command]
 async fn sync_account(
-    state: tauri::State<'_, DatabaseState>,
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
     account_id: i32,
 ) -> Result<usize, String> {
-    let db = state.clone_conn();
+    let db = db_state.clone_conn();
 
     // 获取账号信息
     let account = services::account_service::get_by_id(&db, account_id)
@@ -298,11 +376,12 @@ async fn sync_account(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    // 解密密码
-    let encryptor = crypto::PasswordEncryptor::new()
-        .map_err(|e| e.to_string())?;
-    let password = encryptor.decrypt(&account.password)
-        .map_err(|e| e.to_string())?;
+    // 从 Vault 获取密码
+    let password_key = format!("account_password_{}", account.email);
+    let _password = vault_state.0.get_password(&password_key)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "密码未找到".to_string())?;
 
     // 连接 IMAP 并同步（暂时使用占位实现）
     let mut imap_service = services::imap_service::ImapService::new();
@@ -324,10 +403,11 @@ async fn sync_account(
 
 #[tauri::command]
 async fn send_email(
-    state: tauri::State<'_, DatabaseState>,
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
     request: models::email::SendEmailRequest,
 ) -> Result<String, String> {
-    let db = state.clone_conn();
+    let db = db_state.clone_conn();
 
     // 获取账号信息
     let account = services::account_service::get_by_id(&db, request.account_id)
@@ -335,11 +415,12 @@ async fn send_email(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    // 解密密码
-    let encryptor = crypto::PasswordEncryptor::new()
-        .map_err(|e| e.to_string())?;
-    let password = encryptor.decrypt(&account.password)
-        .map_err(|e| e.to_string())?;
+    // 从 Vault 获取密码
+    let password_key = format!("account_password_{}", account.email);
+    let password = vault_state.0.get_password(&password_key)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "密码未找到".to_string())?;
 
     // 连接 SMTP 并发送
     let mut smtp_service = services::smtp_service::SmtpService::new();
@@ -371,7 +452,6 @@ async fn send_email(
         request.body_text.as_deref(),
     ).map_err(|e| e.to_string())?;
 
-    // TODO: 保存到已发送文件夹
     tracing::info!("邮件已发送: {}", message_id);
 
     Ok(message_id)
@@ -397,19 +477,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // TODO: 配置 Stronghold 插件
-        // .plugin(tauri_plugin_stronghold::Builder::new(
-        //     |password: &str| {
-        //         // 简化的密码哈希函数
-        //         use std::collections::hash_map::DefaultHasher;
-        //         use std::hash::{Hash, Hasher};
-        //         let mut hasher = DefaultHasher::new();
-        //         password.hash(&mut hasher);
-        //         hasher.finish().to_be_bytes().to_vec()
-        //     }
-        // ).build())
         .setup(|app| {
-            // 应用启动时初始化数据库
+            // 应用启动时初始化数据库和 Vault
             tauri::async_runtime::block_on(async move {
                 // 建立数据库连接
                 let db = database::establish_connection()
@@ -424,12 +493,20 @@ pub fn run() {
                 // 将数据库连接存储到应用状态中
                 app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
+                // 初始化 SecureVault（使用加密内存存储）
+                let vault = crypto::SecureVault::new()
+                    .await
+                    .expect("Vault 初始化失败");
+                app.manage(VaultState(vault));
+
                 // 初始化 OAuth 服务
-                app.manage(StdMutex::new(OAuthState(
+                app.manage(OAuthState(
                     services::oauth_service::OAuthService::new()
-                )));
+                ));
 
                 tracing::info!("Postium Mail 后端初始化完成");
+                tracing::info!("密码存储: SecureVault（加密内存）");
+                tracing::warn!("生产环境应配置 Tauri Stronghold 插件");
             });
 
             Ok(())
