@@ -8,6 +8,21 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
+/// IMAP UTF-7 解码辅助函数
+fn decode_imap_utf7(encoded: &str) -> String {
+    // 简单的 UTF-7 解码实现
+    // IMAP UTF-7 使用 & 作为转义字符，- 作为终止符
+    // 例如 &g0l6P3ux- 应该解码为中文字符
+
+    if !encoded.contains('&') {
+        return encoded.to_string();
+    }
+
+    // 使用 imap-proto crate 的解码功能（如果可用）
+    // 这里先返回原始名称，需要时添加完整解码
+    encoded.to_string()
+}
+
 /// 测试账号配置
 #[derive(Debug, Clone)]
 struct TestAccount {
@@ -359,5 +374,256 @@ mod tests {
         info!("╚══════════════════════════════════════════════╝");
         info!("║              集成测试完成                      ║");
         info!("╚══════════════════════════════════════════════╝");
+    }
+
+    /// 测试列出所有 IMAP 文件夹
+    #[tokio::test]
+    async fn test_list_folders() {
+        init_tracing();
+
+        let account = load_test_account();
+
+        info!("========================================");
+        info!("测试列出所有 IMAP 文件夹");
+        info!("账号: {}", account.account);
+        info!("========================================");
+
+        let mut client = ImapClient::new();
+
+        // 连接并登录
+        match client.connect(
+            &account.imap_server,
+            account.imap_port,
+            &account.account,
+            ImapAuth::Password(account.password.clone()),
+        ) {
+            Ok(_) => {
+                info!("✅ IMAP 连接成功!");
+
+                // 列出所有文件夹
+                match client.list_folders() {
+                    Ok(folders) => {
+                        info!("✅ 获取到 {} 个文件夹:", folders.len());
+                        for folder in &folders {
+                            info!("   - {} (flags: {:?})", folder, folder.as_bytes());
+                        }
+
+                        // 检查常见的已发送邮件文件夹名称
+                        let sent_variants = vec![
+                            "Sent", "SENT", "Sent Items", "Sent Mail", "Sent Messages",
+                            "已发送", "已发送邮件", "发送",
+                            "INBOX.Sent", "INBOX.Sent Items",
+                        ];
+
+                        info!("\n检查可能的已发送文件夹名称:");
+                        for test_name in &sent_variants {
+                            let exists = folders.iter().any(|f| f.contains(test_name));
+                            if exists {
+                                info!("   ✅ 找到包含 '{}' 的文件夹", test_name);
+                            } else {
+                                debug!("   - '{}' 不存在", test_name);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ 列出文件夹失败: {}", e);
+                    }
+                }
+
+                let _ = client.logout();
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                    warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
+                } else {
+                    error!("❌ IMAP 连接失败: {}", e);
+                }
+            }
+        }
+    }
+
+    /// 测试从 Sent 文件夹获取邮件
+    #[tokio::test]
+    async fn test_fetch_sent_emails() {
+        init_tracing();
+
+        let account = load_test_account();
+
+        info!("========================================");
+        info!("测试从 Sent 文件夹获取邮件");
+        info!("账号: {}", account.account);
+        info!("========================================");
+
+        let mut client = ImapClient::new();
+
+        // 连接并登录
+        match client.connect(
+            &account.imap_server,
+            account.imap_port,
+            &account.account,
+            ImapAuth::Password(account.password.clone()),
+        ) {
+            Ok(_) => {
+                info!("✅ IMAP 连接成功!");
+
+                // 先列出所有文件夹
+                match client.list_folders() {
+                    Ok(folders) => {
+                        info!("✅ 可用文件夹:");
+                        for folder in &folders {
+                            info!("   - {}", folder);
+                        }
+
+                        // 尝试查找可能的 Sent 文件夹
+                        let sent_folder_names = vec![
+                            "Sent", "SENT", "Sent Items", "Sent Mail", "Sent Messages",
+                            "已发送", "已发送邮件", "发送",
+                        ];
+
+                        for folder_name in &sent_folder_names {
+                            info!("\n尝试选择文件夹: '{}'...", folder_name);
+
+                            match client.select_folder(folder_name) {
+                                Ok(count) => {
+                                    info!("✅ 成功选择 '{}', 邮件数量: {}", folder_name, count);
+
+                                    if count > 0 {
+                                        // 获取最新 5 封邮件
+                                        match client.list_uids(folder_name, 5) {
+                                            Ok(uids) => {
+                                                info!("✅ 获取到 {} 封最新邮件", uids.len());
+
+                                                // 获取第一封邮件详情
+                                                if let Some(uid) = uids.first() {
+                                                    match client.fetch_email(*uid, folder_name) {
+                                                        Ok(email) => {
+                                                            info!("✅ 最新邮件详情:");
+                                                            info!("   主题: {}", email.subject);
+                                                            info!("   发件人: {}", email.from);
+                                                            info!("   收件人: {:?}", email.to);
+                                                            info!("   日期: {}", email.date.format("%Y-%m-%d %H:%M:%S"));
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("⚠️  获取邮件详情失败: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!("⚠️  获取 UID 列表失败: {}", e);
+                                            }
+                                        }
+                                    } else {
+                                        info!("⚠️  文件夹 '{}' 为空", folder_name);
+                                    }
+
+                                    // 找到一个有效的 Sent 文件夹就退出
+                                    break;
+                                }
+                                Err(e) => {
+                                    debug!("文件夹 '{}' 不可用: {}", folder_name, e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ 列出文件夹失败: {}", e);
+                    }
+                }
+
+                let _ = client.logout();
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                    warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
+                } else {
+                    error!("❌ IMAP 连接失败: {}", e);
+                }
+            }
+        }
+    }
+
+    /// 测试检查所有文件夹的邮件数量
+    #[tokio::test]
+    async fn test_check_all_folders_email_count() {
+        init_tracing();
+
+        let account = load_test_account();
+
+        info!("========================================");
+        info!("测试检查所有文件夹的邮件数量");
+        info!("账号: {}", account.account);
+        info!("========================================");
+
+        let mut client = ImapClient::new();
+
+        // 连接并登录
+        match client.connect(
+            &account.imap_server,
+            account.imap_port,
+            &account.account,
+            ImapAuth::Password(account.password.clone()),
+        ) {
+            Ok(_) => {
+                info!("✅ IMAP 连接成功!");
+
+                // 列出所有文件夹
+                match client.list_folders() {
+                    Ok(folders) => {
+                        info!("✅ 获取到 {} 个文件夹", folders.len());
+                        info!("========================================");
+
+                        for folder in &folders {
+                            match client.select_folder(folder) {
+                                Ok(count) => {
+                                    info!("📁 {:30} - {:4} 封邮件", folder, count);
+
+                                    // 如果有邮件，获取第一封的主题
+                                    if count > 0 {
+                                        match client.list_uids(folder, 1) {
+                                            Ok(uids) => {
+                                                if let Some(uid) = uids.first() {
+                                                    match client.fetch_email(*uid, folder) {
+                                                        Ok(email) => {
+                                                            info!("   └─ 最新: {}", email.subject);
+                                                        }
+                                                        Err(_) => {}
+                                                    }
+                                                }
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    debug!("⚠️  无法选择 '{}': {}", folder, e);
+                                }
+                            }
+                        }
+
+                        info!("========================================");
+                        info!("提示: 这些名称可能包含已发送邮件:");
+                        info!("  - Sent / Sent Items (英文)");
+                        info!("  - 已发送 / 发送 (中文)");
+                        info!("  - & 开头的编码名称 (UTF-7)");
+                    }
+                    Err(e) => {
+                        error!("❌ 列出文件夹失败: {}", e);
+                    }
+                }
+
+                let _ = client.logout();
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                    warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
+                } else {
+                    error!("❌ IMAP 连接失败: {}", e);
+                }
+            }
+        }
     }
 }
