@@ -114,6 +114,7 @@ pub fn map_folder_name(imap_name: &str) -> String {
         "TRASH" | "DELETED" | "DELETED ITEMS" | "已删除" | "垃圾箱" | "GELÖSCHTE" | "PAPER" => "trash".to_string(),
         "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" | "POSTINI" => "spam".to_string(),
         "ARCHIVE" | "ARCHIVES" | "归档" | "ALL MAIL" => "archive".to_string(),
+        "STARRED" | "星标邮件" | "已加星标" => "starred".to_string(),
         _ => imap_name.to_string(),
     }
 }
@@ -122,6 +123,6 @@ pub fn map_folder_name(imap_name: &str) -> String {
 pub fn is_standard_folder(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
-        "inbox" | "sent" | "drafts" | "spam" | "trash" | "archive"
+        "inbox" | "sent" | "drafts" | "spam" | "trash" | "archive" | "starred"
     )
 }
