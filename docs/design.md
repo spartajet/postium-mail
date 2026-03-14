@@ -587,14 +587,14 @@ const themeOverrides = {
 
 ### P0 - MVP 核心功能
 
-- [ ] 基础三栏布局
-- [ ] 邮件列表展示与选中
-- [ ] 邮件详情查看
-- [ ] 写信（Tiptap 编辑器）+ 发送
-- [ ] 多账号添加（IMAP/SMTP 配置）
-- [ ] 暗色/亮色主题切换
-- [ ] SQLite 初始化 + SeaORM 实体定义（accounts / emails / attachments）
-- [ ] FTS5 全文检索表及 jieba 分词器注册
+- [x] 基础三栏布局
+- [x] 邮件列表展示与选中
+- [x] 邮件详情查看
+- [x] 写信（Tiptap 编辑器）+ 发送
+- [x] 多账号添加（IMAP/SMTP 配置）
+- [x] 暗色/亮色主题切换
+- [x] SQLite 初始化 + SeaORM 实体定义（accounts / emails / attachments）
+- [x] FTS5 全文检索表（jieba 分词器留作后续优化）
 
 ### P1 - AI 核心特性
 
