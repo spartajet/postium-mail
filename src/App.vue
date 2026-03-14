@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from "vue";
+import { onMounted, computed, watch } from "vue";
 import { useEmailStore, useAccountStore, useUIStore, useSyncStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import { CheckCircleOutlined, LightModeOutlined, DarkModeOutlined } from "@vicons/material";
@@ -125,6 +125,14 @@ onMounted(async () => {
     // 日历数据会在 CalendarView 组件中加载
     // 工作流数据会在 WorkflowView 组件中加载
 });
+
+// 监听账号变化，重新获取文件夹统计
+watch(() => accountStore.currentAccount, async (newAccount) => {
+    console.log('[App] 账号变化，重新获取文件夹统计:', newAccount?.id)
+    if (newAccount) {
+        await emailStore.fetchFolderStats()
+    }
+}, { immediate: true })  // immediate: true 确保初始加载时也会执行
 </script>
 
 <template>

@@ -217,17 +217,27 @@ export const useEmailStore = defineStore('email', () => {
     // 使用 folderStats 中的数据，如果没有则返回 0
     const getCount = (folderName: string, isUnread: boolean = false) => {
       const stat = folderStats.value[folderName]
-      return stat ? (isUnread ? stat.unread_count : stat.email_count) : 0
+      const count = stat ? (isUnread ? stat.unread_count : stat.email_count) : 0
+      console.log(`[folderCounts] ${folderName}:`, {
+        stat,
+        isUnread,
+        count,
+        allStats: folderStats.value
+      })
+      return count
     }
 
-    return {
+    const counts = {
       inbox: getCount('inbox', true),
       starred: emails.value.filter(e => e.starred).length, // 星标邮件仍从当前邮件列表计算
-      sent: getCount('sent'),
-      drafts: getCount('drafts'),
+      sent: getCount('sent', true),  // 改为显示未读数
+      drafts: getCount('drafts', true),  // 改为显示未读数
       spam: getCount('spam', true),
       trash: getCount('trash', true),
     }
+
+    console.log('[folderCounts] 最终结果:', counts)
+    return counts
   })
 
   // 当前邮件在列表中的索引
