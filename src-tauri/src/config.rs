@@ -1,11 +1,10 @@
-use std::path::PathBuf;
 use anyhow::Result;
+use std::path::PathBuf;
 
 /// 获取用户数据目录
 /// 默认为 ~/.postium
 pub fn get_data_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("无法找到用户主目录"))?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("无法找到用户主目录"))?;
 
     let postium_dir = home.join(".postium");
 
@@ -17,10 +16,9 @@ pub fn get_data_dir() -> Result<PathBuf> {
 }
 
 /// 获取数据库文件路径
-/// 返回 ~/.postium/postium.db
+/// 返回 ~/.postium/postium.sqlite
 pub fn get_db_path() -> Result<String> {
-    let db_path = get_data_dir()?
-        .join("postium.db");
+    let db_path = get_data_dir()?.join("postium.sqlite");
 
     Ok(db_path
         .to_str()
@@ -55,7 +53,7 @@ mod tests {
     fn test_get_db_path() {
         let path = get_db_path();
         assert!(path.is_ok());
-        assert!(path.unwrap().contains(".postium"));
-        assert!(path.unwrap().contains("postium.db"));
+        assert!(path.as_ref().unwrap().contains(".postium"));
+        assert!(path.as_ref().unwrap().contains("postium.sqlite"));
     }
 }
