@@ -397,6 +397,19 @@ async fn move_email_to_folder(
         .map_err(|e| e.to_string())
 }
 
+/// 获取账号的文件夹统计数据
+#[tauri::command]
+async fn get_folder_stats(
+    state: tauri::State<'_, DatabaseState>,
+    account_id: i32,
+) -> Result<Vec<models::folder::FolderDto>, String> {
+    let db = state.clone_conn();
+    let folders = services::folder_service::get_by_account(&db, account_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(folders.into_iter().map(|f| f.into()).collect())
+}
+
 // ============================================================
 // 邮件同步 Commands
 // ============================================================
@@ -590,6 +603,7 @@ pub fn run() {
             toggle_star,
             delete_emails,
             move_email_to_folder,
+            get_folder_stats,
             // 邮件同步
             sync_account,
             sync_account_with_progress,
