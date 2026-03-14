@@ -1,3 +1,4 @@
+#![allow(dead_code, ambiguous_glob_reexports)]
 mod config;
 mod crypto;
 mod database;
@@ -8,6 +9,7 @@ pub mod services;
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use tauri_plugin_keyring::KeyringExt;
 
 // 时间处理
 
@@ -24,8 +26,10 @@ impl DatabaseState {
     }
 }
 
-// Stronghold Vault 状态
-struct VaultState(std::sync::Arc<tokio::sync::Mutex<crypto::SecureVault>>);
+// Keyring 密钥环状态（存储 AppHandle 以便使用 keyring() 方法）
+struct KeyringState {
+    app_handle: tauri::AppHandle,
+}
 
 // OAuth 服务状态
 struct OAuthState(services::oauth_service::OAuthService);
@@ -37,13 +41,13 @@ struct OAuthState(services::oauth_service::OAuthService);
 #[tauri::command]
 async fn add_account(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    keyring_state: tauri::State<'_, KeyringState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
-    let vault = &vault_state.0;
+    let app_handle = &keyring_state.app_handle;
 
-    services::account_service::create(&db, vault, account)
+    services::account_service::create(&db, app_handle, account)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -75,14 +79,14 @@ async fn get_account(
 #[tauri::command]
 async fn update_account(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    keyring_state: tauri::State<'_, KeyringState>,
     id: i32,
     account: models::account::CreateAccountRequest,
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
-    let vault = &vault_state.0;
+    let app_handle = &keyring_state.app_handle;
 
-    services::account_service::update(&db, vault, id, account)
+    services::account_service::update(&db, app_handle, id, account)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -91,43 +95,35 @@ async fn update_account(
 #[tauri::command]
 async fn delete_account(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    keyring_state: tauri::State<'_, KeyringState>,
     id: i32,
 ) -> Result<(), String> {
     let db = db_state.clone_conn();
-    let vault = &vault_state.0;
+    let app_handle = &keyring_state.app_handle;
 
-    services::account_service::delete(&db, vault, id)
+    services::account_service::delete(&db, app_handle, id)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn test_account_connection(
-    vault_state: tauri::State<'_, VaultState>,
+    _keyring_state: tauri::State<'_, KeyringState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<services::imap_service::ConnectionTestResult, String> {
-    // 从 Stronghold 获取密码
-    let password_key = format!("account_password_{}", account.email);
-    let password = if account.password.is_empty() {
-        let vault = vault_state.0.lock().await;
-        vault.get_password(&password_key).await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "密码未找到".to_string())?
-    } else {
-        account.password.clone()
-    };
+    let password = account.password.clone();
 
     // 获取服务器配置
-    let host = account.imap_host.clone().unwrap_or_else(|| {
-        match account.provider.as_str() {
+    let host = account
+        .imap_host
+        .clone()
+        .unwrap_or_else(|| match account.provider.as_str() {
             "gmail" => "imap.gmail.com".to_string(),
             "outlook" | "hotmail" => "outlook.office365.com".to_string(),
             "icloud" => "imap.mail.me.com".to_string(),
             "yahoo" => "imap.mail.yahoo.com".to_string(),
             _ => "imap.example.com".to_string(),
-        }
-    });
+        });
 
     let port = account.imap_port.unwrap_or(993);
 
@@ -151,14 +147,12 @@ async fn test_email_connection(
     _smtp_ssl: Option<bool>,
 ) -> Result<(), String> {
     // 获取服务器配置
-    let host = imap_host.unwrap_or_else(|| {
-        match provider.as_str() {
-            "gmail" => "imap.gmail.com".to_string(),
-            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
-            "icloud" => "imap.mail.me.com".to_string(),
-            "yahoo" => "imap.mail.yahoo.com".to_string(),
-            _ => "imap.example.com".to_string(),
-        }
+    let host = imap_host.unwrap_or_else(|| match provider.as_str() {
+        "gmail" => "imap.gmail.com".to_string(),
+        "outlook" | "hotmail" => "outlook.office365.com".to_string(),
+        "icloud" => "imap.mail.me.com".to_string(),
+        "yahoo" => "imap.mail.yahoo.com".to_string(),
+        _ => "imap.example.com".to_string(),
     });
 
     let port = imap_port.unwrap_or(993);
@@ -177,10 +171,7 @@ async fn test_email_connection(
 
 /// 验证 OAuth Token 是否有效
 #[tauri::command]
-async fn validate_oauth_token(
-    provider: String,
-    token: String,
-) -> Result<bool, String> {
+async fn validate_oauth_token(provider: String, token: String) -> Result<bool, String> {
     match provider.as_str() {
         "google" => {
             // 使用 Google UserInfo API 验证
@@ -219,18 +210,14 @@ async fn get_oauth_auth_url(
         "microsoft" => {
             Ok("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string())
         }
-        "google" => {
-            Err("Google OAuth 暂未实现，请使用 Microsoft OAuth".to_string())
-        }
-        _ => {
-            Err(format!("不支持的 OAuth 提供商: {}", provider))
-        }
+        "google" => Err("Google OAuth 暂未实现，请使用 Microsoft OAuth".to_string()),
+        _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
     }
 }
 
 #[tauri::command]
 async fn exchange_oauth_code(
-    vault_state: tauri::State<'_, VaultState>,
+    keyring_state: tauri::State<'_, KeyringState>,
     _state: tauri::State<'_, OAuthState>,
     provider: String,
     email: String,
@@ -245,10 +232,13 @@ async fn exchange_oauth_code(
                 expires_at: 0,
             };
 
-            // 将 Token 存储到 Stronghold
+            // 将 Token 存储到 Keyring（JSON 序列化）
             let temp_account_id = email.len() as i32;
-            let vault = vault_state.0.lock().await;
-            vault.store_token(temp_account_id, &token).await
+            let username = crypto::oauth_username(temp_account_id);
+            let token_json = serde_json::to_string(&token).map_err(|e| e.to_string())?;
+            let keyring = keyring_state.app_handle.keyring();
+            keyring
+                .set_password(crypto::KEYRING_SERVICE, &username, &token_json)
                 .map_err(|e| e.to_string())?;
 
             Ok(models::account::AccountDto {
@@ -271,12 +261,8 @@ async fn exchange_oauth_code(
                 oauth_provider: Some("microsoft".to_string()),
             })
         }
-        "google" => {
-            Err("Google OAuth 暂未实现".to_string())
-        }
-        _ => {
-            Err(format!("不支持的 OAuth 提供商: {}", provider))
-        }
+        "google" => Err("Google OAuth 暂未实现".to_string()),
+        _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
     }
 }
 
@@ -295,12 +281,8 @@ async fn refresh_oauth_token(
                 expires_at: 0,
             })
         }
-        "google" => {
-            Err("Google OAuth 暂未实现".to_string())
-        }
-        _ => {
-            Err(format!("不支持的 OAuth 提供商: {}", provider))
-        }
+        "google" => Err("Google OAuth 暂未实现".to_string()),
+        _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
     }
 }
 
@@ -317,8 +299,13 @@ async fn list_emails(
     limit: usize,
 ) -> Result<services::email_service::EmailListResponse, String> {
     tracing::info!("📨 [list_emails] ========== 邮件列表请求 ==========");
-    tracing::info!("📨 [list_emails] 参数: account_id={}, folder='{}', page={}, limit={}",
-        account_id, folder, page, limit);
+    tracing::info!(
+        "📨 [list_emails] 参数: account_id={}, folder='{}', page={}, limit={}",
+        account_id,
+        folder,
+        page,
+        limit
+    );
 
     let db = state.clone_conn();
 
@@ -329,8 +316,11 @@ async fn list_emails(
             e.to_string()
         })?;
 
-    tracing::info!("📨 [list_emails] ✅ 查询成功: 返回 {} 封邮件，总计 {} 封",
-        result.emails.len(), result.total);
+    tracing::info!(
+        "📨 [list_emails] ✅ 查询成功: 返回 {} 封邮件，总计 {} 封",
+        result.emails.len(),
+        result.total
+    );
 
     tracing::info!("📨 [list_emails] ========== 请求结束 ==========");
 
@@ -356,14 +346,9 @@ async fn search_emails_fts(
     limit: Option<u64>,
 ) -> Result<Vec<services::search_service::SearchResult>, String> {
     let db = state.clone_conn();
-    services::search_service::SearchService::search_emails(
-        &db,
-        account_id,
-        &query,
-        limit,
-    )
-    .await
-    .map_err(|e| e.to_string())
+    services::search_service::SearchService::search_emails(&db, account_id, &query, limit)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -420,18 +405,18 @@ async fn move_email_to_folder(
 #[tauri::command]
 async fn sync_account_with_progress(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    _keyring_state: tauri::State<'_, KeyringState>,
     app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<(), String> {
     let db = std::sync::Arc::new(db_state.clone_conn());
-    let vault = vault_state.0.clone();
 
     // 创建 SyncManager
-    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle.clone(), vault);
+    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle.clone());
 
     // 执行同步
-    let result = sync_manager.sync_account(account_id)
+    let result = sync_manager
+        .sync_account(account_id)
         .await
         .map_err(|e| format!("同步失败: {}", e))?;
 
@@ -451,18 +436,18 @@ async fn sync_account_with_progress(
 #[tauri::command]
 async fn sync_account(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    _keyring_state: tauri::State<'_, KeyringState>,
     app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<usize, String> {
     let db = std::sync::Arc::new(db_state.clone_conn());
-    let vault = vault_state.0.clone();
 
     // 创建 SyncManager
-    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle, vault);
+    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle);
 
     // 执行同步
-    let result = sync_manager.sync_account(account_id)
+    let result = sync_manager
+        .sync_account(account_id)
         .await
         .map_err(|e| format!("同步失败: {}", e))?;
 
@@ -472,7 +457,7 @@ async fn sync_account(
 #[tauri::command]
 async fn send_email(
     db_state: tauri::State<'_, DatabaseState>,
-    vault_state: tauri::State<'_, VaultState>,
+    keyring_state: tauri::State<'_, KeyringState>,
     request: models::email::SendEmailRequest,
 ) -> Result<String, String> {
     let db = db_state.clone_conn();
@@ -483,10 +468,11 @@ async fn send_email(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    // 从 Stronghold 获取密码
-    let password_key = format!("password_{}", request.account_id);
-    let vault = vault_state.0.lock().await;
-    let password = vault.get_password(&password_key).await
+    // 从 Keyring 获取密码
+    let username = crypto::password_username(request.account_id);
+    let keyring = keyring_state.app_handle.keyring();
+    let password = keyring
+        .get_password(crypto::KEYRING_SERVICE, &username)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
@@ -500,25 +486,32 @@ async fn send_email(
             "icloud" => "smtp.mail.me.com",
             "yahoo" => "smtp.mail.yahoo.com",
             _ => "smtp.example.com",
-        }.to_string()
+        }
+        .to_string()
     });
 
     let port = account.smtp_port.unwrap_or(587) as u16;
 
-    smtp_service.connect(&host, port, &account.email, services::smtp_service::SmtpAuth::Password(password))
+    smtp_service
+        .connect(
+            &host,
+            port,
+            &account.email,
+            services::smtp_service::SmtpAuth::Password(password),
+        )
         .map_err(|e| e.to_string())?;
 
-    let to_addresses: Vec<String> = request.to.iter()
-        .map(|a| a.email.clone())
-        .collect();
+    let to_addresses: Vec<String> = request.to.iter().map(|a| a.email.clone()).collect();
 
-    let message_id = smtp_service.send_email(
-        &account.email,
-        to_addresses,
-        &request.subject,
-        &request.body_html,
-        request.body_text.as_deref(),
-    ).map_err(|e| e.to_string())?;
+    let message_id = smtp_service
+        .send_email(
+            &account.email,
+            to_addresses,
+            &request.subject,
+            &request.body_html,
+            request.body_text.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
 
     tracing::info!("邮件已发送: {}", message_id);
 
@@ -545,28 +538,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // 配置 Stronghold 插件（仍然配置以支持其他功能）
-        .plugin(tauri_plugin_stronghold::Builder::new(|password: &str| {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(password.as_bytes());
-            hasher.update(b"postium-mail-salt");
-            hasher.finalize().to_vec()
-        }).build())
+        // Keyring 插件（系统原生密钥链）
+        .plugin(tauri_plugin_keyring::init())
         .setup(|app| {
-            // 应用启动时初始化数据库和 Stronghold
+            // 应用启动时初始化数据库和 Keyring
             tauri::async_runtime::block_on(async move {
-                // 建立 Stronghold vault 目录
-                let vault_path = crypto::get_vault_path()
-                    .expect("无法获取 vault 路径");
-                tracing::info!("Stronghold vault: {}", vault_path);
-
-                // 初始化 SecureVault（使用 IOTA Stronghold）
-                let vault = crypto::SecureVault::new()
-                    .await
-                    .expect("SecureVault 初始化失败");
-                app.manage(VaultState(std::sync::Arc::new(tokio::sync::Mutex::new(vault))));
-
                 // 建立数据库连接
                 let db = database::establish_connection()
                     .await
@@ -581,12 +557,13 @@ pub fn run() {
                 app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
                 // 初始化 OAuth 服务
-                app.manage(OAuthState(
-                    services::oauth_service::OAuthService::new()
-                ));
+                app.manage(OAuthState(services::oauth_service::OAuthService::new()));
+
+                // 存储 AppHandle 到 KeyringState，用于后续访问 keyring
+                app.manage(KeyringState { app_handle: app.handle().clone() });
 
                 tracing::info!("Postium Mail 后端初始化完成");
-                tracing::info!("密码存储: Tauri Stronghold (官方安全存储)");
+                tracing::info!("密码存储: 操作系统原生密钥链 (Tauri Plugin Keyring)");
             });
 
             Ok(())

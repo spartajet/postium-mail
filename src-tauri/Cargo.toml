@@ -47,10 +47,8 @@ url = "2.5"
 
 getrandom = "0.4"
 hex = "0.4"
-iota_stronghold = "=1.0"
-sha2 = "0.10"
-# Stronghold 安全存储
-tauri-plugin-stronghold = "2"
+# Keyring 安全存储（系统原生密钥链）
+tauri-plugin-keyring = "0.1"
 
 # 错误处理
 anyhow = "1.0"
