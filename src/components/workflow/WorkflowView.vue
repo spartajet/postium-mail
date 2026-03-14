@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useWorkflowStore, useUIStore } from "@/stores";
-import type { NodeType, WorkflowNode } from "@/types";
+import type { NodeType } from "@/types";
 import {
     AccountTreeOutlined,
     SaveOutlined,
@@ -172,14 +172,6 @@ function selectNode(nodeId: string | null) {
     selectedNodeId.value = nodeId;
     workflowStore.selectNode(nodeId);
     showConfigPanel.value = nodeId !== null;
-}
-
-// 更新节点位置
-function updateNodePosition(
-    nodeId: string,
-    position: { x: number; y: number },
-) {
-    workflowStore.updateNodePosition(nodeId, position);
 }
 
 // 删除节点

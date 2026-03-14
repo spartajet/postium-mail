@@ -1,0 +1,306 @@
+use sea_orm::*;
+use anyhow::{anyhow, Result};
+use crate::models::{email, attachment, EmailEntity, AttachmentEntity};
+use serde_json::{json, Value};
+
+/// 邮件列表响应
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmailListResponse {
+    pub emails: Vec<email::EmailListItem>,
+    pub total: u64,
+    pub page: usize,
+    pub page_size: usize,
+}
+
+/// 获取邮件列表（分页）
+pub async fn list(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    page: usize,
+    limit: usize,
+) -> Result<EmailListResponse> {
+    let page_size = limit;
+    let offset = page * page_size;
+
+    // 获取总数
+    let total = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .count(db)
+        .await
+        .map_err(|e| anyhow!("获取邮件总数失败: {}", e))?;
+
+    // 获取邮件列表
+    let emails = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .order_by_desc(email::Column::ReceivedAt)
+        .paginate(db, page_size as u64)
+        .fetch_page(offset as u64)
+        .await
+        .map_err(|e| anyhow!("获取邮件列表失败: {}", e))?;
+
+    // 转换为列表项
+    let mut items = Vec::new();
+    for email in emails {
+        // 获取附件数量
+        let attachment_count = AttachmentEntity::find()
+            .filter(attachment::Column::EmailId.eq(email.id))
+            .count(db)
+            .await
+            .map_err(|e| anyhow!("获取附件数量失败: {}", e))?;
+
+        // 生成摘要
+        let snippet = email.body_text
+            .as_ref()
+            .map(|t| {
+                t.chars()
+                    .take(200)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            });
+
+        items.push(email::EmailListItem {
+            id: email.id,
+            account_id: email.account_id,
+            folder: email.folder,
+            subject: email.subject,
+            sender_name: email.sender_name,
+            sender_email: email.sender_email,
+            snippet,
+            has_attachment: attachment_count > 0,
+            attachment_count: attachment_count as i32,
+            is_read: email.is_read,
+            is_starred: email.is_starred,
+            is_draft: email.is_draft,
+            sent_at: email.sent_at,
+            received_at: email.received_at,
+        });
+    }
+
+    Ok(EmailListResponse {
+        emails: items,
+        total,
+        page,
+        page_size,
+    })
+}
+
+/// 根据 ID 获取邮件详情
+pub async fn get_detail(db: &DbConn, id: i32) -> Result<email::EmailDetail> {
+    let email = EmailEntity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| anyhow!("获取邮件失败: {}", e))?
+        .ok_or_else(|| anyhow!("邮件不存在"))?;
+
+    // 获取附件列表
+    let attachments = AttachmentEntity::find()
+        .filter(attachment::Column::EmailId.eq(id))
+        .all(db)
+        .await
+        .map_err(|e| anyhow!("获取附件列表失败: {}", e))?;
+
+    let attachment_infos: Vec<email::AttachmentInfo> = attachments
+        .into_iter()
+        .map(|a| email::AttachmentInfo {
+            id: a.id,
+            filename: a.filename,
+            content_type: a.content_type,
+            size: a.size as i64,
+            path: a.path,
+        })
+        .collect();
+
+    // 解析收件人列表
+    let recipients: Vec<email::EmailAddress> = serde_json::from_str(&email.recipient_emails)
+        .unwrap_or_default();
+
+    // 解析抄送列表
+    let cc: Vec<email::EmailAddress> = email.cc_emails
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    // 解析密送列表
+    let bcc: Vec<email::EmailAddress> = email.bcc_emails
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    Ok(email::EmailDetail {
+        id: email.id,
+        account_id: email.account_id,
+        folder: email.folder,
+        uid: email.uid,
+        message_id: email.message_id,
+        subject: email.subject,
+        sender_name: email.sender_name,
+        sender_email: email.sender_email,
+        recipients,
+        cc,
+        bcc,
+        body_text: email.body_text,
+        body_html: email.body_html,
+        is_read: email.is_read,
+        is_starred: email.is_starred,
+        is_draft: email.is_draft,
+        sent_at: email.sent_at,
+        received_at: email.received_at,
+        created_at: email.created_at,
+        updated_at: email.updated_at,
+        attachments: attachment_infos,
+    })
+}
+
+/// 全文搜索邮件
+pub async fn search(
+    db: &DbConn,
+    query: &str,
+    account_id: Option<i32>,
+    limit: Option<u64>,
+) -> Result<Vec<email::EmailListItem>> {
+    let limit = limit.unwrap_or(50);
+
+    // 使用 FTS5 搜索
+    let sql = if let Some(acc_id) = account_id {
+        format!(
+            "SELECT e.* FROM emails e \
+             INNER JOIN emails_fts f ON e.id = f.rowid \
+             WHERE emails_fts MATCH ? AND e.account_id = ? \
+             ORDER BY e.received_at DESC \
+             LIMIT ?"
+        )
+    } else {
+        format!(
+            "SELECT e.* FROM emails e \
+             INNER JOIN emails_fts f ON e.id = f.rowid \
+             WHERE emails_fts MATCH ? \
+             ORDER BY e.received_at DESC \
+             LIMIT ?"
+        )
+    };
+
+    let stmt = if let Some(acc_id) = account_id {
+        Statement::from_sql_and_values(
+            db.get_database_backend(),
+            sql,
+            [query.into(), acc_id.into(), limit.into()],
+        )
+    } else {
+        Statement::from_sql_and_values(
+            db.get_database_backend(),
+            sql,
+            [query.into(), limit.into()],
+        )
+    };
+
+    // 执行查询
+    let results = EmailEntity::find()
+        .from_raw_sql(stmt)
+        .all(db)
+        .await
+        .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+
+    // 转换为列表项
+    let mut items = Vec::new();
+    for email in results {
+        let snippet = email.body_text
+            .as_ref()
+            .map(|t| {
+                t.chars()
+                    .take(200)
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            });
+
+        items.push(email::EmailListItem {
+            id: email.id,
+            account_id: email.account_id,
+            folder: email.folder,
+            subject: email.subject,
+            sender_name: email.sender_name,
+            sender_email: email.sender_email,
+            snippet,
+            has_attachment: false,  // 搜索时不查询附件
+            attachment_count: 0,
+            is_read: email.is_read,
+            is_starred: email.is_starred,
+            is_draft: email.is_draft,
+            sent_at: email.sent_at,
+            received_at: email.received_at,
+        });
+    }
+
+    Ok(items)
+}
+
+/// 更新已读状态
+pub async fn update_read_status(db: &DbConn, id: i32, is_read: bool) -> Result<()> {
+    let email = EmailEntity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| anyhow!("获取邮件失败: {}", e))?
+        .ok_or_else(|| anyhow!("邮件不存在"))?;
+
+    let mut email: email::ActiveModel = email.into();
+    email.is_read = Set(is_read);
+
+    email.update(db)
+        .await
+        .map_err(|e| anyhow!("更新已读状态失败: {}", e))?;
+
+    Ok(())
+}
+
+/// 切换星标状态
+pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool> {
+    let email = EmailEntity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| anyhow!("获取邮件失败: {}", e))?
+        .ok_or_else(|| anyhow!("邮件不存在"))?;
+
+    let new_status = !email.is_starred;
+
+    let mut email: email::ActiveModel = email.into();
+    email.is_starred = Set(new_status);
+
+    email.update(db)
+        .await
+        .map_err(|e| anyhow!("更新星标状态失败: {}", e))?;
+
+    Ok(new_status)
+}
+
+/// 批量删除邮件
+pub async fn batch_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize> {
+    let result = EmailEntity::delete_many()
+        .filter(email::Column::Id.is_in(ids))
+        .exec(db)
+        .await
+        .map_err(|e| anyhow!("删除邮件失败: {}", e))?;
+
+    Ok(result.rows_affected as usize)
+}
+
+/// 移动邮件到文件夹
+pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<()> {
+    let email = EmailEntity::find_by_id(id)
+        .one(db)
+        .await
+        .map_err(|e| anyhow!("获取邮件失败: {}", e))?
+        .ok_or_else(|| anyhow!("邮件不存在"))?;
+
+    let mut email: email::ActiveModel = email.into();
+    email.folder = Set(folder.to_string());
+
+    email.update(db)
+        .await
+        .map_err(|e| anyhow!("移动邮件失败: {}", e))?;
+
+    Ok(())
+}

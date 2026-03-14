@@ -8,18 +8,59 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "postium_mail_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+# 数据库相关
+sea-orm = { version = "0.12", features = [
+  "macros",
+  "runtime-tokio-rustls",
+  "sqlx-sqlite"
+] }
+sqlx = { version = "0.7", features = [
+  "chrono",
+  "runtime-tokio-rustls",
+  "sqlite"
+] }
+
+# 异步运行时
+tokio = { version = "1.35", features = ["full"] }
+
+# 时间处理
+chrono = "0.4"
+
+# 邮件协议
+imap = { version = "3.0.0-alpha.15" }
+lettre = "0.11"
+mail-parser = "0.9"
+native-tls = "0.2"
+
+# 密码加密
+aes-gcm = "0.10"
+base64 = "0.21"
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# 环境变量
+dotenv = "0.15"
+
+# 文件系统
+dirs = "5.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-[dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-

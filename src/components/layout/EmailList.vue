@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useEmailStore, useUIStore } from "@/stores";
 import { useI18n } from "vue-i18n";
 import { formatDistanceToNow } from "date-fns";
