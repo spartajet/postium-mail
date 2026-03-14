@@ -7,7 +7,7 @@ pub mod services;
 
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 // 时间处理
 use chrono;
@@ -138,9 +138,78 @@ async fn test_account_connection(
         .map_err(|e| e.to_string())
 }
 
+/// 测试邮箱连接（用于添加账号前验证）
+#[tauri::command]
+async fn test_email_connection(
+    email: String,
+    password: String,
+    provider: String,
+    imap_host: Option<String>,
+    imap_port: Option<u16>,
+    imap_ssl: Option<bool>,
+    _smtp_host: Option<String>,
+    _smtp_port: Option<u16>,
+    _smtp_ssl: Option<bool>,
+) -> Result<(), String> {
+    // 获取服务器配置
+    let host = imap_host.unwrap_or_else(|| {
+        match provider.as_str() {
+            "gmail" => "imap.gmail.com".to_string(),
+            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
+            "icloud" => "imap.mail.me.com".to_string(),
+            "yahoo" => "imap.mail.yahoo.com".to_string(),
+            _ => "imap.example.com".to_string(),
+        }
+    });
+
+    let port = imap_port.unwrap_or(993);
+
+    let auth = services::imap_service::ImapAuth::Password(password);
+
+    services::imap_service::test_connection(&host, port, &email, auth)
+        .map_err(|e| format!("IMAP 连接失败: {}", e))?;
+
+    Ok(())
+}
+
 // ============================================================
 // OAuth 2.0 Commands
 // ============================================================
+
+/// 验证 OAuth Token 是否有效
+#[tauri::command]
+async fn validate_oauth_token(
+    provider: String,
+    token: String,
+) -> Result<bool, String> {
+    match provider.as_str() {
+        "google" => {
+            // 使用 Google UserInfo API 验证
+            let client = reqwest::Client::new();
+            let response = client
+                .get("https://www.googleapis.com/oauth2/v3/userinfo")
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| format!("请求失败: {}", e))?;
+
+            Ok(response.status().is_success())
+        }
+        "microsoft" => {
+            // 使用 Microsoft Graph API 验证
+            let client = reqwest::Client::new();
+            let response = client
+                .get("https://graph.microsoft.com/v1.0/me")
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| format!("请求失败: {}", e))?;
+
+            Ok(response.status().is_success())
+        }
+        _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
+    }
+}
 
 #[tauri::command]
 async fn get_oauth_auth_url(
@@ -248,10 +317,25 @@ async fn list_emails(
     page: usize,
     limit: usize,
 ) -> Result<services::email_service::EmailListResponse, String> {
+    tracing::info!("📨 [list_emails] ========== 邮件列表请求 ==========");
+    tracing::info!("📨 [list_emails] 参数: account_id={}, folder='{}', page={}, limit={}",
+        account_id, folder, page, limit);
+
     let db = state.clone_conn();
-    services::email_service::list(&db, account_id, &folder, page, limit)
+
+    let result = services::email_service::list(&db, account_id, &folder, page, limit)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            tracing::error!("📨 [list_emails] ❌ 查询失败: {}", e);
+            e.to_string()
+        })?;
+
+    tracing::info!("📨 [list_emails] ✅ 查询成功: 返回 {} 封邮件，总计 {} 封",
+        result.emails.len(), result.total);
+
+    tracing::info!("📨 [list_emails] ========== 请求结束 ==========");
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -333,6 +417,111 @@ async fn move_email_to_folder(
 // 邮件同步 Commands
 // ============================================================
 
+/// 同步进度事件数据
+#[derive(Clone, serde::Serialize)]
+struct SyncProgressEvent {
+    stage: String,
+    current: usize,
+    total: usize,
+    message: String,
+}
+
+/// 带进度的账号同步命令
+#[tauri::command]
+async fn sync_account_with_progress(
+    db_state: tauri::State<'_, DatabaseState>,
+    vault_state: tauri::State<'_, VaultState>,
+    app_handle: tauri::AppHandle,
+    account_id: i32,
+) -> Result<(), String> {
+    let db = db_state.clone_conn();
+
+    // 获取账号信息
+    let account = services::account_service::get_by_id(&db, account_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "账号不存在".to_string())?;
+
+    // 发送开始事件
+    let event_name = format!("sync-progress-{}", account_id);
+    app_handle
+        .emit(&event_name, SyncProgressEvent {
+            stage: "started".to_string(),
+            current: 0,
+            total: 100,
+            message: "开始同步...".to_string(),
+        })
+        .map_err(|e| format!("发送事件失败: {}", e))?;
+
+    // 从 Stronghold 获取密码
+    let password_key = format!("password_{}", account_id);
+    let vault = vault_state.0.lock().await;
+    let password = vault.get_password(&password_key).await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "密码未找到".to_string())?;
+    drop(vault);
+
+    // 连接 IMAP 并同步
+    let mut imap_service = services::imap_service::ImapService::new();
+
+    // 连接到服务器
+    let host = account.imap_host.unwrap_or_else(|| {
+        match account.provider.as_str() {
+            "gmail" => "imap.gmail.com".to_string(),
+            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
+            "icloud" => "imap.mail.me.com".to_string(),
+            "yahoo" => "imap.mail.yahoo.com".to_string(),
+            _ => "imap.example.com".to_string(),
+        }
+    });
+
+    let port = account.imap_port.unwrap_or(993) as u16;
+    let auth = services::imap_service::ImapAuth::Password(password);
+
+    imap_service.connect(&host, port, &account.email, auth)
+        .map_err(|e| format!("连接失败: {}", e))?;
+
+    // 定义进度回调
+    let app_handle_clone = app_handle.clone();
+    let event_name_for_callback = event_name.clone();
+    let progress_callback = move |current: usize, total: usize, message: String| {
+        let _ = app_handle_clone.emit(&event_name_for_callback, SyncProgressEvent {
+            stage: "syncing".to_string(),
+            current,
+            total,
+            message,
+        });
+    };
+
+    // 同步多个文件夹（INBOX, sent, drafts, spam, trash）
+    let count = imap_service.sync_multiple_folders(
+        account_id,
+        &db,
+        Box::new(progress_callback),
+    ).await
+    .map_err(|e| format!("同步失败: {}", e))?;
+
+    imap_service.logout()
+        .map_err(|e| format!("登出失败: {}", e))?;
+
+    // 更新最后同步时间
+    services::account_service::update_last_sync(&db, account_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 发送完成事件
+    app_handle
+        .emit(&event_name, SyncProgressEvent {
+            stage: "completed".to_string(),
+            current: 100,
+            total: 100,
+            message: format!("同步完成，已同步 {} 封邮件", count),
+        })
+        .map_err(|e| format!("发送事件失败: {}", e))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 async fn sync_account(
     db_state: tauri::State<'_, DatabaseState>,
@@ -348,7 +537,7 @@ async fn sync_account(
         .ok_or_else(|| "账号不存在".to_string())?;
 
     // 从 Stronghold 获取密码
-    let password_key = format!("account_password_{}", account.email);
+    let password_key = format!("password_{}", account_id);
     let vault = vault_state.0.lock().await;
     let _password = vault.get_password(&password_key).await
         .map_err(|e| e.to_string())?
@@ -374,10 +563,16 @@ async fn sync_account(
     imap_service.connect(&host, port, &account.email, auth)
         .map_err(|e| e.to_string())?;
 
-    // 同步收件箱
-    let count = imap_service.sync_folder(account_id, &db, "INBOX")
-        .await
-        .map_err(|e| e.to_string())?;
+    // 同步多个文件夹（INBOX, sent, drafts, spam, trash）
+    let count = imap_service.sync_multiple_folders(
+        account_id,
+        &db,
+        Box::new(|_current, _total, _message| {
+            // 简单的回调，忽略进度更新
+        }),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     imap_service.logout()
         .map_err(|e| e.to_string())?;
@@ -405,7 +600,7 @@ async fn send_email(
         .ok_or_else(|| "账号不存在".to_string())?;
 
     // 从 Stronghold 获取密码
-    let password_key = format!("account_password_{}", account.email);
+    let password_key = format!("password_{}", request.account_id);
     let vault = vault_state.0.lock().await;
     let password = vault.get_password(&password_key).await
         .map_err(|e| e.to_string())?
@@ -520,7 +715,9 @@ pub fn run() {
             update_account,
             delete_account,
             test_account_connection,
+            test_email_connection,
             // OAuth 2.0
+            validate_oauth_token,
             get_oauth_auth_url,
             exchange_oauth_code,
             refresh_oauth_token,
@@ -534,6 +731,7 @@ pub fn run() {
             move_email_to_folder,
             // 邮件同步
             sync_account,
+            sync_account_with_progress,
             send_email,
             // 测试
             greet,

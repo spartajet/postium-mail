@@ -1,6 +1,6 @@
 use crate::config;
 use anyhow::Result;
-use sea_orm::{Database, DbConn, DbErr};
+use sea_orm::{Database, DbConn, DbErr, ConnectOptions};
 
 /// 数据库连接池类型
 pub type DatabaseResult = Result<DbConn, DbErr>;
@@ -15,7 +15,11 @@ pub async fn establish_connection() -> DatabaseResult {
     let normalized_path = db_path.replace('\\', "/");
     let db_url = format!("sqlite://{}?mode=rwc", normalized_path);
 
-    Database::connect(&db_url).await
+    // 配置连接选项，禁用 SQL 日志输出
+    let mut opt = ConnectOptions::new(&db_url);
+    opt.sqlx_logging(false); // 禁用 SQL 日志
+
+    Database::connect(opt).await
 }
 
 /// 初始化数据库

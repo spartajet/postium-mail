@@ -133,14 +133,26 @@ export const useAccountStore = defineStore('account', () => {
 
   // 获取账号列表
   async function fetchAccounts() {
+    console.log('[fetchAccounts] 开始加载账号')
     isLoading.value = true
     try {
       const dtos = await invoke<AccountDto[]>('list_accounts')
+      console.log('[fetchAccounts] 后端返回账号数量:', dtos.length)
       accounts.value = dtos.map(dtoToAccount)
 
       // 默认选择第一个账号
-      if (accounts.value.length > 0 && !currentAccount.value) {
-        currentAccount.value = accounts.value[0]
+      // 如果当前没有选中账号，或者选中的账号不在列表中，则选择第一个
+      if (accounts.value.length > 0) {
+        const currentExists = currentAccount.value &&
+          accounts.value.some(a => a.id === currentAccount.value!.id)
+        if (!currentAccount.value || !currentExists) {
+          currentAccount.value = accounts.value[0]
+          console.log('[fetchAccounts] 设置当前账号:', currentAccount.value)
+        }
+      } else {
+        // 没有账号时清空当前账号
+        currentAccount.value = null
+        console.log('[fetchAccounts] 没有账号')
       }
     } catch (error) {
       console.error('获取账号列表失败:', error)

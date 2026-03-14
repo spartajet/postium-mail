@@ -20,26 +20,52 @@ pub async fn list(
     page: usize,
     limit: usize,
 ) -> Result<EmailListResponse> {
+    tracing::info!("查询邮件列表: account_id={}, folder='{}', page={}, limit={}", account_id, folder, page, limit);
+
     let page_size = limit;
     let offset = page * page_size;
 
+    // 特殊处理 "starred" 虚拟文件夹
+    let is_starred_folder = folder == "starred";
+
+    // 构建基础查询
+    let mut query = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id));
+
+    // 根据文件夹类型应用不同的过滤条件
+    if is_starred_folder {
+        // 星标文件夹：查询所有星标邮件
+        tracing::debug!("查询星标邮件");
+        query = query.filter(email::Column::IsStarred.eq(true));
+    } else {
+        // 普通文件夹：按文件夹名称过滤（大小写不敏感）
+        // 支持小写（新数据）和大写（旧数据）两种格式
+        let folder_upper = folder.to_uppercase();
+        tracing::debug!("查询文件夹: '{}' 或 '{}'", folder, folder_upper);
+        query = query.filter(
+            sea_orm::Condition::any()
+                .add(email::Column::Folder.eq(folder))
+                .add(email::Column::Folder.eq(folder_upper))
+        );
+    }
+
     // 获取总数
-    let total = EmailEntity::find()
-        .filter(email::Column::AccountId.eq(account_id))
-        .filter(email::Column::Folder.eq(folder))
+    let total = query.clone()
         .count(db)
         .await
         .map_err(|e| anyhow!("获取邮件总数失败: {}", e))?;
 
+    tracing::info!("邮件总数: {}", total);
+
     // 获取邮件列表
-    let emails = EmailEntity::find()
-        .filter(email::Column::AccountId.eq(account_id))
-        .filter(email::Column::Folder.eq(folder))
+    let emails = query
         .order_by_desc(email::Column::ReceivedAt)
         .paginate(db, page_size as u64)
         .fetch_page(offset as u64)
         .await
         .map_err(|e| anyhow!("获取邮件列表失败: {}", e))?;
+
+    tracing::info!("返回邮件数量: {}", emails.len());
 
     // 转换为列表项
     let mut items = Vec::new();

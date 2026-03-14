@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useUIStore, useAccountStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio } from 'naive-ui'
+import { listen } from '@tauri-apps/api/event'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio, NProgress, NCard } from 'naive-ui'
 import OAuthLoginModal from './OAuthLoginModal.vue'
 import { extractAutoFillInfo, parseEmail, detectProviderFromEmail } from '@/utils/emailHelper'
 
@@ -51,6 +52,18 @@ const lastValidEmail = ref('') // 上一次有效的邮箱地址
 const showOAuthModal = ref(false)
 const oauthProvider = ref<'microsoft' | 'google'>('microsoft')
 const oauthToken = ref<{ access_token: string, refresh_token: string, expires_at: number } | null>(null)
+
+// 进度状态
+const syncProgress = ref({
+  stage: 'idle' as 'idle' | 'authenticating' | 'validating' | 'syncing' | 'completed' | 'error',
+  currentStep: 0,
+  totalSteps: 3,
+  message: '',
+  percentage: 0,
+})
+
+// 事件监听器清理
+let unlistenProgress: (() => void) | null = null
 
 const isCustom = computed(() => form.value.provider === 'imap')
 const canUseOAuth = computed(() => {
@@ -189,11 +202,32 @@ watch(show, (newShow) => {
     isProviderManuallySet.value = false
     isAuthTypeManuallySet.value = false
     lastValidEmail.value = ''
+    // 重置进度状态
+    syncProgress.value = {
+      stage: 'idle',
+      currentStep: 0,
+      totalSteps: 3,
+      message: '',
+      percentage: 0,
+    }
+    // 清理事件监听器
+    if (unlistenProgress) {
+      unlistenProgress()
+      unlistenProgress = null
+    }
   } else {
     // 打开时，重置为默认状态
     isProviderManuallySet.value = false
     isAuthTypeManuallySet.value = false
     lastValidEmail.value = ''
+  }
+})
+
+// 组件销毁时清理监听器
+onUnmounted(() => {
+  if (unlistenProgress) {
+    unlistenProgress()
+    unlistenProgress = null
   }
 })
 
@@ -232,7 +266,9 @@ function handleEmailBlur() {
 
 async function handleSubmit() {
   error.value = ''
+  success.value = ''
 
+  // 基础验证
   if (!form.value.name.trim()) {
     error.value = '请输入账号名称'
     return
@@ -243,21 +279,93 @@ async function handleSubmit() {
     return
   }
 
-  // OAuth 模式下，如果还没有 token，不能提交
-  if (form.value.authType === 'oauth' && !oauthToken.value) {
-    error.value = '请先完成 OAuth 授权'
-    return
+  // OAuth 模式：检查 token，如果没有则自动触发授权
+  if (form.value.authType === 'oauth') {
+    if (!oauthToken.value) {
+      // 自动触发 OAuth 授权
+      startOAuthLogin()
+      return
+    }
+
+    // 有 token，验证是否有效
+    try {
+      syncProgress.value = {
+        stage: 'authenticating',
+        currentStep: 1,
+        totalSteps: 3,
+        message: '验证授权信息...',
+        percentage: 20,
+      }
+
+      const isValid = await invoke('validate_oauth_token', {
+        provider: oauthProvider.value,
+        token: oauthToken.value.access_token,
+      })
+
+      if (!isValid) {
+        // token 无效，重新授权
+        error.value = '授权已过期，请重新授权'
+        syncProgress.value.stage = 'idle'
+        startOAuthLogin()
+        return
+      }
+    } catch (e: any) {
+      error.value = `授权验证失败：${e}`
+      syncProgress.value.stage = 'idle'
+      return
+    }
   }
 
-  // 密码模式下，必须输入密码
-  if (form.value.authType === 'password' && !form.value.password.trim()) {
-    error.value = '请输入密码'
-    return
+  // 密码模式：验证连接
+  if (form.value.authType === 'password') {
+    if (!form.value.password.trim()) {
+      error.value = '请输入密码'
+      return
+    }
+
+    try {
+      syncProgress.value = {
+        stage: 'validating',
+        currentStep: 1,
+        totalSteps: 3,
+        message: '验证邮箱连接...',
+        percentage: 20,
+      }
+
+      await invoke('test_email_connection', {
+        email: form.value.email,
+        password: form.value.password,
+        provider: form.value.provider,
+        imapHost: isCustom.value ? form.value.imapHost : null,
+        imapPort: isCustom.value ? form.value.imapPort : null,
+        imapSsl: isCustom.value ? form.value.imapSsl : null,
+        smtpHost: isCustom.value ? form.value.smtpHost : null,
+        smtpPort: isCustom.value ? form.value.smtpPort : null,
+        smtpSsl: isCustom.value ? form.value.smtpSsl : null,
+      })
+    } catch (e: any) {
+      error.value = `连接验证失败：${e}`
+      syncProgress.value.stage = 'idle'
+      return
+    }
   }
 
+  // 创建账号并同步
+  await createAccountAndSync()
+}
+
+async function createAccountAndSync() {
   loading.value = true
 
   try {
+    syncProgress.value = {
+      stage: 'syncing',
+      currentStep: 2,
+      totalSteps: 3,
+      message: '正在创建账号...',
+      percentage: 40,
+    }
+
     const accountData: any = {
       name: form.value.name,
       email: form.value.email,
@@ -266,18 +374,15 @@ async function handleSubmit() {
     }
 
     if (form.value.authType === 'oauth' && oauthToken.value) {
-      // OAuth 模式
       accountData.auth_type = 'oauth'
       accountData.oauth_provider = oauthProvider.value
       accountData.oauth_token = oauthToken.value.access_token
       accountData.oauth_refresh_token = oauthToken.value.refresh_token
       accountData.password = '' // OAuth 不需要密码
     } else {
-      // 密码模式
       accountData.password = form.value.password
     }
 
-    // 自定义配置
     if (isCustom.value) {
       accountData.imap_host = form.value.imapHost
       accountData.imap_port = form.value.imapPort
@@ -287,22 +392,95 @@ async function handleSubmit() {
       accountData.smtp_ssl = form.value.smtpSsl
     }
 
-    await invoke('add_account', {
-      account: accountData
-    })
+    // 创建账号
+    const accountResult = await invoke('add_account', { account: accountData }) as { id: number }
+    const accountId = accountResult.id
 
-    success.value = '账号添加成功！'
-    setTimeout(async () => {
-      // 刷新账号列表
-      await accountStore.fetchAccounts()
-      emit('success')
-      uiStore.closeAddAccountModal()
-      resetForm()
-    }, 1000)
+    syncProgress.value = {
+      stage: 'syncing',
+      currentStep: 3,
+      totalSteps: 3,
+      message: '正在同步邮件列表...',
+      percentage: 60,
+    }
+
+    // 先注册监听器（必须在同步之前，否则会错过早期事件）
+    await listenToSyncProgress(accountId)
+
+    // 开始同步（带进度）
+    await invoke('sync_account_with_progress', { accountId })
   } catch (e: any) {
+    syncProgress.value = {
+      stage: 'error',
+      currentStep: 0,
+      totalSteps: 3,
+      message: '',
+      percentage: 0,
+    }
     error.value = String(e)
-  } finally {
     loading.value = false
+  }
+}
+
+async function listenToSyncProgress(accountId: number) {
+  const eventName = `sync-progress-${accountId}`
+
+  // 保存 unlisten 函数以便后续清理
+  unlistenProgress = await listen(eventName, (event: any) => {
+    const progress = event.payload as {
+      stage: string
+      current: number
+      total: number
+      message: string
+    }
+
+    syncProgress.value = {
+      stage: 'syncing',
+      currentStep: Math.floor((progress.current / progress.total) * 3) + 1,
+      totalSteps: 3,
+      message: progress.message,
+      percentage: Math.floor((progress.current / progress.total) * 100),
+    }
+
+    if (progress.stage === 'completed') {
+      // 同步完成
+      syncProgress.value.stage = 'completed'
+      syncProgress.value.percentage = 100
+      syncProgress.value.message = '同步完成！'
+
+      setTimeout(async () => {
+        await accountStore.fetchAccounts()
+        emit('success')
+        uiStore.closeAddAccountModal()
+        resetForm()
+        loading.value = false
+        if (unlistenProgress) {
+          unlistenProgress()
+          unlistenProgress = null
+        }
+      }, 1000)
+    } else if (progress.stage === 'error') {
+      // 同步出错
+      syncProgress.value.stage = 'error'
+      error.value = progress.message
+      loading.value = false
+      if (unlistenProgress) {
+        unlistenProgress()
+        unlistenProgress = null
+      }
+    }
+  })
+}
+
+// 辅助函数：获取阶段标题
+function getStageTitle(stage: string): string {
+  switch (stage) {
+    case 'authenticating': return '正在验证授权'
+    case 'validating': return '正在验证连接'
+    case 'syncing': return '正在同步'
+    case 'completed': return '完成'
+    case 'error': return '失败'
+    default: return '准备中'
   }
 }
 
@@ -324,6 +502,14 @@ function resetForm() {
   oauthToken.value = null
   success.value = ''
   error.value = ''
+  // 重置进度状态
+  syncProgress.value = {
+    stage: 'idle',
+    currentStep: 0,
+    totalSteps: 3,
+    message: '',
+    percentage: 0,
+  }
 }
 
 function startOAuthLogin() {
@@ -511,6 +697,38 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
         {{ error }}
       </div>
 
+      <!-- 进度显示 -->
+      <div v-if="syncProgress.stage !== 'idle'" class="sync-progress">
+        <NCard :bordered="false" class="progress-card">
+          <div class="progress-header">
+            <span class="progress-title">{{ getStageTitle(syncProgress.stage) }}</span>
+            <span class="progress-percentage">{{ syncProgress.percentage }}%</span>
+          </div>
+
+          <NProgress
+            type="line"
+            :percentage="syncProgress.percentage"
+            :processing="syncProgress.stage === 'syncing'"
+            :style="{ marginBottom: '12px' }"
+          />
+
+          <div class="progress-message">
+            {{ syncProgress.message }}
+          </div>
+
+          <div v-if="syncProgress.stage === 'syncing'" class="progress-steps">
+            <div
+              v-for="(step, index) in ['验证账号', '创建记录', '同步邮件']"
+              :key="step"
+              class="progress-step"
+              :class="{ active: index + 1 === syncProgress.currentStep }"
+            >
+              {{ step }}
+            </div>
+          </div>
+        </NCard>
+      </div>
+
       <!-- 操作按钮 -->
       <div class="form-actions">
         <NButton @click="uiStore.closeAddAccountModal" :disabled="loading">
@@ -570,5 +788,56 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
   border-radius: var(--radius-md);
   color: var(--error);
   margin-bottom: 16px;
+}
+
+.sync-progress {
+  margin: 16px 0;
+}
+
+.progress-card {
+  background: var(--bg-secondary);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.progress-title {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.progress-percentage {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.progress-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.progress-steps {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.progress-step {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  transition: all 0.2s;
+}
+
+.progress-step.active {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
 }
 </style>
