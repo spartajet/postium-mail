@@ -41,8 +41,18 @@ const isCalendarView = computed(() => uiStore.currentView === "calendar");
 // 是否是工作流视图
 const isWorkflowView = computed(() => uiStore.currentView === "workflow");
 
+// 处理账号添加成功事件
+async function handleAccountAdded() {
+  // 刷新邮件列表
+  if (isEmailView.value) {
+    await emailStore.fetchEmails();
+  }
+}
+
 // 初始化应用
 onMounted(async () => {
+    console.log('[App] onMounted 开始')
+
     // 检查是否是 OAuth 回调
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
@@ -69,11 +79,28 @@ onMounted(async () => {
     uiStore.init();
 
     // 加载账号数据
+    console.log('[App] 开始加载账号')
     await accountStore.fetchAccounts();
+    console.log('[App] 账号加载完成', {
+        hasAccount: !!accountStore.currentAccount,
+        account: accountStore.currentAccount,
+        isEmailView: isEmailView.value
+    })
 
-    // 根据当前视图加载数据
-    if (isEmailView.value) {
-        await emailStore.fetchEmails();
+    // 确保有账号后才加载邮件
+    if (accountStore.currentAccount && isEmailView.value) {
+        console.log('[App] 开始加载邮件')
+        try {
+            await emailStore.fetchEmails();
+            console.log('[App] 邮件加载完成')
+        } catch (e) {
+            console.error('[App] 邮件加载失败:', e)
+        }
+    } else {
+        console.log('[App] 跳过邮件加载', {
+            hasAccount: !!accountStore.currentAccount,
+            isEmailView: isEmailView.value
+        })
     }
     // 日历数据会在 CalendarView 组件中加载
     // 工作流数据会在 WorkflowView 组件中加载
@@ -163,7 +190,7 @@ onMounted(async () => {
 
             <!-- 模态框 -->
             <ComposeModal />
-            <AddAccountModal v-if="uiStore.modals.addAccount" />
+            <AddAccountModal v-if="uiStore.modals.addAccount" @success="handleAccountAdded" />
             <AIChatModal v-if="uiStore.modals.aiChat" />
             <SettingsModal v-if="uiStore.modals.settings" />
 

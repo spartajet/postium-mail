@@ -67,6 +67,9 @@ interface EmailDetailDto extends EmailDto {
 
 // DTO 转换为前端 Email 类型
 function dtoToEmail(dto: EmailListItemDto): Email {
+  // 统一文件夹名称为小写（兼容旧数据的大写格式）
+  const normalizedFolder = normalizeFolderName(dto.folder)
+
   return {
     id: dto.id.toString(),
     subject: dto.subject || '无主题',
@@ -84,12 +87,14 @@ function dtoToEmail(dto: EmailListItemDto): Email {
       size: '',
       path: '',
     }] : [],
-    folder: dto.folder as EmailFolder,
+    folder: normalizedFolder,
     accountId: dto.account_id.toString(),
   }
 }
 
 function detailDtoToEmail(dto: EmailDetailDto): Email {
+  // 统一文件夹名称为小写（兼容旧数据的大写格式）
+  const normalizedFolder = normalizeFolderName(dto.folder)
   return {
     id: dto.id.toString(),
     subject: dto.subject || '无主题',
@@ -107,9 +112,21 @@ function detailDtoToEmail(dto: EmailDetailDto): Email {
       size: formatFileSize(a.size),
       path: a.path || '',
     })),
-    folder: dto.folder as EmailFolder,
+    folder: normalizedFolder,
     accountId: dto.account_id.toString(),
   }
+}
+
+// 统一文件夹名称为小写（兼容旧数据的大写格式）
+function normalizeFolderName(folder: string): EmailFolder {
+  const folderLower = folder.toLowerCase()
+  // 验证是否为有效的文件夹名称
+  const validFolders: EmailFolder[] = ['inbox', 'starred', 'sent', 'drafts', 'spam', 'trash', 'archive']
+  if (validFolders.includes(folderLower as EmailFolder)) {
+    return folderLower as EmailFolder
+  }
+  // 如果不是标准文件夹名称，返回 inbox（兜底）
+  return 'inbox'
 }
 
 // 格式化文件大小
@@ -233,19 +250,40 @@ export const useEmailStore = defineStore('email', () => {
 
   // 获取邮件列表
   async function fetchEmails(page = 0) {
+    console.log('[fetchEmails] ========== 开始获取邮件列表 ==========')
+    console.log('[fetchEmails] 参数:', { page, currentPage: currentPage.value })
+
     const accountStore = useAccountStore()
+    console.log('[fetchEmails] 当前账号状态:', {
+      hasAccount: !!accountStore.currentAccount,
+      accountId: accountStore.currentAccount?.id,
+      accountEmail: accountStore.currentAccount?.email
+    })
+
     if (!accountStore.currentAccount) {
       // 没有账号时，清空邮件列表并返回
+      console.log('[fetchEmails] ❌ 没有账号，清空邮件列表')
       emails.value = []
       totalEmails.value = 0
       currentPage.value = 0
       return
     }
 
+    console.log('[fetchEmails] 当前文件夹:', currentFolder.value)
+    console.log('[fetchEmails] 每页数量:', pageSize.value)
+
     isLoading.value = true
     try {
       const accountId = getAccountId()
       const folder = currentFolder.value
+
+      console.log('[fetchEmails] 📡 调用后端 list_emails 命令')
+      console.log('[fetchEmails] 调用参数:', {
+        accountId,
+        folder,
+        page,
+        limit: pageSize.value
+      })
 
       const response = await invoke<EmailListResponse>('list_emails', {
         accountId,
@@ -254,14 +292,39 @@ export const useEmailStore = defineStore('email', () => {
         limit: pageSize.value,
       })
 
+      console.log('[fetchEmails] ✅ 后端返回成功')
+      console.log('[fetchEmails] 返回数据:', {
+        total: response.total,
+        page: response.page,
+        pageSize: response.page_size,
+        emailCount: response.emails.length
+      })
+
+      if (response.emails.length > 0) {
+        console.log('[fetchEmails] 前3封邮件:', response.emails.slice(0, 3).map(e => ({
+          id: e.id,
+          subject: e.subject,
+          folder: e.folder,
+          sender: e.sender_email
+        })))
+      }
+
       emails.value = response.emails.map(dtoToEmail)
       totalEmails.value = response.total
       currentPage.value = response.page
+
+      console.log('[fetchEmails] ✅ 邮件列表更新完成')
+      console.log('[fetchEmails] 当前邮件列表状态:', {
+        totalCount: emails.value.length,
+        total: totalEmails.value,
+        currentFolder: currentFolder.value
+      })
     } catch (error) {
-      console.error('获取邮件列表失败:', error)
+      console.error('[fetchEmails] ❌ 获取邮件列表失败:', error)
       throw error
     } finally {
       isLoading.value = false
+      console.log('[fetchEmails] ========== 获取邮件列表结束 ==========')
     }
   }
 
