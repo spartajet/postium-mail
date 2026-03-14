@@ -31,7 +31,13 @@ async fn create_accounts_table(db: &DbConn) -> Result<()> {
             sync_enabled INTEGER DEFAULT 1,
             last_sync_at INTEGER,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            -- OAuth 2.0 相关字段
+            auth_type TEXT DEFAULT 'password',
+            oauth_provider TEXT,
+            oauth_token TEXT,
+            oauth_refresh_token TEXT,
+            oauth_expires_at INTEGER
         )
     "#;
 

@@ -41,8 +41,14 @@ export interface Account {
   unreadCount: number;
   imapHost?: string;
   imapPort?: number;
+  imapSsl?: boolean;
   smtpHost?: string;
   smtpPort?: number;
+  smtpSsl?: boolean;
+  syncEnabled?: boolean;
+  lastSyncAt?: Date;
+  authType?: string;
+  oauthProvider?: string;
 }
 
 export type EmailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "imap";

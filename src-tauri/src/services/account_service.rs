@@ -162,6 +162,30 @@ pub async fn update(
         account.password = Set(encrypted);
     }
 
+    // OAuth 相关字段更新
+    if let Some(auth_type) = req.auth_type {
+        account.auth_type = Set(auth_type);
+    }
+    if let Some(oauth_provider) = req.oauth_provider {
+        account.oauth_provider = Set(Some(oauth_provider));
+    }
+
+    // OAuth Token 需要加密存储
+    if let Some(token) = req.oauth_token {
+        let encryptor = PasswordEncryptor::new()?;
+        let encrypted_token = encryptor.encrypt(&token)?;
+        account.oauth_token = Set(Some(encrypted_token));
+    }
+
+    // Refresh Token 需要加密存储
+    if let Some(refresh_token) = req.oauth_refresh_token {
+        let encryptor = PasswordEncryptor::new()?;
+        let encrypted_refresh = encryptor.encrypt(&refresh_token)?;
+        account.oauth_refresh_token = Set(Some(encrypted_refresh));
+    }
+
+    account.updated_at = Set(chrono::Utc::now().timestamp());
+
     account.update(db)
         .await
         .map_err(|e| anyhow!("更新账号失败: {}", e))?;

@@ -3,7 +3,54 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+// 使用 base64 v0.22 的新 API
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+
+// Stronghold 安全存储
+pub struct SecureVault {
+    // TODO: 使用 tauri-plugin-stronghold 实现
+    // 当前先使用内存存储作为占位实现
+    _tokens: std::collections::HashMap<String, String>,
+}
+
+impl SecureVault {
+    pub async fn new() -> Result<Self> {
+        // TODO: 初始化 Stronghold vault
+        tracing::warn!("SecureVault 当前使用内存存储，请使用 Stronghold 插件");
+        Ok(Self {
+            _tokens: std::collections::HashMap::new(),
+        })
+    }
+
+    /// 存储密码（TODO: 使用 Stronghold）
+    pub async fn store_password(&self, key: &str, password: &str) -> Result<()> {
+        tracing::warn!("store_password 使用占位实现");
+        // TODO: self.vault.insert(key, password).await?;
+        Ok(())
+    }
+
+    /// 获取密码（TODO: 使用 Stronghold）
+    pub async fn get_password(&self, key: &str) -> Result<Option<String>> {
+        tracing::warn!("get_password 使用占位实现");
+        // TODO: self.vault.get(key).await.map_err(|e| anyhow!("获取失败: {}", e))
+        Ok(None)
+    }
+
+    /// 存储 OAuth Token（TODO: 使用 Stronghold）
+    pub async fn store_token(&self, account_id: i32, _token: &crate::services::oauth_service::OAuthToken) -> Result<()> {
+        tracing::warn!("store_token 使用占位实现");
+        // TODO: 使用 Stronghold 加密存储
+        Ok(())
+    }
+
+    /// 获取 OAuth Token（TODO: 使用 Stronghold）
+    pub async fn get_token(&self, account_id: i32) -> Result<Option<crate::services::oauth_service::OAuthToken>> {
+        tracing::warn!("get_token 使用占位实现");
+        // TODO: 从 Stronghold 读取并解密
+        Ok(None)
+    }
+}
 
 /// 密码加密器
 /// 使用 AES-256-GCM 加密算法
@@ -44,13 +91,14 @@ impl PasswordEncryptor {
         let mut combined = nonce.to_vec();
         combined.extend_from_slice(&ciphertext);
 
-        Ok(BASE64.encode(combined))
+        // base64 v0.22 使用 engine API
+        Ok(BASE64_STANDARD.encode(&combined))
     }
 
     /// 解密密码
     pub fn decrypt(&self, encrypted: &str) -> Result<String> {
         // 解码 Base64
-        let combined = BASE64.decode(encrypted)
+        let combined = BASE64_STANDARD.decode(encrypted)
             .map_err(|e| anyhow!("Base64 解码失败: {}", e))?;
 
         // 分离 nonce 和密文
