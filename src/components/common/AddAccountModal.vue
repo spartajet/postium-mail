@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useUIStore, useAccountStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio } from 'naive-ui'
 import OAuthLoginModal from './OAuthLoginModal.vue'
 
+const uiStore = useUIStore()
+const accountStore = useAccountStore()
+
 const emit = defineEmits<{
   (e: 'success'): void
-  (e: 'update:show', value: boolean): void
 }>()
-
-const show = defineModel<boolean>('show', { default: false })
 
 const providerOptions = [
   { label: 'Gmail', value: 'gmail' },
@@ -18,6 +19,8 @@ const providerOptions = [
   { label: 'Yahoo Mail', value: 'yahoo' },
   { label: '自定义 IMAP/SMTP', value: 'imap' },
 ]
+
+const show = computed(() => uiStore.modals.addAccount)
 
 const form = ref({
   name: '',
@@ -140,9 +143,11 @@ async function handleSubmit() {
     })
 
     success.value = '账号添加成功！'
-    setTimeout(() => {
+    setTimeout(async () => {
+      // 刷新账号列表
+      await accountStore.fetchAccounts()
       emit('success')
-      emit('update:show', false)
+      uiStore.closeAddAccountModal()
       resetForm()
     }, 1000)
   } catch (e: any) {
@@ -196,6 +201,7 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
     :style="{ width: '500px' }"
     :mask-closable="!loading"
     :close-on-esc="!loading"
+    @update:show="uiStore.closeAddAccountModal"
   >
     <NForm @submit.prevent="handleSubmit">
       <!-- 账号名称 -->
@@ -345,7 +351,7 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
 
       <!-- 操作按钮 -->
       <div class="form-actions">
-        <NButton @click="emit('update:show', false)" :disabled="loading">
+        <NButton @click="uiStore.closeAddAccountModal" :disabled="loading">
           取消
         </NButton>
         <NButton type="primary" attr-type="submit" :loading="loading" :disabled="form.authType === 'oauth' && !oauthToken">
