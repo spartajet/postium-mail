@@ -165,6 +165,76 @@
 
 > 联系人与分组是多对多关系，一个联系人可以属于多个分组。
 
+#### folders（文件夹）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| account_id | INTEGER | 关联账号 |
+| name | TEXT NOT NULL | 标准化名称（inbox, sent 等） |
+| imap_name | TEXT NOT NULL | IMAP 服务器原始名称（INBOX, Sent Items 等） |
+| parent_id | INTEGER | 父文件夹 ID（支持嵌套结构） |
+| attributes | TEXT | 文件夹属性（JSON: \Noselect, \HasChildren 等） |
+| email_count | INTEGER | 邮件数量（默认 0） |
+| unread_count | INTEGER | 未读数量（默认 0） |
+| synced_at | INTEGER | 最后同步时间 |
+| UNIQUE(account_id, imap_name) | - | 一个账号的同一个 IMAP 文件夹唯一 |
+
+**索引：**
+- `idx_folders_account` ON (account_id)`
+- `idx_folders_name` ON (name)`
+- `idx_folders_parent` ON (parent_id)`
+
+#### sync_states（同步状态）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| account_id | INTEGER | 关联账号 |
+| folder | TEXT NOT NULL | 文件夹名称 |
+| last_sync_uid | INTEGER | 最后同步的 UID |
+| last_sync_at | INTEGER | 最后同步时间 |
+| highest_uid | INTEGER | 文件夹最高 UID |
+| total_emails | INTEGER | 总邮件数 |
+| sync_count | INTEGER DEFAULT 0 | 已同步邮件数 |
+| is_first_sync | BOOLEAN DEFAULT 1 | 是否首次同步 |
+| error_count | INTEGER DEFAULT 0 | 连续错误次数 |
+| last_error | TEXT | 最后错误信息 |
+| updated_at | INTEGER NOT NULL | 更新时间 |
+| UNIQUE(account_id, folder) | - | 一个账号的同一文件夹唯一 |
+
+**索引：**
+- `idx_sync_states_account` ON (account_id)`
+- `idx_sync_states_folder` ON (folder)`
+- `idx_sync_states_last_sync` ON (last_sync_at)`
+
+#### sync_errors（同步错误日志）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER PRIMARY KEY | 自增 |
+| account_id | INTEGER | 关联账号 |
+| folder | TEXT | 失败的文件夹（可选） |
+| error_type | TEXT NOT NULL | 错误类型（connection, auth, parse, database, timeout, unknown） |
+| error_message | TEXT NOT NULL | 错误消息 |
+| uid | INTEGER | 失败的邮件 UID（可选） |
+| stack_trace | TEXT | 堆栈信息 |
+| resolved | BOOLEAN DEFAULT 0 | 是否已解决 |
+| created_at | INTEGER NOT NULL | 发生时间 |
+
+**索引：**
+- `idx_sync_errors_account` ON (account_id)`
+- `idx_sync_errors_type` ON (error_type)`
+- `idx_sync_errors_resolved` ON (resolved)`
+- `idx_sync_errors_created` ON (created_at)`
+
+**同步策略说明：**
+
+1. **首次同步**：账号添加后自动执行，同步最新 1000 封邮件，记录最高 UID
+2. **增量同步**：后续同步只获取大于 last_sync_uid 的新邮件
+3. **文件夹同步**：自动同步服务器上的文件夹列表和结构
+4. **错误处理**：记录所有同步错误，支持错误追踪和重试
+
 ### 2.3 数据库迁移（SeaORM Migrate）
 
 所有关系型表的创建与变更均通过 **SeaORM Migration** 管理，禁止手动执行 DDL。
@@ -320,6 +390,150 @@ Collection: emails_vectors
 - 对 `subject + preview`（非完整正文）做嵌入，控制 token 成本
 - 新邮件同步后异步生成向量，不阻塞主流程
 - 支持切换嵌入模型（OpenAI / 本地 Ollama nomic-embed-text）
+
+### 2.6 同步系统设计
+
+#### 2.6.1 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      SyncManager                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              统一同步调度器                            │    │
+│  │  - 决定执行首次同步还是增量同步                       │    │
+│  │  - 管理同步状态和错误记录                             │    │
+│  │  - 发送进度事件到前端                                 │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+           │                    │                    │
+           ▼                    ▼                    ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  FolderSync      │  │  EmailSync       │  │  StateManager    │
+│  (文件夹同步)     │  │  (邮件同步)       │  │  (状态管理)       │
+├──────────────────┤  ├──────────────────┤  ├──────────────────┤
+│ - 列出服务器文件夹 │  │ - 首次全量同步    │  │ - 读取同步状态    │
+│ - 同步文件夹结构  │  │ - 增量同步        │  │ - 更新同步状态    │
+│ - 检测新增文件夹  │  │ - UID 去重        │  │ - 记录同步错误    │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+           │                    │                    │
+           └────────────────────┴────────────────────┘
+                                  │
+                                  ▼
+                      ┌───────────────────────┐
+                      │    ImapSyncEngine      │
+                      │   (IMAP 同步引擎)      │
+                      ├───────────────────────┤
+                      │ - 连接管理             │
+                      │ - UID 查询             │
+                      │ - 邮件抓取             │
+                      │ - 批量操作             │
+                      └───────────────────────┘
+```
+
+#### 2.6.2 同步策略
+
+**首次同步（First Sync）**
+- **触发时机**：账号添加后首次同步
+- **同步范围**：所有支持的文件夹（inbox, sent, drafts, spam, trash）
+- **同步数量**：每个文件夹最新 1000 封邮件
+- **状态记录**：创建 `sync_states` 记录，`is_first_sync = true`
+- **UID 追踪**：记录最高 UID 作为增量同步起点
+
+**增量同步（Incremental Sync）**
+- **触发时机**：定期自动同步或手动同步
+- **同步范围**：所有有同步状态的文件夹
+- **同步逻辑**：查询 IMAP 服务器获取大于 `last_sync_uid` 的所有邮件
+- **状态更新**：同步成功后更新 `last_sync_uid` 和 `sync_count`
+
+**文件夹同步（Folder Sync）**
+- 使用 IMAP LIST 命令获取所有文件夹
+- 映射 IMAP 文件夹名称到标准名称（inbox, sent 等）
+- 检测新增和删除的文件夹
+- 更新文件夹元数据（邮件数量、未读数量）
+
+#### 2.6.3 同步流程
+
+```
+用户点击同步
+      │
+      ▼
+┌─────────────────────────┐
+│ 1. 连接到 IMAP 服务器    │
+│    - 发送 connecting 事件  │
+└─────────────────────────┘
+      │
+      ▼
+┌─────────────────────────┐
+│ 2. 同步文件夹列表        │
+│    - 发送 syncing_folders  │
+└─────────────────────────┘
+      │
+      ▼
+┌─────────────────────────┐
+│ 3. 判断同步类型          │
+│    - 检查 sync_states    │
+└─────────────────────────┘
+      │                │
+  首次同步          增量同步
+      │                │
+      ▼                ▼
+┌──────────────┐  ┌──────────────┐
+│ 同步 1000 封 │  │ 查询新 UID   │
+│ 记录 max_uid │  │ 同步新邮件    │
+└──────────────┘  └──────────────┘
+      │                │
+      └────────┬───────────┘
+               │
+               ▼
+┌�─────────────────────────┐
+│ 4. 发送 syncing_emails   │
+│    - 实时进度更新        │
+└─────────────────────────┘
+               │
+               ▼
+┌─────────────────────────┐
+│ 5. 完成同步             │
+│    - 更新 last_sync_at  │
+│    - 发送 completed 事件 │
+└─────────────────────────┘
+```
+
+#### 2.6.4 错误处理与重试
+
+**错误类型分类：**
+
+| 错误类型 | 描述 | 处理策略 |
+|---------|------|---------|
+| `connection` | 网络连接失败 | 重试 3 次，间隔递增 |
+| `auth` | 认证失败 | 不重试，提示用户检查密码 |
+| `parse` | 邮件解析失败 | 跳过该邮件，记录错误日志 |
+| `database` | 数据库操作失败 | 重试 3 次 |
+| `timeout` | 操作超时 | 重试 1 次 |
+| `unknown` | 未知错误 | 记录日志，继续执行 |
+
+**重试机制：**
+- 最大重试次数：3 次（可配置）
+- 重试延迟：指数退避（1s, 2s, 4s）
+- 错误记录：所有错误记录到 `sync_errors` 表
+- 错误计数：`sync_states.error_count` 连续错误次数
+
+#### 2.6.5 进度事件格式
+
+```typescript
+interface SyncProgressEvent {
+  account_id: number
+  stage: 'connecting' | 'syncing_folders' | 'syncing_emails' | 'completed' | 'error'
+  folder?: string
+  current: number
+  total: number
+  message: string
+}
+```
+
+**事件发送：**
+- 事件名称：`sync-progress-{account_id}`
+- 发送时机：连接中、同步文件夹、同步邮件、完成、错误
+- 前端监听：通过 Tauri Event API 监听进度事件
 
 ---
 

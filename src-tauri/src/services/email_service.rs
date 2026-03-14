@@ -376,6 +376,37 @@ pub async fn save_email_from_imap(
     let recipient_emails = serde_json::to_string(&recipients)
         .unwrap_or_default();
 
+    // 解析抄送列表
+    let cc_list: Vec<email::EmailAddress> = if !email_data.cc.is_empty() {
+        email_data.cc
+            .split(',')
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(email::EmailAddress {
+                        name: None,
+                        email: s.to_string(),
+                    })
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let cc_emails = if !cc_list.is_empty() {
+        Some(serde_json::to_string(&cc_list).unwrap_or_default())
+    } else {
+        None
+    };
+
+    // 提取发送者名称（从邮箱地址的用户名部分）
+    let sender_name = email_data.from.split('@').next()
+        .unwrap_or(&email_data.from)
+        .to_string();
+
     // 创建新邮件
     let new_email = email::ActiveModel {
         id: NotSet,
@@ -384,10 +415,10 @@ pub async fn save_email_from_imap(
         uid: Set(Some(email_data.uid)),
         message_id: Set(Some(format!("<{}@postium.imap>", email_data.uid))),
         subject: Set(Some(email_data.subject.clone())),
-        sender_name: Set(Some(email_data.from.split('@').next().unwrap_or(&email_data.from).to_string())),
+        sender_name: Set(Some(sender_name)),
         sender_email: Set(email_data.from.clone()),
         recipient_emails: Set(recipient_emails),
-        cc_emails: Set(None),
+        cc_emails: Set(cc_emails),
         bcc_emails: Set(None),
         body_text: Set(Some(email_data.body_text.clone())),
         body_html: Set(Some(email_data.body_html.clone())),
@@ -404,6 +435,15 @@ pub async fn save_email_from_imap(
         .exec(db)
         .await
         .map_err(|e| anyhow!("保存邮件失败: {}", e))?;
+
+    tracing::info!(
+        "保存邮件成功: UID={}, subject='{}', from='{}', to_count={}, cc_count={}",
+        email_data.uid,
+        email_data.subject,
+        email_data.from,
+        recipients.len(),
+        cc_list.len()
+    );
 
     Ok(result.last_insert_id as i32)
 }

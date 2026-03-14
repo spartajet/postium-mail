@@ -87,14 +87,11 @@ pub async fn create(
             Some(smtp_config.port)
         }),
         smtp_ssl: Set(Some(smtp_config.ssl)),
-        password: Set(String::new()), // 不存储到数据库
         color: Set(req.color),
         created_at: Set(now),
         updated_at: Set(now),
         auth_type: Set(req.auth_type.clone().unwrap_or("password".to_string())),
         oauth_provider: Set(req.oauth_provider),
-        oauth_token: Set(None), // 不存储到数据库
-        oauth_refresh_token: Set(None), // 不存储到数据库
         oauth_expires_at: Set(req.oauth_expires_at),
         ..Default::default()
     };
@@ -110,8 +107,13 @@ pub async fn create(
     // 将密码存储到 Stronghold
     if !req.password.is_empty() {
         let key = format!("password_{}", account_id);
+        tracing::info!("存储密码到 Stronghold: account_id={}, key={}", account_id, key);
         vault.store_password(&key, &req.password).await
             .map_err(|e| anyhow!("存储密码到 Stronghold 失败: {}", e))?;
+
+        // 验证密码是否正确存储
+        let stored = vault.get_password(&key).await;
+        tracing::info!("验证密码存储: key={}, result={:?}", key, stored);
     }
 
     // 如果有 OAuth Token，存储到 Stronghold
@@ -284,8 +286,14 @@ pub async fn get_account_password(
     let vault = vault.lock().await;
     let key = format!("password_{}", account_id);
 
-    vault.get_password(&key).await?
-        .ok_or_else(|| anyhow!("账号密码不存在"))
+    tracing::info!("从 Stronghold 获取密码: account_id={}, key={}", account_id, key);
+
+    let password = vault.get_password(&key).await?
+        .ok_or_else(|| anyhow!("账号密码不存在（key={}）", key))?;
+
+    tracing::info!("成功获取密码: account_id={}, password_len={}", account_id, password.len());
+
+    Ok(password)
 }
 
 /// 从 Stronghold 获取 OAuth Token
