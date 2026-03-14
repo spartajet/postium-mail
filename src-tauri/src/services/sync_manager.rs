@@ -241,37 +241,71 @@ impl SyncManager {
         imap_service: &mut imap_service::ImapService,
         account_id: i32,
     ) -> Result<Vec<crate::models::folder::Model>> {
-        // 列出服务器上的所有文件夹及其 RFC 6154 属性
+        // 定义要同步的标准文件夹列表（固定顺序）
+        let standard_folders = &[
+            ("inbox", "收件箱"),
+            ("starred", "星标邮件"),
+            ("drafts", "草稿箱"),
+            ("sent", "已发送"),
+            ("archive", "归档"),
+            ("spam", "垃圾邮件"),
+        ];
+
+        // 获取服务器上的所有文件夹及其属性
         let server_folders = imap_service.list_folders_with_attributes().await?;
 
         tracing::info!("从服务器获取到 {} 个文件夹", server_folders.len());
 
         let mut synced_folders = Vec::new();
 
-        for folder_info in server_folders {
-            let imap_name = &folder_info.name;
-            let standard_name = &folder_info.standard_name;
+        // 为每个标准文件夹查找对应的服务器文件夹
+        for (standard_name, display_name) in standard_folders {
+            tracing::info!("🔍 查找标准文件夹: {} ({})", display_name, standard_name);
 
-            tracing::debug!("处理文件夹: imap_name={}, special_use={:?}, standard_name={}",
-                imap_name, folder_info.special_use, standard_name);
+            // 查找第一个匹配的服务器文件夹
+            let matched_folder = server_folders.iter()
+                .find(|folder_info| {
+                    // 方法 1: 优先使用 RFC 6154 special-use 属性
+                    if let Some(special_use) = folder_info.special_use {
+                        let matches = match special_use {
+                            imap_service::SpecialUse::All => *standard_name == "archive",
+                            imap_service::SpecialUse::Archive => *standard_name == "archive",
+                            imap_service::SpecialUse::Drafts => *standard_name == "drafts",
+                            imap_service::SpecialUse::Flagged => *standard_name == "starred",
+                            imap_service::SpecialUse::Junk => *standard_name == "spam",
+                            imap_service::SpecialUse::Sent => *standard_name == "sent",
+                            imap_service::SpecialUse::Trash => *standard_name == "trash",
+                        };
+                        if matches {
+                            tracing::debug!("  ✅ RFC 6154 属性匹配: {:?} == {}", special_use, standard_name);
+                            return true;
+                        }
+                    }
 
-            // 跳过非标准文件夹
-            if !folder_service::is_standard_folder(standard_name) {
-                tracing::debug!("跳过非标准文件夹: {}", standard_name);
-                continue;
+                    // 方法 2: 回退到标准名称匹配
+                    if folder_info.standard_name == *standard_name {
+                        tracing::debug!("  ✅ 标准名称匹配: {} == {}", folder_info.standard_name, standard_name);
+                        return true;
+                    }
+
+                    false
+                });
+
+            if let Some(folder_info) = matched_folder {
+                // 找到匹配的文件夹
+                let folder = folder_service::find_or_create(
+                    &self.db,
+                    account_id,
+                    standard_name,
+                    &folder_info.name,
+                ).await?;
+
+                tracing::info!("  ✅ 找到匹配: {} -> {} (special_use: {:?})",
+                    display_name, folder_info.name, folder_info.special_use);
+                synced_folders.push(folder);
+            } else {
+                tracing::warn!("  ⚠️  未找到 '{}' 对应的服务器文件夹", display_name);
             }
-
-            // 查找或创建文件夹
-            let folder = folder_service::find_or_create(
-                &self.db,
-                account_id,
-                standard_name,
-                imap_name,
-            ).await?;
-
-            tracing::info!("同步文件夹: {} (IMAP名称: {}, special_use: {:?})",
-                standard_name, imap_name, folder_info.special_use);
-            synced_folders.push(folder);
         }
 
         tracing::info!("共同步了 {} 个标准文件夹", synced_folders.len());
