@@ -2,14 +2,13 @@ use sea_orm::DbConn;
 use anyhow::{anyhow, Result};
 use tauri::{AppHandle, Emitter};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use crate::models::account;
 use crate::services::{
-    folder_service, sync_state_service, sync_error_service,
+    account_service, folder_service, sync_state_service, sync_error_service,
     imap_service,
-    account_service,
 };
-use crate::crypto::SecureVault;
+use crate::crypto::{KEYRING_SERVICE, password_username};
+use tauri_plugin_keyring::KeyringExt;
 
 /// 同步进度回调类型
 pub type ProgressCallback = Box<dyn Fn(SyncProgress) + Send + Sync>;
@@ -47,13 +46,12 @@ pub struct SyncResult {
 pub struct SyncManager {
     db: Arc<DbConn>,
     app_handle: AppHandle,
-    vault: Arc<Mutex<SecureVault>>,
 }
 
 impl SyncManager {
     /// 创建新的同步管理器
-    pub fn new(db: Arc<DbConn>, app_handle: AppHandle, vault: Arc<Mutex<SecureVault>>) -> Self {
-        Self { db, app_handle, vault }
+    pub fn new(db: Arc<DbConn>, app_handle: AppHandle) -> Self {
+        Self { db, app_handle }
     }
 
     /// 执行完整同步（自动判断首次同步或增量同步）
@@ -424,20 +422,33 @@ impl SyncManager {
         Ok(states.is_empty())
     }
 
-    /// 获取账号密码（从 Stronghold）
+    /// 获取账号密码（从 Keyring）
     async fn get_account_password(&self, account: &account::Model) -> Result<String> {
-        tracing::info!("开始获取账号密码: account_id={}, email={}, auth_type={}",
-            account.id, account.email, account.auth_type);
+        tracing::info!(
+            "开始获取账号密码: account_id={}, email={}, auth_type={}",
+            account.id,
+            account.email,
+            account.auth_type
+        );
 
         if account.auth_type == "oauth" {
             // OAuth 认证
             Err(anyhow!("OAuth 认证暂不支持"))
         } else {
-            // 密码认证 - 从 Stronghold 获取
-            let password = account_service::get_account_password(&self.vault, account.id).await?;
+            // 密码认证 - 从 Keyring 获取
+            let username = password_username(account.id);
+            let password = self
+                .app_handle
+                .keyring()
+                .get_password(KEYRING_SERVICE, &username)
+                .map_err(|e| anyhow!("获取密码失败: {}", e))?
+                .ok_or_else(|| anyhow!("账号密码不存在（username={}）", username))?;
 
-            tracing::info!("成功获取账号密码: account_id={}, password_len={}",
-                account.id, password.len());
+            tracing::info!(
+                "成功获取账号密码: account_id={}, password_len={}",
+                account.id,
+                password.len()
+            );
 
             Ok(password)
         }
@@ -476,10 +487,8 @@ impl SyncManager {
 #[cfg(test)]
 impl SyncManager {
     pub async fn for_test(db: Arc<DbConn>, app_handle: AppHandle) -> Self {
-        let vault = SecureVault::new()
-            .await
-            .expect("SecureVault 初始化失败");
-        let vault = Arc::new(Mutex::new(vault));
-        Self::new(db, app_handle, vault)
+        // 注意：测试环境需要配置 Keyring
+        // 这里需要根据实际测试框架进行调整
+        todo!("配置测试环境的 Keyring 实例")
     }
 }

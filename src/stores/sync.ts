@@ -179,10 +179,10 @@ export const useSyncStore = defineStore('sync', {
      * 同步指定账号
      */
     async syncAccount(accountId: number | string): Promise<SyncResult | null> {
-      try {
-        // 确保 accountId 是数字类型
-        const numericAccountId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId
+      // 确保 accountId 是数字类型
+      const numericAccountId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId
 
+      try {
         console.log('[SyncStore] syncAccount 调用:', { accountId, numericAccountId, type: typeof accountId })
 
         // 开始监听进度
