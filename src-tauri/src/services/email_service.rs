@@ -443,3 +443,36 @@ pub async fn save_email_from_imap(
 
     Ok(result.last_insert_id as i32)
 }
+
+/// 统计文件夹的邮件数量
+pub async fn count_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<i32> {
+    let count = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .count(db)
+        .await
+        .map_err(|e| anyhow!("统计文件夹邮件数量失败: {}", e))?;
+
+    Ok(count as i32)
+}
+
+/// 统计文件夹的未读邮件数量
+pub async fn count_unread_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<i32> {
+    let count = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .filter(email::Column::IsRead.eq(false))
+        .count(db)
+        .await
+        .map_err(|e| anyhow!("统计未读邮件数量失败: {}", e))?;
+
+    Ok(count as i32)
+}
