@@ -43,7 +43,7 @@ export const useUIStore = defineStore("ui", () => {
 
   // 设置面板
   const settingsPanel = ref<
-    "general" | "notifications" | "ai" | "appearance" | "shortcuts"
+    "accounts" | "general" | "notifications" | "ai" | "appearance" | "shortcuts"
   >("general");
 
   // 是否全屏模式

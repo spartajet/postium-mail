@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, h, nextTick } from 'vue'
-import { useUIStore } from '@/stores'
+import { useUIStore, useAccountStore } from '@/stores'
 import { useI18n } from 'vue-i18n'
 import { availableLanguages } from '@/locales'
 import {
@@ -34,17 +34,27 @@ import {
   CloseOutlined,
   ComputerOutlined,
   WbSunnyOutlined,
-  BedtimeOutlined
+  BedtimeOutlined,
+  EmailOutlined,
+  AddOutlined,
+  DeleteOutlined,
+  EditOutlined
 } from '@vicons/material'
 
 // Store
 const uiStore = useUIStore()
+const accountStore = useAccountStore()
 
 // i18n
 const { t } = useI18n()
 
 // 菜单配置
 const menuOptions = computed<MenuOption[]>(() => [
+  {
+    label: '账号',
+    key: 'accounts',
+    icon: () => h(NIcon, null, { default: () => h(EmailOutlined) })
+  },
   {
     label: t('settings.general'),
     key: 'general',
@@ -152,6 +162,42 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
   formData.value.theme = theme
   uiStore.setTheme(theme)
 }
+
+// 账号管理
+async function deleteAccount(accountId: string) {
+  try {
+    await accountStore.removeAccount(accountId)
+    uiStore.showSuccess('账号已删除')
+  } catch (error) {
+    uiStore.showError('删除账号失败')
+  }
+}
+
+function confirmDeleteAccount(account: any) {
+  if (confirm(`确定要删除账号 "${account.name}" 吗？`)) {
+    deleteAccount(account.id)
+  }
+}
+
+function editAccount(_accountId: string) {
+  // TODO: 打开编辑账号模态框
+  uiStore.showInfo('编辑账号功能即将推出')
+}
+
+function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins} 分钟前`
+  if (diffHours < 24) return `${diffHours} 小时前`
+  if (diffDays < 7) return `${diffDays} 天前`
+  return d.toLocaleDateString()
+}
 </script>
 
 <template>
@@ -182,6 +228,83 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
 
         <!-- 右侧内容 -->
         <NLayoutContent class="settings-content">
+          <!-- 账号管理 -->
+          <div v-if="currentPanel === 'accounts'" class="panel">
+            <NCard title="邮箱账号" :bordered="false">
+              <template #header-extra>
+                <NButton type="primary" size="small" @click="uiStore.openAddAccountModal">
+                  <template #icon>
+                    <NIcon><AddOutlined /></NIcon>
+                  </template>
+                  添加账号
+                </NButton>
+              </template>
+
+              <div v-if="accountStore.accounts.length === 0" class="empty-state">
+                <NIcon :size="48" color="#999">
+                  <EmailOutlined />
+                </NIcon>
+                <p>还没有添加邮箱账号</p>
+                <NButton type="primary" @click="uiStore.openAddAccountModal">
+                  添加第一个账号
+                </NButton>
+              </div>
+
+              <NList v-else>
+                <NListItem v-for="account in accountStore.accounts" :key="account.id">
+                  <template #prefix>
+                    <div
+                      class="account-avatar"
+                      :style="{ backgroundColor: account.color }"
+                    >
+                      {{ account.name.charAt(0) }}
+                    </div>
+                  </template>
+                  <NThing>
+                    <template #header>
+                      <div class="account-header">
+                        <span class="account-name">{{ account.name }}</span>
+                        <NSpace :size="8">
+                          <NButton
+                            size="tiny"
+                            quaternary
+                            @click="editAccount(account.id)"
+                          >
+                            <template #icon>
+                              <NIcon><EditOutlined :size="16" /></NIcon>
+                            </template>
+                          </NButton>
+                          <NButton
+                            size="tiny"
+                            quaternary
+                            type="error"
+                            @click="confirmDeleteAccount(account)"
+                          >
+                            <template #icon>
+                              <NIcon><DeleteOutlined :size="16" /></NIcon>
+                            </template>
+                          </NButton>
+                        </NSpace>
+                      </div>
+                    </template>
+                    <template #description>
+                      <div class="account-details">
+                        <div class="account-email">{{ account.email }}</div>
+                        <div class="account-meta">
+                          <span class="provider-badge">{{ account.provider }}</span>
+                          <span v-if="account.lastSyncAt" class="sync-time">
+                            上次同步: {{ formatDate(account.lastSyncAt) }}
+                          </span>
+                          <span v-else class="sync-time">未同步</span>
+                        </div>
+                      </div>
+                    </template>
+                  </NThing>
+                </NListItem>
+              </NList>
+            </NCard>
+          </div>
+
           <!-- 通用设置 -->
           <div v-if="currentPanel === 'general'" class="panel">
             <NCard :title="`${t('settings.general')} ${t('settings.title')}`" :bordered="false">
@@ -419,5 +542,75 @@ function setTheme(theme: 'light' | 'dark' | 'system') {
   .settings-header h2 {
     display: none;
   }
+}
+
+/* 账号管理样式 */
+.account-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.account-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.account-name {
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.account-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.account-email {
+  font-size: 13px;
+  color: var(--n-text-color-2);
+}
+
+.account-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.provider-badge {
+  padding: 2px 8px;
+  background-color: var(--n-color-modal);
+  border-radius: 4px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.sync-time {
+  color: var(--n-text-color-3);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 16px;
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--n-text-color-2);
 }
 </style>

@@ -12,6 +12,7 @@ import AppSidebar from "@/components/layout/AppSidebar.vue";
 import EmailList from "@/components/layout/EmailList.vue";
 import EmailDetail from "@/components/layout/EmailDetail.vue";
 import ComposeModal from "@/components/compose/ComposeModal.vue";
+import AddAccountModal from "@/components/common/AddAccountModal.vue";
 import ToastContainer from "@/components/common/ToastContainer.vue";
 import LanguageSelector from "@/components/common/LanguageSelector.vue";
 import CalendarView from "@/components/calendar/CalendarView.vue";
@@ -162,6 +163,7 @@ onMounted(async () => {
 
             <!-- 模态框 -->
             <ComposeModal />
+            <AddAccountModal v-if="uiStore.modals.addAccount" />
             <AIChatModal v-if="uiStore.modals.aiChat" />
             <SettingsModal v-if="uiStore.modals.settings" />
 
