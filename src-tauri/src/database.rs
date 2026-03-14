@@ -19,13 +19,13 @@ pub async fn establish_connection() -> DatabaseResult {
 }
 
 /// 初始化数据库
-/// 运行 migration/init.rs 中的初始化脚本
+/// 运行所有迁移脚本
 pub async fn init_database(db: &DbConn) -> Result<()> {
     // 先运行初始化脚本
-    crate::migration::init::initialize(db).await?;
+    crate::migration::m001_20250314_init::initialize(db).await?;
 
     // 然后运行迁移（为现有数据库添加新字段）
-    crate::migration::migrate::run_migrations(db).await?;
+    crate::migration::m002_20250314_add_oauth_fields::run_migrations(db).await?;
 
     Ok(())
 }
