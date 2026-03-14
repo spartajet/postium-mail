@@ -25,7 +25,7 @@ impl DatabaseState {
     }
 }
 
-// Vault 状态（使用 tokio Mutex 以支持跨 await）
+// Stronghold Vault 状态
 struct VaultState(crypto::SecureVault);
 
 // OAuth 服务状态
@@ -43,10 +43,9 @@ async fn add_account(
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
 
-    // 使用 SecureVault 存储密码
+    // 使用 Stronghold 存储密码
     let password_key = format!("account_password_{}", account.email);
-    vault_state.0.store_password(&password_key, &account.password)
-        .await
+    vault_state.0.store_password(&password_key, &account.password).await
         .map_err(|e| e.to_string())?;
 
     // 保存账号信息到数据库（不包含明文密码）
@@ -93,11 +92,10 @@ async fn update_account(
 ) -> Result<models::account::AccountDto, String> {
     let db = db_state.clone_conn();
 
-    // 如果提供了新密码，更新到 Vault
+    // 如果提供了新密码，更新到 Stronghold
     if !account.password.is_empty() {
         let password_key = format!("account_password_{}", account.email);
-        vault_state.0.store_password(&password_key, &account.password)
-            .await
+        vault_state.0.store_password(&password_key, &account.password).await
             .map_err(|e| e.to_string())?;
     }
 
@@ -137,11 +135,10 @@ async fn test_account_connection(
     vault_state: tauri::State<'_, VaultState>,
     account: models::account::CreateAccountRequest,
 ) -> Result<services::imap_service::ConnectionTestResult, String> {
-    // 从 Vault 获取密码
+    // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
     let password = if account.password.is_empty() {
-        vault_state.0.get_password(&password_key)
-            .await
+        vault_state.0.get_password(&password_key).await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "密码未找到".to_string())?
     } else {
@@ -206,10 +203,9 @@ async fn exchange_oauth_code(
                 expires_at: 0,
             };
 
-            // 将 Token 存储到 Vault
+            // 将 Token 存储到 Stronghold
             let temp_account_id = email.len() as i32;
-            vault_state.0.store_token(temp_account_id, &token)
-                .await
+            vault_state.0.store_token(temp_account_id, &token).await
                 .map_err(|e| e.to_string())?;
 
             Ok(models::account::AccountDto {
@@ -376,10 +372,9 @@ async fn sync_account(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    // 从 Vault 获取密码
+    // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
-    let _password = vault_state.0.get_password(&password_key)
-        .await
+    let _password = vault_state.0.get_password(&password_key).await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
@@ -415,10 +410,9 @@ async fn send_email(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    // 从 Vault 获取密码
+    // 从 Stronghold 获取密码
     let password_key = format!("account_password_{}", account.email);
-    let password = vault_state.0.get_password(&password_key)
-        .await
+    let password = vault_state.0.get_password(&password_key).await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
@@ -477,9 +471,28 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // 配置 Stronghold 插件（仍然配置以支持其他功能）
+        .plugin(tauri_plugin_stronghold::Builder::new(|password: &str| {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(password.as_bytes());
+            hasher.update(b"postium-mail-salt");
+            hasher.finalize().to_vec()
+        }).build())
         .setup(|app| {
-            // 应用启动时初始化数据库和 Vault
+            // 应用启动时初始化数据库和 Stronghold
             tauri::async_runtime::block_on(async move {
+                // 建立 Stronghold vault 目录
+                let vault_path = crypto::get_vault_path()
+                    .expect("无法获取 vault 路径");
+                tracing::info!("Stronghold vault: {}", vault_path);
+
+                // 初始化 SecureVault（使用 iota_stronghold）
+                let vault = crypto::SecureVault::new()
+                    .await
+                    .expect("SecureVault 初始化失败");
+                app.manage(VaultState(vault));
+
                 // 建立数据库连接
                 let db = database::establish_connection()
                     .await
@@ -493,20 +506,13 @@ pub fn run() {
                 // 将数据库连接存储到应用状态中
                 app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
-                // 初始化 SecureVault（使用加密内存存储）
-                let vault = crypto::SecureVault::new()
-                    .await
-                    .expect("Vault 初始化失败");
-                app.manage(VaultState(vault));
-
                 // 初始化 OAuth 服务
                 app.manage(OAuthState(
                     services::oauth_service::OAuthService::new()
                 ));
 
                 tracing::info!("Postium Mail 后端初始化完成");
-                tracing::info!("密码存储: SecureVault（加密内存）");
-                tracing::warn!("生产环境应配置 Tauri Stronghold 插件");
+                tracing::info!("密码存储: AES-256-GCM 加密文件 (vault.enc)");
             });
 
             Ok(())
