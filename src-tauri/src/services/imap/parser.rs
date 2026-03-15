@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use super::types::{EmailData, EmailFlags};
+use super::types::{EmailData, EmailFlags, EmailAttachment};
+use mail_parser::MimeHeaders;
 
 /// 检测字符串是否包含大量乱码字符
 fn is_garbled(input: &str) -> bool {
@@ -309,13 +310,17 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
         .map(|s| s.to_string())
         .unwrap_or_default();
 
+    // 解析附件
+    let attachments = extract_attachments(&message);
+
     tracing::debug!(
-        "解析邮件 UID {}: subject='{}', from='{}', to='{}', cc='{}'",
+        "解析邮件 UID {}: subject='{}', from='{}', to='{}', cc='{}', attachments={}",
         uid,
         subject,
         from,
         to,
-        cc
+        cc,
+        attachments.len()
     );
 
     Ok(EmailData {
@@ -334,7 +339,45 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
             answered: false,
             deleted: false,
         },
+        attachments,
     })
+}
+
+/// 从邮件中提取附件信息
+fn extract_attachments(message: &mail_parser::Message<'_>) -> Vec<EmailAttachment> {
+    let mut attachments = Vec::new();
+
+    for part in message.attachments() {
+        let filename: String = part.attachment_name()
+            .map(|s: &str| s.to_string())
+            .unwrap_or_else(|| {
+                // 如果没有文件名，使用 content-type 生成一个
+                let content_type = part.content_type()
+                    .map(|ct| {
+                        let subtype = ct.c_subtype.as_ref().map(|s| s.as_ref()).unwrap_or("octet-stream");
+                        format!("{}/{}", ct.ctype(), subtype)
+                    })
+                    .unwrap_or_else(|| "application/octet-stream".to_string());
+                format!("attachment.{}", content_type.split('/').last().unwrap_or("bin"))
+            });
+
+        let content_type = part.content_type()
+            .map(|ct| {
+                let subtype = ct.c_subtype.as_ref().map(|s| s.as_ref()).unwrap_or("octet-stream");
+                format!("{}/{}", ct.ctype(), subtype)
+            })
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+
+        let size = part.contents().len() as u64;
+
+        attachments.push(EmailAttachment {
+            filename,
+            content_type,
+            size,
+        });
+    }
+
+    attachments
 }
 
 /// 仅解析邮件头（用于骨架同步）

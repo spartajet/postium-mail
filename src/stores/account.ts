@@ -233,9 +233,15 @@ export const useAccountStore = defineStore('account', () => {
         accounts.value.splice(index, 1)
       }
 
-      // 如果删除的是当前账号，切换到第一个账号
+      // 如果删除的是当前账号，切换到第一个账号并清空邮件列表
       if (currentAccount.value?.id === accountId) {
         currentAccount.value = accounts.value.length > 0 ? accounts.value[0] : null
+
+        // 清空邮件列表和状态（刷新界面）
+        const { useEmailStore } = await import('./email')
+        const emailStore = useEmailStore()
+        emailStore.clearEmails()
+        emailStore.clearSelection()
       }
     } catch (error) {
       console.error('删除账号失败:', error)

@@ -171,14 +171,24 @@ impl AsyncImapClient {
         // 从 Mailbox 对象解析状态信息
         let mailbox = status_response;
 
-        // 处理 Option 类型的字段
+        // 处理 Option 类型的字段，允许服务器不返回某些字段
         let uidvalidity = mailbox
             .uid_validity
-            .ok_or_else(|| anyhow!("服务器未返回 UIDVALIDITY"))? as u64;
+            .map(|v| v as u64)
+            .unwrap_or(1); // 默认值为 1
 
         let uidnext = mailbox
             .uid_next
-            .ok_or_else(|| anyhow!("服务器未返回 UIDNEXT"))? as u64;
+            .map(|v| v as u64)
+            .unwrap_or(1); // 默认值为 1
+
+        // 如果服务器未返回 UIDVALIDITY 或 UIDNEXT，记录警告
+        if mailbox.uid_validity.is_none() {
+            tracing::warn!("文件夹 {} 服务器未返回 UIDVALIDITY，使用默认值 1", folder);
+        }
+        if mailbox.uid_next.is_none() {
+            tracing::warn!("文件夹 {} 服务器未返回 UIDNEXT，使用默认值 1", folder);
+        }
 
         Ok(FolderMetadata {
             uidvalidity,

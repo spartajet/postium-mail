@@ -95,6 +95,10 @@ function dtoToEmail(dto: EmailListItemDto): Email {
 function detailDtoToEmail(dto: EmailDetailDto): Email {
   // 统一文件夹名称为小写（兼容旧数据的大写格式）
   const normalizedFolder = normalizeFolderName(dto.folder)
+
+  // 调试日志：打印附件数据
+  console.log('[detailDtoToEmail] 附件数据:', dto.attachments)
+
   return {
     id: dto.id.toString(),
     subject: dto.subject || '无主题',
