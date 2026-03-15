@@ -171,7 +171,7 @@ const storagePercent = computed(
     <aside class="sidebar">
         <!-- Header -->
         <div class="sidebar-header" data-tauri-drag-region>
-            <div class="logo" data-tauri-drag-region>
+            <div class="logo">
                 <div class="logo-icon">
                     <img src="@/assets/icon.png" alt="Postium Logo" />
                 </div>
@@ -387,6 +387,18 @@ const storagePercent = computed(
     width: 24px;
     height: 24px;
     object-fit: contain;
+    pointer-events: none; /* 防止图片阻止拖动事件 */
+}
+
+/* Logo 区域拖动支持 */
+.logo {
+    -webkit-app-region: drag; /* 支持窗口拖动（Chrome/Edge） */
+    cursor: move; /* 显示移动光标 */
+    user-select: none; /* 防止文字选中 */
+}
+
+.logo * {
+    -webkit-app-region: drag; /* 确保所有子元素都支持拖动 */
 }
 
 /* 组件使用全局样式，此处仅添加作用域样式如有需要 */
