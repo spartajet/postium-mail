@@ -9,7 +9,6 @@ import {
 import { useI18n } from "vue-i18n";
 import type { EmailFolder } from "@/types";
 import {
-    EmailOutlined,
     SettingsOutlined,
     ExpandMoreOutlined,
     AddOutlined,
@@ -172,9 +171,9 @@ const storagePercent = computed(
     <aside class="sidebar">
         <!-- Header -->
         <div class="sidebar-header" data-tauri-drag-region>
-            <div class="logo">
+            <div class="logo" data-tauri-drag-region>
                 <div class="logo-icon">
-                    <EmailOutlined :size="24" />
+                    <img src="@/assets/icon.png" alt="Postium Logo" />
                 </div>
                 <span class="logo-text">Postium</span>
             </div>
@@ -383,6 +382,13 @@ const storagePercent = computed(
 </template>
 
 <style scoped>
+/* Logo 图片样式 */
+.logo-icon img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+
 /* 组件使用全局样式，此处仅添加作用域样式如有需要 */
 
 /* 头部同步按钮旋转动画 */
