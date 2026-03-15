@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::models::account;
 use crate::services::{
     account_service, folder_service, sync_state_service, sync_error_service,
-    imap_service,
+    imap,
 };
 use crate::crypto::{KEYRING_SERVICE, password_username};
 use tauri_plugin_keyring::KeyringExt;
@@ -115,8 +115,8 @@ impl SyncManager {
         tracing::info!("准备连接 IMAP 服务器: email={}, host={:?}, port={:?}",
             account.email, account.imap_host, account.imap_port);
 
-        // 创建 IMAP 服务
-        let mut imap_service = imap_service::ImapService::new();
+        // 创建 IMAP 服务（使用新的异步版本）
+        let mut imap_service = imap::ImapService::new();
 
         // 连接到 IMAP 服务器
         let host = account.imap_host.unwrap_or_default();
@@ -128,8 +128,8 @@ impl SyncManager {
             &host,
             port,
             &account.email,
-            imap_service::ImapAuth::Password(password),
-        ) {
+            imap::ImapAuth::Password(password),
+        ).await {
             let msg = format!("连接 IMAP 服务器失败: {}", e);
             let _ = self.emit_progress(account_id, SyncProgress {
                 stage: SyncStage::Error,
@@ -270,7 +270,7 @@ impl SyncManager {
     /// 同步文件夹列表
     async fn sync_folders(
         &self,
-        imap_service: &mut imap_service::ImapService,
+        imap_service: &mut imap::ImapService,
         account_id: i32,
     ) -> Result<Vec<crate::models::folder::Model>> {
         // 定义要同步的标准文件夹列表（固定顺序）
@@ -300,13 +300,13 @@ impl SyncManager {
                     // 方法 1: 优先使用 RFC 6154 special-use 属性
                     if let Some(special_use) = folder_info.special_use {
                         let matches = match special_use {
-                            imap_service::SpecialUse::All => *standard_name == "archive",
-                            imap_service::SpecialUse::Archive => *standard_name == "archive",
-                            imap_service::SpecialUse::Drafts => *standard_name == "drafts",
-                            imap_service::SpecialUse::Flagged => *standard_name == "starred",
-                            imap_service::SpecialUse::Junk => *standard_name == "spam",
-                            imap_service::SpecialUse::Sent => *standard_name == "sent",
-                            imap_service::SpecialUse::Trash => *standard_name == "trash",
+                            imap::SpecialUse::All => *standard_name == "archive",
+                            imap::SpecialUse::Archive => *standard_name == "archive",
+                            imap::SpecialUse::Drafts => *standard_name == "drafts",
+                            imap::SpecialUse::Flagged => *standard_name == "starred",
+                            imap::SpecialUse::Junk => *standard_name == "spam",
+                            imap::SpecialUse::Sent => *standard_name == "sent",
+                            imap::SpecialUse::Trash => *standard_name == "trash",
                         };
                         if matches {
                             tracing::debug!("  ✅ RFC 6154 属性匹配: {:?} == {}", special_use, standard_name);
@@ -348,7 +348,7 @@ impl SyncManager {
     /// 首次同步文件夹
     async fn first_sync_folder(
         &self,
-        imap_service: &mut imap_service::ImapService,
+        imap_service: &mut imap::ImapService,
         account_id: i32,
         folder_name: &str,
         imap_folder: &str,
@@ -392,7 +392,7 @@ impl SyncManager {
     /// 增量同步文件夹
     async fn incremental_sync_folder(
         &self,
-        imap_service: &mut imap_service::ImapService,
+        imap_service: &mut imap::ImapService,
         account_id: i32,
         folder_name: &str,
         imap_folder: &str,
@@ -415,7 +415,7 @@ impl SyncManager {
         }
 
         // 获取大于 last_uid 的所有邮件
-        let uids = imap_service.list_uids_after(imap_folder, last_uid.unwrap()).await?;
+        let uids = imap_service.list_uids_after(imap_folder, last_uid.unwrap() as u32).await?;
 
         if uids.is_empty() {
             return Ok(0);
@@ -452,7 +452,7 @@ impl SyncManager {
     /// 同步单封邮件
     async fn sync_email(
         &self,
-        imap_service: &mut imap_service::ImapService,
+        imap_service: &mut imap::ImapService,
         account_id: i32,
         folder_name: &str,
         imap_folder: &str,
