@@ -92,7 +92,7 @@ fn load_test_account() -> TestAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postium_mail_lib::services::imap_service::{ImapAuth, ImapClient};
+    use postium_mail_lib::services::imap::{ImapAuth, ImapClient};
     use postium_mail_lib::services::smtp_service::{SmtpAuth, SmtpClient};
     use std::time::Instant;
 
@@ -124,7 +124,7 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        );
+        ).await;
 
         let connect_time = start.elapsed();
 
@@ -149,19 +149,19 @@ mod tests {
         info!("   连接耗时: {:?}", connect_time);
 
         // 尝试选择收件箱
-        let count = client.select_folder("INBOX").expect("选择收件箱失败");
+        let count = client.select_folder("INBOX").await.expect("选择收件箱失败");
         info!("   选择收件箱成功");
         info!("   邮件数量: {}", count);
 
         // 获取邮件 UID 列表（限制 10 封）
-        let uids = client.list_uids("INBOX", 10).expect("获取 UID 列表失败");
+        let uids = client.list_uids("INBOX", 10).await.expect("获取 UID 列表失败");
         info!("   获取 UID 列表成功");
         debug!("   最新 {} 封邮件 UID: {:?}", uids.len(), uids);
 
         // 获取第一封邮件（如果有）
         if let Some(&uid) = uids.first() {
             info!("尝试获取第一封邮件 (UID: {})...", uid);
-            let email = client.fetch_email(uid, "INBOX").expect("获取邮件失败");
+            let email = client.fetch_email("INBOX", uid).await.expect("获取邮件失败");
             info!("✅ 获取邮件成功!");
             info!("   主题: {}", email.subject);
             info!("   发件人: {}", email.from);
@@ -171,7 +171,7 @@ mod tests {
         }
 
         // 登出
-        let _ = client.logout();
+        let _ = client.logout().await;
         info!("✅ IMAP 测试完成!");
     }
 
@@ -287,23 +287,23 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        ) {
+        ).await {
             Ok(_) => {
                 info!("   ✅ IMAP 连接成功");
 
                 // 选择收件箱
-                match imap_client.select_folder("INBOX") {
+                match imap_client.select_folder("INBOX").await {
                     Ok(count) => {
                         info!("   ✅ 收件箱: {} 封邮件", count);
 
                         // 获取最新 5 封邮件
-                        match imap_client.list_uids("INBOX", 5) {
+                        match imap_client.list_uids("INBOX", 5).await {
                             Ok(uids) => {
                                 info!("   ✅ 获取到 {} 封最新邮件", uids.len());
 
                                 // 获取第一封邮件详情
                                 if let Some(uid) = uids.first() {
-                                    match imap_client.fetch_email(*uid, "INBOX") {
+                                    match imap_client.fetch_email("INBOX", *uid).await {
                                         Ok(email) => info!("   ✅ 最新邮件: {}", email.subject),
                                         Err(e) => warn!("   ⚠️  获取邮件详情失败: {}", e),
                                     }
@@ -315,7 +315,7 @@ mod tests {
                     Err(e) => warn!("   ⚠️  选择收件箱失败: {}", e),
                 }
 
-                let _ = imap_client.logout();
+                let _ = imap_client.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();
@@ -396,12 +396,12 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        ) {
+        ).await {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
                 // 列出所有文件夹
-                match client.list_folders() {
+                match client.list_folders().await {
                     Ok(folders) => {
                         info!("✅ 获取到 {} 个文件夹:", folders.len());
                         for folder in &folders {
@@ -430,7 +430,7 @@ mod tests {
                     }
                 }
 
-                let _ = client.logout();
+                let _ = client.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();
@@ -463,12 +463,12 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        ) {
+        ).await {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
                 // 先列出所有文件夹
-                match client.list_folders() {
+                match client.list_folders().await {
                     Ok(folders) => {
                         info!("✅ 可用文件夹:");
                         for folder in &folders {
@@ -484,19 +484,19 @@ mod tests {
                         for folder_name in &sent_folder_names {
                             info!("\n尝试选择文件夹: '{}'...", folder_name);
 
-                            match client.select_folder(folder_name) {
+                            match client.select_folder(folder_name).await {
                                 Ok(count) => {
                                     info!("✅ 成功选择 '{}', 邮件数量: {}", folder_name, count);
 
                                     if count > 0 {
                                         // 获取最新 5 封邮件
-                                        match client.list_uids(folder_name, 5) {
+                                        match client.list_uids(folder_name, 5).await {
                                             Ok(uids) => {
                                                 info!("✅ 获取到 {} 封最新邮件", uids.len());
 
                                                 // 获取第一封邮件详情
                                                 if let Some(uid) = uids.first() {
-                                                    match client.fetch_email(*uid, folder_name) {
+                                                    match client.fetch_email(folder_name, *uid).await {
                                                         Ok(email) => {
                                                             info!("✅ 最新邮件详情:");
                                                             info!("   主题: {}", email.subject);
@@ -532,7 +532,7 @@ mod tests {
                     }
                 }
 
-                let _ = client.logout();
+                let _ = client.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();
@@ -565,27 +565,27 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        ) {
+        ).await {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
                 // 列出所有文件夹
-                match client.list_folders() {
+                match client.list_folders().await {
                     Ok(folders) => {
                         info!("✅ 获取到 {} 个文件夹", folders.len());
                         info!("========================================");
 
                         for folder in &folders {
-                            match client.select_folder(folder) {
+                            match client.select_folder(folder).await {
                                 Ok(count) => {
                                     info!("📁 {:30} - {:4} 封邮件", folder, count);
 
                                     // 如果有邮件，获取第一封的主题
                                     if count > 0 {
-                                        match client.list_uids(folder, 1) {
+                                        match client.list_uids(folder, 1).await {
                                             Ok(uids) => {
                                                 if let Some(uid) = uids.first() {
-                                                    match client.fetch_email(*uid, folder) {
+                                                    match client.fetch_email(folder, *uid).await {
                                                         Ok(email) => {
                                                             info!("   └─ 最新: {}", email.subject);
                                                         }
@@ -614,7 +614,7 @@ mod tests {
                     }
                 }
 
-                let _ = client.logout();
+                let _ = client.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();

@@ -58,7 +58,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_folder_attributes() {
-        use postium_mail_lib::services::imap_service::{ImapAuth, ImapClient};
+        use postium_mail_lib::services::imap::{ImapAuth, ImapClient};
         use tracing::info;
 
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
@@ -77,12 +77,12 @@ mod tests {
             account.imap_port,
             &account.account,
             ImapAuth::Password(account.password.clone()),
-        ) {
+        ).await {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
                 // 获取文件夹列表
-                match client.list_folders() {
+                match client.list_folders().await {
                     Ok(folders) => {
                         info!("========================================");
                         info!("文件夹列表（共 {} 个）:", folders.len());
@@ -92,7 +92,7 @@ mod tests {
                             info!("📁 {}", folder_name);
 
                             // 尝试选择文件夹获取更多信息
-                            if let Ok(count) = client.select_folder(folder_name) {
+                            if let Ok(count) = client.select_folder(folder_name).await {
                                 info!("   邮件数: {}", count);
                             }
                         }
@@ -108,7 +108,7 @@ mod tests {
                     }
                 }
 
-                let _ = client.logout();
+                let _ = client.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();

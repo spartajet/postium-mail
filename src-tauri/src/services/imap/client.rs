@@ -97,6 +97,41 @@ impl AsyncImapClient {
         Ok(folder_infos)
     }
 
+    /// 异步列出服务器上的所有文件夹（仅返回名称）
+    pub async fn list_folders(&mut self) -> Result<Vec<String>> {
+        let session = self.session.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // 使用 list 命令获取文件夹列表（返回流）
+        let folders: Vec<async_imap::types::Name> = session.list(None, Some("*"))
+            .await
+            .map_err(|e| anyhow!("列出文件夹失败: {}", e))?
+            .try_collect::<Vec<async_imap::types::Name>>()
+            .await
+            .map_err(|e| anyhow!("收集文件夹列表失败: {}", e))?;
+
+        // 只返回文件夹名称
+        let folder_names: Vec<String> = folders.iter()
+            .map(|f| f.name().to_string())
+            .filter(|name| !name.starts_with('.')) // 过滤掉系统文件夹
+            .collect();
+
+        Ok(folder_names)
+    }
+
+    /// 选择文件夹并返回邮件数量
+    pub async fn select_folder(&mut self, folder: &str) -> Result<usize> {
+        let session = self.session.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹（返回 Result<Mailbox>）
+        let mailbox = session.select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        Ok(mailbox.exists as usize)
+    }
+
     /// 解析 RFC 6154 Special-Use 属性
     /// async-imap 0.11 的属性处理方式不同，暂时使用名称匹配
     fn parse_special_use(_attrs: &[async_imap::types::NameAttribute]) -> Option<SpecialUse> {
