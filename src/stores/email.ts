@@ -164,8 +164,12 @@ export const useEmailStore = defineStore('email', () => {
 
   // 分页
   const currentPage = ref(0)
-  const pageSize = ref(50)
+  const pageSize = ref(100)  // 默认显示100封邮件
   const totalEmails = ref(0)
+
+  // 是否还有更多邮件可以加载
+  const hasMore = ref(true)
+  const isLoadingMore = ref(false)
 
   // 文件夹统计数据（从后端获取）
   interface FolderStat {
@@ -276,9 +280,9 @@ export const useEmailStore = defineStore('email', () => {
   }
 
   // 获取邮件列表
-  async function fetchEmails(page = 0) {
+  async function fetchEmails(page = 0, append = false) {
     console.log('[fetchEmails] ========== 开始获取邮件列表 ==========')
-    console.log('[fetchEmails] 参数:', { page, currentPage: currentPage.value })
+    console.log('[fetchEmails] 参数:', { page, currentPage: currentPage.value, append })
 
     const accountStore = useAccountStore()
     console.log('[fetchEmails] 当前账号状态:', {
@@ -293,13 +297,20 @@ export const useEmailStore = defineStore('email', () => {
       emails.value = []
       totalEmails.value = 0
       currentPage.value = 0
+      hasMore.value = true
       return
     }
 
     console.log('[fetchEmails] 当前文件夹:', currentFolder.value)
     console.log('[fetchEmails] 每页数量:', pageSize.value)
 
-    isLoading.value = true
+    // 非追加模式时才设置 isLoading
+    if (!append) {
+      isLoading.value = true
+    } else {
+      isLoadingMore.value = true
+    }
+
     try {
       const accountId = getAccountId()
       const folder = currentFolder.value
@@ -336,9 +347,21 @@ export const useEmailStore = defineStore('email', () => {
         })))
       }
 
-      emails.value = response.emails.map(dtoToEmail)
-      totalEmails.value = response.total
-      currentPage.value = response.page
+      const newEmails = response.emails.map(dtoToEmail)
+
+      if (append) {
+        // 追加模式：添加到现有列表
+        emails.value = [...emails.value, ...newEmails]
+        currentPage.value = response.page
+      } else {
+        // 替换模式：替换整个列表
+        emails.value = newEmails
+        totalEmails.value = response.total
+        currentPage.value = response.page
+      }
+
+      // 更新 hasMore 状态
+      hasMore.value = emails.value.length < response.total
 
       // 获取文件夹统计数据
       await fetchFolderStats()
@@ -347,14 +370,40 @@ export const useEmailStore = defineStore('email', () => {
       console.log('[fetchEmails] 当前邮件列表状态:', {
         totalCount: emails.value.length,
         total: totalEmails.value,
-        currentFolder: currentFolder.value
+        currentFolder: currentFolder.value,
+        hasMore: hasMore.value
       })
     } catch (error) {
       console.error('[fetchEmails] ❌ 获取邮件列表失败:', error)
       throw error
     } finally {
-      isLoading.value = false
+      if (!append) {
+        isLoading.value = false
+      } else {
+        isLoadingMore.value = false
+      }
       console.log('[fetchEmails] ========== 获取邮件列表结束 ==========')
+    }
+  }
+
+  // 加载更多邮件
+  async function loadMore() {
+    console.log('[loadMore] ========== 开始加载更多邮件 ==========')
+
+    // 防止重复加载
+    if (isLoadingMore.value || !hasMore.value) {
+      console.log('[loadMore] ⚠️  跳过加载:', { isLoadingMore: isLoadingMore.value, hasMore: hasMore.value })
+      return
+    }
+
+    try {
+      const nextPage = currentPage.value + 1
+      console.log('[loadMore] 加载第', nextPage, '页')
+
+      await fetchEmails(nextPage, true)
+    } catch (error) {
+      console.error('[loadMore] ❌ 加载更多失败:', error)
+      throw error
     }
   }
 
@@ -788,6 +837,8 @@ export const useEmailStore = defineStore('email', () => {
     currentPage,
     pageSize,
     totalEmails,
+    hasMore,
+    isLoadingMore,
 
     // Getters
     folderEmails,
@@ -802,6 +853,7 @@ export const useEmailStore = defineStore('email', () => {
 
     // Actions
     fetchEmails,
+    loadMore,
     fetchEmailDetail,
     fetchFolderStats,
     initialize,
