@@ -684,32 +684,33 @@
   align-items: center;
   gap: $spacing-sm;
   margin-bottom: $spacing-md;
-  font-size: $font-size-sm;
+  font-size: $font-size-base; // 增大基础字体
   font-weight: $font-weight-medium;
-  color: var(--text-secondary);
+  color: var(--text-primary); // 使用更清晰的颜色
 
   svg {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
   }
 }
 
 .attachments-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column; // 改为垂直布局，更清晰
   gap: $spacing-sm;
 }
 
 .attachment-item {
   display: flex;
   align-items: center;
-  gap: $spacing-sm;
-  padding: $spacing-sm $spacing-md;
+  gap: $spacing-md;
+  padding: $spacing-md; // 增加内边距
   background: var(--bg-glass);
   border: 1px solid var(--border-subtle);
   border-radius: $radius-md;
   cursor: pointer;
   transition: all $transition-fast;
+  min-width: 0; // 防止文本溢出
 
   &:hover {
     background: var(--bg-glass-hover);
@@ -718,35 +719,41 @@
 }
 
 .attachment-icon {
-  width: 32px;
-  height: 32px;
+  width: 40px; // 增大图标区域
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-glass-active);
   border-radius: $radius-sm;
-  color: var(--text-secondary);
+  color: var(--text-primary); // 使用更清晰的颜色
+  flex-shrink: 0; // 防止图标被压缩
 
   svg {
-    width: 18px;
-    height: 18px;
+    width: 20px; // 增大图标
+    height: 20px;
   }
 }
 
 .attachment-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px; // 增加间距
+  flex: 1; // 占据剩余空间
+  min-width: 0; // 防止文本溢出
 }
 
 .attachment-name {
-  font-size: $font-size-sm;
-  color: var(--text-primary);
+  font-size: $font-size-base; // 增大文件名字体
+  font-weight: $font-weight-medium; // 加粗
+  color: var(--text-primary); // 确保清晰
+  word-break: break-word; // 长文件名换行
+  overflow-wrap: break-word;
 }
 
 .attachment-size {
-  font-size: $font-size-xs;
-  color: var(--text-muted);
+  font-size: $font-size-sm; // 增大附件大小字体
+  color: var(--text-secondary); // 使用次要文字颜色，比 muted 更清晰
 }
 
 // ========================================
