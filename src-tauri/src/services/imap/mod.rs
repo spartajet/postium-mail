@@ -5,7 +5,7 @@ mod service;
 mod tests;
 mod types;
 
-pub use client::{AsyncImapClient, one_year_ago_imap_format};
+pub use client::{AsyncImapClient, three_months_ago_imap_format};
 // 向后兼容别名
 pub use AsyncImapClient as ImapClient;
 pub use error::{ImapError, Result};

@@ -586,21 +586,21 @@ impl Default for AsyncImapClient {
     }
 }
 
-pub fn one_year_ago_imap_format() -> String {
+pub fn three_months_ago_imap_format() -> String {
     let now = chrono::Utc::now();
-    let one_year_ago = now - chrono::Duration::days(365);
+    let three_months_ago = now - chrono::Duration::days(90);
 
     let date_str = format!(
         "{:02}-{}-{:04}",
-        one_year_ago.day(),
-        month_abbr(one_year_ago.month()),
-        one_year_ago.year()
+        three_months_ago.day(),
+        month_abbr(three_months_ago.month()),
+        three_months_ago.year()
     );
 
     tracing::info!(
-        "📅 计算一年前的日期: 现在={}, 一年前={}, 格式化后={}",
+        "📅 计算三个月前的日期: 现在={}, 三个月前={}, 格式化后={}",
         now.format("%Y-%m-%d %H:%M:%S UTC"),
-        one_year_ago.format("%Y-%m-%d %H:%M:%S UTC"),
+        three_months_ago.format("%Y-%m-%d %H:%M:%S UTC"),
         date_str
     );
 

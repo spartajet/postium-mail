@@ -455,16 +455,16 @@ impl SyncManager {
         folder_name: &str,
         imap_folder: &str,
     ) -> Result<usize> {
-        // 计算一年前的日期（IMAP 格式）
-        let date_since = imap::one_year_ago_imap_format();
+        // 计算三个月前的日期（IMAP 格式）
+        let date_since = imap::three_months_ago_imap_format();
 
         tracing::info!(
-            "同步近一年邮件: 文件夹={}, 日期>={}",
+            "同步近三个月邮件: 文件夹={}, 日期>={}",
             imap_folder,
             date_since
         );
 
-        // 获取近一年的邮件 UID 列表
+        // 获取近三个月的邮件 UID 列表
         let uids = imap_service
             .list_uids_since(imap_folder, &date_since)
             .await?;
