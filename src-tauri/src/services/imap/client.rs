@@ -151,6 +151,45 @@ impl AsyncImapClient {
         Ok(mailbox.exists as usize)
     }
 
+    /// 获取文件夹 IMAP 元数据（UIDVALIDITY, UIDNEXT 等）
+    /// 使用 STATUS 命令获取文件夹元数据而不选中文件夹
+    pub async fn fetch_folder_metadata(&mut self, folder: &str) -> Result<super::types::FolderMetadata> {
+        use super::types::FolderMetadata;
+
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // 使用 STATUS 命令获取文件夹元数据
+        // 请求: MESSAGES, RECENT, UIDNEXT, UIDVALIDITY, UNSEEN
+        let status_response = session
+            .status(folder, "(MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)")
+            .await
+            .map_err(|e| anyhow!("获取文件夹状态失败: {}", e))?;
+
+        // 从 Mailbox 对象解析状态信息
+        let mailbox = status_response;
+
+        // 处理 Option 类型的字段
+        let uidvalidity = mailbox
+            .uid_validity
+            .ok_or_else(|| anyhow!("服务器未返回 UIDVALIDITY"))? as u64;
+
+        let uidnext = mailbox
+            .uid_next
+            .ok_or_else(|| anyhow!("服务器未返回 UIDNEXT"))? as u64;
+
+        Ok(FolderMetadata {
+            uidvalidity,
+            uidnext,
+            highest_modseq: None, // CONDSTORE 支持将在后续实现
+            exists: mailbox.exists as u32,
+            recent: mailbox.recent as u32,
+            unseen: None, // Mailbox 结构不直接提供 unseen，需要从其他途径获取
+        })
+    }
+
     /// 解析 RFC 6154 Special-Use 属性
     /// async-imap 0.11 的属性处理方式不同，暂时使用名称匹配
     fn parse_special_use(_attrs: &[async_imap::types::NameAttribute]) -> Option<SpecialUse> {
@@ -417,6 +456,118 @@ impl AsyncImapClient {
             },
             ..email_data
         })
+    }
+
+    /// 仅获取邮件头（用于骨架同步，不获取正文）
+    /// 使用 BODY.PEEK[HEADER] 避免设置已读标志
+    pub async fn fetch_email_headers(&mut self, folder: &str, uid: u32) -> Result<super::types::EmailHeader> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹
+        session
+            .select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // FETCH 邮件头（使用 BODY.PEEK[HEADER] 不会设置已读标志）
+        let uid_str = uid.to_string();
+        let messages: Vec<async_imap::types::Fetch> = session
+            .fetch(&uid_str, "(BODY.PEEK[HEADER] FLAGS)")
+            .await
+            .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
+            .try_collect::<Vec<async_imap::types::Fetch>>()
+            .await
+            .map_err(|e| anyhow!("收集邮件头数据失败: {}", e))?;
+
+        let message = messages
+            .first()
+            .ok_or_else(|| anyhow!("邮件 {} 不存在", uid))?;
+
+        // 解析邮件头
+        let header_body = message.body().ok_or_else(|| anyhow!("邮件头为空"))?;
+        let raw_header = decode_email_body(header_body)?;
+
+        // 使用 mail_parser 解析邮件头
+        let email_header = super::parser::parse_email_header_only(&raw_header, uid)?;
+
+        // 解析标志
+        let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
+        let flagged = message.flags().any(|f| f == async_imap::types::Flag::Flagged);
+        let answered = message.flags().any(|f| f == async_imap::types::Flag::Answered);
+        let deleted = message.flags().any(|f| f == async_imap::types::Flag::Deleted);
+
+        Ok(super::types::EmailHeader {
+            flags: super::types::EmailFlags {
+                seen,
+                flagged,
+                answered,
+                deleted,
+            },
+            ..email_header
+        })
+    }
+
+    /// 仅获取邮件正文（用于后台填充）
+    /// 使用 BODY[TEXT] 会设置已读标志
+    pub async fn fetch_email_body(&mut self, folder: &str, uid: u32) -> Result<(String, String)> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹
+        session
+            .select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // FETCH 邮件正文（使用 BODY[1.TEXT] 获取纯文本，BODY[1.HTML] 获取HTML）
+        let uid_str = uid.to_string();
+
+        // 先获取纯文本正文
+        let text_messages: Vec<async_imap::types::Fetch> = session
+            .fetch(&uid_str, "BODY[1.TEXT]")
+            .await
+            .map_err(|e| anyhow!("获取纯文本正文失败: {}", e))?
+            .try_collect::<Vec<async_imap::types::Fetch>>()
+            .await
+            .map_err(|e| anyhow!("收集纯文本正文数据失败: {}", e))?;
+
+        // 再获取HTML正文
+        let html_messages: Vec<async_imap::types::Fetch> = session
+            .fetch(&uid_str, "BODY[1.HTML]")
+            .await
+            .map_err(|e| anyhow!("获取HTML正文失败: {}", e))?
+            .try_collect::<Vec<async_imap::types::Fetch>>()
+            .await
+            .map_err(|e| anyhow!("收集HTML正文数据失败: {}", e))?;
+
+        // 解析纯文本正文
+        let body_text = if let Some(msg) = text_messages.first() {
+            if let Some(body) = msg.body() {
+                decode_email_body(body).unwrap_or_default()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        // 解析HTML正文
+        let body_html = if let Some(msg) = html_messages.first() {
+            if let Some(body) = msg.body() {
+                decode_email_body(body).unwrap_or_default()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        Ok((body_text, body_html))
     }
 
     /// 异步标记邮件为已读/未读

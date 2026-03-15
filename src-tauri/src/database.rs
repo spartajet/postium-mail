@@ -37,5 +37,11 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
     // 删除敏感字段（密码和 token 迁移到 Stronghold）
     crate::migration::m004_20250315_remove_sensitive_fields::run_migrations(db).await?;
 
+    // 添加 IMAP 元数据字段
+    crate::migration::m005_20250315_add_imap_metadata::add_imap_metadata(db).await?;
+
+    // 添加离线操作和同步元数据表
+    crate::migration::m006_20250315_add_sync_operations::add_sync_operations(db).await?;
+
     Ok(())
 }

@@ -336,3 +336,87 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
         },
     })
 }
+
+/// 仅解析邮件头（用于骨架同步）
+pub fn parse_email_header_only(raw: &str, uid: u32) -> Result<super::types::EmailHeader> {
+    use mail_parser::MessageParser;
+
+    let message = MessageParser::default().parse(raw.as_bytes());
+
+    let message = message.ok_or_else(|| anyhow!("邮件头解析失败"))?;
+
+    // 从原始邮件头中提取Subject字段并解码
+    let subject = extract_and_decode_subject(raw).unwrap_or_else(|| {
+        // 如果提取失败，回退到mail_parser
+        let subject_raw = message.subject().unwrap_or("无主题");
+        fix_encoding_issue(subject_raw)
+    });
+
+    // 解析 From 地址
+    let from = message
+        .from()
+        .and_then(|addrs| addrs.first())
+        .and_then(|addr| addr.address())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            tracing::warn!("邮件 UID {} 缺少 From 地址", uid);
+            String::new()
+        });
+
+    // 解析 To 地址
+    let to = message
+        .to()
+        .map(|addrs| addrs.iter()
+            .filter_map(|addr| addr.address())
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "))
+        .unwrap_or_default();
+
+    // 解析 Cc 地址
+    let cc = message
+        .cc()
+        .map(|addrs| addrs.iter()
+            .filter_map(|addr| addr.address())
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "))
+        .unwrap_or_default();
+
+    // 解析日期
+    let date = message
+        .date()
+        .and_then(|d| {
+            let date_str = d.to_rfc822();
+            chrono::DateTime::parse_from_rfc2822(&date_str).ok()
+        })
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|| {
+            tracing::warn!("邮件 UID {} 日期解析失败，使用当前时间", uid);
+            chrono::Utc::now()
+        });
+
+    tracing::debug!(
+        "解析邮件头 UID {}: subject='{}', from='{}', to='{}', cc='{}'",
+        uid,
+        subject,
+        from,
+        to,
+        cc
+    );
+
+    Ok(super::types::EmailHeader {
+        uid,
+        subject,
+        from,
+        to,
+        cc,
+        date,
+        flags: super::types::EmailFlags {
+            seen: false,
+            flagged: false,
+            answered: false,
+            deleted: false,
+        },
+    })
+}

@@ -512,3 +512,26 @@ pub async fn update_email_status(
 
     Ok(())
 }
+
+/// 删除指定文件夹的所有邮件（用于UIDVALIDITY变化时）
+pub async fn delete_all_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<u64> {
+    let delete_result = EmailEntity::delete_many()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .exec(db)
+        .await
+        .map_err(|e| anyhow!("删除文件夹邮件失败: {}", e))?;
+
+    tracing::info!(
+        "删除文件夹 {} 的所有邮件: account_id={}, 删除数量={}",
+        folder,
+        account_id,
+        delete_result.rows_affected
+    );
+
+    Ok(delete_result.rows_affected)
+}
