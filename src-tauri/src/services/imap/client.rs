@@ -189,6 +189,30 @@ impl AsyncImapClient {
     }
 
     /// 获取指定时间范围内的邮件 UID 列表
+    /// date_since: Unix 时间戳（秒）
+    pub async fn list_uids_since_timestamp(&mut self, folder: &str, since_timestamp: i64) -> Result<Vec<u32>> {
+        let session = self.session.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹（返回 Result<Mailbox>）
+        session.select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // 获取所有邮件 UID
+        let uids = session.search("ALL")
+            .await
+            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+
+        // 转换为向量并排序（最新在前）
+        let mut uid_list: Vec<u32> = uids.into_iter().map(|uid| uid.into()).collect();
+        uid_list.sort();
+        uid_list.reverse();
+
+        Ok(uid_list)
+    }
+
+    /// 获取指定时间范围内的邮件 UID 列表（使用 IMAP SINCE 命令）
     /// date_since: IMAP 日期格式，如 "01-Jan-2025"
     pub async fn list_uids_since(&mut self, folder: &str, date_since: &str) -> Result<Vec<u32>> {
         let session = self.session.as_mut()
@@ -200,7 +224,10 @@ impl AsyncImapClient {
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
 
         // 使用 SINCE 命令搜索指定日期之后的邮件（返回 Result<HashSet<Seq>>）
+        // 注意：SINCE 命令的日期格式是 "01-Jan-2025"（不需要双引号，根据 RFC 3501）
         let search_cmd = format!("SINCE {}", date_since);
+        tracing::debug!("使用 IMAP 搜索命令: {}", search_cmd);
+
         let uids = session.search(&search_cmd)
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;

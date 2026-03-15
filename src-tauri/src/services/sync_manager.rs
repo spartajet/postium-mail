@@ -517,7 +517,7 @@ impl SyncManager {
         Ok(synced_count)
     }
 
-    /// 同步单封邮件
+    /// 同步单封邮件（包括更新已存在邮件的状态）
     async fn sync_email(
         &self,
         imap_service: &mut imap::ImapService,
@@ -525,7 +525,7 @@ impl SyncManager {
         folder_name: &str,
         imap_folder: &str,
         uid: u32,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         // 检查邮件是否已存在
         let exists = imap_service.email_exists_by_uid(
             &self.db,
@@ -534,17 +534,29 @@ impl SyncManager {
             folder_name,
         ).await;
 
-        if exists {
-            return Ok(()); // 已存在，跳过
+        if !exists {
+            // 新邮件，获取并保存
+            let email_data = imap_service.fetch_email(imap_folder, uid).await?;
+            imap_service.save_email(&self.db, account_id, folder_name, uid, &email_data).await?;
+            tracing::debug!("新邮件: UID={}, subject={}", uid, email_data.subject);
+            Ok(true)
+        } else {
+            // 邮件已存在，更新状态（已读、星标等）
+            let email_data = imap_service.fetch_email(imap_folder, uid).await?;
+
+            // 更新邮件状态
+            crate::services::email_service::update_email_status(
+                &self.db,
+                account_id,
+                folder_name,
+                uid as i32,
+                &email_data.flags,
+            ).await?;
+
+            tracing::debug!("更新状态: UID={}, seen={}, flagged={}",
+                uid, email_data.flags.seen, email_data.flags.flagged);
+            Ok(false)
         }
-
-        // 获取邮件
-        let email_data = imap_service.fetch_email(imap_folder, uid).await?;
-
-        // 解析并保存
-        imap_service.save_email(&self.db, account_id, folder_name, uid, &email_data).await?;
-
-        Ok(())
     }
 
     /// 检查是否首次同步
