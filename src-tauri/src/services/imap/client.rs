@@ -390,11 +390,11 @@ impl AsyncImapClient {
         // 解析邮件体
         let body = message.body().ok_or_else(|| anyhow!("邮件体为空"))?;
 
-        let raw_email =
-            std::str::from_utf8(body).map_err(|e| anyhow!("解析邮件编码失败: {}", e))?;
+        // 尝试使用不同的编码解码邮件体
+        let raw_email = decode_email_body(body)?;
 
         // 使用 parser 模块解析邮件
-        let email_data = super::parser::parse_email_with_mail_parser(raw_email, uid)?;
+        let email_data = super::parser::parse_email_with_mail_parser(&raw_email, uid)?;
 
         // 解析标志（在返回前收集所有标志状态）
         let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
@@ -536,6 +536,48 @@ impl AsyncImapClient {
         }
         Ok(())
     }
+
+    /// 获取原始邮件头（用于诊断）
+    pub async fn fetch_raw_header(&mut self, folder: &str, uid: u32) -> Result<String> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        session
+            .select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        let uid_str = uid.to_string();
+        let messages = session
+            .fetch(&uid_str, "(RFC822.HEADER)")
+            .await
+            .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(|e| anyhow!("收集邮件头失败: {}", e))?;
+
+        let message = messages
+            .first()
+            .ok_or_else(|| anyhow!("邮件 {} 不存在", uid))?;
+
+        tracing::debug!("Fetch响应: {:?}", message);
+
+        // 检查是否有RFC822.HEADER字段
+        if let Some(header) = message.header() {
+            return String::from_utf8(header.to_vec())
+                .map_err(|e| anyhow!("解析邮件头编码失败: {}", e));
+        }
+
+        // 尝试body方法
+        if let Some(body) = message.body() {
+            return String::from_utf8(body.to_vec())
+                .map_err(|e| anyhow!("解析邮件头编码失败: {}", e));
+        }
+
+        Err(anyhow!("无法获取邮件头"))
+    }
 }
 
 impl Default for AsyncImapClient {
@@ -582,4 +624,89 @@ fn month_abbr(month: u32) -> &'static str {
         12 => "Dec",
         _ => "Jan",
     }
+}
+
+/// 尝试使用不同的编码解码邮件体
+/// 邮件可能使用 UTF-8、GBK、GB2312、ISO-8859-1 等编码
+fn decode_email_body(bytes: &[u8]) -> Result<String> {
+    // 首先尝试 UTF-8（最常见）
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        // 检查是否包含大量替换字符（可能是错误解码）
+        let replacement_count = text.chars().filter(|&c| c == '�').count();
+        let total_chars = text.chars().count();
+
+        if total_chars > 0 && (replacement_count as f64 / total_chars as f64) < 0.05 {
+            tracing::debug!("邮件体使用 UTF-8 编码");
+            return Ok(text.to_string());
+        }
+    }
+
+    // 如果UTF-8失败或包含大量乱码，尝试其他编码
+    // 使用encoding_rs库尝试常见编码
+
+    // 尝试 GBK (常见于中文邮件)
+    let (text, _, _) = encoding_rs::GBK.decode(bytes);
+    let replacement_ratio = if text.chars().count() > 0 {
+        text.chars().filter(|&c| c == '\u{FFFD}').count() as f64 / text.chars().count() as f64
+    } else {
+        0.0
+    };
+    if !text.contains('\u{FFFD}') || replacement_ratio < 0.05 {
+        tracing::info!("邮件体使用 GBK 编码（已转换）");
+        return Ok(text.to_string());
+    }
+
+    // 尝试 GB18030 (GBK的超集)
+    let (text, _, _) = encoding_rs::GB18030.decode(bytes);
+    let replacement_ratio = if text.chars().count() > 0 {
+        text.chars().filter(|&c| c == '\u{FFFD}').count() as f64 / text.chars().count() as f64
+    } else {
+        0.0
+    };
+    if !text.contains('\u{FFFD}') || replacement_ratio < 0.05 {
+        tracing::info!("邮件体使用 GB18030 编码（已转换）");
+        return Ok(text.to_string());
+    }
+
+    // 尝试 Big5 (繁体中文)
+    let (text, _, _) = encoding_rs::BIG5.decode(bytes);
+    let replacement_ratio = if text.chars().count() > 0 {
+        text.chars().filter(|&c| c == '\u{FFFD}').count() as f64 / text.chars().count() as f64
+    } else {
+        0.0
+    };
+    if !text.contains('\u{FFFD}') || replacement_ratio < 0.05 {
+        tracing::info!("邮件体使用 Big5 编码（已转换）");
+        return Ok(text.to_string());
+    }
+
+    // 尝试 Shift_JIS (日文)
+    let (text, _, _) = encoding_rs::SHIFT_JIS.decode(bytes);
+    let replacement_ratio = if text.chars().count() > 0 {
+        text.chars().filter(|&c| c == '\u{FFFD}').count() as f64 / text.chars().count() as f64
+    } else {
+        0.0
+    };
+    if !text.contains('\u{FFFD}') || replacement_ratio < 0.05 {
+        tracing::info!("邮件体使用 Shift_JIS 编码（已转换）");
+        return Ok(text.to_string());
+    }
+
+    // 尝试 ISO-8859-1 (Latin-1)
+    let (text, _, _) = encoding_rs::WINDOWS_1252.decode(bytes);
+    let replacement_ratio = if text.chars().count() > 0 {
+        text.chars().filter(|&c| c == '\u{FFFD}').count() as f64 / text.chars().count() as f64
+    } else {
+        0.0
+    };
+    if !text.contains('\u{FFFD}') || replacement_ratio < 0.05 {
+        tracing::info!("邮件体使用 WINDOWS_1252 编码（已转换）");
+        return Ok(text.to_string());
+    }
+
+    // 如果所有编码都失败，回退到UTF-8并记录警告
+    tracing::warn!("无法确定邮件编码，使用UTF-8作为回退，可能存在乱码");
+    std::str::from_utf8(bytes)
+        .map(|s| s.to_string())
+        .map_err(|e| anyhow!("解码邮件编码失败: {}", e))
 }
