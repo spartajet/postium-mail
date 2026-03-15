@@ -110,7 +110,7 @@ async fn delete_account(
 async fn test_account_connection(
     _keyring_state: tauri::State<'_, KeyringState>,
     account: models::account::CreateAccountRequest,
-) -> Result<services::imap_service::ConnectionTestResult, String> {
+) -> Result<services::imap::ConnectionTestResult, String> {
     let password = account.password.clone();
 
     // 获取服务器配置
@@ -127,9 +127,10 @@ async fn test_account_connection(
 
     let port = account.imap_port.unwrap_or(993);
 
-    let auth = services::imap_service::ImapAuth::Password(password);
+    let auth = services::imap::ImapAuth::Password(password);
 
-    services::imap_service::test_connection(&host, port as u16, &account.email, auth)
+    services::imap::test_connection(&host, port as u16, &account.email, auth)
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -157,9 +158,10 @@ async fn test_email_connection(
 
     let port = imap_port.unwrap_or(993);
 
-    let auth = services::imap_service::ImapAuth::Password(password);
+    let auth = services::imap::ImapAuth::Password(password);
 
-    services::imap_service::test_connection(&host, port, &email, auth)
+    services::imap::test_connection(&host, port, &email, auth)
+        .await
         .map_err(|e| format!("IMAP 连接失败: {}", e))?;
 
     Ok(())

@@ -29,15 +29,20 @@ sea-orm = { version = "0.12", features = [
 
 # 异步运行时
 tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
 
 # 时间处理
 chrono = "0.4"
 
 # 邮件协议
-imap = { version = "3.0.0-alpha.15" }
+# imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = "0.5"
+tokio-native-tls = "0.3"  # Tokio TLS 支持
+tokio-util = { version = "0.7", features = ["compat"] }
+native-tls = "0.2"  # 保留用于旧的 imap_service.rs
 lettre = "0.11"
 mail-parser = "0.11"
-native-tls = "0.2"
 
 base64 = "0.22"
 # OAuth 2.0 相关（最新版本）

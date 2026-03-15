@@ -347,7 +347,7 @@ pub async fn email_exists_by_uid(
 pub async fn save_email_from_imap(
     db: &DbConn,
     account_id: i32,
-    email_data: &crate::services::imap_service::EmailData,
+    email_data: &crate::services::imap::EmailData,
     folder: &str,
 ) -> Result<i32> {
     use sea_orm::ActiveValue::*;
@@ -407,7 +407,7 @@ pub async fn save_email_from_imap(
         id: NotSet,
         account_id: Set(account_id),
         folder: Set(folder.to_string()),
-        uid: Set(Some(email_data.uid)),
+        uid: Set(Some(email_data.uid as i32)),
         // 在 message_id 中包含 folder，确保不同文件夹的相同 UID 不会冲突
         message_id: Set(Some(format!("<{}.{}@postium.imap>", folder, email_data.uid))),
         subject: Set(Some(email_data.subject.clone())),
