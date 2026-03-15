@@ -3,15 +3,32 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use chrono::Utc;
 use oauth2::{
-    basic::BasicClient, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge,
-    PkceCodeVerifier, RefreshToken, Scope, TokenResponse,
+    basic::BasicClient, ClientId, CsrfToken, PkceCodeChallenge, Scope,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::OAuthConfig;
+
+/// 自定义 TokenResponse 用于提取 id_token
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MicrosoftTokenResponse {
+    /// 标准的 access_token
+    access_token: String,
+    /// Token 类型
+    token_type: String,
+    /// 过期时间（秒）
+    expires_in: Option<u64>,
+    /// Refresh token
+    refresh_token: Option<String>,
+    /// Scope
+    scope: Option<String>,
+    /// ID Token (JWT格式，包含用户信息)
+    id_token: Option<String>,
+}
 
 // 使用curl HTTP客户端（避免与Tauri的reqwest冲突）
 fn http_client() -> oauth2::CurlHttpClient {
@@ -25,6 +42,8 @@ pub struct OAuthToken {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: i64, // Unix 时间戳
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>, // JWT格式的用户信息token（当使用openid scope时返回）
 }
 
 /// OAuth 授权上下文（不包含PKCE verifier，因为它不可Clone）
@@ -70,8 +89,10 @@ impl OAuthService {
         // 生成PKCE code challenge和verifier
         let (pkce_code_challenge, pkce_code_verifier) = PkceCodeChallenge::new_random_sha256();
 
-        // 构建授权URL，添加所有必要的scopes
-        // 注意：authorize_url接受一个函数，而不是CsrfToken值
+        // 构建授权URL，使用 Exchange Online scopes
+        // 注意：不能混合使用 Exchange Online 和 Microsoft Graph scopes
+        // 需要 openid scope 才能获取 JWT 格式的 access token
+        // profile 和 email scope 不需要，用户信息从 JWT 中提取
         let (auth_url, csrf_token) = client
             .authorize_url(CsrfToken::new_random)
             .add_scope(Scope::new(
@@ -81,9 +102,7 @@ impl OAuthService {
                 "https://outlook.office.com/SMTP.Send".to_string(),
             ))
             .add_scope(Scope::new("offline_access".to_string()))
-            .add_scope(Scope::new("profile".to_string()))
             .add_scope(Scope::new("openid".to_string()))
-            .add_scope(Scope::new("email".to_string()))
             .set_pkce_challenge(pkce_code_challenge)
             .url();
 
@@ -105,13 +124,6 @@ impl OAuthService {
 
     /// 交换授权码获取Token（使用PKCE verifier）
     pub async fn exchange_microsoft_code(&self, code: &str, state: &str) -> Result<OAuthToken> {
-        use oauth2::{AuthUrl, RedirectUrl, TokenUrl};
-
-        let client = BasicClient::new(ClientId::new(self.config.client_id.clone()))
-            .set_auth_uri(AuthUrl::new(self.config.auth_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.config.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(self.config.redirect_uri.clone())?);
-
         // 从内存中获取PKCE verifier secret字符串
         let verifier_secret = PKCE_STORE
             .read()
@@ -120,143 +132,213 @@ impl OAuthService {
             .ok_or_else(|| anyhow!("找不到PKCE verifier，state可能已过期"))?
             .clone();
 
-        // 从字符串创建PkceCodeVerifier
-        let pkce_verifier = PkceCodeVerifier::new(verifier_secret);
-
-        // 创建授权码
-        let code = AuthorizationCode::new(code.to_string());
-
-        // 使用curl HTTP客户端（同步，需要在spawn_blocking中运行）
-        let http = http_client();
-        // 构建scope字符串（Microsoft要求在token交换时也包含scope参数）
-        // 注意：不能包含 User.Read，因为它与 Exchange Online scopes 不兼容
-        let scopes_str = "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access profile openid email";
-
         tracing::info!("开始交换 OAuth token...");
-        tracing::info!(
-            "  - code: {}...",
-            &code.secret()[..20.min(code.secret().len())]
-        );
+        tracing::info!("  - code: {}...", &code[..20.min(code.len())]);
         tracing::info!("  - state: {}", state);
-        tracing::info!("  - scope: {}", scopes_str);
 
-        let token_response = tokio::task::spawn_blocking(move || {
-            client
-                .exchange_code(code)
-                .set_pkce_verifier(pkce_verifier)
-                // 使用 add_extra_param 添加 scope 参数
-                .add_extra_param("scope", scopes_str)
-                .request(&http)
+        // 直接使用 curl 发送 HTTP 请求以获取完整的响应（包括 id_token）
+        let token_url = self.config.token_url.clone();
+        let client_id = self.config.client_id.clone();
+        let redirect_uri = self.config.redirect_uri.clone();
+        let code = code.to_string();
+        let scopes_str = "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access openid".to_string();
+
+        let response = tokio::task::spawn_blocking(move || {
+            // 使用 curl 发送 POST 请求
+            let mut handle = curl::easy::Easy::new();
+            handle.url(&token_url)?;
+            handle.post(true)?;
+
+            // 构建请求体
+            let params = [
+                format!("client_id={}", client_id),
+                format!("code={}", code),
+                format!("redirect_uri={}", redirect_uri),
+                format!("grant_type=authorization_code"),
+                format!("code_verifier={}", verifier_secret),
+                format!("scope={}", scopes_str),
+            ];
+            let body = params.join("&");
+            handle.post_fields_copy(body.as_bytes())?;
+
+            // 设置响应回调
+            let mut response_data = Vec::new();
+            {
+                let mut transfer = handle.transfer();
+                transfer.write_function(|data| {
+                    response_data.extend_from_slice(data);
+                    Ok(data.len())
+                })?;
+                transfer.perform()?;
+            }
+
+            // 检查 HTTP 状态码
+            let status_code = handle.response_code()?;
+            if status_code != 200 {
+                let error_text = String::from_utf8_lossy(&response_data);
+                return Err(anyhow!("HTTP {}: {}", status_code, error_text));
+            }
+
+            Ok(response_data)
         })
         .await
         .map_err(|e| anyhow!("交换token失败: {}", e))?
         .map_err(|e| anyhow!("交换token失败: {}", e))?;
 
-        // 计算过期时间
-        let expires_in = token_response
-            .expires_in()
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(3600);
+        // 解析 JSON 响应
+        let response_text = String::from_utf8(response)?;
+        let token_json: Value = serde_json::from_str(&response_text)
+            .map_err(|e| anyhow!("解析token响应失败: {}", e))?;
+
+        tracing::info!("========== OAuth Token 交换成功 ==========");
+        tracing::info!("  响应: {}", response_text);
+
+        // 提取字段
+        let access_token = token_json["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("缺少 access_token"))?
+            .to_string();
+        let refresh_token = token_json["refresh_token"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let expires_in = token_json["expires_in"]
+            .as_u64()
+            .unwrap_or(3600) as i64;
+        let id_token = token_json["id_token"].as_str().map(String::from);
+
         let expires_at = Utc::now().timestamp() + expires_in;
 
         // 清理PKCE verifier
         PKCE_STORE.write().await.remove(state);
 
-        // 提取 token
-        let access_token = token_response.access_token().secret().clone();
-        let refresh_token = token_response
-            .refresh_token()
-            .map(|t| t.secret().clone())
-            .unwrap_or_default();
-
         // 打印 token 信息（用于调试）
-        tracing::info!("========== OAuth Token 交换成功 ==========");
         tracing::info!("  expires_in: {} 秒", expires_in);
         tracing::info!("  expires_at: {} (Unix timestamp)", expires_at);
-        tracing::info!(
-            "  access_token (前50字符): {}...",
-            if access_token.len() > 50 {
-                &access_token[..50]
-            } else {
-                &access_token
-            }
-        );
-        tracing::info!("  access_token (完整): {}", access_token);
-        tracing::info!(
-            "  refresh_token (前50字符): {}...",
-            if refresh_token.len() > 50 {
-                &refresh_token[..50]
-            } else {
-                &refresh_token
-            }
-        );
-        tracing::info!("  refresh_token (完整): {}", refresh_token);
+        tracing::info!("  access_token 长度: {}", access_token.len());
+
+        // 打印 id_token 信息
+        if let Some(ref idt) = id_token {
+            tracing::info!("  id_token (前50字符): {}...",
+                if idt.len() > 50 { &idt[..50] } else { idt }
+            );
+            tracing::info!("  id_token 长度: {}", idt.len());
+            let jwt_parts = idt.split('.').count();
+            tracing::info!("  id_token 段数: {} (JWT格式应该是3段)", jwt_parts);
+        } else {
+            tracing::info!("  id_token: 无（可能需要openid scope）");
+        }
+
         tracing::info!("==========================================");
 
         Ok(OAuthToken {
             access_token,
             refresh_token,
             expires_at,
+            id_token,
         })
     }
 
     /// 刷新Token
     pub async fn refresh_microsoft_token(&self, refresh_token: &str) -> Result<OAuthToken> {
-        use oauth2::{AuthUrl, RedirectUrl, TokenUrl};
+        tracing::info!("开始刷新 OAuth token...");
 
-        let client = BasicClient::new(ClientId::new(self.config.client_id.clone()))
-            .set_auth_uri(AuthUrl::new(self.config.auth_url.clone())?)
-            .set_token_uri(TokenUrl::new(self.config.token_url.clone())?)
-            .set_redirect_uri(RedirectUrl::new(self.config.redirect_uri.clone())?);
+        // 直接使用 curl 发送 HTTP 请求
+        let token_url = self.config.token_url.clone();
+        let client_id = self.config.client_id.clone();
+        let refresh_token_owned = refresh_token.to_string();
+        let refresh_token_clone = refresh_token_owned.clone(); // 保留一份副本
+        let scopes_str = "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access openid".to_string();
 
-        // 使用curl HTTP客户端
-        let http = http_client();
-        let refresh_token_copy = refresh_token.to_string(); // 保存原始值用于返回
-        let token_response = tokio::task::spawn_blocking(move || {
-            client
-                .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token_copy))
-                .request(&http)
+        let response = tokio::task::spawn_blocking(move || {
+            // 使用 curl 发送 POST 请求
+            let mut handle = curl::easy::Easy::new();
+            handle.url(&token_url)?;
+            handle.post(true)?;
+
+            // 构建请求体
+            let params = [
+                format!("client_id={}", client_id),
+                format!("refresh_token={}", refresh_token_owned),
+                format!("grant_type=refresh_token"),
+                format!("scope={}", scopes_str),
+            ];
+            let body = params.join("&");
+            handle.post_fields_copy(body.as_bytes())?;
+
+            // 设置响应回调
+            let mut response_data = Vec::new();
+            {
+                let mut transfer = handle.transfer();
+                transfer.write_function(|data| {
+                    response_data.extend_from_slice(data);
+                    Ok(data.len())
+                })?;
+                transfer.perform()?;
+            }
+
+            // 检查 HTTP 状态码
+            let status_code = handle.response_code()?;
+            if status_code != 200 {
+                let error_text = String::from_utf8_lossy(&response_data);
+                return Err(anyhow!("HTTP {}: {}", status_code, error_text));
+            }
+
+            Ok(response_data)
         })
         .await
         .map_err(|e| anyhow!("刷新token失败: {}", e))?
         .map_err(|e| anyhow!("刷新token失败: {}", e))?;
 
-        let expires_in = token_response
-            .expires_in()
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(3600);
-        let expires_at = Utc::now().timestamp() + expires_in;
-
-        let access_token = token_response.access_token().secret().clone();
-        let new_refresh_token = token_response
-            .refresh_token()
-            .map(|t| t.secret().clone())
-            .unwrap_or_else(|| refresh_token.to_string());
+        // 解析 JSON 响应
+        let response_text = String::from_utf8(response)?;
+        let token_json: Value = serde_json::from_str(&response_text)
+            .map_err(|e| anyhow!("解析token响应失败: {}", e))?;
 
         tracing::info!("========== OAuth Token 刷新成功 ==========");
+        tracing::info!("  响应: {}", response_text);
+
+        // 提取字段
+        let access_token = token_json["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow!("缺少 access_token"))?
+            .to_string();
+        let new_refresh_token = token_json["refresh_token"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| {
+                // 如果响应中没有新的 refresh_token，使用旧的
+                tracing::warn!("响应中未包含新的 refresh_token，使用旧的");
+                // 这里需要使用旧的 refresh_token，但我们已经在 move 中消耗了它
+                // 实际上 Microsoft 应该总是返回新的 refresh_token
+                "".to_string()
+            });
+        let expires_in = token_json["expires_in"]
+            .as_u64()
+            .unwrap_or(3600) as i64;
+        let expires_at = Utc::now().timestamp() + expires_in;
+
+        // 如果新的 refresh_token 为空，使用旧的
+        let new_refresh_token = if new_refresh_token.is_empty() {
+            // 需要从外部传入原始的 refresh_token
+            refresh_token_clone
+        } else {
+            new_refresh_token
+        };
+
+        // 打印 token 信息（用于调试）
         tracing::info!("  expires_in: {} 秒", expires_in);
-        tracing::info!(
-            "  access_token (前50字符): {}...",
-            if access_token.len() > 50 {
-                &access_token[..50]
-            } else {
-                &access_token
-            }
-        );
-        tracing::info!(
-            "  refresh_token (前50字符): {}...",
-            if new_refresh_token.len() > 50 {
-                &new_refresh_token[..50]
-            } else {
-                &new_refresh_token
-            }
-        );
+        tracing::info!("  expires_at: {} (Unix timestamp)", expires_at);
+        tracing::info!("  access_token 长度: {}", access_token.len());
+
         tracing::info!("==========================================");
 
         Ok(OAuthToken {
             access_token,
             refresh_token: new_refresh_token,
             expires_at,
+            // 刷新 token 时可能不会返回新的 id_token
+            id_token: None,
         })
     }
 

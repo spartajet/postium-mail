@@ -124,13 +124,13 @@ pub async fn create(
     }
 
     // 如果有 OAuth Token，存储到 Keyring
-    if let (Some(token), Some(refresh_token), Some(expires_at)) = (
-        &req.oauth_token,
+    // 只存储 refresh_token，access_token 可以通过 refresh_token 重新获取
+    // 这样可以避免超过 Windows Keyring 的 2560 字符（UTF-16）限制
+    if let (Some(refresh_token), Some(expires_at)) = (
         &req.oauth_refresh_token,
         req.oauth_expires_at,
     ) {
         let oauth_token = OAuthToken {
-            access_token: token.clone(),
             refresh_token: refresh_token.clone(),
             expires_at,
         };
@@ -225,13 +225,12 @@ pub async fn update(
     }
 
     // 如果有 OAuth Token，更新到 Keyring
-    if let (Some(token), Some(refresh_token), Some(expires_at)) = (
-        &req.oauth_token,
+    // 只存储 refresh_token，access_token 可以通过 refresh_token 重新获取
+    if let (Some(refresh_token), Some(expires_at)) = (
         &req.oauth_refresh_token,
         req.oauth_expires_at,
     ) {
         let oauth_token = OAuthToken {
-            access_token: token.clone(),
             refresh_token: refresh_token.clone(),
             expires_at,
         };

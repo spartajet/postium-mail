@@ -248,15 +248,16 @@ async fn exchange_oauth_code(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            // 从Microsoft Graph API获取用户信息
-            let user_info = get_microsoft_user_info(&token.access_token)
-                .await
+            // 从 id_token 中解析用户信息
+            // id_token 是 JWT 格式，包含用户的 email 和 name
+            // access_token 是不透明token，仅用于 SASL XOAUTH2 认证
+            let id_token = token.id_token
+                .as_ref()
+                .ok_or_else(|| "未获取到 id_token，请确保 openid scope 已启用".to_string())?;
+            let (email, display_name) = get_user_info_from_token(id_token)
                 .map_err(|e| e.to_string())?;
 
-            let email = user_info.email.unwrap_or_default();
-            let display_name = user_info
-                .name
-                .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string());
+            tracing::info!("从 token 解析用户信息: email={}, display_name={}", email, display_name);
 
             // 创建账号记录
             let db = db_state.clone_conn();
@@ -293,40 +294,78 @@ async fn exchange_oauth_code(
     }
 }
 
-/// 从 OpenID Connect userinfo 端点获取用户信息
-/// 使用此端点不需要 User.Read scope，只需要 openid、profile、email scope
-async fn get_microsoft_user_info(access_token: &str) -> anyhow::Result<MicrosoftUserInfo> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("https://graph.microsoft.com/oidc/userinfo")
-        .header("Authorization", format!("Bearer {}", access_token))
-        .send()
-        .await
-        .map_err(|e| anyhow!("获取用户信息失败: {}", e))?;
+/// 从 JWT access token 中解析用户信息
+/// Microsoft 的 access token 是 JWT 格式，包含 email 和 name
+fn get_user_info_from_token(access_token: &str) -> anyhow::Result<(String, String)> {
+    tracing::info!("========== JWT Token 解析 ==========");
+    tracing::info!("  token 长度: {}", access_token.len());
+    tracing::info!("  token 前100字符: {}", &access_token[..100.min(access_token.len())]);
 
-    if !response.status().is_success() {
-        return Err(anyhow!("获取用户信息失败: HTTP {}", response.status()));
+    // JWT 格式: header.payload.signature
+    let parts: Vec<&str> = access_token.split('.').collect();
+    tracing::info!("  分段数量: {}", parts.len());
+
+    if parts.len() != 3 {
+        // 打印每段的长度用于调试
+        for (i, part) in parts.iter().enumerate() {
+            tracing::info!("  段{} 长度: {}", i, part.len());
+        }
+        return Err(anyhow!("无效的 JWT token 格式，期望3段，实际{}段", parts.len()));
     }
 
-    let user_info = response
-        .json::<MicrosoftUserInfo>()
-        .await
-        .map_err(|e| anyhow!("解析用户信息失败: {}", e))?;
+    // 解码 payload（第二部分）
+    let payload = parts.get(1).ok_or_else(|| anyhow!("JWT token 缺少 payload"))?;
 
-    Ok(user_info)
+    // Base64URL 解码
+    let payload_json = base64_url_decode(payload)?;
+
+    // 解析 JSON
+    let claims: serde_json::Value = serde_json::from_str(&payload_json)
+        .map_err(|e| anyhow!("解析 JWT payload 失败: {}", e))?;
+
+    // 提取 email 和 name
+    // Microsoft 使用 "upn" (User Principal Name) 或 "email" 或 "unique_name"
+    let email = claims.get("upn")
+        .or_else(|| claims.get("email"))
+        .or_else(|| claims.get("unique_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown@example.com");
+
+    // 提取显示名称
+    let name = claims.get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            // 如果没有 name，使用 email 的用户名部分
+            email.split('@').next().unwrap_or("用户")
+        });
+
+    Ok((email.to_string(), name.to_string()))
 }
 
-/// OpenID Connect userinfo 端点返回的用户信息
-#[derive(Debug, serde::Deserialize)]
-struct MicrosoftUserInfo {
-    /// 邮箱地址
-    email: Option<String>,
-    /// 显示名称
-    name: Option<String>,
-    /// 名
-    given_name: Option<String>,
-    /// 姓
-    family_name: Option<String>,
+/// Base64URL 解码（处理 JWT 的编码方式）
+fn base64_url_decode(input: &str) -> anyhow::Result<String> {
+    use base64::Engine;
+
+    // Base64URL 需要添加 padding
+    let input_padded = if input.len() % 4 == 0 {
+        input.to_string()
+    } else {
+        let padding = "=".repeat(4 - (input.len() % 4));
+        format!("{}{}", input, padding)
+    };
+
+    // 将 Base64URL 字符转换为标准 Base64
+    let input_standard = input_padded
+        .replace('-', "+")
+        .replace('_', "/");
+
+    // 解码
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&input_standard)
+        .map_err(|e| anyhow!("Base64 解码失败: {}", e))?;
+
+    String::from_utf8(bytes)
+        .map_err(|e| anyhow!("UTF-8 转换失败: {}", e))
 }
 
 #[tauri::command]
@@ -347,8 +386,9 @@ async fn refresh_oauth_token(
 
             tracing::info!("成功刷新OAuth token");
 
+            // 只返回 refresh_token 用于存储
+            // access_token 由调用者直接使用，不需要存储到 Keyring
             Ok(crypto::OAuthToken {
-                access_token: token.access_token,
                 refresh_token: token.refresh_token,
                 expires_at: token.expires_at,
             })

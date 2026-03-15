@@ -1,7 +1,8 @@
-/// OAuth Token 结构（保留用于类型定义）
+/// OAuth Token 结构（用于 Keyring 存储）
+/// 只存储 refresh_token，因为 access_token 可以通过 refresh_token 重新获取
+/// 这样可以避免超过 Windows Keyring 的 2560 字符（UTF-16）限制
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OAuthToken {
-    pub access_token: String,
     pub refresh_token: String,
     pub expires_at: i64,
 }
