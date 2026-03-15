@@ -476,3 +476,39 @@ pub async fn count_unread_by_folder(
 
     Ok(count as i32)
 }
+
+/// 更新邮件状态（从 IMAP 同步状态更新）
+pub async fn update_email_status(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    uid: i32,
+    flags: &crate::services::imap::EmailFlags,
+) -> Result<()> {
+    // 查找邮件
+    let email = EmailEntity::find()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .filter(email::Column::Uid.eq(Some(uid)))
+        .one(db)
+        .await
+        .map_err(|e| anyhow!("查找邮件失败: {}", e))?
+        .ok_or_else(|| anyhow!("邮件不存在: account_id={}, folder={}, uid={}", account_id, folder, uid))?;
+
+    // 更新状态
+    let mut email: email::ActiveModel = email.into();
+    email.is_read = Set(flags.seen);
+    email.is_starred = Set(flags.flagged);
+    email.updated_at = Set(chrono::Utc::now().timestamp());
+
+    email.update(db)
+        .await
+        .map_err(|e| anyhow!("更新邮件状态失败: {}", e))?;
+
+    tracing::debug!(
+        "更新邮件状态: account_id={}, folder={}, uid={}, seen={}, flagged={}",
+        account_id, folder, uid, flags.seen, flags.flagged
+    );
+
+    Ok(())
+}
