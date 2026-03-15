@@ -696,7 +696,7 @@
 
 .attachments-list {
   display: flex;
-  flex-direction: column; // 改为垂直布局，更清晰
+  flex-wrap: wrap; // 横向排列，自动换行
   gap: $spacing-sm;
 }
 
