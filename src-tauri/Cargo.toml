@@ -47,8 +47,10 @@ encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
 
 base64 = "0.22"
 # OAuth 2.0 相关（最新版本）
-oauth2 = "5.0"
+# 使用curl HTTP客户端以避免与Tauri的reqwest冲突
+oauth2 = { version = "5.0", features = ["curl"] }
 reqwest = { version = "0.13", features = ["json"] }
+curl = "0.4"
 url = "2.5"
 
 getrandom = "0.4"
@@ -72,6 +74,9 @@ dotenv = "0.15"
 
 # 文件系统
 dirs = "5.0"
+
+# 全局静态变量
+once_cell = "0.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -4,6 +4,10 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Clone)]
 pub enum ImapAuth {
     Password(String),
+    OAuth2 {
+        email: String,
+        access_token: String,
+    },
 }
 
 /// 邮件标志
