@@ -169,12 +169,12 @@ impl SyncManager {
             })?;
 
             let result = if is_first_sync {
-                self.first_sync_folder(
+                // 首次同步：使用时间范围过滤（近一年）
+                self.sync_folder_recent(
                     &mut imap_service,
                     account_id,
                     &folder.name,
                     &folder.imap_name,
-                    1000, // 首次同步 1000 封
                 ).await
             } else {
                 self.incremental_sync_folder(
@@ -385,6 +385,74 @@ impl SyncManager {
             synced_count as i32,
             true, // is_first_sync
         ).await;
+
+        Ok(synced_count)
+    }
+
+    /// 同步指定文件夹的近一年邮件
+    async fn sync_folder_recent(
+        &self,
+        imap_service: &mut imap::ImapService,
+        account_id: i32,
+        folder_name: &str,
+        imap_folder: &str,
+    ) -> Result<usize> {
+        // 计算一年前的日期（IMAP 格式）
+        let date_since = imap::one_year_ago_imap_format();
+
+        tracing::info!("同步近一年邮件: 文件夹={}, 日期>={}", imap_folder, date_since);
+
+        // 获取近一年的邮件 UID 列表
+        let uids = imap_service.list_uids_since(imap_folder, &date_since).await?;
+
+        if uids.is_empty() {
+            tracing::info!("文件夹 {} 没有近一年的邮件", imap_folder);
+            return Ok(0);
+        }
+
+        tracing::info!("文件夹 {} 找到 {} 封近一年的邮件", imap_folder, uids.len());
+
+        let mut synced_count = 0;
+        let mut error_count = 0;
+
+        // 分批同步（每批 50 封）
+        for chunk in uids.chunks(50) {
+            for &uid in chunk {
+                match self.sync_email(imap_service, account_id, folder_name, imap_folder, uid).await {
+                    Ok(_) => synced_count += 1,
+                    Err(e) => {
+                        tracing::warn!("同步邮件 UID {} 失败: {}", uid, e);
+                        error_count += 1;
+                    }
+                }
+            }
+
+            // 更新进度
+            if let Err(e) = self.emit_progress(account_id, SyncProgress {
+                stage: SyncStage::SyncingEmails,
+                folder: Some(folder_name.to_string()),
+                current: synced_count,
+                total: uids.len(),
+                message: format!("已同步 {}/{}", synced_count, uids.len()),
+            }) {
+                tracing::warn!("发送进度事件失败: {}", e);
+            }
+        }
+
+        // 更新同步状态
+        if let Some(&highest_uid) = uids.first() {
+            let _ = sync_state_service::upsert(
+                &self.db,
+                account_id,
+                folder_name,
+                Some(highest_uid as i32),
+                Some(highest_uid as i32),
+                synced_count as i32,
+                false, // 不是首次同步
+            ).await;
+        }
+
+        tracing::info!("文件夹 {} 同步完成: 成功={}, 失败={}", imap_folder, synced_count, error_count);
 
         Ok(synced_count)
     }

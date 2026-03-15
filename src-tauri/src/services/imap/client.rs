@@ -3,6 +3,7 @@ use futures::{TryStreamExt};
 use std::time::Instant;
 use super::{types::{EmailData, FolderInfo, SpecialUse, EmailFlags}, ImapAuth};
 use tokio::net::TcpStream;
+use chrono::Datelike;
 
 /// 异步 IMAP 客户端会话
 pub struct AsyncImapClient {
@@ -187,6 +188,30 @@ impl AsyncImapClient {
         Ok(uid_list)
     }
 
+    /// 获取指定时间范围内的邮件 UID 列表
+    /// date_since: IMAP 日期格式，如 "01-Jan-2025"
+    pub async fn list_uids_since(&mut self, folder: &str, date_since: &str) -> Result<Vec<u32>> {
+        let session = self.session.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹（返回 Result<Mailbox>）
+        session.select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // 使用 SINCE 命令搜索指定日期之后的邮件（返回 Result<HashSet<Seq>>）
+        let search_cmd = format!("SINCE {}", date_since);
+        let uids = session.search(&search_cmd)
+            .await
+            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+
+        let mut uid_list: Vec<u32> = uids.into_iter().map(|uid| uid.into()).collect();
+        uid_list.sort();
+        uid_list.reverse();
+
+        Ok(uid_list)
+    }
+
     /// 异步获取邮件数据
     pub async fn fetch_email(&mut self, folder: &str, uid: u32) -> Result<EmailData> {
         let session = self.session.as_mut()
@@ -343,5 +368,37 @@ impl AsyncImapClient {
 impl Default for AsyncImapClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 计算一年前的日期并返回 IMAP 格式 (dd-Mon-yyyy)
+/// 例如: "01-Jan-2025"
+pub fn one_year_ago_imap_format() -> String {
+    let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
+
+    format!(
+        "{:02}-{}-{:04}",
+        one_year_ago.day(),
+        month_abbr(one_year_ago.month()),
+        one_year_ago.year()
+    )
+}
+
+/// 将月份数字转换为英文缩写
+fn month_abbr(month: u32) -> &'static str {
+    match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "Jan",
     }
 }

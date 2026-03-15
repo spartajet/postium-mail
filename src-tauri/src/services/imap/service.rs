@@ -47,6 +47,14 @@ impl ImapService {
         client.list_uids_after(folder, min_uid).await
     }
 
+    /// 获取指定时间范围内的邮件列表（用于同步近一年的邮件）
+    /// date_since: IMAP 日期格式，如 "01-Jan-2025"
+    pub async fn list_uids_since(&mut self, folder: &str, date_since: &str) -> Result<Vec<u32>> {
+        let client = self.client.as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        client.list_uids_since(folder, date_since).await
+    }
+
     /// 异步获取邮件
     pub async fn fetch_email(&mut self, folder: &str, uid: u32) -> Result<EmailData> {
         let client = self.client.as_mut()
