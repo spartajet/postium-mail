@@ -79,7 +79,7 @@ mod tests {
                             info!("   Special-Use: {:?}", folder.special_use);
 
                             // 验证特殊文件夹
-                            if let Some(special_use) = folder.special_use {
+                            if let Some(_special_use) = folder.special_use {
                                 info!("   ✅ 这是 RFC 6154 定义的特殊文件夹");
                             }
                         }

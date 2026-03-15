@@ -8,30 +8,17 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
-/// IMAP UTF-7 解码辅助函数
-fn decode_imap_utf7(encoded: &str) -> String {
-    // 简单的 UTF-7 解码实现
-    // IMAP UTF-7 使用 & 作为转义字符，- 作为终止符
-    // 例如 &g0l6P3ux- 应该解码为中文字符
-
-    if !encoded.contains('&') {
-        return encoded.to_string();
-    }
-
-    // 使用 imap-proto crate 的解码功能（如果可用）
-    // 这里先返回原始名称，需要时添加完整解码
-    encoded.to_string()
-}
-
 /// 测试账号配置
 #[derive(Debug, Clone)]
 struct TestAccount {
     account: String,
     imap_server: String,
     imap_port: u16,
+    #[allow(dead_code)]
     imap_ssl: bool,
     smtp_server: String,
     smtp_port: u16,
+    #[allow(dead_code)]
     smtp_ssl: bool,
     password: String,
 }
