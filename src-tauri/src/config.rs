@@ -32,7 +32,9 @@ pub fn load_oauth_config() -> Result<OAuthConfig> {
 
     let scopes_str = std::env::var("MICROSOFT_SCOPES")
         .unwrap_or_else(|_| {
-            "https://outlook.office.com/SMTP.Send https://outlook.office.com/IMAP.AccessAsUser.All offline_access profile openid email".to_string()
+            // 默认 scopes: 需要 openid 才能获取 JWT 格式的 access token
+            // 不需要 profile 和 email scope，用户信息从 JWT 中提取
+            "https://outlook.office.com/SMTP.Send https://outlook.office.com/IMAP.AccessAsUser.All offline_access openid".to_string()
         });
     let scopes: Vec<String> = scopes_str.split_whitespace().map(String::from).collect();
 
@@ -40,6 +42,16 @@ pub fn load_oauth_config() -> Result<OAuthConfig> {
         .unwrap_or_else(|_| "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string());
     let token_url = std::env::var("MICROSOFT_TOKEN_URL")
         .unwrap_or_else(|_| "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string());
+
+    // 调试日志：打印加载的配置
+    tracing::info!("========== OAuth 配置加载 ==========");
+    tracing::info!("  client_id: {}", client_id);
+    tracing::info!("  redirect_uri: {}", redirect_uri);
+    tracing::info!("  scopes ({} 个):", scopes.len());
+    for (i, scope) in scopes.iter().enumerate() {
+        tracing::info!("    [{}] {}", i, scope);
+    }
+    tracing::info!("====================================");
 
     Ok(OAuthConfig {
         client_id,
