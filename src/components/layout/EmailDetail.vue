@@ -19,8 +19,19 @@ import {
     DescriptionOutlined,
     AutoAwesomeOutlined,
     NotesOutlined,
-    TranslateOutlined
+    TranslateOutlined,
+    PictureAsPdfOutlined,
+    ImageOutlined,
+    VideoFileOutlined,
+    AudioFileOutlined,
+    TextSnippetOutlined,
+    TableChartOutlined,
+    FolderZipOutlined,
+    ArticleOutlined,
+    CodeOutlined,
+    InsertDriveFileOutlined,
 } from "@vicons/material";
+import type { Component } from "vue";
 
 // Stores
 const emailStore = useEmailStore();
@@ -47,6 +58,85 @@ function formatFullDate(date: Date): string {
 // 获取头像首字母
 function getInitials(name: string): string {
     return name.charAt(0).toUpperCase();
+}
+
+// 文件类型图标和颜色映射（基于行业标准 - Gmail、Apple Mail、Outlook）
+const fileTypeMap: Record<string, { icon: Component; color: string }> = {
+    // PDF - 红色
+    'pdf': { icon: PictureAsPdfOutlined, color: '#F40F02' },
+    // 图片 - 紫色
+    'jpg': { icon: ImageOutlined, color: '#9C27B0' },
+    'jpeg': { icon: ImageOutlined, color: '#9C27B0' },
+    'png': { icon: ImageOutlined, color: '#9C27B0' },
+    'gif': { icon: ImageOutlined, color: '#9C27B0' },
+    'bmp': { icon: ImageOutlined, color: '#9C27B0' },
+    'svg': { icon: ImageOutlined, color: '#9C27B0' },
+    'webp': { icon: ImageOutlined, color: '#9C27B0' },
+    'ico': { icon: ImageOutlined, color: '#9C27B0' },
+    // 视频 - 橙色
+    'mp4': { icon: VideoFileOutlined, color: '#FF9800' },
+    'avi': { icon: VideoFileOutlined, color: '#FF9800' },
+    'mov': { icon: VideoFileOutlined, color: '#FF9800' },
+    'wmv': { icon: VideoFileOutlined, color: '#FF9800' },
+    'flv': { icon: VideoFileOutlined, color: '#FF9800' },
+    'mkv': { icon: VideoFileOutlined, color: '#FF9800' },
+    'webm': { icon: VideoFileOutlined, color: '#FF9800' },
+    // 音频 - 蓝色
+    'mp3': { icon: AudioFileOutlined, color: '#2196F3' },
+    'wav': { icon: AudioFileOutlined, color: '#2196F3' },
+    'flac': { icon: AudioFileOutlined, color: '#2196F3' },
+    'aac': { icon: AudioFileOutlined, color: '#2196F3' },
+    'ogg': { icon: AudioFileOutlined, color: '#2196F3' },
+    'm4a': { icon: AudioFileOutlined, color: '#2196F3' },
+    'wma': { icon: AudioFileOutlined, color: '#2196F3' },
+    // Microsoft Office 文档
+    'doc': { icon: ArticleOutlined, color: '#2B579A' },   // Word 蓝色
+    'docx': { icon: ArticleOutlined, color: '#2B579A' },
+    'xls': { icon: TableChartOutlined, color: '#217346' }, // Excel 绿色
+    'xlsx': { icon: TableChartOutlined, color: '#217346' },
+    'ppt': { icon: ArticleOutlined, color: '#D24726' },   // PowerPoint 橙红色
+    'pptx': { icon: ArticleOutlined, color: '#D24726' },
+    // 其他文档
+    'txt': { icon: TextSnippetOutlined, color: '#757575' },
+    'rtf': { icon: TextSnippetOutlined, color: '#757575' },
+    'odt': { icon: TextSnippetOutlined, color: '#757575' },
+    'ods': { icon: TableChartOutlined, color: '#4CAF50' },
+    'odp': { icon: ArticleOutlined, color: '#F57C00' },
+    // 压缩包 - 绿色
+    'zip': { icon: FolderZipOutlined, color: '#4CAF50' },
+    'rar': { icon: FolderZipOutlined, color: '#4CAF50' },
+    '7z': { icon: FolderZipOutlined, color: '#4CAF50' },
+    'tar': { icon: FolderZipOutlined, color: '#4CAF50' },
+    'gz': { icon: FolderZipOutlined, color: '#4CAF50' },
+    // 代码 - 紫灰色
+    'js': { icon: CodeOutlined, color: '#7E57C2' },
+    'ts': { icon: CodeOutlined, color: '#7E57C2' },
+    'html': { icon: CodeOutlined, color: '#7E57C2' },
+    'css': { icon: CodeOutlined, color: '#7E57C2' },
+    'json': { icon: CodeOutlined, color: '#7E57C2' },
+    'xml': { icon: CodeOutlined, color: '#7E57C2' },
+    'py': { icon: CodeOutlined, color: '#7E57C2' },
+    'java': { icon: CodeOutlined, color: '#7E57C2' },
+    'cpp': { icon: CodeOutlined, color: '#7E57C2' },
+    'c': { icon: CodeOutlined, color: '#7E57C2' },
+    'go': { icon: CodeOutlined, color: '#7E57C2' },
+    'rs': { icon: CodeOutlined, color: '#7E57C2' },
+    'php': { icon: CodeOutlined, color: '#7E57C2' },
+    // 其他
+    'exe': { icon: InsertDriveFileOutlined, color: '#607D8B' },
+    'msi': { icon: InsertDriveFileOutlined, color: '#607D8B' },
+};
+
+// 获取附件图标
+function getAttachmentIcon(filename: string): Component {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    return fileTypeMap[ext]?.icon || DescriptionOutlined;
+}
+
+// 获取附件颜色
+function getAttachmentColor(filename: string): string {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    return fileTypeMap[ext]?.color || '#757575';
 }
 
 // 加载 AI 摘要
@@ -271,8 +361,8 @@ const aiActions = computed(() => [
                         :key="index"
                         class="attachment-item"
                     >
-                        <div class="attachment-icon">
-                            <DescriptionOutlined :size="24" />
+                        <div class="attachment-icon" :style="{ color: getAttachmentColor(attachment.name) }">
+                            <component :is="getAttachmentIcon(attachment.name)" :size="24" />
                         </div>
                         <div class="attachment-info">
                             <div class="attachment-name">
