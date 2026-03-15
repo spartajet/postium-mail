@@ -13,6 +13,7 @@
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",
     "opener:default",
-    "keyring:default"
+    "keyring:default",
+    "deep-link:default"
   ]
 }

@@ -18,7 +18,9 @@ name = "postium_mail_lib"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
 
 # 数据库相关
 sea-orm = { version = "0.12", features = [
@@ -27,30 +29,32 @@ sea-orm = { version = "0.12", features = [
   "sqlx-sqlite"
 ] }
 
+futures = "0.3"
 # 异步运行时
 tokio = { version = "1.35", features = ["full"] }
-futures = "0.3"
 
 # 时间处理
 chrono = "0.4"
 
 # 邮件协议
 # imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
-async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+async-imap = { version = "0.11", default-features = false, features = [
+  "runtime-tokio"
+] }
 async-native-tls = "0.5"
-tokio-native-tls = "0.3"  # Tokio TLS 支持
-tokio-util = { version = "0.7", features = ["compat"] }
-native-tls = "0.2"  # 保留用于旧的 imap_service.rs
+encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
 lettre = "0.11"
 mail-parser = "0.11"
-encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
+native-tls = "0.2"  # 保留用于旧的 imap_service.rs
+tokio-native-tls = "0.3"  # Tokio TLS 支持
+tokio-util = { version = "0.7", features = ["compat"] }
 
 base64 = "0.22"
+curl = "0.4"
 # OAuth 2.0 相关（最新版本）
 # 使用curl HTTP客户端以避免与Tauri的reqwest冲突
 oauth2 = { version = "5.0", features = ["curl"] }
 reqwest = { version = "0.13", features = ["json"] }
-curl = "0.4"
 url = "2.5"
 
 getrandom = "0.4"

@@ -128,10 +128,24 @@ impl OAuthService {
 
         // 使用curl HTTP客户端（同步，需要在spawn_blocking中运行）
         let http = http_client();
+        // 构建scope字符串（Microsoft要求在token交换时也包含scope参数）
+        // 注意：不能包含 User.Read，因为它与 Exchange Online scopes 不兼容
+        let scopes_str = "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access profile openid email";
+
+        tracing::info!("开始交换 OAuth token...");
+        tracing::info!(
+            "  - code: {}...",
+            &code.secret()[..20.min(code.secret().len())]
+        );
+        tracing::info!("  - state: {}", state);
+        tracing::info!("  - scope: {}", scopes_str);
+
         let token_response = tokio::task::spawn_blocking(move || {
             client
                 .exchange_code(code)
                 .set_pkce_verifier(pkce_verifier)
+                // 使用 add_extra_param 添加 scope 参数
+                .add_extra_param("scope", scopes_str)
                 .request(&http)
         })
         .await
@@ -148,14 +162,40 @@ impl OAuthService {
         // 清理PKCE verifier
         PKCE_STORE.write().await.remove(state);
 
-        tracing::info!("成功交换OAuth token，过期时间: {}秒后", expires_in);
+        // 提取 token
+        let access_token = token_response.access_token().secret().clone();
+        let refresh_token = token_response
+            .refresh_token()
+            .map(|t| t.secret().clone())
+            .unwrap_or_default();
+
+        // 打印 token 信息（用于调试）
+        tracing::info!("========== OAuth Token 交换成功 ==========");
+        tracing::info!("  expires_in: {} 秒", expires_in);
+        tracing::info!("  expires_at: {} (Unix timestamp)", expires_at);
+        tracing::info!(
+            "  access_token (前50字符): {}...",
+            if access_token.len() > 50 {
+                &access_token[..50]
+            } else {
+                &access_token
+            }
+        );
+        tracing::info!("  access_token (完整): {}", access_token);
+        tracing::info!(
+            "  refresh_token (前50字符): {}...",
+            if refresh_token.len() > 50 {
+                &refresh_token[..50]
+            } else {
+                &refresh_token
+            }
+        );
+        tracing::info!("  refresh_token (完整): {}", refresh_token);
+        tracing::info!("==========================================");
 
         Ok(OAuthToken {
-            access_token: token_response.access_token().secret().clone(),
-            refresh_token: token_response
-                .refresh_token()
-                .map(|t| t.secret().clone())
-                .unwrap_or_default(),
+            access_token,
+            refresh_token,
             expires_at,
         })
     }
@@ -187,14 +227,35 @@ impl OAuthService {
             .unwrap_or(3600);
         let expires_at = Utc::now().timestamp() + expires_in;
 
-        tracing::info!("成功刷新OAuth token，过期时间: {}秒后", expires_in);
+        let access_token = token_response.access_token().secret().clone();
+        let new_refresh_token = token_response
+            .refresh_token()
+            .map(|t| t.secret().clone())
+            .unwrap_or_else(|| refresh_token.to_string());
+
+        tracing::info!("========== OAuth Token 刷新成功 ==========");
+        tracing::info!("  expires_in: {} 秒", expires_in);
+        tracing::info!(
+            "  access_token (前50字符): {}...",
+            if access_token.len() > 50 {
+                &access_token[..50]
+            } else {
+                &access_token
+            }
+        );
+        tracing::info!(
+            "  refresh_token (前50字符): {}...",
+            if new_refresh_token.len() > 50 {
+                &new_refresh_token[..50]
+            } else {
+                &new_refresh_token
+            }
+        );
+        tracing::info!("==========================================");
 
         Ok(OAuthToken {
-            access_token: token_response.access_token().secret().clone(),
-            refresh_token: token_response
-                .refresh_token()
-                .map(|t| t.secret().clone())
-                .unwrap_or_else(|| refresh_token.to_string()),
+            access_token,
+            refresh_token: new_refresh_token,
             expires_at,
         })
     }
