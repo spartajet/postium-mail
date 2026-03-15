@@ -6,6 +6,7 @@ mod migration;
 mod models;
 pub mod services;
 
+use anyhow::anyhow;
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -205,12 +206,23 @@ async fn validate_oauth_token(provider: String, token: String) -> Result<bool, S
 
 #[tauri::command]
 async fn get_oauth_auth_url(
-    _state: tauri::State<'_, OAuthState>,
+    state: tauri::State<'_, OAuthState>,
     provider: String,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
+    // 返回 (auth_url, csrf_state)
+    let oauth_service = &state.0;
+
     match provider.as_str() {
         "microsoft" => {
-            Ok("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string())
+            let auth_context = oauth_service
+                .get_microsoft_auth_url()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            Ok((
+                auth_context.auth_url,
+                auth_context.csrf_token,
+            ))
         }
         "google" => Err("Google OAuth 暂未实现，请使用 Microsoft OAuth".to_string()),
         _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
@@ -219,35 +231,38 @@ async fn get_oauth_auth_url(
 
 #[tauri::command]
 async fn exchange_oauth_code(
+    db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
-    _state: tauri::State<'_, OAuthState>,
+    oauth_state: tauri::State<'_, OAuthState>,
     provider: String,
-    email: String,
-    _code: String,
+    code: String,
+    csrf_state: String,
 ) -> Result<models::account::AccountDto, String> {
+    let oauth_service = &oauth_state.0;
+
     match provider.as_str() {
         "microsoft" => {
-            tracing::warn!("exchange_oauth_code 使用占位实现");
-            let token = crypto::OAuthToken {
-                access_token: "placeholder_access_token".to_string(),
-                refresh_token: "placeholder_refresh_token".to_string(),
-                expires_at: 0,
-            };
-
-            // 将 Token 存储到 Keyring（JSON 序列化）
-            let temp_account_id = email.len() as i32;
-            let username = crypto::oauth_username(temp_account_id);
-            let token_json = serde_json::to_string(&token).map_err(|e| e.to_string())?;
-            let keyring = keyring_state.app_handle.keyring();
-            keyring
-                .set_password(crypto::KEYRING_SERVICE, &username, &token_json)
+            // 使用OAuth服务交换token
+            let token = oauth_service
+                .exchange_microsoft_code(&code, &csrf_state)
+                .await
                 .map_err(|e| e.to_string())?;
 
-            Ok(models::account::AccountDto {
-                id: temp_account_id,
-                name: email.clone(),
-                email,
+            // 从Microsoft Graph API获取用户信息
+            let user_info = get_microsoft_user_info(&token.access_token)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let email = user_info.mail.unwrap_or_default();
+            let display_name = user_info.display_name.unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string());
+
+            // 创建账号记录
+            let db = db_state.clone_conn();
+            let account_req = models::account::CreateAccountRequest {
+                name: display_name,
+                email: email.clone(),
                 provider: "outlook".to_string(),
+                password: String::new(), // OAuth不需要密码
                 imap_host: Some("outlook.office365.com".to_string()),
                 imap_port: Some(993),
                 imap_ssl: Some(true),
@@ -255,32 +270,85 @@ async fn exchange_oauth_code(
                 smtp_port: Some(587),
                 smtp_ssl: Some(true),
                 color: Some("#0078D4".to_string()),
-                sync_enabled: true,
-                last_sync_at: None,
-                created_at: chrono::Utc::now().timestamp(),
-                updated_at: chrono::Utc::now().timestamp(),
-                auth_type: "oauth".to_string(),
+                auth_type: Some("oauth2".to_string()),
                 oauth_provider: Some("microsoft".to_string()),
-            })
+                oauth_token: Some(token.access_token.clone()),
+                oauth_refresh_token: Some(token.refresh_token.clone()),
+                oauth_expires_at: Some(token.expires_at),
+            };
+
+            let account = services::account_service::create(
+                &db,
+                &keyring_state.app_handle,
+                account_req,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+            tracing::info!("成功创建OAuth账号: {}", email);
+
+            Ok(account.into())
         }
         "google" => Err("Google OAuth 暂未实现".to_string()),
         _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
     }
 }
 
+/// 从Microsoft Graph API获取用户信息
+async fn get_microsoft_user_info(access_token: &str) -> anyhow::Result<MicrosoftUserInfo> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://graph.microsoft.com/v1.0/me")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| anyhow!("获取用户信息失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(anyhow!("获取用户信息失败: HTTP {}", response.status()));
+    }
+
+    let user_info = response
+        .json::<MicrosoftUserInfo>()
+        .await
+        .map_err(|e| anyhow!("解析用户信息失败: {}", e))?;
+
+    Ok(user_info)
+}
+
+/// Microsoft Graph API 用户信息
+#[derive(Debug, serde::Deserialize)]
+struct MicrosoftUserInfo {
+    #[serde(rename = "mail")]
+    mail: Option<String>,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    #[serde(rename = "userPrincipalName")]
+    user_principal_name: Option<String>,
+}
+
 #[tauri::command]
 async fn refresh_oauth_token(
-    _state: tauri::State<'_, OAuthState>,
+    oauth_state: tauri::State<'_, OAuthState>,
     provider: String,
-    _refresh_token: String,
+    refresh_token: String,
 ) -> Result<crypto::OAuthToken, String> {
+    let oauth_service = &oauth_state.0;
+
     match provider.as_str() {
         "microsoft" => {
-            tracing::warn!("refresh_oauth_token 使用占位实现");
+            // 使用OAuth服务刷新token
+            let token = oauth_service
+                .refresh_microsoft_token(&refresh_token)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            tracing::info!("成功刷新OAuth token");
+
             Ok(crypto::OAuthToken {
-                access_token: "placeholder_access_token".to_string(),
-                refresh_token: "placeholder_refresh_token".to_string(),
-                expires_at: 0,
+                access_token: token.access_token,
+                refresh_token: token.refresh_token,
+                expires_at: token.expires_at,
             })
         }
         "google" => Err("Google OAuth 暂未实现".to_string()),
@@ -572,7 +640,11 @@ pub fn run() {
                 app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
                 // 初始化 OAuth 服务
-                app.manage(OAuthState(services::oauth_service::OAuthService::new()));
+                let oauth_config = config::load_oauth_config()
+                    .expect("无法加载OAuth配置");
+                let oauth_service = services::oauth_service::OAuthService::new(oauth_config)
+                    .expect("无法初始化OAuth服务");
+                app.manage(OAuthState(oauth_service));
 
                 // 存储 AppHandle 到 KeyringState，用于后续访问 keyring
                 app.manage(KeyringState { app_handle: app.handle().clone() });

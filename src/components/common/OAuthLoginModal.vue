@@ -16,6 +16,9 @@ const emit = defineEmits<{
 const loading = ref(true)
 const error = ref<string | null>(null)
 
+// 存储csrf_state用于验证
+let csrfState: string = ''
+
 onMounted(async () => {
   if (props.show) {
     await startOAuthFlow()
@@ -27,10 +30,13 @@ async function startOAuthFlow() {
     loading.value = true
     error.value = null
 
-    // 1. 获取授权 URL
-    const authUrl = await invoke<string>('get_oauth_auth_url', {
+    // 1. 获取授权 URL和csrf_state
+    const [authUrl, state] = await invoke<[string, string]>('get_oauth_auth_url', {
       provider: props.provider,
     })
+
+    // 存储csrf_state用于后续验证
+    csrfState = state
 
     // 2. 打开浏览器窗口
     const width = 500
@@ -53,7 +59,15 @@ async function startOAuthFlow() {
       // 验证来源（安全检查）
       if (event.origin !== window.location.origin) return
 
-      const { code, state: _state, error: oauthError } = event.data
+      const { code, state: returnedState, error: oauthError } = event.data
+
+      // 验证state参数以防止CSRF攻击
+      if (returnedState !== csrfState) {
+        error.value = '状态验证失败，可能存在安全风险'
+        loading.value = false
+        authWindow.close()
+        return
+      }
 
       authWindow.close()
 
@@ -86,16 +100,24 @@ async function startOAuthFlow() {
 
 async function exchangeCodeForToken(code: string) {
   try {
-    const token = await invoke<{
-      access_token: string
-      refresh_token: string
-      expires_at: number
+    // 注意：后端会自动从Microsoft Graph API获取用户email
+    const account = await invoke<{
+      id: number
+      name: string
+      email: string
+      provider: string
     }>('exchange_oauth_code', {
       provider: props.provider,
-      code
+      code,
+      csrf_state: csrfState
     })
 
-    emit('success', token)
+    // 成功创建账号，触发成功事件
+    emit('success', {
+      access_token: '', // token已安全存储在后端，不需要传递到前端
+      refresh_token: '',
+      expires_at: 0
+    })
     emit('update:show', false)
   } catch (e) {
     error.value = String(e)
@@ -188,3 +210,4 @@ onUnmounted(() => {
   color: var(--text-color-2);
 }
 </style>
+

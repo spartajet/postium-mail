@@ -1,5 +1,55 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+
+/// OAuth配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthConfig {
+    /// 客户端ID（公共客户端不需要client_secret）
+    pub client_id: String,
+    /// 重定向URI
+    pub redirect_uri: String,
+    /// 租户ID（common表示多租户）
+    pub tenant: String,
+    /// OAuth权限范围
+    pub scopes: Vec<String>,
+    /// 授权端点URL
+    pub auth_url: String,
+    /// Token端点URL
+    pub token_url: String,
+}
+
+/// 从环境变量加载OAuth配置
+pub fn load_oauth_config() -> Result<OAuthConfig> {
+    dotenv::dotenv().ok(); // 尝试加载.env文件，失败也没关系
+
+    let client_id = std::env::var("MICROSOFT_CLIENT_ID")
+        .unwrap_or_else(|_| "your-client-id-here".to_string());
+    let tenant = std::env::var("MICROSOFT_TENANT")
+        .unwrap_or_else(|_| "common".to_string());
+    let redirect_uri = std::env::var("MICROSOFT_REDIRECT_URI")
+        .unwrap_or_else(|_| "postium-mail://oauth/callback".to_string());
+
+    let scopes_str = std::env::var("MICROSOFT_SCOPES")
+        .unwrap_or_else(|_| {
+            "https://outlook.office.com/SMTP.Send https://outlook.office.com/IMAP.AccessAsUser.All offline_access profile openid email".to_string()
+        });
+    let scopes: Vec<String> = scopes_str.split_whitespace().map(String::from).collect();
+
+    let auth_url = std::env::var("MICROSOFT_AUTH_URL")
+        .unwrap_or_else(|_| "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string());
+    let token_url = std::env::var("MICROSOFT_TOKEN_URL")
+        .unwrap_or_else(|_| "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string());
+
+    Ok(OAuthConfig {
+        client_id,
+        redirect_uri,
+        tenant,
+        scopes,
+        auth_url,
+        token_url,
+    })
+}
 
 /// 获取用户数据目录
 /// 默认为 ~/.postium
