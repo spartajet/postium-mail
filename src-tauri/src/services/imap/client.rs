@@ -249,11 +249,11 @@ impl AsyncImapClient {
             .await
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
 
-        // FETCH 邮件内容（使用 RFC822.PEEK 不会自动设置 \Seen 标志）
-        // RFC 3501: RFC822.PEEK 等同于 BODY.PEEK[]，不会将邮件标记为已读
-        // 这样可以保持邮件原本的已读/未读状态
+        // FETCH 邮件内容（使用 BODY.PEEK[] 不会自动设置 \Seen 标志）
+        // RFC 3501: BODY.PEEK[] 不会将邮件标记为已读，RFC822.PEEK 是过时的语法
+        // 使用 BODY.PEEK[] 保持邮件原本的已读/未读状态
         let uid_str = uid.to_string();
-        let messages: Vec<async_imap::types::Fetch> = session.fetch(&uid_str, "(RFC822.PEEK FLAGS)")
+        let messages: Vec<async_imap::types::Fetch> = session.fetch(&uid_str, "(BODY.PEEK[] FLAGS)")
             .await
             .map_err(|e| anyhow!("获取邮件失败: {}", e))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
