@@ -9,8 +9,11 @@ pub mod services;
 use anyhow::anyhow;
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
+use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_keyring::KeyringExt;
+use url::Url;
 
 // 时间处理
 
@@ -219,10 +222,7 @@ async fn get_oauth_auth_url(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            Ok((
-                auth_context.auth_url,
-                auth_context.csrf_token,
-            ))
+            Ok((auth_context.auth_url, auth_context.csrf_token))
         }
         "google" => Err("Google OAuth 暂未实现，请使用 Microsoft OAuth".to_string()),
         _ => Err(format!("不支持的 OAuth 提供商: {}", provider)),
@@ -253,8 +253,10 @@ async fn exchange_oauth_code(
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let email = user_info.mail.unwrap_or_default();
-            let display_name = user_info.display_name.unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string());
+            let email = user_info.email.unwrap_or_default();
+            let display_name = user_info
+                .name
+                .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string());
 
             // 创建账号记录
             let db = db_state.clone_conn();
@@ -277,13 +279,10 @@ async fn exchange_oauth_code(
                 oauth_expires_at: Some(token.expires_at),
             };
 
-            let account = services::account_service::create(
-                &db,
-                &keyring_state.app_handle,
-                account_req,
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            let account =
+                services::account_service::create(&db, &keyring_state.app_handle, account_req)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
             tracing::info!("成功创建OAuth账号: {}", email);
 
@@ -294,11 +293,12 @@ async fn exchange_oauth_code(
     }
 }
 
-/// 从Microsoft Graph API获取用户信息
+/// 从 OpenID Connect userinfo 端点获取用户信息
+/// 使用此端点不需要 User.Read scope，只需要 openid、profile、email scope
 async fn get_microsoft_user_info(access_token: &str) -> anyhow::Result<MicrosoftUserInfo> {
     let client = reqwest::Client::new();
     let response = client
-        .get("https://graph.microsoft.com/v1.0/me")
+        .get("https://graph.microsoft.com/oidc/userinfo")
         .header("Authorization", format!("Bearer {}", access_token))
         .send()
         .await
@@ -316,15 +316,17 @@ async fn get_microsoft_user_info(access_token: &str) -> anyhow::Result<Microsoft
     Ok(user_info)
 }
 
-/// Microsoft Graph API 用户信息
+/// OpenID Connect userinfo 端点返回的用户信息
 #[derive(Debug, serde::Deserialize)]
 struct MicrosoftUserInfo {
-    #[serde(rename = "mail")]
-    mail: Option<String>,
-    #[serde(rename = "displayName")]
-    display_name: Option<String>,
-    #[serde(rename = "userPrincipalName")]
-    user_principal_name: Option<String>,
+    /// 邮箱地址
+    email: Option<String>,
+    /// 显示名称
+    name: Option<String>,
+    /// 名
+    given_name: Option<String>,
+    /// 姓
+    family_name: Option<String>,
 }
 
 #[tauri::command]
@@ -610,6 +612,79 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// 处理 OAuth Deep Link 回调
+/// 解析 URL 中的 code, state, error 参数并发射事件到前端
+fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
+    tracing::info!("收到 Deep Link: {}", url);
+
+    // 解析 URL
+    let parsed_url = match Url::parse(url) {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("解析 Deep Link URL 失败: {}", e);
+            return;
+        }
+    };
+
+    // 检查是否是 OAuth 回调
+    // URL 格式: postium-mail://oauth/callback?code=xxx&state=yyy
+    let host = parsed_url.host_str().unwrap_or("");
+    let path = parsed_url.path();
+
+    if host != "oauth" || path != "/callback" {
+        tracing::warn!("忽略非 OAuth Deep Link: host={}, path={}", host, path);
+        return;
+    }
+
+    // 提取查询参数
+    let query_params: std::collections::HashMap<String, String> = parsed_url
+        .query_pairs()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+    let code = query_params.get("code").cloned().unwrap_or_default();
+    let state = query_params.get("state").cloned().unwrap_or_default();
+    let error = query_params.get("error").cloned();
+    let error_description = query_params.get("error_description").cloned();
+
+    tracing::info!(
+        "OAuth Deep Link 参数: code={}, state={}, error={:?}",
+        if code.is_empty() { "无" } else { "有" },
+        if state.is_empty() { "无" } else { "有" },
+        error
+    );
+
+    // 将主窗口带到前台
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+        let _ = window.unminimize();
+        let _ = window.show();
+    }
+
+    // 发射事件到前端
+    let emit_result = if let Some(err) = error {
+        app.emit(
+            "oauth-deep-link-callback",
+            serde_json::json!({
+                "error": err,
+                "errorDescription": error_description.unwrap_or_default()
+            }),
+        )
+    } else {
+        app.emit(
+            "oauth-deep-link-callback",
+            serde_json::json!({
+                "code": code,
+                "state": state
+            }),
+        )
+    };
+
+    if let Err(e) = emit_result {
+        tracing::error!("发射 OAuth Deep Link 事件失败: {}", e);
+    }
+}
+
 // ============================================================
 // 应用入口
 // ============================================================
@@ -620,10 +695,50 @@ pub fn run() {
     tracing_subscriber::fmt::init();
 
     tauri::Builder::default()
+        // 单实例插件 - 在 deep-link 之前初始化，以便转发 deep link URL 到主实例
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            tracing::info!("单实例检测：收到参数 {:?}", args);
+
+            // 检查参数中是否包含 deep link URL
+            for arg in args {
+                if arg.starts_with("postium-mail://") {
+                    tracing::info!("单实例转发 Deep Link: {}", arg);
+                    handle_oauth_deep_link(app, &arg);
+                    return;
+                }
+            }
+
+            // 如果不是 deep link，只是将窗口带到前台
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+                let _ = window.show();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         // Keyring 插件（系统原生密钥链）
         .plugin(tauri_plugin_keyring::init())
         .setup(|app| {
+            // 注册 Deep Link 事件处理器
+            let app_handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    handle_oauth_deep_link(&app_handle, url.as_str());
+                }
+            });
+
+            // 在 Windows 上注册协议 scheme（开发模式下需要）
+            #[cfg(target_os = "windows")]
+            {
+                if let Err(e) = app.deep_link().register("postium-mail") {
+                    tracing::warn!("注册 Deep Link 协议失败（可能需要管理员权限）: {}", e);
+                    tracing::warn!("请尝试以管理员身份运行应用，或者手动注册协议");
+                } else {
+                    tracing::info!("Deep Link 协议注册成功");
+                }
+            }
+
             // 应用启动时初始化数据库和 Keyring
             tauri::async_runtime::block_on(async move {
                 // 建立数据库连接
@@ -640,14 +755,15 @@ pub fn run() {
                 app.manage(DatabaseState(Arc::new(Mutex::new(db))));
 
                 // 初始化 OAuth 服务
-                let oauth_config = config::load_oauth_config()
-                    .expect("无法加载OAuth配置");
+                let oauth_config = config::load_oauth_config().expect("无法加载OAuth配置");
                 let oauth_service = services::oauth_service::OAuthService::new(oauth_config)
                     .expect("无法初始化OAuth服务");
                 app.manage(OAuthState(oauth_service));
 
                 // 存储 AppHandle 到 KeyringState，用于后续访问 keyring
-                app.manage(KeyringState { app_handle: app.handle().clone() });
+                app.manage(KeyringState {
+                    app_handle: app.handle().clone(),
+                });
 
                 tracing::info!("Postium Mail 后端初始化完成");
                 tracing::info!("密码存储: 操作系统原生密钥链 (Tauri Plugin Keyring)");

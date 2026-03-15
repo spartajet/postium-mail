@@ -47,6 +47,7 @@ const success = ref('')
 const isProviderManuallySet = ref(false) // 是否由用户手动设置的服务商
 const isAuthTypeManuallySet = ref(false) // 是否由用户手动修改了认证方式
 const lastValidEmail = ref('') // 上一次有效的邮箱地址
+const isInitializing = ref(true) // 是否正在初始化（避免初始化时触发watch）
 
 // OAuth 相关
 const showOAuthModal = ref(false)
@@ -72,6 +73,11 @@ const canUseOAuth = computed(() => {
 
 // 监听 provider 变化，自动设置邮箱前缀
 watch(() => form.value.provider, (newProvider, oldProvider) => {
+  // 如果是初始化阶段，不标记为手动设置
+  if (isInitializing.value) {
+    return
+  }
+
   // 如果是程序自动触发的（由邮箱地址变化导致），不标记为手动设置
   if (lastValidEmail.value) {
     const detected = detectProviderFromEmail(lastValidEmail.value)
@@ -118,6 +124,7 @@ watch(() => form.value.provider, (newProvider, oldProvider) => {
         break
     }
   }
+  console.log('#################### [AddAccountModal] PROVIDER WATCHER END ####################\n')
 })
 
 // 监听邮箱地址变化，自动判断服务商和填充信息
@@ -220,6 +227,12 @@ watch(show, (newShow) => {
     isProviderManuallySet.value = false
     isAuthTypeManuallySet.value = false
     lastValidEmail.value = ''
+    isInitializing.value = true
+
+    // 延迟将 isInitializing 设置为 false，确保初始化完成
+    setTimeout(() => {
+      isInitializing.value = false
+    }, 100)
   }
 })
 
@@ -265,96 +278,135 @@ function handleEmailBlur() {
 }
 
 async function handleSubmit() {
+  console.log('[AddAccountModal] handleSubmit 开始')
+  console.log('[AddAccountModal] 表单数据:', {
+    name: form.value.name,
+    email: form.value.email,
+    provider: form.value.provider,
+    authType: form.value.authType,
+    hasOAuthToken: !!oauthToken.value,
+  })
+
   error.value = ''
   success.value = ''
 
-  // 基础验证
-  if (!form.value.name.trim()) {
-    error.value = '请输入账号名称'
-    return
-  }
-
-  if (!form.value.email.trim() || form.value.email.startsWith('@')) {
-    error.value = '请输入完整的邮箱地址'
-    return
-  }
-
-  // OAuth 模式：检查 token，如果没有则自动触发授权
-  if (form.value.authType === 'oauth') {
-    if (!oauthToken.value) {
-      // 自动触发 OAuth 授权
-      startOAuthLogin()
+  try {
+    // 基础验证
+    if (!form.value.name.trim()) {
+      error.value = '请输入账号名称'
+      console.log('[AddAccountModal] 验证失败：账号名称为空')
       return
     }
 
-    // 有 token，验证是否有效
-    try {
-      syncProgress.value = {
-        stage: 'authenticating',
-        currentStep: 1,
-        totalSteps: 3,
-        message: '验证授权信息...',
-        percentage: 20,
-      }
+    if (!form.value.email.trim() || form.value.email.startsWith('@')) {
+      error.value = '请输入完整的邮箱地址'
+      console.log('[AddAccountModal] 验证失败：邮箱地址不完整')
+      return
+    }
 
-      const isValid = await invoke('validate_oauth_token', {
-        provider: oauthProvider.value,
-        token: oauthToken.value.access_token,
-      })
+    console.log('[AddAccountModal] 基础验证通过')
 
-      if (!isValid) {
-        // token 无效，重新授权
-        error.value = '授权已过期，请重新授权'
-        syncProgress.value.stage = 'idle'
+    // OAuth 模式：检查 token，如果没有则自动触发授权
+    if (form.value.authType === 'oauth') {
+      console.log('[AddAccountModal] 处理OAuth模式')
+
+      if (!oauthToken.value) {
+        console.log('[AddAccountModal] 没有OAuth token，触发授权')
+        // 自动触发 OAuth 授权
         startOAuthLogin()
         return
       }
-    } catch (e: any) {
-      error.value = `授权验证失败：${e}`
-      syncProgress.value.stage = 'idle'
-      return
-    }
-  }
 
-  // 密码模式：验证连接
-  if (form.value.authType === 'password') {
-    if (!form.value.password.trim()) {
-      error.value = '请输入密码'
-      return
+      console.log('[AddAccountModal] 有OAuth token，开始验证')
+
+      // 有 token，验证是否有效
+      try {
+        syncProgress.value = {
+          stage: 'authenticating',
+          currentStep: 1,
+          totalSteps: 3,
+          message: '验证授权信息...',
+          percentage: 20,
+        }
+
+        console.log('[AddAccountModal] 调用 validate_oauth_token')
+        const isValid = await invoke('validate_oauth_token', {
+          provider: oauthProvider.value,
+          token: oauthToken.value.access_token,
+        })
+
+        console.log('[AddAccountModal] validate_oauth_token 结果:', isValid)
+
+        if (!isValid) {
+          // token 无效，重新授权
+          error.value = '授权已过期，请重新授权'
+          syncProgress.value.stage = 'idle'
+          startOAuthLogin()
+          return
+        }
+      } catch (e: any) {
+        console.error('[AddAccountModal] validate_oauth_token 出错:', e)
+        error.value = `授权验证失败：${e}`
+        syncProgress.value.stage = 'idle'
+        return
+      }
     }
 
-    try {
-      syncProgress.value = {
-        stage: 'validating',
-        currentStep: 1,
-        totalSteps: 3,
-        message: '验证邮箱连接...',
-        percentage: 20,
+    // 密码模式：验证连接
+    if (form.value.authType === 'password') {
+      console.log('[AddAccountModal] 处理密码模式')
+
+      if (!form.value.password.trim()) {
+        error.value = '请输入密码'
+        console.log('[AddAccountModal] 验证失败：密码为空')
+        return
       }
 
-      await invoke('test_email_connection', {
-        email: form.value.email,
-        password: form.value.password,
-        provider: form.value.provider,
-        imapHost: isCustom.value ? form.value.imapHost : null,
-        imapPort: isCustom.value ? form.value.imapPort : null,
-        imapSsl: isCustom.value ? form.value.imapSsl : null,
-        smtpHost: isCustom.value ? form.value.smtpHost : null,
-        smtpPort: isCustom.value ? form.value.smtpPort : null,
-        smtpSsl: isCustom.value ? form.value.smtpSsl : null,
-      })
-    } catch (e: any) {
-      error.value = `连接验证失败：${e}`
-      syncProgress.value.stage = 'idle'
-      return
-    }
-  }
+      try {
+        syncProgress.value = {
+          stage: 'validating',
+          currentStep: 1,
+          totalSteps: 3,
+          message: '验证邮箱连接...',
+          percentage: 20,
+        }
 
-  // 创建账号并同步
-  await createAccountAndSync()
+        console.log('[AddAccountModal] 调用 test_email_connection')
+        await invoke('test_email_connection', {
+          email: form.value.email,
+          password: form.value.password,
+          provider: form.value.provider,
+          imapHost: isCustom.value ? form.value.imapHost : null,
+          imapPort: isCustom.value ? form.value.imapPort : null,
+          imapSsl: isCustom.value ? form.value.imapSsl : null,
+          smtpHost: isCustom.value ? form.value.smtpHost : null,
+          smtpPort: isCustom.value ? form.value.smtpPort : null,
+          smtpSsl: isCustom.value ? form.value.smtpSsl : null,
+        })
+
+        console.log('[AddAccountModal] test_email_connection 成功')
+      } catch (e: any) {
+        console.error('[AddAccountModal] test_email_connection 出错:', e)
+        error.value = `连接验证失败：${e}`
+        syncProgress.value.stage = 'idle'
+        return
+      }
+    }
+
+    console.log('[AddAccountModal] 验证完成，开始创建账号并同步')
+
+    // 创建账号并同步
+    await createAccountAndSync()
+  } catch (e: any) {
+    console.error('[AddAccountModal] handleSubmit 全局错误:', e)
+    error.value = `操作失败：${e?.message || String(e)}`
+    syncProgress.value.stage = 'idle'
+    loading.value = false
+  }
 }
 
 async function createAccountAndSync() {
+  console.log('[AddAccountModal] createAccountAndSync 开始')
   loading.value = true
 
   try {
@@ -373,17 +425,26 @@ async function createAccountAndSync() {
       color: form.value.color,
     }
 
+    console.log('[AddAccountModal] 准备账号数据:', {
+      ...accountData,
+      authType: form.value.authType,
+      isCustom: isCustom.value,
+    })
+
     if (form.value.authType === 'oauth' && oauthToken.value) {
+      console.log('[AddAccountModal] 使用OAuth认证')
       accountData.auth_type = 'oauth'
       accountData.oauth_provider = oauthProvider.value
       accountData.oauth_token = oauthToken.value.access_token
       accountData.oauth_refresh_token = oauthToken.value.refresh_token
       accountData.password = '' // OAuth 不需要密码
     } else {
+      console.log('[AddAccountModal] 使用密码认证')
       accountData.password = form.value.password
     }
 
     if (isCustom.value) {
+      console.log('[AddAccountModal] 自定义服务器配置')
       accountData.imap_host = form.value.imapHost
       accountData.imap_port = form.value.imapPort
       accountData.imap_ssl = form.value.imapSsl
@@ -393,8 +454,11 @@ async function createAccountAndSync() {
     }
 
     // 创建账号
+    console.log('[AddAccountModal] 调用 add_account')
     const accountResult = await invoke('add_account', { account: accountData }) as { id: number }
     const accountId = accountResult.id
+
+    console.log('[AddAccountModal] 账号创建成功, ID:', accountId)
 
     syncProgress.value = {
       stage: 'syncing',
@@ -405,11 +469,22 @@ async function createAccountAndSync() {
     }
 
     // 先注册监听器（必须在同步之前，否则会错过早期事件）
+    console.log('[AddAccountModal] 注册同步进度监听器')
     await listenToSyncProgress(accountId)
 
     // 开始同步（带进度）
+    console.log('[AddAccountModal] 开始同步, accountId:', accountId)
     await invoke('sync_account_with_progress', { accountId })
+    console.log('[AddAccountModal] 同步命令已发送')
   } catch (e: any) {
+    console.error('[AddAccountModal] createAccountAndSync 出错:', e)
+    console.error('[AddAccountModal] 错误详情:', {
+      message: e?.message,
+      stack: e?.stack,
+      string: String(e),
+      json: JSON.stringify(e),
+    })
+
     syncProgress.value = {
       stage: 'error',
       currentStep: 0,
@@ -417,7 +492,18 @@ async function createAccountAndSync() {
       message: '',
       percentage: 0,
     }
-    error.value = String(e)
+
+    // 提供更详细的错误信息
+    let errorMessage = '创建账号失败'
+    if (typeof e === 'string') {
+      errorMessage = e
+    } else if (e?.message) {
+      errorMessage = e.message
+    } else if (e?.toString) {
+      errorMessage = e.toString()
+    }
+
+    error.value = errorMessage
     loading.value = false
   }
 }
@@ -522,12 +608,20 @@ function resetForm() {
 }
 
 function startOAuthLogin() {
+  console.log('[AddAccountModal] startOAuthLogin 被调用')
+  console.log('[AddAccountModal] 当前 provider:', form.value.provider)
+
   if (form.value.provider === 'outlook' || form.value.provider === 'hotmail') {
     oauthProvider.value = 'microsoft'
+    console.log('[AddAccountModal] 设置 oauthProvider 为 microsoft')
   } else if (form.value.provider === 'gmail') {
     oauthProvider.value = 'google'
+    console.log('[AddAccountModal] 设置 oauthProvider 为 google')
   }
+
+  console.log('[AddAccountModal] 打开 OAuth 弹窗')
   showOAuthModal.value = true
+  console.log('[AddAccountModal] showOAuthModal.value:', showOAuthModal.value)
 }
 
 function handleOAuthSuccess(token: { access_token: string, refresh_token: string, expires_at: number }) {
@@ -539,13 +633,13 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
 
 <template>
   <NModal
-    v-model:show="show"
+    :show="show"
+    @update:show="uiStore.closeAddAccountModal"
     preset="card"
     title="添加邮箱账号"
     :style="{ width: '500px' }"
     :mask-closable="!loading"
     :close-on-esc="!loading"
-    @update:show="uiStore.closeAddAccountModal"
   >
     <NForm @submit.prevent="handleSubmit">
       <!-- 账号名称 -->

@@ -1,6 +1,9 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn, EntityTrait, QueryFilter, ColumnTrait, QuerySelect, QueryOrder, Condition};
-use anyhow::{Result, Context};
 use crate::models::email;
+use anyhow::{Context, Result};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DbConn, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Statement,
+};
 
 /// 搜索结果项
 #[derive(Debug, serde::Serialize)]
@@ -69,20 +72,14 @@ impl SearchService {
         for row in results {
             // 解析查询结果
             // 注意：这里使用 try_get 方法
-            let id: i32 = row.try_get_by_index(0)
-                .unwrap_or(0);
-            let subject: String = row.try_get_by_index(1)
-                .unwrap_or("".to_string());
-            let sender_email: String = row.try_get_by_index(2)
-                .unwrap_or("".to_string());
+            let id: i32 = row.try_get_by_index(0).unwrap_or(0);
+            let subject: String = row.try_get_by_index(1).unwrap_or("".to_string());
+            let sender_email: String = row.try_get_by_index(2).unwrap_or("".to_string());
             let sender_name: Option<String> = row.try_get_by_index(3).ok();
             let body_text: Option<String> = row.try_get_by_index(4).ok();
-            let folder: String = row.try_get_by_index(5)
-                .unwrap_or("inbox".to_string());
-            let sent_at: i64 = row.try_get_by_index(6)
-                .unwrap_or(0);
-            let account_id: i32 = row.try_get_by_index(7)
-                .unwrap_or(0);
+            let folder: String = row.try_get_by_index(5).unwrap_or("inbox".to_string());
+            let sent_at: i64 = row.try_get_by_index(6).unwrap_or(0);
+            let account_id: i32 = row.try_get_by_index(7).unwrap_or(0);
 
             search_results.push(SearchResult {
                 id,

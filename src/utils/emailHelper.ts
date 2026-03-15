@@ -123,6 +123,25 @@ export function generateServerConfig(domain: string): {
 }
 
 /**
+ * 调试辅助函数 - 测试邮箱检测（可在控制台调用）
+ * 使用方法: import { testEmailDetection } from '@/utils/emailHelper'; testEmailDetection('test@outlook.com')
+ */
+export function testEmailDetection(email: string): void {
+  console.log('=== 邮箱检测测试 ===')
+  console.log('输入邮箱:', email)
+
+  const { domain, localPart, isValid } = parseEmail(email)
+  console.log('parseEmail结果:', { domain, localPart, isValid })
+
+  const provider = detectProviderFromEmail(email)
+  console.log('detectProviderFromEmail结果:', provider)
+
+  const autoFillInfo = extractAutoFillInfo(email, '')
+  console.log('extractAutoFillInfo结果:', autoFillInfo)
+  console.log('==================')
+}
+
+/**
  * 从邮箱地址提取所有可自动填充的信息
  */
 export function extractAutoFillInfo(email: string, currentName: string): {
