@@ -1,4 +1,4 @@
-use super::{AsyncImapClient, EmailData, FolderInfo, ImapAuth};
+use super::{AsyncImapClient, EmailData, FolderInfo, FolderMetadata, ImapAuth};
 use anyhow::{anyhow, Result};
 use sea_orm::DbConn;
 
@@ -30,6 +30,12 @@ impl ImapService {
     pub async fn list_folders_with_attributes(&mut self) -> Result<Vec<FolderInfo>> {
         let client = self.client.as_mut().ok_or_else(|| anyhow!("IMAP 未连接"))?;
         client.list_folders_with_attributes().await
+    }
+
+    /// 获取文件夹 IMAP 元数据（UIDVALIDITY, UIDNEXT 等）
+    pub async fn fetch_folder_metadata(&mut self, folder: &str) -> Result<FolderMetadata> {
+        let client = self.client.as_mut().ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        client.fetch_folder_metadata(folder).await
     }
 
     /// 异步获取 UID 列表

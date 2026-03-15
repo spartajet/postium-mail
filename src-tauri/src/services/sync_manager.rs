@@ -373,12 +373,54 @@ impl SyncManager {
             });
 
             if let Some(folder_info) = matched_folder {
-                // 找到匹配的文件夹
-                let folder = folder_service::find_or_create(
+                // 找到匹配的文件夹，获取其IMAP元数据
+                let imap_name = &folder_info.name;
+                let folder_metadata = imap_service.fetch_folder_metadata(imap_name).await?;
+
+                tracing::info!(
+                    "  📊 文件夹元数据: uidvalidity={}, uidnext={}, exists={}",
+                    folder_metadata.uidvalidity,
+                    folder_metadata.uidnext,
+                    folder_metadata.exists
+                );
+
+                // 检查UIDVALIDITY是否变化
+                let existing_folder = folder_service::get_by_account_and_imap_name(
+                    &self.db,
+                    account_id,
+                    imap_name,
+                ).await?;
+
+                if let Some(ref existing) = existing_folder {
+                    // 检查UIDVALIDITY是否变化
+                    if let Some(existing_uidvalidity) = existing.uidvalidity {
+                        if existing_uidvalidity != folder_metadata.uidvalidity as i64 {
+                            tracing::warn!(
+                                "⚠️  文件夹 {} UIDVALIDITY 变化: {} -> {}，需要重新同步",
+                                imap_name,
+                                existing_uidvalidity,
+                                folder_metadata.uidvalidity
+                            );
+                            // UIDVALIDITY变化：删除该文件夹的所有邮件
+                            let _ = crate::services::email_service::delete_all_by_folder(
+                                &self.db,
+                                account_id,
+                                standard_name,
+                            ).await;
+                            tracing::info!("已删除文件夹 {} 的所有本地邮件", imap_name);
+                        }
+                    }
+                }
+
+                // 创建或更新文件夹（包括IMAP元数据）
+                let folder = folder_service::find_or_create_with_metadata(
                     &self.db,
                     account_id,
                     standard_name,
-                    &folder_info.name,
+                    imap_name,
+                    folder_metadata.uidvalidity as i64,
+                    folder_metadata.uidnext as i64,
+                    folder_metadata.highest_modseq.map(|m| m as i64),
                 )
                 .await?;
 

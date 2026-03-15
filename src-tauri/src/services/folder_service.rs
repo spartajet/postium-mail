@@ -94,6 +94,15 @@ pub async fn get_by_imap_name(
         .map_err(|e| anyhow!("获取文件夹失败: {}", e))
 }
 
+/// 根据账号和 IMAP 名称获取文件夹（别名，用于同步管理器）
+pub async fn get_by_account_and_imap_name(
+    db: &DbConn,
+    account_id: i32,
+    imap_name: &str,
+) -> Result<Option<folder::Model>> {
+    get_by_imap_name(db, account_id, imap_name).await
+}
+
 /// 查找或创建文件夹
 pub async fn find_or_create(
     db: &DbConn,
@@ -112,6 +121,51 @@ pub async fn find_or_create(
         account_id: Set(account_id),
         name: Set(name.to_string()),
         imap_name: Set(imap_name.to_string()),
+        synced_at: Set(Some(now)),
+        ..Default::default()
+    };
+
+    new_folder
+        .insert(db)
+        .await
+        .map_err(|e| anyhow!("创建文件夹失败: {}", e))
+}
+
+/// 查找或创建文件夹（包含IMAP元数据）
+pub async fn find_or_create_with_metadata(
+    db: &DbConn,
+    account_id: i32,
+    name: &str,
+    imap_name: &str,
+    uidvalidity: i64,
+    uidnext: i64,
+    highest_modseq: Option<i64>,
+) -> Result<folder::Model> {
+    // 先尝试查找
+    if let Some(existing) = get_by_imap_name(db, account_id, imap_name).await? {
+        // 更新IMAP元数据
+        let now = chrono::Utc::now().timestamp();
+        let mut active: folder::ActiveModel = existing.into();
+        active.uidvalidity = Set(Some(uidvalidity));
+        active.uidnext = Set(Some(uidnext));
+        active.highest_modseq = Set(highest_modseq);
+        active.synced_at = Set(Some(now));
+
+        return active
+            .update(db)
+            .await
+            .map_err(|e| anyhow!("更新文件夹元数据失败: {}", e));
+    }
+
+    // 不存在则创建
+    let now = chrono::Utc::now().timestamp();
+    let new_folder = folder::ActiveModel {
+        account_id: Set(account_id),
+        name: Set(name.to_string()),
+        imap_name: Set(imap_name.to_string()),
+        uidvalidity: Set(Some(uidvalidity)),
+        uidnext: Set(Some(uidnext)),
+        highest_modseq: Set(highest_modseq),
         synced_at: Set(Some(now)),
         ..Default::default()
     };

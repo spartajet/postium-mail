@@ -15,6 +15,10 @@ pub struct Model {
     pub email_count: i32,           // 邮件数量
     pub unread_count: i32,          // 未读数量
     pub synced_at: Option<i64>,     // 最后同步时间
+    // IMAP 元数据字段
+    pub uidvalidity: Option<i64>,   // IMAP UIDVALIDITY 值
+    pub uidnext: Option<i64>,       // 预期的下一个 UID
+    pub highest_modseq: Option<i64>, // CONDSTORE 扩展的最高修改序列号
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -62,6 +66,10 @@ pub struct FolderDto {
     pub email_count: i32,
     pub unread_count: i32,
     pub synced_at: Option<i64>,
+    // IMAP 元数据
+    pub uidvalidity: Option<i64>,
+    pub uidnext: Option<i64>,
+    pub highest_modseq: Option<i64>,
 }
 
 impl From<Model> for FolderDto {
@@ -75,6 +83,9 @@ impl From<Model> for FolderDto {
             email_count: model.email_count,
             unread_count: model.unread_count,
             synced_at: model.synced_at,
+            uidvalidity: model.uidvalidity,
+            uidnext: model.uidnext,
+            highest_modseq: model.highest_modseq,
         }
     }
 }
