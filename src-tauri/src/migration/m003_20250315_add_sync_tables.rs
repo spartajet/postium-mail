@@ -24,6 +24,9 @@ async fn create_folders_table(db: &DbConn) -> Result<()> {
             email_count INTEGER DEFAULT 0,
             unread_count INTEGER DEFAULT 0,
             synced_at INTEGER,
+            uidvalidity INTEGER,
+            uidnext INTEGER,
+            highest_modseq INTEGER,
             UNIQUE(account_id, imap_name),
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
             FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
