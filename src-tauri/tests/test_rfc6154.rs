@@ -48,7 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rfc6154_folder_attributes() {
-        use postium_mail_lib::services::imap_service::{ImapAuth, ImapService};
+        use postium_mail_lib::services::imap::{ImapAuth, ImapService};
         use tracing::info;
 
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
@@ -62,7 +62,7 @@ mod tests {
 
         let mut imap_service = ImapService::new();
 
-        match imap_service.connect(&account.imap_server, account.imap_port, &account.account, ImapAuth::Password(account.password.clone())) {
+        match imap_service.connect(&account.imap_server, account.imap_port, &account.account, ImapAuth::Password(account.password.clone())).await {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
@@ -96,7 +96,7 @@ mod tests {
                     }
                 }
 
-                let _ = imap_service.logout();
+                let _ = imap_service.logout().await;
             }
             Err(e) => {
                 let err_str = e.to_string();
