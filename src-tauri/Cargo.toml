@@ -43,6 +43,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 native-tls = "0.2"  # 保留用于旧的 imap_service.rs
 lettre = "0.11"
 mail-parser = "0.11"
+encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
 
 base64 = "0.22"
 # OAuth 2.0 相关（最新版本）
@@ -58,6 +59,9 @@ tauri-plugin-keyring = "0.1"
 # 错误处理
 anyhow = "1.0"
 thiserror = "1.0"
+
+# 正则表达式（用于解析RFC 2047编码）
+regex = "1.10"
 
 # 日志
 tracing = "0.1"

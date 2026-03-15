@@ -1,6 +1,242 @@
 use anyhow::{anyhow, Result};
 use super::types::{EmailData, EmailFlags};
 
+/// 检测字符串是否包含大量乱码字符
+fn is_garbled(input: &str) -> bool {
+    let replacement_count = input.chars().filter(|&c| c == '\u{FFFD}').count();
+    let total_chars = input.chars().count();
+
+    if total_chars == 0 {
+        return false;
+    }
+
+    let replacement_ratio = replacement_count as f64 / total_chars as f64;
+
+    // 如果替换字符占比超过5%，认为是乱码
+    if replacement_ratio > 0.05 {
+        return true;
+    }
+
+    // 检查是否包含特定的GBK编码错误模式
+    // GBK被当作Latin-1解码时，会产生特定的字符序列
+    if input.contains('ƶ') || input.contains('Ʊ') || input.contains('ĵ') || input.contains('ӷ') {
+        // 这些字符是GBK中文被错误解码的典型标志
+        return true;
+    }
+
+    false
+}
+
+/// 解码RFC 2047编码的字符串
+/// 格式：=?charset?encoding?encoded-text?=
+/// 例如：=?GBK?B?xOO6ww==?=
+fn decode_rfc2047(input: &str) -> Result<String> {
+    use base64::Engine;
+
+    // RFC 2047 编码的正则表达式模式
+    // 格式：=?charset?Q/B?encoded-text?=
+    let pattern = regex::Regex::new(r"(?i)=\?([^?]+)\?([QB])\?([^?]+)\?=").unwrap();
+
+    let mut result = String::from(input);
+    let mut pos = 0;
+
+    // 查找所有编码的片段
+    while let Some(caps) = pattern.captures(&result[pos..]) {
+        let full_match = caps.get(0).unwrap();
+        let charset = caps.get(1).unwrap().as_str().to_uppercase();
+        let encoding = caps.get(2).unwrap().as_str().to_uppercase();
+        let encoded_text = caps.get(3).unwrap().as_str();
+
+        let decoded_text = match (charset.as_str(), encoding.as_str()) {
+            ("UTF-8", "B") => {
+                // Base64 编码的 UTF-8
+                let engine = base64::engine::general_purpose::STANDARD;
+                match engine.decode(encoded_text) {
+                    Ok(bytes) => String::from_utf8(bytes).unwrap_or_default(),
+                    Err(_) => encoded_text.to_string(),
+                }
+            }
+            ("GBK", "B") | ("GB18030", "B") | ("GB2312", "B") => {
+                // Base64 编码的 GBK/GB18030/GB2312
+                let engine = base64::engine::general_purpose::STANDARD;
+                match engine.decode(encoded_text) {
+                    Ok(bytes) => {
+                        let (text, _, _) = encoding_rs::GBK.decode(&bytes);
+                        text.to_string()
+                    }
+                    Err(_) => encoded_text.to_string(),
+                }
+            }
+            ("BIG5", "B") => {
+                // Base64 编码的 Big5
+                let engine = base64::engine::general_purpose::STANDARD;
+                match engine.decode(encoded_text) {
+                    Ok(bytes) => {
+                        let (text, _, _) = encoding_rs::BIG5.decode(&bytes);
+                        text.to_string()
+                    }
+                    Err(_) => encoded_text.to_string(),
+                }
+            }
+            ("UTF-8", "Q") | ("UTF-8", "q") => {
+                // Quoted-Printable 编码的 UTF-8
+                decode_quoted_printable_utf8(encoded_text)
+            }
+            ("GBK", "Q") | ("GBK", "q") | ("GB18030", "Q") | ("GB18030", "q") | ("GB2312", "Q") | ("GB2312", "q") => {
+                // Quoted-Printable 编码的 GBK
+                decode_quoted_printable_gbk(encoded_text)
+            }
+            _ => {
+                // 未知编码，返回原文
+                full_match.as_str().to_string()
+            }
+        };
+
+        let abs_match_start = pos + full_match.start();
+        let abs_match_end = pos + full_match.end();
+        result.replace_range(abs_match_start..abs_match_end, &decoded_text);
+        pos = abs_match_start + decoded_text.len();
+    }
+
+    Ok(result)
+}
+
+/// 解码 Quoted-Printable 编码的 UTF-8 文本
+fn decode_quoted_printable_utf8(input: &str) -> String {
+    let mut result = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '_' {
+            // 下划线表示空格
+            result.push(b' ');
+            i += 1;
+        } else if chars[i] == '=' && i + 2 < chars.len() {
+            // =XX 表示字节值
+            let hex = format!("{}{}", chars[i + 1], chars[i + 2]);
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte);
+            }
+            i += 3;
+        } else {
+            // 普通字符
+            let mut buf = [0u8; 4];
+            let s = chars[i].encode_utf8(&mut buf);
+            result.extend_from_slice(s.as_bytes());
+            i += 1;
+        }
+    }
+
+    String::from_utf8(result).unwrap_or_default()
+}
+
+/// 解码 Quoted-Printable 编码的 GBK 文本
+fn decode_quoted_printable_gbk(input: &str) -> String {
+    let mut result = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '_' {
+            // 下划线表示空格
+            result.push(b' ');
+            i += 1;
+        } else if chars[i] == '=' && i + 2 < chars.len() {
+            // =XX 表示字节值
+            let hex = format!("{}{}", chars[i + 1], chars[i + 2]);
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte);
+            }
+            i += 3;
+        } else {
+            // 普通字符（转换为Latin-1字节）
+            result.push(chars[i] as u8);
+            i += 1;
+        }
+    }
+
+    // 使用GBK解码字节
+    let (text, _, _) = encoding_rs::GBK.decode(&result);
+    text.to_string()
+}
+
+/// 检测并修复字符串的编码问题
+/// 首先尝试解码RFC 2047编码，然后检查是否仍然存在乱码
+fn fix_encoding_issue(input: &str) -> String {
+    // 首先尝试解码RFC 2047编码
+    let decoded = match decode_rfc2047(input) {
+        Ok(text) => text,
+        Err(_) => input.to_string(),
+    };
+
+    // 如果解码后仍然存在乱码，尝试其他方法
+    if is_garbled(&decoded) {
+        tracing::warn!(
+            "检测到编码问题且RFC 2047解码后仍有乱码: 主题={}",
+            decoded
+        );
+
+        // 尝试移除替换字符
+        let cleaned = decoded.replace('\u{FFFD}', "");
+        if !cleaned.is_empty() {
+            return cleaned;
+        }
+
+        decoded
+    } else {
+        decoded
+    }
+}
+
+/// 从原始邮件头中提取Subject字段并解码
+/// 这是为了绕过mail_parser对RFC 2047 GBK编码的错误处理
+fn extract_and_decode_subject(raw: &str) -> Option<String> {
+    // 查找Subject字段
+    let mut subject_lines = Vec::new();
+    let mut in_subject = false;
+    let mut subject_complete = false;
+
+    for line in raw.lines() {
+        if line.starts_with("Subject:") {
+            in_subject = true;
+            subject_lines.push(line.strip_prefix("Subject:")?.trim());
+        } else if in_subject {
+            // 检查是否是续行（以空格或制表符开头）
+            if line.starts_with(' ') || line.starts_with('\t') {
+                subject_lines.push(line.trim());
+            } else {
+                // Subject字段结束
+                subject_complete = true;
+                break;
+            }
+        }
+    }
+
+    if !subject_complete && !subject_lines.is_empty() {
+        // 邮件头结束了但没有遇到其他字段
+        subject_complete = true;
+    }
+
+    if subject_complete && !subject_lines.is_empty() {
+        let subject_raw = subject_lines.join("");
+
+        // 使用我们的RFC 2047解码器
+        match decode_rfc2047(&subject_raw) {
+            Ok(decoded) => {
+                tracing::debug!("从原始邮件头提取并解码Subject: {}", decoded);
+                Some(decoded)
+            }
+            Err(e) => {
+                tracing::warn!("解码Subject失败: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
 /// 使用 mail_parser 完整解析邮件
 pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
     use mail_parser::MessageParser;
@@ -9,11 +245,13 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
 
     let message = message.ok_or_else(|| anyhow!("邮件解析失败"))?;
 
-    // 解析主题
-    let subject = message
-        .subject()
-        .unwrap_or("无主题")
-        .to_string();
+    // 从原始邮件头中提取Subject字段并解码
+    // mail_parser对RFC 2047 GBK编码的支持有问题，所以我们自己处理
+    let subject = extract_and_decode_subject(raw).unwrap_or_else(|| {
+        // 如果提取失败，回退到mail_parser
+        let subject_raw = message.subject().unwrap_or("无主题");
+        fix_encoding_issue(subject_raw)
+    });
 
     // 解析 From 地址
     let from = message
