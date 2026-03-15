@@ -201,16 +201,27 @@ impl AsyncImapClient {
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
-        session
+        let mailbox = session
             .select(folder)
             .await
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // 记录邮箱信息
+        tracing::info!(
+            "📬 邮箱信息: exists={}, recent={}, unseen={:?}, uid_next={:?}",
+            mailbox.exists,
+            mailbox.recent,
+            mailbox.unseen,
+            mailbox.uid_next
+        );
 
         // SEARCH ALL 获取所有邮件 UID（返回 Result<HashSet<Seq>>）
         let uids = session
             .search("ALL")
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+
+        tracing::debug!("SEARCH ALL 返回 {} 个 UID", uids.len());
 
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
         uid_list.sort();
@@ -291,25 +302,57 @@ impl AsyncImapClient {
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
+        tracing::info!("🔍 list_uids_since 开始: folder={}, date_since={}", folder, date_since);
+
         // SELECT 文件夹（返回 Result<Mailbox>）
         session
             .select(folder)
             .await
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
 
-        // 使用 SINCE 命令搜索指定日期之后的邮件（返回 Result<HashSet<Seq>>）
+        // 首先获取总邮件数（用于诊断）
+        let all_uids = session
+            .search("ALL")
+            .await
+            .map_err(|e| anyhow!("搜索所有邮件失败: {}", e))?;
+        tracing::info!("📊 文件夹总邮件数: {}", all_uids.len());
+
+        // 使用 SINCE 命令搜索指定日期之后的邮件
         // 注意：SINCE 命令的日期格式是 "01-Jan-2025"（不需要双引号，根据 RFC 3501）
         let search_cmd = format!("SINCE {}", date_since);
-        tracing::debug!("使用 IMAP 搜索命令: {}", search_cmd);
+        tracing::info!("📤 使用 IMAP 搜索命令: '{}'", search_cmd);
 
         let uids = session
             .search(&search_cmd)
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
+        tracing::info!("📥 SINCE 命令返回 {} 个 UID (预期: 所有近一年的邮件)", uids.len());
+        tracing::info!("📊 比例: {}/{} ({:.1}%)", uids.len(), all_uids.len(),
+            (uids.len() as f64 / all_uids.len() as f64) * 100.0);
+
+        // 如果 SINCE 返回的结果太少，记录警告
+        if all_uids.len() > 100 && uids.len() < all_uids.len() / 2 {
+            tracing::warn!(
+                "⚠️  SINCE 命令返回的邮件数量异常少！可能的原因:\n\
+                 1. 日期格式不正确: '{}'\n\
+                 2. IMAP 服务器不支持 SINCE 命令\n\
+                 3. 服务器上的邮件确实都在近一个月内",
+                date_since
+            );
+        }
+
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
         uid_list.sort();
         uid_list.reverse();
+
+        if !uid_list.is_empty() {
+            tracing::info!(
+                "   UID 范围: {} ~ {}",
+                uid_list.last().unwrap_or(&0),
+                uid_list.first().unwrap_or(&0)
+            );
+        }
 
         Ok(uid_list)
     }
@@ -502,14 +545,24 @@ impl Default for AsyncImapClient {
 }
 
 pub fn one_year_ago_imap_format() -> String {
-    let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
+    let now = chrono::Utc::now();
+    let one_year_ago = now - chrono::Duration::days(365);
 
-    format!(
+    let date_str = format!(
         "{:02}-{}-{:04}",
         one_year_ago.day(),
         month_abbr(one_year_ago.month()),
         one_year_ago.year()
-    )
+    );
+
+    tracing::info!(
+        "📅 计算一年前的日期: 现在={}, 一年前={}, 格式化后={}",
+        now.format("%Y-%m-%d %H:%M:%S UTC"),
+        one_year_ago.format("%Y-%m-%d %H:%M:%S UTC"),
+        date_str
+    );
+
+    date_str
 }
 
 /// 将月份数字转换为英文缩写

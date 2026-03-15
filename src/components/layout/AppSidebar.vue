@@ -11,8 +11,6 @@ import type { EmailFolder } from "@/types";
 import {
     EmailOutlined,
     SettingsOutlined,
-    LightModeOutlined,
-    DarkModeOutlined,
     ExpandMoreOutlined,
     AddOutlined,
     EditOutlined,
@@ -133,11 +131,6 @@ function handleViewNavClick(view: "calendar" | "workflow") {
     uiStore.setView(view);
 }
 
-// 切换主题
-function toggleTheme() {
-    uiStore.toggleTheme();
-}
-
 // 打开写信模态框
 function openCompose() {
     uiStore.openComposeModal();
@@ -146,19 +139,6 @@ function openCompose() {
 // 打开设置模态框
 function openSettings() {
     uiStore.openSettingsModal();
-}
-
-// 同步账号邮件
-async function syncAccountEmail() {
-    if (!accountStore.currentAccount) return;
-
-    try {
-        await accountStore.syncAccount();
-        await emailStore.fetchEmails();
-        uiStore.showSuccess(t("email.syncSuccess"));
-    } catch (error) {
-        uiStore.showError(t("email.syncFailed"));
-    }
 }
 
 // 手动同步所有账号
