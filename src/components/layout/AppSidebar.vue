@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, h } from "vue";
-import { useEmailStore, useAccountStore, useUIStore, useSyncStore } from "@/stores";
+import {
+    useEmailStore,
+    useAccountStore,
+    useUIStore,
+    useSyncStore,
+} from "@/stores";
 import { useI18n } from "vue-i18n";
 import type { EmailFolder } from "@/types";
 import {
@@ -150,28 +155,28 @@ async function syncAccountEmail() {
     try {
         await accountStore.syncAccount();
         await emailStore.fetchEmails();
-        uiStore.showSuccess(t('email.syncSuccess'));
+        uiStore.showSuccess(t("email.syncSuccess"));
     } catch (error) {
-        uiStore.showError(t('email.syncFailed'));
+        uiStore.showError(t("email.syncFailed"));
     }
 }
 
 // 手动同步所有账号
 async function syncAllAccounts() {
     if (!accountStore.currentAccount) {
-        console.log('[AppSidebar] 没有当前账号，跳过同步');
+        console.log("[AppSidebar] 没有当前账号，跳过同步");
         return;
     }
 
-    console.log('[AppSidebar] 开始同步账号:', accountStore.currentAccount.id);
+    console.log("[AppSidebar] 开始同步账号:", accountStore.currentAccount.id);
 
     try {
         await syncStore.syncAccount(accountStore.currentAccount.id);
         await emailStore.fetchEmails();
-        uiStore.showSuccess('同步完成');
+        uiStore.showSuccess("同步完成");
     } catch (error) {
-        console.error('[AppSidebar] 同步失败:', error);
-        uiStore.showError('同步失败');
+        console.error("[AppSidebar] 同步失败:", error);
+        uiStore.showError("同步失败");
     }
 }
 
@@ -207,7 +212,10 @@ const storagePercent = computed(
                     :disabled="syncStore.hasAnySyncing"
                     :title="syncStore.hasAnySyncing ? '同步中...' : '手动同步'"
                 >
-                    <SyncOutlined :size="18" :class="{ spinning: syncStore.hasAnySyncing }" />
+                    <SyncOutlined
+                        :size="18"
+                        :class="{ spinning: syncStore.hasAnySyncing }"
+                    />
                 </button>
             </div>
         </div>
@@ -246,20 +254,6 @@ const storagePercent = computed(
                     </div>
                     <ExpandMoreOutlined class="select-arrow" :size="20" />
                 </div>
-
-                <!-- Sync Button -->
-                <button
-                    v-if="accountStore.currentAccount"
-                    class="sync-btn"
-                    @click.stop="syncAccountEmail"
-                    :disabled="emailStore.isSyncing"
-                    :title="t('email.sync')"
-                >
-                    <SyncOutlined
-                        :size="16"
-                        :class="{ spinning: emailStore.isSyncing }"
-                    />
-                </button>
 
                 <div
                     class="custom-select-options"
@@ -423,40 +417,6 @@ const storagePercent = computed(
     to {
         transform: rotate(360deg);
     }
-}
-
-/* 同步按钮样式 */
-.sync-btn {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.2s;
-    z-index: 10;
-}
-
-.sync-btn:hover:not(:disabled) {
-    background: var(--hover-bg);
-    color: var(--text-primary);
-}
-
-.sync-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.sync-btn.spinning :deep(svg) {
-    animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
