@@ -367,6 +367,75 @@ const aiActions = computed(() => [
     gap: 4px;
 }
 
+/* 附件区域样式 */
+.attachments-section {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.attachments-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.attachments-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.attachment-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 0;
+    flex-shrink: 0;
+}
+
+.attachment-item:hover {
+    background: var(--bg-glass-hover);
+    border-color: var(--primary-color);
+}
+
+.attachment-icon {
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.attachment-info {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+}
+
+.attachment-name {
+    font-size: $font-size-base;
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+    word-break: break-word;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.attachment-size {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
 .skeleton-text {
     height: 14px;
     margin-bottom: 8px;
