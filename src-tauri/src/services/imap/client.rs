@@ -198,6 +198,26 @@ impl AsyncImapClient {
         None
     }
 
+    /// 解码 IMAP UTF-7 编码的文件夹名称（163、QQ邮箱等中文文件夹）
+    fn decode_imap_utf7(imap_name: &str) -> String {
+        // 常见的中文邮箱文件夹名称映射
+        let common_mappings = [
+            ("&XfJT0ZAB-", "已发送"),
+            ("&XfJSIJZk-", "收件箱"),
+            ("&V4NXPpCuTvY-", "垃圾邮件"),
+            ("&dcVr0mWHTvZZOQ-", "已删除"),
+            ("&g0l6P3ux-", "草稿箱"),
+        ];
+
+        for (encoded, decoded) in common_mappings.iter() {
+            if imap_name == *encoded || imap_name.ends_with(encoded) {
+                return decoded.to_string();
+            }
+        }
+
+        imap_name.to_string()
+    }
+
     /// 根据特殊用途或名称确定标准文件夹名
     fn determine_standard_name(special_use: Option<SpecialUse>, name: &str) -> String {
         if let Some(special) = special_use {
@@ -213,19 +233,22 @@ impl AsyncImapClient {
             .to_string();
         }
 
-        // 根据名称推断
-        let name_lower = name.to_lowercase();
-        if name_lower.contains("inbox") || name_lower == "inbox" {
+        // 先尝试解码 UTF-7 编码的中文名称
+        let decoded_name = Self::decode_imap_utf7(name);
+
+        // 根据名称推断（包括解码后的中文名称）
+        let name_lower = decoded_name.to_lowercase();
+        if name_lower.contains("inbox") || name_lower == "inbox" || name_lower.contains("收件箱") {
             "inbox".to_string()
-        } else if name_lower.contains("sent") {
+        } else if name_lower.contains("sent") || name_lower.contains("已发送") {
             "sent".to_string()
-        } else if name_lower.contains("draft") {
+        } else if name_lower.contains("draft") || name_lower.contains("草稿") {
             "drafts".to_string()
-        } else if name_lower.contains("spam") || name_lower.contains("junk") {
+        } else if name_lower.contains("spam") || name_lower.contains("junk") || name_lower.contains("垃圾邮件") {
             "spam".to_string()
-        } else if name_lower.contains("trash") || name_lower.contains("deleted") {
+        } else if name_lower.contains("trash") || name_lower.contains("deleted") || name_lower.contains("已删除") {
             "trash".to_string()
-        } else if name_lower.contains("archive") {
+        } else if name_lower.contains("archive") || name_lower.contains("归档") {
             "archive".to_string()
         } else {
             name.to_string()
