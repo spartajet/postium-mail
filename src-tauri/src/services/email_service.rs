@@ -128,14 +128,30 @@ pub async fn get_detail(db: &DbConn, id: i32) -> Result<email::EmailDetail> {
         .await
         .map_err(|e| anyhow!("获取附件列表失败: {}", e))?;
 
+    tracing::info!(
+        "邮件 {} 的附件数量: {}",
+        id,
+        attachments.len()
+    );
+
     let attachment_infos: Vec<email::AttachmentInfo> = attachments
         .into_iter()
-        .map(|a| email::AttachmentInfo {
-            id: a.id,
-            filename: a.filename,
-            content_type: a.content_type,
-            size: a.size as i64,
-            path: a.path,
+        .map(|a| {
+            tracing::info!(
+                "附件详情: id={}, filename='{}', content_type={:?}, size={}, path={:?}",
+                a.id,
+                a.filename,
+                a.content_type,
+                a.size,
+                a.path
+            );
+            email::AttachmentInfo {
+                id: a.id,
+                filename: a.filename,
+                content_type: a.content_type,
+                size: a.size as i64,
+                path: a.path,
+            }
         })
         .collect();
 
@@ -432,8 +448,11 @@ pub async fn save_email_from_imap(
         .await
         .map_err(|e| anyhow!("保存邮件失败: {}", e))?;
 
+    let email_id = result.last_insert_id as i32;
+
     tracing::info!(
-        "保存邮件成功: UID={}, subject='{}', from='{}', to_count={}, cc_count={}",
+        "保存邮件成功: ID={}, UID={}, subject='{}', from='{}', to_count={}, cc_count={}",
+        email_id,
         email_data.uid,
         email_data.subject,
         email_data.from,
@@ -441,7 +460,47 @@ pub async fn save_email_from_imap(
         cc_list.len()
     );
 
-    Ok(result.last_insert_id as i32)
+    // 保存附件信息
+    if !email_data.attachments.is_empty() {
+        save_attachments(db, email_id, &email_data.attachments).await?;
+    }
+
+    Ok(email_id)
+}
+
+/// 保存邮件附件
+async fn save_attachments(
+    db: &DbConn,
+    email_id: i32,
+    attachments: &[crate::services::imap::EmailAttachment],
+) -> Result<()> {
+    use sea_orm::ActiveValue::*;
+
+    for attachment_data in attachments {
+        let new_attachment = attachment::ActiveModel {
+            id: NotSet,
+            email_id: Set(email_id),
+            filename: Set(attachment_data.filename.clone()),
+            content_type: Set(Some(attachment_data.content_type.clone())),
+            size: Set(attachment_data.size as i32),
+            path: Set(None),
+            created_at: Set(chrono::Utc::now().timestamp()),
+        };
+
+        AttachmentEntity::insert(new_attachment)
+            .exec(db)
+            .await
+            .map_err(|e| anyhow!("保存附件失败: {}", e))?;
+
+        tracing::info!(
+            "保存附件成功: email_id={}, filename='{}', size={}",
+            email_id,
+            attachment_data.filename,
+            attachment_data.size
+        );
+    }
+
+    Ok(())
 }
 
 /// 统计文件夹的邮件数量

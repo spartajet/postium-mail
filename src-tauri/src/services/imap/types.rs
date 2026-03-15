@@ -15,6 +15,14 @@ pub struct EmailFlags {
     pub deleted: bool,
 }
 
+/// 附件信息
+#[derive(Debug, Clone)]
+pub struct EmailAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub size: u64,
+}
+
 /// 邮件数据
 #[derive(Debug, Clone)]
 pub struct EmailData {
@@ -28,6 +36,7 @@ pub struct EmailData {
     pub body_html: String,
     pub raw: String,
     pub flags: EmailFlags,
+    pub attachments: Vec<EmailAttachment>,
 }
 
 /// RFC 6154 Special-Use Mailboxes 属性

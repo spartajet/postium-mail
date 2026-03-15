@@ -11,4 +11,4 @@ pub use AsyncImapClient as ImapClient;
 pub use error::{ImapError, Result};
 pub use service::ImapService;
 pub use tests::{test_connection, ConnectionTestResult};
-pub use types::{EmailData, EmailFlags, EmailHeader, FolderInfo, FolderMetadata, ImapAuth, SpecialUse};
+pub use types::{EmailAttachment, EmailData, EmailFlags, EmailHeader, FolderInfo, FolderMetadata, ImapAuth, SpecialUse};
