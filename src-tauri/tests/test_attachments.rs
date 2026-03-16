@@ -8,15 +8,20 @@ fn test_check_attachments() {
     // 尝试使用 rusqlite 直接查询
     if let Ok(conn) = rusqlite::Connection::open(db_path) {
         // 查询附件表中的数据
-        let mut stmt = conn.prepare("SELECT id, email_id, filename, size FROM attachments LIMIT 10").unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id, email_id, filename, size FROM attachments LIMIT 10")
+            .unwrap();
 
         let attachment_count = stmt
-            .query_map([], |row| {
+            .query_map([], |row: &rusqlite::Row| {
                 let id: i32 = row.get(0)?;
                 let email_id: i32 = row.get(1)?;
                 let filename: String = row.get(2)?;
                 let size: i32 = row.get(3)?;
-                println!("附件: id={}, email_id={}, filename='{}', size={} bytes", id, email_id, filename, size);
+                println!(
+                    "附件: id={}, email_id={}, filename='{}', size={} bytes",
+                    id, email_id, filename, size
+                );
                 Ok(())
             })
             .unwrap()
