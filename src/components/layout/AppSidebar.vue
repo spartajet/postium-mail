@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, h } from "vue";
+import { computed, ref, h, onMounted, onUnmounted } from "vue";
 import {
     useEmailStore,
     useAccountStore,
@@ -23,6 +23,20 @@ import {
     AccountTreeOutlined,
     SyncOutlined,
 } from "@vicons/material";
+
+// 账号选择器 ref
+const accountSelectorRef = ref<HTMLElement | null>(null);
+
+// 点击外部时关闭下拉框
+function handleClickOutside(event: MouseEvent) {
+    if (
+        accountStore.isDropdownOpen &&
+        accountSelectorRef.value &&
+        !accountSelectorRef.value.contains(event.target as Node)
+    ) {
+        accountStore.closeDropdown();
+    }
+}
 
 // Stores
 const emailStore = useEmailStore();
@@ -165,6 +179,15 @@ const storageTotal = ref(10);
 const storagePercent = computed(
     () => (storageUsed.value / storageTotal.value) * 100,
 );
+
+// 监听点击外部事件
+onMounted(() => {
+    document.addEventListener("click", handleClickOutside);
+});
+
+onUnmounted(() => {
+    document.removeEventListener("click", handleClickOutside);
+});
 </script>
 
 <template>
@@ -202,6 +225,7 @@ const storagePercent = computed(
         <!-- Account Selector -->
         <div class="account-selector-wrapper">
             <div
+                ref="accountSelectorRef"
                 class="custom-select"
                 :class="{ open: accountStore.isDropdownOpen }"
             >
