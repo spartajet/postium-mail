@@ -19,7 +19,34 @@
 
 本文档定义了 Postium Mail 邮件客户端的流程引擎架构，旨在支持多种邮件服务商的统一接入和管理。引擎采用 Rust 异步架构，基于 Tauri 框架构建。
 
+### 个人邮件 vs 企业邮件
+
+在设计邮件客户端时，需要区分个人邮件和企业邮件，因为它们在服务器配置、认证方式、安全策略等方面存在显著差异：
+
+#### 主要差异对比
+
+| 维度 | 个人邮件 | 企业邮件 |
+|------|----------|----------|
+| **服务器配置** | 固定地址（如 imap.gmail.com） | 可自定义（如 mail.company.com） |
+| **域名特征** | 标准域名（@gmail.com, @outlook.com） | 自定义域名（@company.com） |
+| **认证方式** | OAuth/密码/应用密码 | OAuth企业租户/域认证/SAML/MFA |
+| **安全策略** | 基础安全策略 | 条件访问、设备管理、DLP策略 |
+| **API 支持** | 标准 IMAP/SMTP | Graph API、EWS、企业通讯录API |
+| **邮箱配额** | 固定配额（15-25GB） | 企业可定制（50GB-无限） |
+| **功能扩展** | 基础功能 | 日历集成、通讯录、团队协作 |
+
+#### 设计策略
+
+本引擎采用**统一抽象 + 差异化配置**的策略：
+
+1. **统一抽象**：所有服务商（个人/企业）都实现相同的 `MailProvider` trait
+2. **差异化配置**：通过 `AccountType` 枚举区分个人/企业，并提供不同的配置策略
+3. **自动检测**：系统自动识别邮箱类型（通过域名或用户指定）
+4. **灵活扩展**：企业邮箱支持自定义服务器配置
+
 ### 支持的服务商
+
+#### 个人邮件服务商
 
 | 服务商 | 认证方式 | IMAP | SMTP | 特殊配置 |
 |--------|----------|------|------|----------|
@@ -30,13 +57,23 @@
 | QQ | 密码 | imap.qq.com:993 | smtp.qq.com:465 | 需授权码 |
 | iCloud | 密码 | imap.mail.me.com:993 | smtp.mail.me.com:587 | 需应用专用密码 |
 
+#### 企业邮件服务商
+
+| 服务商 | 认证方式 | IMAP | SMTP | 特殊配置 |
+|--------|----------|------|------|----------|
+| Microsoft 365 | OAuth 2.0 (企业租户) | outlook.office365.com:993 | smtp.office365.com:587 | 条件访问策略、MFA |
+| Google Workspace | OAuth 2.0 (企业域) | imap.gmail.com:993 | smtp.gmail.com:587 | 企业安全管理 |
+| Exchange Server | 域认证/OAuth | 企业自定义 | 企业自定义 | 自建服务器配置 |
+| 自建邮件服务器 | 多种认证 | 完全自定义 | 完全自定义 | 需手动配置所有参数 |
+
 ### 设计原则
 
-1. **可扩展性**: 易于添加新的邮件服务商
-2. **可配置性**: 服务商参数可配置
+1. **可扩展性**: 易于添加新的邮件服务商（个人和企业）
+2. **可配置性**: 服务商参数可配置，支持企业自定义服务器
 3. **容错性**: 完善的错误处理和重试机制
-4. **安全性**: 敏感信息安全存储
+4. **安全性**: 敏感信息安全存储，支持企业安全策略
 5. **性能**: 异步并发处理
+6. **灵活性**: 自动检测邮箱类型，支持手动指定企业配置
 
 ---
 
@@ -151,16 +188,25 @@ classDiagram
         <<trait>>
         +provider_id() String
         +provider_name() String
+        +account_type() AccountType
         +auth_types() Vec~AuthType~
         +default_imap_config() ImapConfig
         +default_smtp_config() SmtpConfig
         +detect(email: &str) bool
         +oauth_config() Option~OAuthConfig~
+        +enterprise_config() Option~EnterpriseConfig~
+    }
+
+    class AccountType {
+        <<enum>>
+        Personal
+        Enterprise
     }
 
     class GmailProvider {
         +provider_id() String
         +provider_name() String
+        +account_type() AccountType
         +auth_types() Vec~AuthType~
         +default_imap_config() ImapConfig
         +default_smtp_config() SmtpConfig
@@ -171,6 +217,7 @@ classDiagram
     class OutlookProvider {
         +provider_id() String
         +provider_name() String
+        +account_type() AccountType
         +auth_types() Vec~AuthType~
         +default_imap_config() ImapConfig
         +default_smtp_config() SmtpConfig
@@ -178,24 +225,36 @@ classDiagram
         +oauth_config() Option~OAuthConfig~
     }
 
-    class YahooProvider {
+    class Microsoft365Provider {
         +provider_id() String
         +provider_name() String
+        +account_type() AccountType
         +auth_types() Vec~AuthType~
         +default_imap_config() ImapConfig
         +default_smtp_config() SmtpConfig
-        +detect(email: &str) bool
         +oauth_config() Option~OAuthConfig~
+        +enterprise_config() Option~EnterpriseConfig~
     }
 
-    class NativeProvider {
+    class GoogleWorkspaceProvider {
         +provider_id() String
         +provider_name() String
+        +account_type() AccountType
         +auth_types() Vec~AuthType~
         +default_imap_config() ImapConfig
         +default_smtp_config() SmtpConfig
-        +detect(email: &str) bool
         +oauth_config() Option~OAuthConfig~
+        +enterprise_config() Option~EnterpriseConfig~
+    }
+
+    class CustomProvider {
+        +provider_id() String
+        +provider_name() String
+        +account_type() AccountType
+        +auth_types() Vec~AuthType~
+        +imap_config: ImapConfig
+        +smtp_config: SmtpConfig
+        +enterprise_config: Option~EnterpriseConfig~
     }
 
     class ImapConfig {
@@ -217,18 +276,32 @@ classDiagram
         +token_url: String
         +redirect_uri: String
         +scopes: Vec~String~
+        +tenant_id: Option~String~
+    }
+
+    class EnterpriseConfig {
+        +tenant_id: Option~String~
+        +domain: Option~String~
+        +conditional_access: bool
+        +mfa_required: bool
+        +custom_server: bool
     }
 
     MailProvider <|.. GmailProvider
     MailProvider <|.. OutlookProvider
-    MailProvider <|.. YahooProvider
-    MailProvider <|.. NativeProvider
+    MailProvider <|.. Microsoft365Provider
+    MailProvider <|.. GoogleWorkspaceProvider
+    MailProvider <|.. CustomProvider
     
     GmailProvider --> OAuthConfig
     OutlookProvider --> OAuthConfig
-    YahooProvider --> OAuthConfig
+    Microsoft365Provider --> OAuthConfig
+    Microsoft365Provider --> EnterpriseConfig
+    GoogleWorkspaceProvider --> OAuthConfig
+    GoogleWorkspaceProvider --> EnterpriseConfig
     GmailProvider --> ImapConfig
     GmailProvider --> SmtpConfig
+    MailProvider --> AccountType
 ```
 
 ### 服务商配置表
@@ -238,31 +311,89 @@ erDiagram
     ProviderConfig {
         string provider_id PK
         string name
+        string account_type "personal/enterprise"
         string[] domains
         string[] auth_types
         ImapConfig imap
         SmtpConfig smtp
         OAuthConfig oauth "nullable"
+        EnterpriseConfig enterprise "nullable"
         string[] special_features
         json custom_settings
+    }
+
+    EnterpriseConfig {
+        int id PK
+        string tenant_id
+        string domain
+        bool conditional_access
+        bool mfa_required
+        bool custom_server
+        string[] allowed_auth_methods
     }
 
     Account {
         int id PK
         string email
         string provider_id FK
+        string account_type "personal/enterprise"
         string auth_type
         string oauth_provider
         bool sync_enabled
         datetime last_sync_at
+        int enterprise_config_id FK "nullable"
     }
 
     ProviderConfig ||--o{ Account : "has many"
+    EnterpriseConfig ||--o{ Account : "configures"
+    ProviderConfig ||--o| EnterpriseConfig : "may have"
 ```
 
 ---
 
 ## 认证流程
+
+### 账号类型识别流程
+
+```mermaid
+flowchart TB
+    Start([用户输入邮箱]) --> Parse[解析邮箱域名]
+    Parse --> Check{域名匹配}
+    
+    Check -->|"gmail.com, googlemail.com"| Gmail[识别为 Gmail 个人]
+    Check -->|"outlook.com, hotmail.com, live.com"| Outlook[识别为 Outlook 个人]
+    Check -->|"yahoo.com"| Yahoo[识别为 Yahoo]
+    Check -->|"163.com, qq.com, 126.com"| Native[识别为国内邮箱]
+    
+    Check -->|"自定义域名"| EnterpriseCheck{企业邮箱检测}
+    
+    EnterpriseCheck -->|MX记录指向 Google| GW[Google Workspace]
+    EnterpriseCheck -->|MX记录指向 Microsoft| M365[Microsoft 365]
+    EnterpriseCheck -->|其他MX记录| Custom[自定义企业邮箱]
+    EnterpriseCheck -->|无法确定| Ask[询问用户]
+    
+    Gmail --> SetPersonal[设置为个人账号]
+    Outlook --> SetPersonal
+    Yahoo --> SetPersonal
+    Native --> SetPersonal
+    
+    GW --> SetEnterprise[设置为企业账号]
+    M365 --> SetEnterprise
+    Custom --> SetEnterprise
+    Ask --> Manual[手动选择账号类型]
+    
+    SetPersonal --> ConfigPersonal[使用默认服务器配置]
+    SetEnterprise --> CheckCustom{企业自定义服务器?}
+    CheckCustom -->|是| InputServer[输入服务器配置]
+    CheckCustom -->|否| ConfigEnterprise[使用企业默认配置]
+    
+    Manual --> SelectType[选择服务商和账号类型]
+    
+    ConfigPersonal --> Auth[开始认证]
+    InputServer --> Auth
+    ConfigEnterprise --> Auth
+    SelectType --> Auth
+```
 
 ### 认证方式概览
 
@@ -272,15 +403,24 @@ graph LR
         Password[密码认证]
         OAuth2[OAuth 2.0]
         AppPassword[应用专用密码]
+        DomainAuth[域认证]
+        SAML[SAML SSO]
     end
 
-    subgraph Providers["服务商"]
-        Google[Google]
-        Microsoft[Microsoft]
+    subgraph PersonalProviders["个人邮件服务商"]
+        Google[Google Gmail]
+        Microsoft[Microsoft Outlook]
         Yahoo[Yahoo]
         N163[163]
         QQ[QQ]
         iCloud[iCloud]
+    end
+
+    subgraph EnterpriseProviders["企业邮件服务商"]
+        M365[Microsoft 365]
+        GW[Google Workspace]
+        Exchange[Exchange Server]
+        Custom[自建服务器]
     end
 
     Google --> OAuth2
@@ -293,6 +433,15 @@ graph LR
     QQ --> Password
     QQ --> AppPassword
     iCloud --> AppPassword
+    
+    M365 --> OAuth2
+    M365 --> DomainAuth
+    M365 --> SAML
+    GW --> OAuth2
+    Exchange --> DomainAuth
+    Exchange --> OAuth2
+    Custom --> Password
+    Custom --> OAuth2
 ```
 
 ### 密码认证流程
@@ -354,6 +503,8 @@ sequenceDiagram
 
 ### OAuth 2.0 认证流程
 
+#### 个人账号 OAuth 流程
+
 ```mermaid
 sequenceDiagram
     participant User as 用户
@@ -372,6 +523,7 @@ sequenceDiagram
     Engine->>Auth: 开始OAuth流程
     
     Auth->>Auth: detect_provider(email)
+    Auth->>Auth: 确定为个人账号
     Auth->>OAuth: get_authorization_url(provider)
     
     OAuth->>OAuth: 生成PKCE挑战码
@@ -403,7 +555,74 @@ sequenceDiagram
     TokenM->>TokenM: 计算过期时间
     TokenM->>Secure: 加密存储Token
     
-    Auth->>DB: 创建账号记录
+    Auth->>DB: 创建账号记录 (account_type=personal)
+    DB-->>Auth: 账号ID
+    
+    Auth-->>Engine: 认证成功
+    Engine-->>UI: 账号创建成功
+    UI-->>User: 显示成功
+```
+
+#### 企业账号 OAuth 流程（Microsoft 365 示例）
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant UI as 前端界面
+    participant Engine as FlowEngine
+    participant Auth as AuthManager
+    participant OAuth as OAuth2Handler
+    participant Browser as 系统浏览器
+    participant AzureAD as Azure AD
+    participant TokenM as TokenManager
+    participant Secure as Stronghold
+    participant DB as 数据库
+
+    User->>UI: 输入企业邮箱
+    UI->>Engine: 请求OAuth授权
+    Engine->>Auth: 开始OAuth流程
+    
+    Auth->>Auth: detect_provider(email)
+    Auth->>Auth: 检测为企业账号
+    Auth->>Auth: 获取企业租户ID
+    Auth->>OAuth: get_enterprise_auth_url(provider, tenant_id)
+    
+    OAuth->>OAuth: 构建企业授权URL
+    Note over OAuth: 使用 /organizations/<br/>或 /{tenant_id} 端点
+    
+    OAuth-->>Auth: 返回授权URL
+    Auth-->>UI: 返回授权URL
+    UI->>Browser: 打开企业登录页
+    
+    User->>Browser: 输入企业凭据
+    Note over Browser: 可能需要 MFA<br/>条件访问检查
+    
+    alt MFA 需要
+        Browser->>User: 要求第二因素认证
+        User->>Browser: 完成 MFA
+    end
+    
+    Browser->>AzureAD: 提交授权
+    AzureAD-->>Browser: 重定向到callback
+    Browser-->>UI: 回调code和state
+    
+    UI->>Engine: 提交授权码
+    Engine->>Auth: 交换Token
+    
+    Auth->>OAuth: exchange_enterprise_code(code, tenant_id)
+    OAuth->>AzureAD: 请求Token端点
+    AzureAD-->>OAuth: access_token + refresh_token
+    
+    OAuth->>OAuth: 解析id_token获取用户信息
+    Note over OAuth: 包含租户信息<br/>UPN (User Principal Name)
+    
+    OAuth-->>Auth: 返回Token
+    Auth->>TokenM: 注册Token
+    
+    TokenM->>TokenM: 存储租户信息
+    TokenM->>Secure: 加密存储Token
+    
+    Auth->>DB: 创建账号记录 (account_type=enterprise)
     DB-->>Auth: 账号ID
     
     Auth-->>Engine: 认证成功
@@ -454,6 +673,289 @@ stateDiagram-v2
         Token已过期
         需要刷新或重新授权
     end note
+```
+
+### Token 定期刷新机制
+
+#### 刷新策略概述
+
+Token 刷新采用**主动刷新 + 被动刷新**相结合的策略：
+
+| 策略 | 触发条件 | 刷新时机 | 适用场景 |
+|------|----------|----------|----------|
+| **主动刷新** | 定时调度器 | Token过期前5分钟 | 日常维护，保持Token有效 |
+| **被动刷新** | API调用失败 | Token过期或无效时 | 请求时发现Token失效 |
+| **手动刷新** | 用户触发 | 用户主动请求 | Token异常时的手动恢复 |
+
+#### 主动刷新调度流程
+
+```mermaid
+flowchart TB
+    subgraph Scheduler["Token刷新调度器"]
+        Start[启动调度器] --> Load[加载所有OAuth账号]
+        Load --> Loop[定时循环检查]
+        
+        Loop --> Check{检查每个账号}
+        Check --> Calc[计算剩余有效期]
+        Calc --> NeedRefresh{需要刷新?<br/>剩余<5分钟}
+        
+        NeedRefresh -->|是| Acquire[获取刷新锁]
+        NeedRefresh -->|否| Next[下一个账号]
+        
+        Acquire --> LockGot{获取锁成功?}
+        LockGot -->|是| Refresh[执行刷新]
+        LockGot -->|否| Skip[跳过(其他线程正在刷新)]
+        
+        Refresh --> Success{刷新成功?}
+        Success -->|是| Store[存储新Token]
+        Success -->|否| Record[记录失败]
+        
+        Store --> Update[更新过期时间]
+        Update --> Next
+        Record --> RetryCheck{重试次数<3?}
+        RetryCheck -->|是| ScheduleRetry[安排重试]
+        RetryCheck -->|否| NotifyFail[通知用户]
+        ScheduleRetry --> Next
+        NotifyFail --> Next
+        
+        Skip --> Next
+        Next --> More{还有更多账号?}
+        More -->|是| Check
+        More -->|否| Sleep[等待下一个检查周期]
+        Sleep --> Loop
+    end
+```
+
+#### Token 刷新调度器架构
+
+```mermaid
+graph TB
+    subgraph Core["Token刷新核心"]
+        Scheduler[TokenRefreshScheduler<br/>刷新调度器]
+        Queue[RefreshQueue<br/>刷新队列]
+        Worker[RefreshWorker<br/>刷新工作器]
+        Lock[RefreshLock<br/>分布式锁]
+    end
+    
+    subgraph Storage["存储层"]
+        TokenStore[TokenStore<br/>Token存储]
+        StateStore[RefreshStateStore<br/>刷新状态存储]
+        HistoryStore[RefreshHistoryStore<br/>刷新历史记录]
+    end
+    
+    subgraph Provider["服务商层"]
+        OAuth[OAuthHandler<br/>OAuth处理器]
+        Provider[MailProvider<br/>服务商适配器]
+    end
+    
+    subgraph Monitor["监控层"]
+        Metrics[RefreshMetrics<br/>刷新指标]
+        Alert[AlertManager<br/>告警管理]
+    end
+    
+    Scheduler --> Queue
+    Queue --> Worker
+    Worker --> Lock
+    Worker --> OAuth
+    OAuth --> Provider
+    
+    Worker --> TokenStore
+    Worker --> StateStore
+    Worker --> HistoryStore
+    
+    Worker --> Metrics
+    Metrics --> Alert
+    
+    TokenStore --> Keyring[Keyring<br/>安全存储]
+```
+
+#### 刷新详细时序图
+
+```mermaid
+sequenceDiagram
+    participant Scheduler as 刷新调度器
+    participant Queue as 刷新队列
+    participant Worker as 刷新工作器
+    participant Lock as 分布式锁
+    participant OAuth as OAuthHandler
+    participant Provider as 服务商API
+    participant Store as Token存储
+    participant Notify as 通知系统
+    
+    loop 每分钟检查
+        Scheduler->>Queue: 扫描需要刷新的账号
+        Queue->>Queue: 过滤条件:<br/>expires_at - now < 5分钟
+    end
+    
+    Queue-->>Worker: 返回待刷新账号列表
+    
+    loop 处理每个账号
+        Worker->>Lock: 尝试获取锁 (account_id)
+        alt 获取锁成功
+            Lock-->>Worker: 锁获取成功
+            
+            Worker->>Store: 获取当前Token
+            Store-->>Worker: 返回Token信息
+            
+            Worker->>OAuth: refresh_token(provider, token)
+            OAuth->>Provider: POST /oauth2/v2.0/token
+            
+            alt 刷新成功
+                Provider-->>OAuth: 新Token
+                OAuth-->>Worker: 新Token信息
+                
+                Worker->>Store: 存储新Token
+                Worker->>Lock: 释放锁
+                
+                Worker->>Notify: 发送刷新成功事件
+            else 刷新失败
+                Provider-->>OAuth: 错误响应
+                OAuth-->>Worker: 刷新失败
+                
+                alt 可重试错误
+                    Worker->>Worker: 记录重试次数
+                    Worker->>Queue: 重新加入队列
+                    Worker->>Lock: 释放锁
+                else 不可恢复错误
+                    Worker->>Notify: 发送需要重新授权通知
+                    Worker->>Lock: 释放锁
+                end
+            end
+        else 获取锁失败
+            Lock-->>Worker: 锁被占用
+            Note over Worker: 跳过，其他实例正在刷新
+        end
+    end
+```
+
+#### 刷新状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: 账号创建
+    
+    Idle --> Scheduled: 加入刷新队列
+    Scheduled --> Refreshing: 开始刷新
+    
+    Refreshing --> Success: 刷新成功
+    Refreshing --> RetryableError: 可重试错误
+    Refreshing --> FatalError: 致命错误
+    
+    RetryableError --> Scheduled: 安排重试
+    RetryableError --> Failed: 重试次数耗尽
+    
+    FatalError --> NeedReauth: 需要重新授权
+    Failed --> NeedReauth: 用户干预
+    
+    Success --> Idle: 更新完成
+    
+    NeedReauth --> Idle: 用户重新授权
+    NeedReauth --> Disabled: 用户取消
+    
+    Disabled --> Idle: 用户重新启用
+    
+    note right of Idle
+        正常状态
+        Token有效
+    end note
+    
+    note right of Scheduled
+        已安排刷新
+        等待执行
+    end note
+    
+    note right of Refreshing
+        刷新进行中
+        防止并发
+    end note
+    
+    note right of NeedReauth
+        需要用户重新授权
+        Token无法刷新
+    end note
+```
+
+#### 刷新配置参数
+
+```rust
+/// Token刷新配置
+#[derive(Debug, Clone)]
+pub struct TokenRefreshConfig {
+    /// 刷新检查间隔（秒）
+    pub check_interval_secs: u64,
+    /// 提前刷新时间（秒），Token过期前多久开始刷新
+    pub refresh_before_expiry_secs: u64,
+    /// 最大重试次数
+    pub max_retry_count: u32,
+    /// 重试间隔基数（秒），实际间隔 = base * 2^retry_count
+    pub retry_interval_base_secs: u64,
+    /// 最大重试间隔（秒）
+    pub max_retry_interval_secs: u64,
+    /// 并发刷新最大数量
+    pub max_concurrent_refreshes: usize,
+    /// 刷新超时时间（秒）
+    pub refresh_timeout_secs: u64,
+}
+
+impl Default for TokenRefreshConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: 60,           // 每分钟检查一次
+            refresh_before_expiry_secs: 300,   // 过期前5分钟刷新
+            max_retry_count: 3,                // 最多重试3次
+            retry_interval_base_secs: 30,      // 重试间隔基数30秒
+            max_retry_interval_secs: 300,      // 最大重试间隔5分钟
+            max_concurrent_refreshes: 5,       // 最多同时刷新5个账号
+            refresh_timeout_secs: 30,          // 刷新超时30秒
+        }
+    }
+}
+```
+
+#### 刷新错误分类与处理
+
+| 错误类型 | 错误码 | 处理策略 | 用户通知 |
+|----------|--------|----------|----------|
+| 网络超时 | `NETWORK_TIMEOUT` | 指数退避重试 | 无 |
+| 服务暂时不可用 | `SERVICE_UNAVAILABLE` | 指数退避重试 | 无 |
+| Rate Limit | `RATE_LIMITED` | 等待后重试 | 无 |
+| Refresh Token 过期 | `INVALID_GRANT` | 需要重新授权 | 是，高优先级 |
+| Token 已撤销 | `TOKEN_REVOKED` | 需要重新授权 | 是，高优先级 |
+| 账号被禁用 | `ACCOUNT_DISABLED` | 停止刷新，标记账号 | 是，高优先级 |
+| 权限不足 | `INSUFFICIENT_SCOPE` | 需要重新授权 | 是 |
+
+#### 刷新历史记录
+
+```mermaid
+erDiagram
+    RefreshHistory {
+        bigint id PK
+        int account_id FK
+        string provider_id
+        string status "success/failed"
+        string error_code
+        string error_message
+        datetime started_at
+        datetime completed_at
+        int duration_ms
+        int retry_count
+        string old_token_hash
+        string new_token_hash
+        int old_expires_at
+        int new_expires_at
+    }
+    
+    RefreshMetrics {
+        bigint id PK
+        date date
+        int total_refreshes
+        int successful_refreshes
+        int failed_refreshes
+        int avg_duration_ms
+        int max_duration_ms
+    }
+    
+    Account ||--o{ RefreshHistory : has
 ```
 
 ---
@@ -1217,19 +1719,44 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+/// 账号类型（个人 vs 企业）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
+pub enum AccountType {
+    /// 个人邮件账号
+    Personal,
+    /// 企业邮件账号
+    Enterprise,
+}
+
+impl Default for AccountType {
+    fn default() -> Self {
+        Self::Personal
+    }
+}
+
 /// 认证类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AuthType {
+    /// 密码认证
     Password,
+    /// OAuth 2.0 认证
     OAuth2,
+    /// 应用专用密码
     AppPassword,
+    /// 域认证（企业）
+    DomainAuth,
+    /// SAML SSO（企业）
+    SamlSso,
 }
 
 /// SSL 模式
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SslMode {
+    /// 无加密
     None,
+    /// STARTTLS 升级
     StartTls,
+    /// 隐式 SSL/TLS
     Implicit,
 }
 
@@ -1259,6 +1786,27 @@ pub struct OAuthConfig {
     pub redirect_uri: String,
     pub scopes: Vec<String>,
     pub pkce_enabled: bool,
+    /// 企业租户 ID（仅企业账号）
+    pub tenant_id: Option<String>,
+}
+
+/// 企业配置（仅企业账号）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnterpriseConfig {
+    /// Azure AD 租户 ID 或 Google Workspace 域
+    pub tenant_id: Option<String>,
+    /// 企业域名
+    pub domain: Option<String>,
+    /// 是否启用条件访问策略
+    pub conditional_access: bool,
+    /// 是否强制 MFA
+    pub mfa_required: bool,
+    /// 是否使用自定义服务器
+    pub custom_server: bool,
+    /// 自定义 IMAP 服务器（如果使用）
+    pub custom_imap: Option<ImapConfig>,
+    /// 自定义 SMTP 服务器（如果使用）
+    pub custom_smtp: Option<SmtpConfig>,
 }
 
 /// OAuth Token
@@ -1268,6 +1816,8 @@ pub struct OAuthToken {
     pub refresh_token: String,
     pub expires_at: i64,
     pub id_token: Option<String>,
+    /// 企业租户信息（仅企业账号）
+    pub tenant_id: Option<String>,
 }
 
 /// 服务商能力
@@ -1277,6 +1827,9 @@ pub struct ProviderCapabilities {
     pub supports_condstore: bool,
     pub supports_push: bool,
     pub supports_oauth: bool,
+    /// 是否支持企业特性
+    pub supports_enterprise: bool,
+    /// 最大邮件大小
     pub max_message_size: Option<u64>,
 }
 
@@ -1288,6 +1841,9 @@ pub trait MailProvider: Send + Sync {
     
     /// 服务商显示名称
     fn provider_name(&self) -> &str;
+    
+    /// 账号类型（个人/企业）
+    fn account_type(&self) -> AccountType;
     
     /// 支持的认证类型
     fn auth_types(&self) -> Vec<AuthType>;
@@ -1301,16 +1857,34 @@ pub trait MailProvider: Send + Sync {
     /// OAuth 配置 (如果支持)
     fn oauth_config(&self) -> Option<OAuthConfig>;
     
+    /// 企业配置（仅企业账号）
+    fn enterprise_config(&self) -> Option<EnterpriseConfig> {
+        None
+    }
+    
     /// 服务商能力
     fn capabilities(&self) -> ProviderCapabilities;
     
     /// 根据邮箱地址检测是否为此服务商
     fn detect(&self, email: &str) -> bool;
     
+    /// 获取支持的域名列表
+    fn supported_domains(&self) -> Vec<&str>;
+    
     /// 生成 XOAUTH2 字符串
     fn generate_xoauth2(&self, email: &str, access_token: &str) -> String {
         let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token);
         base64::engine::general_purpose::STANDARD.encode(auth_string)
+    }
+    
+    /// 克隆为 Box
+    fn box_clone(&self) -> Box<dyn MailProvider>;
+}
+
+/// 实现 Clone for Box<dyn MailProvider>
+impl Clone for Box<dyn MailProvider> {
+    fn clone(&self) -> Self {
+        self.box_clone()
     }
 }
 
@@ -1320,20 +1894,31 @@ pub trait ProviderFactory: Send + Sync {
     /// 根据邮箱地址创建服务商实例
     fn create_provider(&self, email: &str) -> Result<Box<dyn MailProvider>>;
     
+    /// 根据邮箱地址创建企业服务商实例
+    fn create_enterprise_provider(
+        &self,
+        email: &str,
+        enterprise_config: EnterpriseConfig,
+    ) -> Result<Box<dyn MailProvider>>;
+    
     /// 获取所有支持的服务商列表
     fn supported_providers(&self) -> Vec<ProviderInfo>;
+    
+    /// 获取支持的企业服务商列表
+    fn supported_enterprise_providers(&self) -> Vec<ProviderInfo>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
+    pub account_type: AccountType,
     pub domains: Vec<String>,
     pub auth_types: Vec<AuthType>,
 }
 ```
 
-### 2. Gmail 服务商实现
+### 2. Gmail 服务商实现（个人）
 
 ```rust
 // src-tauri/src/providers/gmail.rs
@@ -1342,6 +1927,7 @@ use super::traits::*;
 use anyhow::Result;
 use async_trait::async_trait;
 
+/// Gmail 个人邮件服务商
 pub struct GmailProvider {
     oauth_config: OAuthConfig,
 }
@@ -1361,6 +1947,7 @@ impl GmailProvider {
                     "https://www.googleapis.com/auth/userinfo.profile".to_string(),
                 ],
                 pkce_enabled: true,
+                tenant_id: None, // 个人账号无租户
             },
         }
     }
@@ -1382,6 +1969,10 @@ impl MailProvider for GmailProvider {
     
     fn provider_name(&self) -> &str {
         "Google Mail"
+    }
+    
+    fn account_type(&self) -> AccountType {
+        AccountType::Personal
     }
     
     fn auth_types(&self) -> Vec<AuthType> {
@@ -1414,6 +2005,7 @@ impl MailProvider for GmailProvider {
             supports_condstore: true,
             supports_push: true,
             supports_oauth: true,
+            supports_enterprise: false, // 个人版
             max_message_size: Some(25 * 1024 * 1024), // 25MB
         }
     }
@@ -1422,10 +2014,179 @@ impl MailProvider for GmailProvider {
         let domain = email.split('@').last().unwrap_or("");
         matches!(domain.to_lowercase().as_str(), "gmail.com" | "googlemail.com")
     }
+    
+    fn supported_domains(&self) -> Vec<&str> {
+        vec!["gmail.com", "googlemail.com"]
+    }
+    
+    fn box_clone(&self) -> Box<dyn MailProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for GmailProvider {
+    fn clone(&self) -> Self {
+        Self {
+            oauth_config: self.oauth_config.clone(),
+        }
+    }
 }
 ```
 
-### 3. Outlook 服务商实现
+### 2b. Google Workspace 服务商实现（企业）
+
+```rust
+// src-tauri/src/providers/google_workspace.rs
+
+use super::traits::*;
+use anyhow::Result;
+use async_trait::async_trait;
+
+/// Google Workspace 企业邮件服务商
+pub struct GoogleWorkspaceProvider {
+    oauth_config: OAuthConfig,
+    enterprise_config: EnterpriseConfig,
+}
+
+impl GoogleWorkspaceProvider {
+    pub fn new(
+        client_id: String,
+        client_secret: String,
+        domain: String,
+        enterprise_config: EnterpriseConfig,
+    ) -> Self {
+        Self {
+            oauth_config: OAuthConfig {
+                client_id,
+                client_secret: Some(client_secret),
+                auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+                token_url: "https://oauth2.googleapis.com/token".to_string(),
+                redirect_uri: "postium://oauth/callback".to_string(),
+                scopes: vec![
+                    "https://mail.google.com/".to_string(),
+                    "https://www.googleapis.com/auth/userinfo.email".to_string(),
+                    "https://www.googleapis.com/auth/directory.readonly".to_string(), // 企业通讯录
+                ],
+                pkce_enabled: true,
+                tenant_id: Some(domain.clone()),
+            },
+            enterprise_config,
+        }
+    }
+    
+    pub fn from_env_with_domain(domain: String) -> Result<Self> {
+        let client_id = std::env::var("GOOGLE_CLIENT_ID")
+            .map_err(|_| anyhow::anyhow!("GOOGLE_CLIENT_ID not set"))?;
+        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
+            .map_err(|_| anyhow::anyhow!("GOOGLE_CLIENT_SECRET not set"))?;
+        
+        let enterprise_config = EnterpriseConfig {
+            tenant_id: Some(domain.clone()),
+            domain: Some(domain.clone()),
+            conditional_access: true,
+            mfa_required: true,
+            custom_server: false,
+            custom_imap: None,
+            custom_smtp: None,
+        };
+        
+        Ok(Self::new(client_id, client_secret, domain, enterprise_config))
+    }
+}
+
+#[async_trait]
+impl MailProvider for GoogleWorkspaceProvider {
+    fn provider_id(&self) -> &str {
+        "google_workspace"
+    }
+    
+    fn provider_name(&self) -> &str {
+        "Google Workspace"
+    }
+    
+    fn account_type(&self) -> AccountType {
+        AccountType::Enterprise
+    }
+    
+    fn auth_types(&self) -> Vec<AuthType> {
+        vec![AuthType::OAuth2]
+    }
+    
+    fn default_imap_config(&self) -> ImapConfig {
+        // 企业版也使用 Gmail IMAP 服务器
+        if let Some(ref custom_imap) = self.enterprise_config.custom_imap {
+            custom_imap.clone()
+        } else {
+            ImapConfig {
+                host: "imap.gmail.com".to_string(),
+                port: 993,
+                ssl: SslMode::Implicit,
+            }
+        }
+    }
+    
+    fn default_smtp_config(&self) -> SmtpConfig {
+        if let Some(ref custom_smtp) = self.enterprise_config.custom_smtp {
+            custom_smtp.clone()
+        } else {
+            SmtpConfig {
+                host: "smtp.gmail.com".to_string(),
+                port: 587,
+                ssl: SslMode::StartTls,
+            }
+        }
+    }
+    
+    fn oauth_config(&self) -> Option<OAuthConfig> {
+        Some(self.oauth_config.clone())
+    }
+    
+    fn enterprise_config(&self) -> Option<EnterpriseConfig> {
+        Some(self.enterprise_config.clone())
+    }
+    
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_idle: true,
+            supports_condstore: true,
+            supports_push: true,
+            supports_oauth: true,
+            supports_enterprise: true,
+            max_message_size: Some(50 * 1024 * 1024), // 企业版 50MB
+        }
+    }
+    
+    fn detect(&self, email: &str) -> bool {
+        // 企业邮箱通过域名检测，通常不在已知个人域名列表中
+        let domain = email.split('@').last().unwrap_or("");
+        // Google Workspace 可以使用任何自定义域名
+        !matches!(
+            domain.to_lowercase().as_str(),
+            "gmail.com" | "googlemail.com" | "outlook.com" | "hotmail.com" | "yahoo.com"
+        )
+    }
+    
+    fn supported_domains(&self) -> Vec<&str> {
+        // 企业版支持自定义域名
+        vec![]
+    }
+    
+    fn box_clone(&self) -> Box<dyn MailProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for GoogleWorkspaceProvider {
+    fn clone(&self) -> Self {
+        Self {
+            oauth_config: self.oauth_config.clone(),
+            enterprise_config: self.enterprise_config.clone(),
+        }
+    }
+}
+```
+
+### 3. Outlook 服务商实现（个人）
 
 ```rust
 // src-tauri/src/providers/outlook.rs
@@ -1434,6 +2195,7 @@ use super::traits::*;
 use anyhow::Result;
 use async_trait::async_trait;
 
+/// Microsoft Outlook 个人邮件服务商
 pub struct OutlookProvider {
     oauth_config: OAuthConfig,
 }
@@ -1454,6 +2216,7 @@ impl OutlookProvider {
                     "openid".to_string(),
                 ],
                 pkce_enabled: true,
+                tenant_id: None, // 个人账号使用 common
             },
         }
     }
@@ -1473,6 +2236,10 @@ impl MailProvider for OutlookProvider {
     
     fn provider_name(&self) -> &str {
         "Microsoft Outlook"
+    }
+    
+    fn account_type(&self) -> AccountType {
+        AccountType::Personal
     }
     
     fn auth_types(&self) -> Vec<AuthType> {
@@ -1505,6 +2272,7 @@ impl MailProvider for OutlookProvider {
             supports_condstore: true,
             supports_push: true,
             supports_oauth: true,
+            supports_enterprise: false,
             max_message_size: Some(150 * 1024 * 1024), // 150MB
         }
     }
@@ -1516,6 +2284,291 @@ impl MailProvider for OutlookProvider {
             "outlook.com" | "hotmail.com" | "live.com" | "msn.com"
         )
     }
+    
+    fn supported_domains(&self) -> Vec<&str> {
+        vec!["outlook.com", "hotmail.com", "live.com", "msn.com"]
+    }
+    
+    fn box_clone(&self) -> Box<dyn MailProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for OutlookProvider {
+    fn clone(&self) -> Self {
+        Self {
+            oauth_config: self.oauth_config.clone(),
+        }
+    }
+}
+```
+
+### 3b. Microsoft 365 服务商实现（企业）
+
+```rust
+// src-tauri/src/providers/microsoft_365.rs
+
+use super::traits::*;
+use anyhow::Result;
+use async_trait::async_trait;
+
+/// Microsoft 365 企业邮件服务商
+pub struct Microsoft365Provider {
+    oauth_config: OAuthConfig,
+    enterprise_config: EnterpriseConfig,
+}
+
+impl Microsoft365Provider {
+    /// 创建新的 Microsoft 365 企业服务商
+    /// tenant_id: Azure AD 租户 ID（或 "common" 用于多租户）
+    pub fn new(client_id: String, tenant_id: String, enterprise_config: EnterpriseConfig) -> Self {
+        let auth_url = format!(
+            "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
+            tenant_id
+        );
+        let token_url = format!(
+            "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
+            tenant_id
+        );
+        
+        Self {
+            oauth_config: OAuthConfig {
+                client_id,
+                client_secret: None,
+                auth_url,
+                token_url,
+                redirect_uri: "postium://oauth/callback".to_string(),
+                scopes: vec![
+                    "https://outlook.office365.com/IMAP.AccessAsUser.All".to_string(),
+                    "https://outlook.office365.com/SMTP.Send".to_string(),
+                    "offline_access".to_string(),
+                    "openid".to_string(),
+                    "profile".to_string(),
+                ],
+                pkce_enabled: true,
+                tenant_id: Some(tenant_id),
+            },
+            enterprise_config,
+        }
+    }
+    
+    pub fn from_env_with_tenant(tenant_id: String, enterprise_config: EnterpriseConfig) -> Result<Self> {
+        let client_id = std::env::var("MICROSOFT_CLIENT_ID")
+            .map_err(|_| anyhow::anyhow!("MICROSOFT_CLIENT_ID not set"))?;
+        Ok(Self::new(client_id, tenant_id, enterprise_config))
+    }
+    
+    /// 自动发现企业租户（通过 OpenID Connect 发现）
+    pub async fn discover_tenant(domain: &str) -> Result<String> {
+        let discovery_url = format!(
+            "https://login.microsoftonline.com/{}/.well-known/openid-configuration",
+            domain
+        );
+        
+        let response = reqwest::get(&discovery_url).await?;
+        if response.status().is_success() {
+            // 域名是有效的 Microsoft 365 域
+            return Ok(domain.to_string());
+        }
+        
+        Err(anyhow::anyhow!("无法发现租户信息"))
+    }
+}
+
+#[async_trait]
+impl MailProvider for Microsoft365Provider {
+    fn provider_id(&self) -> &str {
+        "microsoft_365"
+    }
+    
+    fn provider_name(&self) -> &str {
+        "Microsoft 365"
+    }
+    
+    fn account_type(&self) -> AccountType {
+        AccountType::Enterprise
+    }
+    
+    fn auth_types(&self) -> Vec<AuthType> {
+        vec![AuthType::OAuth2, AuthType::SamlSso]
+    }
+    
+    fn default_imap_config(&self) -> ImapConfig {
+        if let Some(ref custom_imap) = self.enterprise_config.custom_imap {
+            custom_imap.clone()
+        } else {
+            ImapConfig {
+                host: "outlook.office365.com".to_string(),
+                port: 993,
+                ssl: SslMode::Implicit,
+            }
+        }
+    }
+    
+    fn default_smtp_config(&self) -> SmtpConfig {
+        if let Some(ref custom_smtp) = self.enterprise_config.custom_smtp {
+            custom_smtp.clone()
+        } else {
+            SmtpConfig {
+                host: "smtp.office365.com".to_string(),
+                port: 587,
+                ssl: SslMode::StartTls,
+            }
+        }
+    }
+    
+    fn oauth_config(&self) -> Option<OAuthConfig> {
+        Some(self.oauth_config.clone())
+    }
+    
+    fn enterprise_config(&self) -> Option<EnterpriseConfig> {
+        Some(self.enterprise_config.clone())
+    }
+    
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_idle: false,
+            supports_condstore: true,
+            supports_push: true,
+            supports_oauth: true,
+            supports_enterprise: true,
+            max_message_size: Some(150 * 1024 * 1024), // 150MB
+        }
+    }
+    
+    fn detect(&self, email: &str) -> bool {
+        // 企业邮箱检测逻辑：不在个人域名列表中
+        let domain = email.split('@').last().unwrap_or("");
+        !matches!(
+            domain.to_lowercase().as_str(),
+            "gmail.com" | "googlemail.com" | "outlook.com" | "hotmail.com" | 
+            "live.com" | "msn.com" | "yahoo.com" | "163.com" | "qq.com"
+        )
+    }
+    
+    fn supported_domains(&self) -> Vec<&str> {
+        // 企业版支持自定义域名
+        vec![]
+    }
+    
+    fn box_clone(&self) -> Box<dyn MailProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Microsoft365Provider {
+    fn clone(&self) -> Self {
+        Self {
+            oauth_config: self.oauth_config.clone(),
+            enterprise_config: self.enterprise_config.clone(),
+        }
+    }
+}
+```
+
+### 3c. 自定义企业邮箱服务商实现
+
+```rust
+// src-tauri/src/providers/custom_enterprise.rs
+
+use super::traits::*;
+use anyhow::Result;
+use async_trait::async_trait;
+
+/// 自定义企业邮箱服务商（自建 Exchange/Postfix 等）
+pub struct CustomEnterpriseProvider {
+    imap_config: ImapConfig,
+    smtp_config: SmtpConfig,
+    enterprise_config: EnterpriseConfig,
+    provider_name: String,
+}
+
+impl CustomEnterpriseProvider {
+    pub fn new(
+        name: String,
+        imap_config: ImapConfig,
+        smtp_config: SmtpConfig,
+        enterprise_config: EnterpriseConfig,
+    ) -> Self {
+        Self {
+            imap_config,
+            smtp_config,
+            enterprise_config,
+            provider_name: name,
+        }
+    }
+}
+
+#[async_trait]
+impl MailProvider for CustomEnterpriseProvider {
+    fn provider_id(&self) -> &str {
+        "custom_enterprise"
+    }
+    
+    fn provider_name(&self) -> &str {
+        &self.provider_name
+    }
+    
+    fn account_type(&self) -> AccountType {
+        AccountType::Enterprise
+    }
+    
+    fn auth_types(&self) -> Vec<AuthType> {
+        // 自定义服务器可能支持多种认证方式
+        vec![AuthType::Password, AuthType::OAuth2, AuthType::DomainAuth]
+    }
+    
+    fn default_imap_config(&self) -> ImapConfig {
+        self.imap_config.clone()
+    }
+    
+    fn default_smtp_config(&self) -> SmtpConfig {
+        self.smtp_config.clone()
+    }
+    
+    fn oauth_config(&self) -> Option<OAuthConfig> {
+        // 自定义服务器可能没有 OAuth
+        None
+    }
+    
+    fn enterprise_config(&self) -> Option<EnterpriseConfig> {
+        Some(self.enterprise_config.clone())
+    }
+    
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_idle: true,
+            supports_condstore: true, // 取决于服务器
+            supports_push: false,
+            supports_oauth: false,
+            supports_enterprise: true,
+            max_message_size: None, // 未知
+        }
+    }
+    
+    fn detect(&self, _email: &str) -> bool {
+        // 自定义提供商不参与自动检测
+        false
+    }
+    
+    fn supported_domains(&self) -> Vec<&str> {
+        vec![]
+    }
+    
+    fn box_clone(&self) -> Box<dyn MailProvider> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for CustomEnterpriseProvider {
+    fn clone(&self) -> Self {
+        Self {
+            imap_config: self.imap_config.clone(),
+            smtp_config: self.smtp_config.clone(),
+            enterprise_config: self.enterprise_config.clone(),
+            provider_name: self.provider_name.clone(),
+        }
+    }
 }
 ```
 
@@ -1526,6 +2579,7 @@ impl MailProvider for OutlookProvider {
 
 use super::traits::*;
 use super::{GmailProvider, OutlookProvider, YahooProvider, NativeProvider};
+use super::{GoogleWorkspaceProvider, Microsoft365Provider, CustomEnterpriseProvider};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1533,90 +2587,246 @@ use tokio::sync::RwLock;
 
 /// 服务商池
 pub struct ProviderPool {
-    providers: Arc<RwLock<HashMap<String, Box<dyn MailProvider>>>>,
-    ordered_providers: Vec<&'static str>,
+    /// 个人邮件服务商
+    personal_providers: Arc<RwLock<HashMap<String, Box<dyn MailProvider>>>>,
+    /// 企业邮件服务商
+    enterprise_providers: Arc<RwLock<HashMap<String, Box<dyn MailProvider>>>>,
+    /// 检测优先级
+    detection_order: Vec<&'static str>,
 }
 
 impl ProviderPool {
     pub fn new() -> Self {
         Self {
-            providers: Arc::new(RwLock::new(HashMap::new())),
-            ordered_providers: vec![
+            personal_providers: Arc::new(RwLock::new(HashMap::new())),
+            enterprise_providers: Arc::new(RwLock::new(HashMap::new())),
+            detection_order: vec![
+                // 个人服务商优先检测
                 "gmail",
                 "outlook",
                 "yahoo",
                 "icloud",
                 "163",
                 "qq",
+                // 企业服务商
+                "google_workspace",
+                "microsoft_365",
             ],
         }
     }
     
     /// 从环境变量初始化所有服务商
     pub async fn initialize_from_env(&self) -> Result<()> {
-        let mut providers = self.providers.write().await;
+        let mut personal = self.personal_providers.write().await;
         
-        // 初始化 Gmail
+        // 初始化个人邮件服务商
         if let Ok(provider) = GmailProvider::from_env() {
-            providers.insert("gmail".to_string(), Box::new(provider));
+            personal.insert("gmail".to_string(), Box::new(provider));
         }
         
-        // 初始化 Outlook
         if let Ok(provider) = OutlookProvider::from_env() {
-            providers.insert("outlook".to_string(), Box::new(provider));
+            personal.insert("outlook".to_string(), Box::new(provider));
         }
         
-        // 初始化 Yahoo
         if let Ok(provider) = YahooProvider::from_env() {
-            providers.insert("yahoo".to_string(), Box::new(provider));
+            personal.insert("yahoo".to_string(), Box::new(provider));
         }
         
-        // 初始化国内邮箱
-        providers.insert("163".to_string(), Box::new(NativeProvider::new_163()));
-        providers.insert("qq".to_string(), Box::new(NativeProvider::new_qq()));
-        providers.insert("icloud".to_string(), Box::new(NativeProvider::new_icloud()));
+        personal.insert("163".to_string(), Box::new(NativeProvider::new_163()));
+        personal.insert("qq".to_string(), Box::new(NativeProvider::new_qq()));
+        personal.insert("icloud".to_string(), Box::new(NativeProvider::new_icloud()));
+        
+        drop(personal);
+        
+        // 企业服务商需要动态创建，不在此初始化
         
         Ok(())
     }
     
     /// 根据邮箱地址自动检测服务商
     pub async fn detect_provider(&self, email: &str) -> Result<Box<dyn MailProvider>> {
-        let providers = self.providers.read().await;
-        
-        for provider_id in &self.ordered_providers {
-            if let Some(provider) = providers.get(*provider_id) {
+        // 1. 先检测个人邮件服务商
+        let personal = self.personal_providers.read().await;
+        for provider_id in &self.detection_order {
+            if let Some(provider) = personal.get(*provider_id) {
                 if provider.detect(email) {
+                    tracing::info!(
+                        "检测到个人邮箱服务商: {} ({})",
+                        provider.provider_name(),
+                        email
+                    );
                     return Ok(provider.box_clone());
                 }
             }
         }
+        drop(personal);
         
-        // 未识别的服务商，尝试从域名推断
+        // 2. 检测企业邮件服务商（需要额外信息）
         let domain = email.split('@').last().unwrap_or("");
-        Err(anyhow!("未知的邮箱服务商: {}", domain))
+        
+        // 尝试检测是否为 Microsoft 365
+        if self.is_microsoft_365_domain(domain).await? {
+            tracing::info!("检测到 Microsoft 365 企业邮箱: {}", domain);
+            return self.create_microsoft_365_provider(domain).await;
+        }
+        
+        // 尝试检测是否为 Google Workspace
+        if self.is_google_workspace_domain(domain).await? {
+            tracing::info!("检测到 Google Workspace 企业邮箱: {}", domain);
+            return self.create_google_workspace_provider(domain).await;
+        }
+        
+        // 3. 未知服务商，提示用户手动配置
+        Err(anyhow!(
+            "无法自动识别邮箱服务商: {}。请手动选择服务商类型并配置服务器信息。",
+            domain
+        ))
+    }
+    
+    /// 检测域名是否为 Microsoft 365
+    async fn is_microsoft_365_domain(&self, domain: &str) -> Result<bool> {
+        // 通过 MX 记录或 Autodiscover 检测
+        let autodiscover_url = format!(
+            "https://autodiscover-s.outlook.com/autodiscover/autodiscover.xml",
+        );
+        
+        // 简化检测：尝试访问 Microsoft 的自动发现服务
+        let response = reqwest::Client::new()
+            .get(&autodiscover_url)
+            .header("Host", format!("autodiscover.{}", domain))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await;
+        
+        Ok(response.map(|r| r.status().is_success()).unwrap_or(false))
+    }
+    
+    /// 检测域名是否为 Google Workspace
+    async fn is_google_workspace_domain(&self, domain: &str) -> Result<bool> {
+        // 通过 MX 记录检测 Google Workspace
+        // 简化实现：检查 MX 记录是否指向 Google 服务器
+        Ok(false) // TODO: 实现 DNS MX 记录查询
+    }
+    
+    /// 创建 Microsoft 365 企业服务商
+    async fn create_microsoft_365_provider(&self, domain: &str) -> Result<Box<dyn MailProvider>> {
+        let client_id = std::env::var("MICROSOFT_CLIENT_ID")
+            .map_err(|_| anyhow!("MICROSOFT_CLIENT_ID not set"))?;
+        
+        // 尝试发现租户
+        let tenant_id = domain.to_string(); // 使用域名作为租户标识
+        
+        let enterprise_config = EnterpriseConfig {
+            tenant_id: Some(tenant_id.clone()),
+            domain: Some(domain.to_string()),
+            conditional_access: true,
+            mfa_required: true,
+            custom_server: false,
+            custom_imap: None,
+            custom_smtp: None,
+        };
+        
+        Ok(Box::new(Microsoft365Provider::new(
+            client_id,
+            tenant_id,
+            enterprise_config,
+        )))
+    }
+    
+    /// 创建 Google Workspace 企业服务商
+    async fn create_google_workspace_provider(&self, domain: &str) -> Result<Box<dyn MailProvider>> {
+        let client_id = std::env::var("GOOGLE_CLIENT_ID")
+            .map_err(|_| anyhow!("GOOGLE_CLIENT_ID not set"))?;
+        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
+            .map_err(|_| anyhow!("GOOGLE_CLIENT_SECRET not set"))?;
+        
+        let enterprise_config = EnterpriseConfig {
+            tenant_id: Some(domain.to_string()),
+            domain: Some(domain.to_string()),
+            conditional_access: true,
+            mfa_required: true,
+            custom_server: false,
+            custom_imap: None,
+            custom_smtp: None,
+        };
+        
+        Ok(Box::new(GoogleWorkspaceProvider::new(
+            client_id,
+            client_secret,
+            domain.to_string(),
+            enterprise_config,
+        )))
+    }
+    
+    /// 创建自定义企业邮箱服务商
+    pub fn create_custom_provider(
+        &self,
+        name: String,
+        imap_config: ImapConfig,
+        smtp_config: SmtpConfig,
+        enterprise_config: EnterpriseConfig,
+    ) -> Box<dyn MailProvider> {
+        Box::new(CustomEnterpriseProvider::new(
+            name,
+            imap_config,
+            smtp_config,
+            enterprise_config,
+        ))
     }
     
     /// 获取指定服务商
     pub async fn get_provider(&self, provider_id: &str) -> Result<Box<dyn MailProvider>> {
-        let providers = self.providers.read().await;
-        providers
-            .get(provider_id)
-            .map(|p| p.box_clone())
-            .ok_or_else(|| anyhow!("服务商不存在: {}", provider_id))
+        // 先查找个人服务商
+        let personal = self.personal_providers.read().await;
+        if let Some(provider) = personal.get(provider_id) {
+            return Ok(provider.box_clone());
+        }
+        drop(personal);
+        
+        // 再查找企业服务商
+        let enterprise = self.enterprise_providers.read().await;
+        if let Some(provider) = enterprise.get(provider_id) {
+            return Ok(provider.box_clone());
+        }
+        
+        Err(anyhow!("服务商不存在: {}", provider_id))
     }
     
-    /// 获取所有支持的服务商信息
-    pub async fn get_all_providers(&self) -> Vec<ProviderInfo> {
-        let providers = self.providers.read().await;
+    /// 获取所有个人服务商信息
+    pub async fn get_personal_providers(&self) -> Vec<ProviderInfo> {
+        let providers = self.personal_providers.read().await;
         providers
             .values()
             .map(|p| ProviderInfo {
                 id: p.provider_id().to_string(),
                 name: p.provider_name().to_string(),
-                domains: vec![], // 需要各服务商提供
+                account_type: AccountType::Personal,
+                domains: p.supported_domains().iter().map(|s| s.to_string()).collect(),
                 auth_types: p.auth_types(),
             })
             .collect()
+    }
+    
+    /// 获取所有企业服务商信息
+    pub async fn get_enterprise_providers(&self) -> Vec<ProviderInfo> {
+        let providers = self.enterprise_providers.read().await;
+        providers
+            .values()
+            .map(|p| ProviderInfo {
+                id: p.provider_id().to_string(),
+                name: p.provider_name().to_string(),
+                account_type: AccountType::Enterprise,
+                domains: vec![],
+                auth_types: p.auth_types(),
+            })
+            .collect()
+    }
+    
+    /// 获取所有服务商信息
+    pub async fn get_all_providers(&self) -> Vec<ProviderInfo> {
+        let mut result = self.get_personal_providers().await;
+        result.extend(self.get_enterprise_providers().await);
+        result
     }
 }
 
@@ -2649,20 +3859,33 @@ pub use sync_state::*;
 
 本文档定义了 Postium Mail 邮件客户端流程引擎的完整架构，包括：
 
-1. **服务商抽象层** - 支持多种邮件服务商的统一接口
-2. **认证流程** - 支持 OAuth 2.0 和密码认证
-3. **首次同步** - 完整的文件夹发现和邮件同步流程
-4. **增量同步** - 基于 CONDSTORE 和 UID 搜索的高效同步
-5. **通知机制** - 去重、合并、优先级处理的新邮件通知
-6. **错误处理** - 分类错误和智能重试策略
+1. **服务商抽象层** - 支持多种邮件服务商的统一接口，区分个人和企业邮箱
+2. **账号类型识别** - 自动检测个人邮箱和企业邮箱，支持手动配置
+3. **认证流程** - 支持 OAuth 2.0、密码认证、域认证、SAML SSO
+4. **首次同步** - 完整的文件夹发现和邮件同步流程
+5. **增量同步** - 基于 CONDSTORE 和 UID 搜索的高效同步
+6. **通知机制** - 去重、合并、优先级处理的新邮件通知
+7. **错误处理** - 分类错误和智能重试策略
+8. **企业特性** - 条件访问策略、MFA、企业通讯录支持
 
-框架代码提供了 Rust 实现的骨架，可以基于此进行详细开发。
+### 个人邮件 vs 企业邮件支持矩阵
+
+| 功能 | 个人邮件 | 企业邮件 |
+|------|----------|----------|
+| 自动检测 | ✅ 域名匹配 | ✅ MX记录/Autodiscover |
+| OAuth 2.0 | ✅ 标准流程 | ✅ 企业租户流程 |
+| 自定义服务器 | ❌ 不支持 | ✅ 完全支持 |
+| MFA | ⚠️ 可选 | ✅ 企业策略 |
+| 条件访问 | ❌ | ✅ 企业策略 |
+| 通讯录集成 | ❌ | ✅ 企业通讯录 |
 
 ### 下一步工作
 
-1. 实现各个服务商的具体适配器
+1. 实现各个服务商的具体适配器（个人+企业）
 2. 完善错误处理和重试逻辑
 3. 实现 IMAP IDLE 实时监听
 4. 添加推送通知集成
 5. 优化大批量邮件同步性能
 6. 添加同步冲突处理
+7. 实现企业邮箱自动发现（Autodiscover/DNS MX）
+8. 添加企业通讯录 API 集成（Graph API）

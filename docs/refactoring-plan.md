@@ -36,16 +36,29 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 3. **同步策略单一**：缺乏灵活的增量同步和错误恢复机制
 4. **通知机制不完善**：缺少新邮件实时推送和通知合并
 5. **错误处理粗糙**：缺乏分类错误处理和智能重试策略
+6. **个人/企业邮箱未区分**：现有设计未考虑个人邮箱和企业邮箱的差异
+
+### 个人邮件 vs 企业邮件差异
+
+| 维度 | 个人邮件 | 企业邮件 |
+|------|----------|----------|
+| **服务器配置** | 固定地址（如 imap.gmail.com） | 可自定义（如 mail.company.com） |
+| **域名特征** | 标准域名（@gmail.com） | 自定义域名（@company.com） |
+| **认证方式** | OAuth/密码/应用密码 | OAuth企业租户/域认证/SAML/MFA |
+| **安全策略** | 基础安全策略 | 条件访问、设备管理、DLP策略 |
+| **API 支持** | 标准 IMAP/SMTP | Graph API、EWS、企业通讯录API |
 
 ### 目标
 
 通过引入流程引擎架构，实现：
 
-1. **可扩展的服务商支持**：通过 Trait 抽象，轻松添加新服务商
-2. **统一的认证管理**：集中处理 OAuth 2.0 和密码认证
+1. **可扩展的服务商支持**：通过 Trait 抽象，轻松添加新服务商（个人和企业）
+2. **统一的认证管理**：集中处理 OAuth 2.0、密码认证、域认证、SAML SSO
 3. **智能同步机制**：支持 CONDSTORE 增量同步、断点续传
 4. **实时通知系统**：IMAP IDLE、推送通知、通知合并
 5. **健壮的错误处理**：分类错误、指数退避重试、状态恢复
+6. **个人/企业邮箱区分**：自动检测邮箱类型，支持企业自定义配置
+7. **企业特性支持**：条件访问策略、MFA、企业通讯录集成
 
 ### 参考文档
 
@@ -217,19 +230,23 @@ async fn incremental_sync_folder(...) {
 
 | 功能 | 当前状态 | 目标状态 | 工作量 |
 |------|----------|----------|--------|
-| 服务商 Trait 抽象 | 无 | 完整实现 | 3 天 |
+| 服务商 Trait 抽象 | 无 | 完整实现（含个人/企业区分） | 4 天 |
 | Google OAuth 支持 | 未实现 | 完整实现 | 2 天 |
 | IMAP IDLE 支持 | 未实现 | 完整实现 | 3 天 |
 | 任务调度器 | 无 | 完整实现 | 2 天 |
+| 账号类型识别（个人/企业） | 无 | 自动检测+手动选择 | 2 天 |
 
 #### 中优先级 (P1)
 
 | 功能 | 当前状态 | 目标状态 | 工作量 |
 |------|----------|----------|--------|
 | CONDSTORE 增量同步 | 未实现 | 完整实现 | 3 天 |
-| Token 生命周期管理 | 部分 | 自动化 | 2 天 |
+| Token 生命周期管理 | 部分 | 自动化（含企业租户） | 2 天 |
+| Token 定期刷新调度 | 未实现 | 完整实现 | 2 天 |
 | 新邮件通知 | 未实现 | 完整实现 | 2 天 |
 | 错误分类与重试 | 简单 | 智能化 | 2 天 |
+| Microsoft 365 企业支持 | 未实现 | 完整实现 | 2 天 |
+| Google Workspace 企业支持 | 未实现 | 完整实现 | 2 天 |
 
 #### 低优先级 (P2)
 
@@ -238,7 +255,10 @@ async fn incremental_sync_folder(...) {
 | 连接池管理 | 无 | 完整实现 | 2 天 |
 | 同步断点续传 | 无 | 完整实现 | 1 天 |
 | 通知合并 | 无 | 完整实现 | 1 天 |
-| 更多服务商支持 | 3个 | 6+ | 1 天 |
+| 更多服务商支持 | 3个 | 6+（含企业） | 2 天 |
+| 企业邮箱自动发现 | 无 | Autodiscover/MX检测 | 2 天 |
+| 企业通讯录集成 | 未实现 | Graph API 支持 | 3 天 |
+| 自定义企业服务器配置 | 未实现 | 完整UI配置 | 2 天 |
 
 ---
 
@@ -282,11 +302,12 @@ async fn incremental_sync_folder(...) {
 ### 总体时间线
 
 ```
-Week 1-2: 基础架构搭建
-Week 3-4: 服务商层重构
-Week 5-6: 认证与同步层重构
+Week 1-2: 基础架构搭建（含账号类型抽象）
+Week 3-4: 服务商层重构（个人+企业适配器）
+Week 5-6: 认证与同步层重构（含企业认证）
 Week 7-8: 通知与调度层实现
-Week 9-10: 测试与优化
+Week 9-10: 企业特性与测试优化
+Week 11-12: 企业高级特性与集成测试
 ```
 
 ### 阶段划分
@@ -333,6 +354,71 @@ gantt
 
 ### 阶段 1: 基础架构搭建 (Week 1-2)
 
+#### 任务 1.0: 账号类型抽象设计
+
+**目标**：设计个人邮箱和企业邮箱的区分机制
+
+**实现内容**：
+
+```rust
+/// 账号类型（个人 vs 企业）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
+pub enum AccountType {
+    /// 个人邮件账号
+    Personal,
+    /// 企业邮件账号
+    Enterprise,
+}
+
+/// 企业配置（仅企业账号）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnterpriseConfig {
+    /// Azure AD 租户 ID 或 Google Workspace 域
+    pub tenant_id: Option<String>,
+    /// 企业域名
+    pub domain: Option<String>,
+    /// 是否启用条件访问策略
+    pub conditional_access: bool,
+    /// 是否强制 MFA
+    pub mfa_required: bool,
+    /// 是否使用自定义服务器
+    pub custom_server: bool,
+    /// 自定义 IMAP 服务器（如果使用）
+    pub custom_imap: Option<ImapConfig>,
+    /// 自定义 SMTP 服务器（如果使用）
+    pub custom_smtp: Option<SmtpConfig>,
+}
+```
+
+**数据库迁移**：
+```sql
+-- 添加账号类型字段
+ALTER TABLE accounts ADD COLUMN account_type VARCHAR(20) DEFAULT 'personal';
+ALTER TABLE accounts ADD COLUMN enterprise_config_id INTEGER REFERENCES enterprise_configs(id);
+
+-- 创建企业配置表
+CREATE TABLE enterprise_configs (
+    id INTEGER PRIMARY KEY,
+    tenant_id VARCHAR(100),
+    domain VARCHAR(100),
+    conditional_access BOOLEAN DEFAULT false,
+    mfa_required BOOLEAN DEFAULT false,
+    custom_server BOOLEAN DEFAULT false,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+```
+
+**验收标准**：
+- [ ] AccountType 枚举定义
+- [ ] EnterpriseConfig 结构定义
+- [ ] 数据库迁移脚本
+- [ ] 模型更新
+
+**预计工时**：1 天
+
+---
+
 #### 任务 1.1: 项目结构重组
 
 **目标**：创建新的模块目录结构
@@ -360,16 +446,25 @@ src-tauri/src/
 ├── providers/                 # 新增：服务商适配层
 │   ├── mod.rs
 │   ├── traits.rs              # MailProvider trait
+│   ├── account_type.rs        # 账号类型定义（个人/企业）
 │   ├── provider_pool.rs       # 服务商池
-│   ├── gmail.rs               # Gmail 适配器
-│   ├── outlook.rs             # Outlook 适配器
-│   ├── yahoo.rs               # Yahoo 适配器
-│   ├── native.rs              # 国内邮箱适配器
+│   ├── personal/              # 个人邮件服务商
+│   │   ├── mod.rs
+│   │   ├── gmail.rs           # Gmail 个人版
+│   │   ├── outlook.rs         # Outlook 个人版
+│   │   ├── yahoo.rs           # Yahoo
+│   │   └── native.rs          # 国内邮箱（163/QQ/iCloud）
+│   ├── enterprise/            # 企业邮件服务商
+│   │   ├── mod.rs
+│   │   ├── microsoft_365.rs   # Microsoft 365
+│   │   ├── google_workspace.rs # Google Workspace
+│   │   └── custom.rs          # 自定义企业邮箱
 │   └── config.rs              # 服务商配置
 ├── auth/                      # 新增：认证模块
 │   ├── mod.rs
 │   ├── auth_manager.rs        # 认证管理器
 │   ├── oauth_handler.rs       # OAuth 处理器
+│   ├── enterprise_auth.rs     # 企业认证（域认证/SAML）
 │   ├── password_auth.rs       # 密码认证
 │   └── token_manager.rs       # Token 管理
 ├── sync/                      # 重构：同步模块
@@ -675,7 +770,7 @@ pub trait IsRetryable {
 
 #### 任务 1.4: 服务商 Trait 定义
 
-**目标**：定义 `MailProvider` trait
+**目标**：定义 `MailProvider` trait（含个人/企业区分）
 
 **实现文件**：`src-tauri/src/providers/traits.rs`
 
@@ -684,19 +779,44 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+/// 账号类型（个人 vs 企业）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
+pub enum AccountType {
+    /// 个人邮件账号
+    Personal,
+    /// 企业邮件账号
+    Enterprise,
+}
+
+impl Default for AccountType {
+    fn default() -> Self {
+        Self::Personal
+    }
+}
+
 /// 认证类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AuthType {
+    /// 密码认证
     Password,
+    /// OAuth 2.0 认证
     OAuth2,
+    /// 应用专用密码
     AppPassword,
+    /// 域认证（企业）
+    DomainAuth,
+    /// SAML SSO（企业）
+    SamlSso,
 }
 
 /// SSL 模式
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SslMode {
+    /// 无加密
     None,
+    /// STARTTLS 升级
     StartTls,
+    /// 隐式 SSL/TLS
     Implicit,
 }
 
@@ -726,6 +846,27 @@ pub struct OAuthConfig {
     pub redirect_uri: String,
     pub scopes: Vec<String>,
     pub pkce_enabled: bool,
+    /// 企业租户 ID（仅企业账号）
+    pub tenant_id: Option<String>,
+}
+
+/// 企业配置（仅企业账号）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnterpriseConfig {
+    /// Azure AD 租户 ID 或 Google Workspace 域
+    pub tenant_id: Option<String>,
+    /// 企业域名
+    pub domain: Option<String>,
+    /// 是否启用条件访问策略
+    pub conditional_access: bool,
+    /// 是否强制 MFA
+    pub mfa_required: bool,
+    /// 是否使用自定义服务器
+    pub custom_server: bool,
+    /// 自定义 IMAP 服务器（如果使用）
+    pub custom_imap: Option<ImapConfig>,
+    /// 自定义 SMTP 服务器（如果使用）
+    pub custom_smtp: Option<SmtpConfig>,
 }
 
 /// 服务商能力
@@ -735,6 +876,8 @@ pub struct ProviderCapabilities {
     pub supports_condstore: bool,
     pub supports_push: bool,
     pub supports_oauth: bool,
+    /// 是否支持企业特性
+    pub supports_enterprise: bool,
     pub max_message_size: Option<u64>,
 }
 
@@ -743,6 +886,8 @@ pub struct ProviderCapabilities {
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
+    /// 账号类型（个人/企业）
+    pub account_type: AccountType,
     pub domains: Vec<String>,
     pub auth_types: Vec<AuthType>,
     pub icon: Option<String>,
@@ -757,6 +902,9 @@ pub trait MailProvider: Send + Sync {
     /// 服务商显示名称
     fn provider_name(&self) -> &str;
     
+    /// 账号类型（个人/企业）
+    fn account_type(&self) -> AccountType;
+    
     /// 支持的认证类型
     fn auth_types(&self) -> Vec<AuthType>;
     
@@ -768,6 +916,11 @@ pub trait MailProvider: Send + Sync {
     
     /// OAuth 配置（如果支持）
     fn oauth_config(&self) -> Option<OAuthConfig>;
+    
+    /// 企业配置（仅企业账号）
+    fn enterprise_config(&self) -> Option<EnterpriseConfig> {
+        None
+    }
     
     /// 服务商能力
     fn capabilities(&self) -> ProviderCapabilities;
@@ -809,29 +962,31 @@ impl Clone for Box<dyn MailProvider> {
 
 #### 任务 2.1: ProviderPool 实现
 
-**目标**：实现服务商池，管理所有服务商实例
+**目标**：实现服务商池，管理所有服务商实例（含个人/企业分类）
 
 **实现文件**：`src-tauri/src/providers/provider_pool.rs`
 
 **关键功能**：
-- 从环境变量初始化服务商
-- 根据邮箱地址自动检测服务商
-- 获取服务商实例
++- 从环境变量初始化服务商
++- 根据邮箱地址自动检测服务商类型（个人/企业）
++- 分离管理个人服务商和企业服务商
++- 企业邮箱自动发现（MX记录/Autodiscover）
 
 **验收标准**：
-- [ ] 服务商注册与获取
-- [ ] 自动检测服务商
-- [ ] 单元测试覆盖
++- [ ] 服务商注册与获取
++- [ ] 自动检测服务商（含个人/企业区分）
++- [ ] 企业邮箱检测逻辑
++- [ ] 单元测试覆盖
 
-**预计工时**：2 天
+**预计工时**：3 天
 
 ---
 
 #### 任务 2.2: Gmail 适配器实现
 
-**目标**：实现 Gmail 服务商适配器
+**目标**：实现 Gmail 个人邮件服务商适配器
 
-**实现文件**：`src-tauri/src/providers/gmail.rs`
+**实现文件**：`src-tauri/src/providers/personal/gmail.rs`
 
 **关键配置**：
 ```rust
@@ -849,14 +1004,16 @@ port: 993
 ssl: SslMode::Implicit
 
 // Gmail 能力
+account_type: AccountType::Personal
 supports_idle: true
 supports_condstore: true
 ```
 
 **验收标准**：
-- [ ] Gmail OAuth 流程完整
-- [ ] IMAP/SMTP 配置正确
-- [ ] 集成测试通过
++- [ ] Gmail OAuth 流程完整
++- [ ] IMAP/SMTP 配置正确
++- [ ] 标记为个人邮箱
++- [ ] 集成测试通过
 
 **预计工时**：2 天
 
@@ -864,19 +1021,20 @@ supports_condstore: true
 
 #### 任务 2.3: Outlook 适配器迁移
 
-**目标**：将现有 Microsoft OAuth 逻辑迁移到适配器
+**目标**：将现有 Microsoft OAuth 逻辑迁移到 Outlook 个人适配器
 
-**实现文件**：`src-tauri/src/providers/outlook.rs`
+**实现文件**：`src-tauri/src/providers/personal/outlook.rs`
 
 **迁移策略**：
 1. 从 `oauth_service.rs` 提取 Microsoft 特定逻辑
-2. 封装到 Outlook 适配器
+2. 封装到 Outlook 个人适配器
 3. 保持现有功能不变
 
 **验收标准**：
-- [ ] 现有 Outlook 功能保持
-- [ ] 代码迁移完成
-- [ ] 回归测试通过
++- [ ] 现有 Outlook 功能保持
++- [ ] 标记为个人邮箱
++- [ ] 代码迁移完成
++- [ ] 回归测试通过
 
 **预计工时**：1 天
 
@@ -886,18 +1044,115 @@ supports_condstore: true
 
 **目标**：实现国内邮箱 (163/QQ/iCloud) 适配器
 
-**实现文件**：`src-tauri/src/providers/native.rs`
+**实现文件**：`src-tauri/src/providers/personal/native.rs`
 
 **支持的服务商**：
-- 163 邮箱 (`imap.163.com:993`)
-- QQ 邮箱 (`imap.qq.com:993`)
-- iCloud (`imap.mail.me.com:993`)
-- Yahoo (`imap.mail.yahoo.com:993`)
++- 163 邮箱 (`imap.163.com:993`)
++- QQ 邮箱 (`imap.qq.com:993`)
++- iCloud (`imap.mail.me.com:993`)
++- Yahoo (`imap.mail.yahoo.com:993`)
 
 **验收标准**：
-- [ ] 各服务商配置正确
-- [ ] 密码认证流程完整
-- [ ] 测试覆盖
++- [ ] 各服务商配置正确
++- [ ] 密码认证流程完整
++- [ ] 标记为个人邮箱
++- [ ] 测试覆盖
+
+**预计工时**：1 天
+
+---
+
+#### 任务 2.5: Microsoft 365 企业适配器实现
+
+**目标**：实现 Microsoft 365 企业邮件服务商适配器
+
+**实现文件**：`src-tauri/src/providers/enterprise/microsoft_365.rs`
+
+**关键功能**：
++- 企业租户 OAuth 流程
++- 条件访问策略支持
++- MFA 认证流程
++- 企业租户 ID 管理
+
+**关键配置**：
+```rust
+// Microsoft 365 企业 OAuth 配置
+auth_url: "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+token_url: "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+scopes: [
+    "https://outlook.office365.com/IMAP.AccessAsUser.All",
+    "https://outlook.office365.com/SMTP.Send",
+    "offline_access",
+    "openid",
+]
+
+// 企业配置
+account_type: AccountType::Enterprise
+conditional_access: true
+mfa_required: true
+```
+
+**验收标准**：
++- [ ] 企业租户 OAuth 流程
++- [ ] MFA 处理
++- [ ] 租户 ID 存储
++- [ ] 集成测试通过
+
+**预计工时**：2 天
+
+---
+
+#### 任务 2.6: Google Workspace 企业适配器实现
+
+**目标**：实现 Google Workspace 企业邮件服务商适配器
+
+**实现文件**：`src-tauri/src/providers/enterprise/google_workspace.rs`
+
+**关键功能**：
++- 企业域 OAuth 流程
++- 企业安全管理支持
++- 企业通讯录 API 范围
+
+**关键配置**：
+```rust
+// Google Workspace 企业 OAuth 配置
+auth_url: "https://accounts.google.com/o/oauth2/v2/auth"
+token_url: "https://oauth2.googleapis.com/token"
+scopes: [
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/directory.readonly", // 企业通讯录
+]
+
+// 企业配置
+account_type: AccountType::Enterprise
+domain: custom_domain
+```
+
+**验收标准**：
++- [ ] 企业域 OAuth 流程
++- [ ] 企业特性配置
++- [ ] 集成测试通过
+
+**预计工时**：2 天
+
+---
+
+#### 任务 2.7: 自定义企业邮箱适配器实现
+
+**目标**：实现自建邮件服务器适配器
+
+**实现文件**：`src-tauri/src/providers/enterprise/custom.rs`
+
+**关键功能**：
++- 完全自定义 IMAP/SMTP 配置
++- 支持多种认证方式
++- 灵活的服务器参数
+
+**验收标准**：
++- [ ] 自定义服务器配置 UI
++- [ ] 多种认证方式支持
++- [ ] 测试覆盖
 
 **预计工时**：1 天
 
@@ -907,7 +1162,7 @@ supports_condstore: true
 
 #### 任务 3.1: AuthManager 实现
 
-**目标**：统一认证入口，整合 OAuth 和密码认证
+**目标**：统一认证入口，整合 OAuth、密码认证和企业认证
 
 **实现文件**：`src-tauri/src/auth/auth_manager.rs`
 
@@ -917,6 +1172,7 @@ supports_condstore: true
 pub struct AuthManager {
     provider_pool: Arc<ProviderPool>,
     oauth_handler: Arc<OAuthHandler>,
+    enterprise_auth: Arc<EnterpriseAuth>,
     password_auth: Arc<PasswordAuth>,
 }
 
@@ -925,6 +1181,13 @@ impl AuthManager {
     pub async fn authenticate(
         &self,
         request: &CreateAccountRequest,
+    ) -> Result<AuthResult>;
+    
+    /// 企业认证（含租户信息）
+    pub async fn authenticate_enterprise(
+        &self,
+        request: &CreateAccountRequest,
+        enterprise_config: &EnterpriseConfig,
     ) -> Result<AuthResult>;
     
     /// 测试连接（添加账号前验证）
@@ -940,21 +1203,29 @@ impl AuthManager {
         &self,
         account_id: i32,
     ) -> Result<()>;
+    
+    /// 检测账号类型（个人/企业）
+    pub async fn detect_account_type(
+        &self,
+        email: &str,
+    ) -> Result<(AccountType, Box<dyn MailProvider>)>;
 }
 ```
 
 **验收标准**：
-- [ ] 统一认证入口
-- [ ] 自动选择认证方式
-- [ ] 集成测试通过
++- [ ] 统一认证入口
++- [ ] 自动选择认证方式
++- [ ] 企业认证支持
++- [ ] 账号类型检测
++- [ ] 集成测试通过
 
-**预计工时**：3 天
+**预计工时**：4 天
 
 ---
 
 #### 任务 3.2: TokenManager 实现
 
-**目标**：管理 OAuth Token 生命周期
+**目标**：管理 OAuth Token 生命周期（含企业租户支持）
 
 **实现文件**：`src-tauri/src/auth/token_manager.rs`
 
@@ -973,31 +1244,47 @@ impl TokenManager {
         account_id: i32,
     ) -> Result<String>;
     
-    /// 刷新 Token
+    /// 刷新 Token（支持企业租户）
     pub async fn refresh_token(
         &self,
         account_id: i32,
         provider: &dyn MailProvider,
     ) -> Result<OAuthToken>;
     
+    /// 刷新企业 Token（使用租户特定端点）
+    pub async fn refresh_enterprise_token(
+        &self,
+        account_id: i32,
+        tenant_id: &str,
+        provider: &dyn MailProvider,
+    ) -> Result<OAuthToken>;
+    
     /// 检查 Token 是否即将过期
     pub fn is_expiring_soon(&self, expires_at: i64) -> bool;
     
-    /// 存储 Token
+    /// 存储 Token（含租户信息）
     pub async fn store_token(
         &self,
         account_id: i32,
         token: &OAuthToken,
     ) -> Result<()>;
+    
+    /// 存储企业配置
+    pub async fn store_enterprise_config(
+        &self,
+        account_id: i32,
+        config: &EnterpriseConfig,
+    ) -> Result<()>;
 }
 ```
 
 **验收标准**：
-- [ ] 自动刷新过期 Token
-- [ ] 安全存储 Token
-- [ ] 单元测试覆盖
++- [ ] 自动刷新过期 Token
++- [ ] 安全存储 Token
++- [ ] 企业租户 Token 管理
++- [ ] 单元测试覆盖
 
-**预计工时**：2 天
+**预计工时**：3 天
 
 ---
 
@@ -1009,13 +1296,231 @@ impl TokenManager {
 
 **重构策略**：
 1. 抽取服务商无关的 OAuth 逻辑
-2. 支持多服务商配置
-3. 保持与现有代码兼容
+2. 支持多服务商配置（个人+企业）
+3. 支持企业租户特定端点
+4. 保持与现有代码兼容
+
+**关键功能**：
+```rust
+impl OAuthHandler {
+    /// 生成个人账号授权 URL
+    pub async fn get_personal_auth_url(
+        &self,
+        provider: &dyn MailProvider,
+    ) -> Result<AuthorizationContext>;
+    
+    /// 生成企业账号授权 URL（含租户）
+    pub async fn get_enterprise_auth_url(
+        &self,
+        provider: &dyn MailProvider,
+        tenant_id: &str,
+    ) -> Result<AuthorizationContext>;
+    
+    /// 交换授权码（自动检测个人/企业）
+    pub async fn exchange_code(
+        &self,
+        code: &str,
+        state: &str,
+        provider: &dyn MailProvider,
+    ) -> Result<OAuthToken>;
+}
+```
 
 **验收标准**：
-- [ ] 通用 OAuth 流程
-- [ ] 支持 Google 和 Microsoft
-- [ ] 回归测试通过
++- [ ] 通用 OAuth 流程
++- [ ] 支持 Google 和 Microsoft（个人+企业）
++- [ ] 企业租户端点支持
++- [ ] 回归测试通过
+
+**预计工时**：3 天
+
+---
+
+#### 任务 3.4: 企业认证处理器实现
+
+**目标**：实现企业特有的认证方式
+
+**实现文件**：`src-tauri/src/auth/enterprise_auth.rs`
+
+**关键功能**：
++- 域认证（Kerberos/NTLM）
++- SAML SSO 流程
++- 条件访问策略处理
++- MFA 状态管理
+
+**验收标准**：
++- [ ] 域认证支持
++- [ ] SAML SSO 流程
++- [ ] MFA 状态处理
++- [ ] 测试覆盖
+
+**预计工时**：3 天
+
+---
+
+#### 任务 3.5: Token 刷新调度器实现
+
+**目标**：实现 OAuth Token 定期刷新调度器
+
+**实现文件**：`src-tauri/src/auth/token_refresh_scheduler.rs`
+
+**关键功能**：
+
+```rust
+/// Token 刷新配置
+#[derive(Debug, Clone)]
+pub struct TokenRefreshConfig {
+    /// 刷新检查间隔（秒）
+    pub check_interval_secs: u64,
+    /// 提前刷新时间（秒），Token过期前多久开始刷新
+    pub refresh_before_expiry_secs: u64,
+    /// 最大重试次数
+    pub max_retry_count: u32,
+    /// 重试间隔基数（秒）
+    pub retry_interval_base_secs: u64,
+    /// 并发刷新最大数量
+    pub max_concurrent_refreshes: usize,
+}
+
+impl Default for TokenRefreshConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: 60,           // 每分钟检查一次
+            refresh_before_expiry_secs: 300,   // 过期前5分钟刷新
+            max_retry_count: 3,
+            retry_interval_base_secs: 30,
+            max_concurrent_refreshes: 5,
+        }
+    }
+}
+
+/// Token 刷新调度器
+pub struct TokenRefreshScheduler {
+    config: TokenRefreshConfig,
+    token_manager: Arc<TokenManager>,
+    provider_pool: Arc<ProviderPool>,
+    refresh_queue: Arc<RwLock<Vec<RefreshTask>>>,
+    running: Arc<AtomicBool>,
+}
+
+impl TokenRefreshScheduler {
+    /// 启动调度器
+    pub async fn start(&self) -> Result<()>;
+    
+    /// 停止调度器
+    pub async fn stop(&self) -> Result<()>;
+    
+    /// 扫描需要刷新的账号
+    async fn scan_accounts(&self) -> Result<Vec<i32>>;
+    
+    /// 执行单个账号的刷新
+    async fn refresh_account(&self, account_id: i32) -> Result<()>;
+    
+    /// 处理刷新失败
+    async fn handle_refresh_failure(
+        &self,
+        account_id: i32,
+        error: &OAuthError,
+        retry_count: u32,
+    ) -> Result<RefreshAction>;
+}
+
+/// 刷新动作
+pub enum RefreshAction {
+    /// 成功，更新Token
+    Success { new_expires_at: i64 },
+    /// 重试
+    Retry { delay_secs: u64 },
+    /// 需要重新授权
+    NeedReauth { reason: String },
+}
+
+/// 刷新历史记录
+pub struct RefreshHistory {
+    pub account_id: i32,
+    pub status: RefreshStatus,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+    pub retry_count: u32,
+}
+```
+
+**刷新流程图**：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Token 刷新调度流程                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
+│  │ 定时检查 │───>│ 扫描账号 │───>│ 过滤条件 │───>│ 加入队列 │  │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│       │                                              │          │
+│       │              过滤条件:                       │          │
+│       │              expires_at - now < 5分钟       │          │
+│       │              且不在刷新中                    │          │
+│       ↓                                              ↓          │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
+│  │ 等待1分钟│<───│ 更新状态 │<───│ 存储Token│<───│ 执行刷新 │  │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│                                                        │        │
+│                                                        ↓        │
+│                   ┌──────────┐    ┌──────────┐    ┌──────────┐  │
+│                   │ 记录失败 │<───│ 重试/通知│<───│ 刷新失败 │  │
+│                   └──────────┘    └──────────┘    └──────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**数据库迁移**：
+```sql
+-- 刷新历史记录表
+CREATE TABLE refresh_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    provider_id TEXT NOT NULL,
+    status TEXT NOT NULL,  -- 'success', 'failed'
+    error_code TEXT,
+    error_message TEXT,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    duration_ms INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    old_expires_at INTEGER,
+    new_expires_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 刷新状态表（用于防并发）
+CREATE TABLE refresh_state (
+    account_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,  -- 'idle', 'scheduled', 'refreshing'
+    last_refresh_at INTEGER,
+    next_refresh_at INTEGER,
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 索引
+CREATE INDEX idx_refresh_history_account ON refresh_history(account_id);
+CREATE INDEX idx_refresh_history_started ON refresh_history(started_at);
+CREATE INDEX idx_refresh_state_next ON refresh_state(next_refresh_at);
+```
+
+**验收标准**：
+- [ ] 定时扫描需要刷新的账号
+- [ ] 提前5分钟刷新Token
+- [ ] 刷新失败自动重试（最多3次）
+- [ ] 刷新失败超过重试次数通知用户
+- [ ] 并发刷新控制（最多5个同时刷新）
+- [ ] 刷新历史记录
+- [ ] 刷新状态持久化
+- [ ] 单元测试覆盖
 
 **预计工时**：2 天
 
@@ -1324,6 +1829,15 @@ tests/
 | Token 刷新 | 等待 Token 过期 | 自动刷新，继续同步 |
 | 新邮件通知 | 发送测试邮件 | 收到桌面通知 |
 | 网络断开 | 断开网络 | 显示错误，自动重试 |
+| **Microsoft 365 企业** | 添加企业邮箱 | 企业租户识别，OAuth 完成 |
+| **Google Workspace 企业** | 添加企业邮箱 | 企业域识别，OAuth 完成 |
+| **自定义企业服务器** | 手动配置服务器 | 连接成功，邮件同步 |
+| **企业 MFA** | 完成 MFA 认证 | MFA 流程正常，账号添加成功 |
+| **企业条件访问** | 满足条件访问策略 | 正确处理策略要求 |
+| **账号类型检测** | 输入企业邮箱 | 自动识别为企业账号 |
+| **Token 定期刷新** | Token 即将过期 | 自动刷新，无感知 |
+| **Token 刷新失败** | 网络错误/Token 失效 | 重试后通知用户 |
+| **多账号刷新** | 多个账号同时过期 | 并发刷新，控制并发数 |
 
 ---
 
@@ -1389,14 +1903,22 @@ tests/
 | `src-tauri/src/engine/task_scheduler.rs` | 任务调度器 |
 | `src-tauri/src/engine/notification_manager.rs` | 通知管理器 |
 | `src-tauri/src/providers/mod.rs` | 服务商模块入口 |
-| `src-tauri/src/providers/traits.rs` | 服务商 Trait |
-| `src-tauri/src/providers/provider_pool.rs` | 服务商池 |
-| `src-tauri/src/providers/gmail.rs` | Gmail 适配器 |
-| `src-tauri/src/providers/outlook.rs` | Outlook 适配器 |
-| `src-tauri/src/providers/native.rs` | 国内邮箱适配器 |
+| `src-tauri/src/providers/traits.rs` | 服务商 Trait（含个人/企业区分） |
+| `src-tauri/src/providers/account_type.rs` | 账号类型定义 |
+| `src-tauri/src/providers/provider_pool.rs` | 服务商池（个人+企业） |
+| `src-tauri/src/providers/personal/mod.rs` | 个人邮件服务商模块 |
+| `src-tauri/src/providers/personal/gmail.rs` | Gmail 个人适配器 |
+| `src-tauri/src/providers/personal/outlook.rs` | Outlook 个人适配器 |
+| `src-tauri/src/providers/personal/native.rs` | 国内邮箱适配器 |
+| `src-tauri/src/providers/enterprise/mod.rs` | 企业邮件服务商模块 |
+| `src-tauri/src/providers/enterprise/microsoft_365.rs` | Microsoft 365 企业适配器 |
+| `src-tauri/src/providers/enterprise/google_workspace.rs` | Google Workspace 企业适配器 |
+| `src-tauri/src/providers/enterprise/custom.rs` | 自定义企业邮箱适配器 |
 | `src-tauri/src/auth/mod.rs` | 认证模块入口 |
 | `src-tauri/src/auth/auth_manager.rs` | 认证管理器 |
 | `src-tauri/src/auth/token_manager.rs` | Token 管理器 |
+| `src-tauri/src/auth/token_refresh_scheduler.rs` | Token 刷新调度器 |
+| `src-tauri/src/auth/enterprise_auth.rs` | 企业认证处理器 |
 | `src-tauri/src/error/mod.rs` | 错误模块入口 |
 | `src-tauri/src/error/types.rs` | 错误类型定义 |
 | `src-tauri/src/error/retry.rs` | 重试策略 |
@@ -1409,18 +1931,37 @@ tests/
 | `src-tauri/src/services/imap/client.rs` | 添加 IDLE/CONDSTORE 支持 |
 | `src-tauri/src/services/sync_manager.rs` | 重构使用新架构 |
 | `src-tauri/src/command/*.rs` | 适配新引擎 API |
+| `src-tauri/src/models/account.rs` | 添加 account_type 字段 |
+| `src-tauri/migration/` | 添加企业配置表迁移 |
+
+#### 数据库迁移文件
+
+| 文件路径 | 描述 |
+|----------|------|
+| `src-tauri/migration/add_account_type.sql` | 添加账号类型字段 |
+| `src-tauri/migration/create_enterprise_configs.sql` | 创建企业配置表 |
+| `src-tauri/migration/create_refresh_tables.sql` | 创建刷新历史和状态表 |
 
 ### B. 环境变量配置
 
 ```bash
 # .env 文件示例
 
-# Microsoft OAuth
+# Microsoft OAuth（个人）
 MICROSOFT_CLIENT_ID=your-client-id
 
-# Google OAuth
+# Google OAuth（个人）
 GOOGLE_CLIENT_ID=your-client-id
 GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Microsoft 365 企业（可选）
+MICROSOFT_TENANT_ID=your-tenant-id
+
+# Google Workspace 企业（可选）
+GOOGLE_WORKSPACE_DOMAIN=your-domain.com
+
+# 企业自动发现服务（可选）
+ENTERPRISE_AUTODISCOVER_ENABLED=true
 
 # 日志级别
 RUST_LOG=info,postium_mail=debug
@@ -1428,14 +1969,29 @@ RUST_LOG=info,postium_mail=debug
 
 ### C. 参考资源
 
-- [RFC 3501 - IMAP4rev1](https://tools.ietf.org/html/rfc3501)
-- [RFC 4549 - IMAP CONDSTORE](https://tools.ietf.org/html/rfc4549)
-- [RFC 2177 - IMAP IDLE](https://tools.ietf.org/html/rfc2177)
-- [OAuth 2.0 RFC 6749](https://tools.ietf.org/html/rfc6749)
-- [Gmail API Documentation](https://developers.google.com/gmail/api)
-- [Microsoft Graph API](https://docs.microsoft.com/graph/)
+#### 协议规范
++- [RFC 3501 - IMAP4rev1](https://tools.ietf.org/html/rfc3501)
++- [RFC 4549 - IMAP CONDSTORE](https://tools.ietf.org/html/rfc4549)
++- [RFC 2177 - IMAP IDLE](https://tools.ietf.org/html/rfc2177)
++- [OAuth 2.0 RFC 6749](https://tools.ietf.org/html/rfc6749)
+
+#### 个人邮件服务商 API
++- [Gmail API Documentation](https://developers.google.com/gmail/api)
++- [Microsoft Outlook REST API](https://docs.microsoft.com/outlook/rest/)
+
+#### 企业邮件服务商 API
++- [Microsoft Graph API](https://docs.microsoft.com/graph/)
++- [Microsoft 365 Exchange Online](https://docs.microsoft.com/exchange/exchange-online)
++- [Google Workspace APIs](https://developers.google.com/workspace/apis)
++- [Exchange Autodiscover](https://docs.microsoft.com/exchange/client-developer/exchange-web-services/autodiscover-for-exchange)
+
+#### 企业认证相关
++- [Azure AD OAuth 2.0](https://docs.microsoft.com/azure/active-directory/develop/v2-oauth2-auth-code-flow)
++- [Azure AD Conditional Access](https://docs.microsoft.com/azure/active-directory/conditional-access/)
++- [Google Workspace SAML](https://support.google.com/a/answer/6087519)
 
 ---
 
 **文档维护者**: Postium Mail 开发团队  
-**最后更新**: 2024-01-15
+**最后更新**: 2024-01-15  
+**版本**: 1.1.0（新增企业邮件支持）
