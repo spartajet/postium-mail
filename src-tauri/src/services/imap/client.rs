@@ -147,10 +147,10 @@ impl AsyncImapClient {
         // 3. 或使用其他支持OAuth2的IMAP库
 
         // 这里我们返回一个错误，指示需要实现OAuth2认证
-        return Err(anyhow!("OAuth2 IMAP认证需要进一步实现。请考虑：\n\
+        Err(anyhow!("OAuth2 IMAP认证需要进一步实现。请考虑：\n\
             1. 升级async-imap到支持SASL的版本\n\
             2. 手动实现IMAP AUTHENTICATE命令\n\
-            3. 使用支持OAuth2的其他IMAP库"));
+            3. 使用支持OAuth2的其他IMAP库"))
 
         // 如果async-imap支持authenticate方法，正确的实现应该是：
         // client.authenticate("XOAUTH2", xoauth2_str).await

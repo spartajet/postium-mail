@@ -93,7 +93,7 @@ mod tests {
 
                         // 检查用户提到的特定 UID 2408
                         let target_uid = 2408;
-                        let uids_vec: Vec<u32> = uids.iter().copied().collect();
+                        let uids_vec: Vec<u32> = uids.to_vec();
 
                         if uids_vec.contains(&target_uid) {
                             info!("========================================");

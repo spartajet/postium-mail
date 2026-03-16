@@ -569,18 +569,12 @@ mod tests {
 
                                     // 如果有邮件，获取第一封的主题
                                     if count > 0 {
-                                        match client.list_uids(folder, 1).await {
-                                            Ok(uids) => {
-                                                if let Some(uid) = uids.first() {
-                                                    match client.fetch_email(folder, *uid).await {
-                                                        Ok(email) => {
-                                                            info!("   └─ 最新: {}", email.subject);
-                                                        }
-                                                        Err(_) => {}
-                                                    }
+                                        if let Ok(uids) = client.list_uids(folder, 1).await {
+                                            if let Some(uid) = uids.first() {
+                                                if let Ok(email) = client.fetch_email(folder, *uid).await {
+                                                    info!("   └─ 最新: {}", email.subject);
                                                 }
                                             }
-                                            Err(_) => {}
                                         }
                                     }
                                 }

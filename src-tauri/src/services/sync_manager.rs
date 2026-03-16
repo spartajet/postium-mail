@@ -273,7 +273,7 @@ impl SyncManager {
             let _ = crate::services::folder_service::update_stats(
                 &self.db,
                 folder_id,
-                email_count as i32,
+                email_count,
                 unread_count,
             )
             .await;
