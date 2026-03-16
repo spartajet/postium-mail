@@ -58,7 +58,6 @@ impl ImapService {
     }
 
     /// 异步获取邮件
-
     pub async fn fetch_email(&mut self, folder: &str, uid: u32) -> Result<EmailData> {
         let client = self.client.as_mut().ok_or_else(|| anyhow!("IMAP 未连接"))?;
 

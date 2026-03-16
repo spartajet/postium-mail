@@ -39,7 +39,7 @@ pub async fn create(
     req: account::CreateAccountRequest,
 ) -> Result<account::Model> {
     // 检查邮箱是否已存在
-    if let Some(_) = get_by_email(db, &req.email).await? {
+    if get_by_email(db, &req.email).await?.is_some() {
         return Err(anyhow!("该邮箱地址已存在"));
     }
 
@@ -162,10 +162,10 @@ pub async fn update(
         .ok_or_else(|| anyhow!("账号不存在"))?;
 
     // 如果邮箱地址变更，检查新邮箱是否已被使用
-    if account.email != req.email {
-        if let Some(_) = get_by_email(db, &req.email).await? {
-            return Err(anyhow!("该邮箱地址已被使用"));
-        }
+    if account.email != req.email
+        && get_by_email(db, &req.email).await?.is_some()
+    {
+        return Err(anyhow!("该邮箱地址已被使用"));
     }
 
     let mut account: account::ActiveModel = account.into();

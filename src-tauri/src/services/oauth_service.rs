@@ -2,9 +2,7 @@ use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use chrono::Utc;
-use oauth2::{
-    basic::BasicClient, ClientId, CsrfToken, PkceCodeChallenge, Scope,
-};
+use oauth2::{basic::BasicClient, ClientId, CsrfToken, PkceCodeChallenge, Scope};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -154,7 +152,7 @@ impl OAuthService {
                 format!("client_id={}", client_id),
                 format!("code={}", code),
                 format!("redirect_uri={}", redirect_uri),
-                format!("grant_type=authorization_code"),
+                "grant_type=authorization_code".to_string(),
                 format!("code_verifier={}", verifier_secret),
                 format!("scope={}", scopes_str),
             ];
@@ -202,9 +200,7 @@ impl OAuthService {
             .as_str()
             .unwrap_or("")
             .to_string();
-        let expires_in = token_json["expires_in"]
-            .as_u64()
-            .unwrap_or(3600) as i64;
+        let expires_in = token_json["expires_in"].as_u64().unwrap_or(3600) as i64;
         let id_token = token_json["id_token"].as_str().map(String::from);
 
         let expires_at = Utc::now().timestamp() + expires_in;
@@ -219,7 +215,8 @@ impl OAuthService {
 
         // 打印 id_token 信息
         if let Some(ref idt) = id_token {
-            tracing::info!("  id_token (前50字符): {}...",
+            tracing::info!(
+                "  id_token (前50字符): {}...",
                 if idt.len() > 50 { &idt[..50] } else { idt }
             );
             tracing::info!("  id_token 长度: {}", idt.len());
@@ -260,7 +257,7 @@ impl OAuthService {
             let params = [
                 format!("client_id={}", client_id),
                 format!("refresh_token={}", refresh_token_owned),
-                format!("grant_type=refresh_token"),
+                "grant_type=refresh_token".to_string(),
                 format!("scope={}", scopes_str),
             ];
             let body = params.join("&");
@@ -313,9 +310,7 @@ impl OAuthService {
                 // 实际上 Microsoft 应该总是返回新的 refresh_token
                 "".to_string()
             });
-        let expires_in = token_json["expires_in"]
-            .as_u64()
-            .unwrap_or(3600) as i64;
+        let expires_in = token_json["expires_in"].as_u64().unwrap_or(3600) as i64;
         let expires_at = Utc::now().timestamp() + expires_in;
 
         // 如果新的 refresh_token 为空，使用旧的

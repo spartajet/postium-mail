@@ -358,7 +358,7 @@ fn extract_attachments(message: &mail_parser::Message<'_>) -> Vec<EmailAttachmen
                         format!("{}/{}", ct.ctype(), subtype)
                     })
                     .unwrap_or_else(|| "application/octet-stream".to_string());
-                format!("attachment.{}", content_type.split('/').last().unwrap_or("bin"))
+                format!("attachment.{}", content_type.split('/').next_back().unwrap_or("bin"))
             });
 
         let content_type = part.content_type()
