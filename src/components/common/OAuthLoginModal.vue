@@ -1,4 +1,4 @@
-<script setup lang="ts">
+ode<script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
