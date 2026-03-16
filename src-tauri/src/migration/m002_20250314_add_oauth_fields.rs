@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sea_orm::{ConnectionTrait, DbConn, Statement};
+use sea_orm::{ConnectionTrait, DbConn, Statement, DbBackend};
 
 /// 添加 OAuth 相关字段到 accounts 表
 pub async fn migrate_add_oauth_fields(db: &DbConn) -> Result<()> {
@@ -9,10 +9,7 @@ pub async fn migrate_add_oauth_fields(db: &DbConn) -> Result<()> {
     "#;
 
     let result = db
-        .query_one(Statement::from_string(
-            db.get_database_backend(),
-            check_sql.to_string(),
-        ))
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_sql))
         .await
         .map_err(|e| anyhow::anyhow!("检查列失败: {}", e))?;
 
@@ -34,10 +31,7 @@ pub async fn migrate_add_oauth_fields(db: &DbConn) -> Result<()> {
                 ALTER TABLE accounts ADD COLUMN oauth_expires_at INTEGER;
             "#;
 
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                alter_sql.to_string(),
-            ))
+            db.execute_unprepared(alter_sql)
             .await
             .map_err(|e| anyhow::anyhow!("添加 OAuth 字段失败: {}", e))?;
 

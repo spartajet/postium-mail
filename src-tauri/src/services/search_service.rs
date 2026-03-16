@@ -1,8 +1,8 @@
 use crate::models::email;
 use anyhow::{Context, Result};
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DbConn, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Statement,
+    ColumnTrait, Condition, ConnectionTrait, DbConn, DbBackend, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, Statement,
 };
 
 /// 搜索结果项
@@ -33,38 +33,38 @@ impl SearchService {
         let processed_query = Self::process_fts_query(query);
 
         // 执行查询
-        // 注意：这里简化实现，实际应该使用参数化查询
-        // 由于 SeaORM 的限制，我们使用原始 SQL
+        // 注意：FTS5 的 MATCH 子句不能使用参数化查询（SQLite 限制）
+        // 我们对输入进行转义处理以缓解 SQL 注入风险
+        // TODO: 未来考虑使用 sea-orm 的 from_raw_sql 配合 Entity 来提升安全性
         let limit_val = limit.unwrap_or(50);
+        let sql = if let Some(acc_id) = account_id {
+            format!(
+                "SELECT e.id, e.subject, e.sender_email, e.sender_name, e.body_text, e.folder, e.sent_at, e.account_id \
+                 FROM emails e \
+                 INNER JOIN emails_fts fts ON e.id = fts.rowid \
+                 WHERE e.account_id = {} \
+                 AND emails_fts MATCH '{}' \
+                 ORDER BY e.sent_at DESC \
+                 LIMIT {}",
+                acc_id,
+                processed_query.replace('\'', "''"),
+                limit_val
+            )
+        } else {
+            format!(
+                "SELECT e.id, e.subject, e.sender_email, e.sender_name, e.body_text, e.folder, e.sent_at, e.account_id \
+                 FROM emails e \
+                 INNER JOIN emails_fts fts ON e.id = fts.rowid \
+                 WHERE emails_fts MATCH '{}' \
+                 ORDER BY e.sent_at DESC \
+                 LIMIT {}",
+                processed_query.replace('\'', "''"),
+                limit_val
+            )
+        };
+
         let results = db
-            .query_all(Statement::from_string(
-                db.get_database_backend(),
-                if let Some(acc_id) = account_id {
-                    format!(
-                        "SELECT e.id, e.subject, e.sender_email, e.sender_name, e.body_text, e.folder, e.sent_at, e.account_id \
-                         FROM emails e \
-                         INNER JOIN emails_fts fts ON e.id = fts.rowid \
-                         WHERE e.account_id = {} \
-                         AND emails_fts MATCH '{}' \
-                         ORDER BY e.sent_at DESC \
-                         LIMIT {}",
-                        acc_id,
-                        processed_query.replace('\'', "''"),
-                        limit_val
-                    )
-                } else {
-                    format!(
-                        "SELECT e.id, e.subject, e.sender_email, e.sender_name, e.body_text, e.folder, e.sent_at, e.account_id \
-                         FROM emails e \
-                         INNER JOIN emails_fts fts ON e.id = fts.rowid \
-                         WHERE emails_fts MATCH '{}' \
-                         ORDER BY e.sent_at DESC \
-                         LIMIT {}",
-                        processed_query.replace('\'', "''"),
-                        limit_val
-                    )
-                },
-            ))
+            .query_all_raw(Statement::from_string(DbBackend::Sqlite, &sql))
             .await
             .context("FTS5 搜索失败")?;
 

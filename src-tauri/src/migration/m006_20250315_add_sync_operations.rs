@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn};
+use sea_orm::{ConnectionTrait, DbConn};
 use anyhow::Result;
 
 /// 添加离线操作队列和邮件同步元数据表
@@ -26,10 +26,7 @@ async fn create_offline_operations_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
+    db.execute_unprepared(sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 offline_operations 表失败: {}", e))?;
 
@@ -40,10 +37,7 @@ async fn create_offline_operations_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_offline_operations_type ON offline_operations(operation_type);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
+    db.execute_unprepared(index_sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 offline_operations 索引失败: {}", e))?;
 
@@ -64,10 +58,7 @@ async fn create_email_sync_metadata_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
+    db.execute_unprepared(sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 email_sync_metadata 表失败: {}", e))?;
 
@@ -77,10 +68,7 @@ async fn create_email_sync_metadata_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_email_sync_metadata_body_fetched ON email_sync_metadata(body_fetched);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
+    db.execute_unprepared(index_sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 email_sync_metadata 索引失败: {}", e))?;
 

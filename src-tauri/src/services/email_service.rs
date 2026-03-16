@@ -222,13 +222,13 @@ pub async fn search(
 
     let stmt = if let Some(acc_id) = account_id {
         Statement::from_sql_and_values(
-            db.get_database_backend(),
+            DbBackend::Sqlite,
             sql,
             [query.into(), acc_id.into(), limit.into()],
         )
     } else {
         Statement::from_sql_and_values(
-            db.get_database_backend(),
+            DbBackend::Sqlite,
             sql,
             [query.into(), limit.into()],
         )
