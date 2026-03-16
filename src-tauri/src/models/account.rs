@@ -26,9 +26,9 @@ pub struct Model {
     pub created_at: i64,
     pub updated_at: i64,
     // OAuth 2.0 相关字段（仅保留非敏感字段）
-    pub auth_type: String,                   // 'password' | 'oauth2'
-    pub oauth_provider: Option<String>,      // 'microsoft' | 'google'
-    pub oauth_expires_at: Option<i64>,       // Unix 时间戳
+    pub auth_type: String,              // 'password' | 'oauth2'
+    pub oauth_provider: Option<String>, // 'microsoft' | 'google'
+    pub oauth_expires_at: Option<i64>,  // Unix 时间戳
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -110,7 +110,7 @@ pub struct CreateAccountRequest {
     pub name: String,
     pub email: String,
     pub provider: String,
-    pub password: String,  // 密码或 OAuth code
+    pub password: String, // 密码或 OAuth code
     pub imap_host: Option<String>,
     pub imap_port: Option<i32>,
     pub imap_ssl: Option<bool>,
@@ -119,11 +119,11 @@ pub struct CreateAccountRequest {
     pub smtp_ssl: Option<bool>,
     pub color: Option<String>,
     // OAuth 相关
-    pub auth_type: Option<String>,  // 'password' | 'oauth2'
-    pub oauth_provider: Option<String>,  // 'microsoft' | 'google'
-    pub oauth_token: Option<String>,  // access_token（仅 OAuth）
-    pub oauth_refresh_token: Option<String>,  // refresh_token（仅 OAuth）
-    pub oauth_expires_at: Option<i64>,  // token 过期时间（仅 OAuth）
+    pub auth_type: Option<String>,           // 'password' | 'oauth2'
+    pub oauth_provider: Option<String>,      // 'microsoft' | 'google'
+    pub oauth_token: Option<String>,         // access_token（仅 OAuth）
+    pub oauth_refresh_token: Option<String>, // refresh_token（仅 OAuth）
+    pub oauth_expires_at: Option<i64>,       // token 过期时间（仅 OAuth）
 }
 
 // 预设的服务商配置
