@@ -9,6 +9,8 @@ pub mod services;
 use anyhow::anyhow;
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -251,13 +253,18 @@ async fn exchange_oauth_code(
             // 从 id_token 中解析用户信息
             // id_token 是 JWT 格式，包含用户的 email 和 name
             // access_token 是不透明token，仅用于 SASL XOAUTH2 认证
-            let id_token = token.id_token
+            let id_token = token
+                .id_token
                 .as_ref()
                 .ok_or_else(|| "未获取到 id_token，请确保 openid scope 已启用".to_string())?;
-            let (email, display_name) = get_user_info_from_token(id_token)
-                .map_err(|e| e.to_string())?;
+            let (email, display_name) =
+                get_user_info_from_token(id_token).map_err(|e| e.to_string())?;
 
-            tracing::info!("从 token 解析用户信息: email={}, display_name={}", email, display_name);
+            tracing::info!(
+                "从 token 解析用户信息: email={}, display_name={}",
+                email,
+                display_name
+            );
 
             // 创建账号记录
             let db = db_state.clone_conn();
@@ -299,7 +306,10 @@ async fn exchange_oauth_code(
 fn get_user_info_from_token(access_token: &str) -> anyhow::Result<(String, String)> {
     tracing::info!("========== JWT Token 解析 ==========");
     tracing::info!("  token 长度: {}", access_token.len());
-    tracing::info!("  token 前100字符: {}", &access_token[..100.min(access_token.len())]);
+    tracing::info!(
+        "  token 前100字符: {}",
+        &access_token[..100.min(access_token.len())]
+    );
 
     // JWT 格式: header.payload.signature
     let parts: Vec<&str> = access_token.split('.').collect();
@@ -310,29 +320,36 @@ fn get_user_info_from_token(access_token: &str) -> anyhow::Result<(String, Strin
         for (i, part) in parts.iter().enumerate() {
             tracing::info!("  段{} 长度: {}", i, part.len());
         }
-        return Err(anyhow!("无效的 JWT token 格式，期望3段，实际{}段", parts.len()));
+        return Err(anyhow!(
+            "无效的 JWT token 格式，期望3段，实际{}段",
+            parts.len()
+        ));
     }
 
     // 解码 payload（第二部分）
-    let payload = parts.get(1).ok_or_else(|| anyhow!("JWT token 缺少 payload"))?;
+    let payload = parts
+        .get(1)
+        .ok_or_else(|| anyhow!("JWT token 缺少 payload"))?;
 
     // Base64URL 解码
     let payload_json = base64_url_decode(payload)?;
 
     // 解析 JSON
-    let claims: serde_json::Value = serde_json::from_str(&payload_json)
-        .map_err(|e| anyhow!("解析 JWT payload 失败: {}", e))?;
+    let claims: serde_json::Value =
+        serde_json::from_str(&payload_json).map_err(|e| anyhow!("解析 JWT payload 失败: {}", e))?;
 
     // 提取 email 和 name
     // Microsoft 使用 "upn" (User Principal Name) 或 "email" 或 "unique_name"
-    let email = claims.get("upn")
+    let email = claims
+        .get("upn")
         .or_else(|| claims.get("email"))
         .or_else(|| claims.get("unique_name"))
         .and_then(|v| v.as_str())
         .unwrap_or("unknown@example.com");
 
     // 提取显示名称
-    let name = claims.get("name")
+    let name = claims
+        .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| {
             // 如果没有 name，使用 email 的用户名部分
@@ -355,17 +372,14 @@ fn base64_url_decode(input: &str) -> anyhow::Result<String> {
     };
 
     // 将 Base64URL 字符转换为标准 Base64
-    let input_standard = input_padded
-        .replace('-', "+")
-        .replace('_', "/");
+    let input_standard = input_padded.replace('-', "+").replace('_', "/");
 
     // 解码
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&input_standard)
         .map_err(|e| anyhow!("Base64 解码失败: {}", e))?;
 
-    String::from_utf8(bytes)
-        .map_err(|e| anyhow!("UTF-8 转换失败: {}", e))
+    String::from_utf8(bytes).map_err(|e| anyhow!("UTF-8 转换失败: {}", e))
 }
 
 #[tauri::command]
@@ -760,6 +774,67 @@ pub fn run() {
         // Keyring 插件（系统原生密钥链）
         .plugin(tauri_plugin_keyring::init())
         .setup(|app| {
+            // ========== 系统托盘初始化 ==========
+            // 创建托盘菜单项
+            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+
+            // 创建托盘菜单
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+            // 创建系统托盘
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.unminimize();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // 左键单击托盘图标显示窗口
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.unminimize();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ========== 窗口关闭事件处理（隐藏到托盘而非退出） ==========
+            if let Some(window) = app.get_webview_window("main") {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // 阻止默认关闭行为
+                        api.prevent_close();
+                        // 隐藏窗口到托盘
+                        let _ = window_clone.hide();
+                        tracing::info!("窗口已隐藏到系统托盘");
+                    }
+                });
+            }
+
+            tracing::info!("系统托盘初始化完成");
+
+            // ========== Deep Link 事件处理器 ==========
             // 注册 Deep Link 事件处理器
             let app_handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
