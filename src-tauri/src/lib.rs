@@ -770,6 +770,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_deep_link::init())
         // Keyring 插件（系统原生密钥链）
         .plugin(tauri_plugin_keyring::init())
