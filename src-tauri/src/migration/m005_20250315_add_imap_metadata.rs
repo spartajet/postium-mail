@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn};
+use sea_orm::{ConnectionTrait, DbConn, DbBackend, Statement};
 use anyhow::Result;
 
 /// 为 folders 表添加 IMAP 元数据字段
@@ -9,10 +9,7 @@ pub async fn add_imap_metadata(db: &DbConn) -> Result<()> {
     "#;
 
     let result = db
-        .query_one(Statement::from_string(
-            db.get_database_backend(),
-            check_sql.to_string(),
-        ))
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_sql))
         .await
         .map_err(|e| anyhow::anyhow!("检查列失败: {}", e))?;
 
@@ -31,10 +28,7 @@ pub async fn add_imap_metadata(db: &DbConn) -> Result<()> {
                 ALTER TABLE folders ADD COLUMN highest_modseq INTEGER;
             "#;
 
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                sql.to_string(),
-            ))
+            db.execute_unprepared(sql)
             .await
             .map_err(|e| anyhow::anyhow!("添加 IMAP 元数据字段失败: {}", e))?;
 

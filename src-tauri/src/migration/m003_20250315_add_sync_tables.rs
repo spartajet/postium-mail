@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, Statement, DbConn};
+use sea_orm::{ConnectionTrait, DbConn};
 use anyhow::Result;
 
 /// 添加同步相关表结构
@@ -33,10 +33,7 @@ async fn create_folders_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
+    db.execute_unprepared(sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 folders 表失败: {}", e))?;
 
@@ -47,10 +44,7 @@ async fn create_folders_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
+    db.execute_unprepared(index_sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 folders 索引失败: {}", e))?;
 
@@ -79,10 +73,7 @@ async fn create_sync_states_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
+    db.execute_unprepared(sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 sync_states 表失败: {}", e))?;
 
@@ -93,10 +84,7 @@ async fn create_sync_states_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_sync_states_last_sync ON sync_states(last_sync_at);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
+    db.execute_unprepared(index_sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 sync_states 索引失败: {}", e))?;
 
@@ -121,10 +109,7 @@ async fn create_sync_errors_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
+    db.execute_unprepared(sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 sync_errors 表失败: {}", e))?;
 
@@ -136,10 +121,7 @@ async fn create_sync_errors_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_sync_errors_created ON sync_errors(created_at);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
+    db.execute_unprepared(index_sql)
     .await
     .map_err(|e| anyhow::anyhow!("创建 sync_errors 索引失败: {}", e))?;
 

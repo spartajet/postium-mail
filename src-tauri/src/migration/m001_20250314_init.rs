@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sea_orm::{ConnectionTrait, DbConn, Statement};
+use sea_orm::{ConnectionTrait, DbConn};
 
 /// 初始化数据库表结构
 pub async fn initialize(db: &DbConn) -> Result<()> {
@@ -41,12 +41,9 @@ async fn create_accounts_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 accounts 表失败: {}", e))?;
+    db.execute_unprepared(sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 accounts 表失败: {}", e))?;
 
     // 创建索引
     let index_sql = r#"
@@ -54,12 +51,9 @@ async fn create_accounts_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_accounts_provider ON accounts(provider);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 accounts 索引失败: {}", e))?;
+    db.execute_unprepared(index_sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 accounts 索引失败: {}", e))?;
 
     Ok(())
 }
@@ -92,12 +86,9 @@ async fn create_emails_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 emails 表失败: {}", e))?;
+    db.execute_unprepared(sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 emails 表失败: {}", e))?;
 
     // 创建索引
     let index_sql = r#"
@@ -107,12 +98,9 @@ async fn create_emails_table(db: &DbConn) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_emails_is_read ON emails(is_read);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 emails 索引失败: {}", e))?;
+    db.execute_unprepared(index_sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 emails 索引失败: {}", e))?;
 
     Ok(())
 }
@@ -132,24 +120,18 @@ async fn create_attachments_table(db: &DbConn) -> Result<()> {
         )
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 attachments 表失败: {}", e))?;
+    db.execute_unprepared(sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 attachments 表失败: {}", e))?;
 
     // 创建索引
     let index_sql = r#"
         CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        index_sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 attachments 索引失败: {}", e))?;
+    db.execute_unprepared(index_sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 attachments 索引失败: {}", e))?;
 
     Ok(())
 }
@@ -166,12 +148,9 @@ async fn create_fts5_table(db: &DbConn) -> Result<()> {
         );
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 FTS5 表失败: {}", e))?;
+    db.execute_unprepared(sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 FTS5 表失败: {}", e))?;
 
     // 创建触发器自动同步数据
     let triggers = r#"
@@ -193,12 +172,9 @@ async fn create_fts5_table(db: &DbConn) -> Result<()> {
         END;
     "#;
 
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        triggers.to_string(),
-    ))
-    .await
-    .map_err(|e| anyhow::anyhow!("创建 FTS5 触发器失败: {}", e))?;
+    db.execute_unprepared(triggers)
+        .await
+        .map_err(|e| anyhow::anyhow!("创建 FTS5 触发器失败: {}", e))?;
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sea_orm::{ConnectionTrait, DbConn, Statement};
+use sea_orm::{ConnectionTrait, DbConn, Statement, DbBackend};
 
 /// 删除数据库中的敏感字段（密码和 OAuth token）
 /// 这些敏感数据现在只存储在 Stronghold 中
@@ -13,10 +13,7 @@ pub async fn migrate_remove_sensitive_fields(db: &DbConn) -> Result<()> {
     "#;
 
     let result = db
-        .query_one(Statement::from_string(
-            db.get_database_backend(),
-            check_sql.to_string(),
-        ))
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_sql))
         .await
         .map_err(|e| anyhow::anyhow!("检查列失败: {}", e))?;
 
@@ -32,8 +29,7 @@ pub async fn migrate_remove_sensitive_fields(db: &DbConn) -> Result<()> {
             // 步骤：创建新表 → 复制数据 → 删除旧表 → 重命名新表 → 重建索引
 
             // 1. 创建新表（不包含敏感字段）
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
+            db.execute_unprepared(
                 r#"
                     CREATE TABLE accounts_new (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,14 +51,13 @@ pub async fn migrate_remove_sensitive_fields(db: &DbConn) -> Result<()> {
                         oauth_provider TEXT,
                         oauth_expires_at INTEGER
                     )
-                "#.to_string(),
-            ))
+                "#,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("创建新表失败: {}", e))?;
 
             // 2. 复制数据（排除敏感字段）
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
+            db.execute_unprepared(
                 r#"
                     INSERT INTO accounts_new
                     SELECT id, name, email, provider,
@@ -72,35 +67,28 @@ pub async fn migrate_remove_sensitive_fields(db: &DbConn) -> Result<()> {
                            created_at, updated_at,
                            auth_type, oauth_provider, oauth_expires_at
                     FROM accounts
-                "#.to_string(),
-            ))
+                "#,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("复制数据失败: {}", e))?;
 
             // 3. 删除旧表
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                "DROP TABLE accounts".to_string(),
-            ))
+            db.execute_unprepared("DROP TABLE accounts")
             .await
             .map_err(|e| anyhow::anyhow!("删除旧表失败: {}", e))?;
 
             // 4. 重命名新表
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
-                "ALTER TABLE accounts_new RENAME TO accounts".to_string(),
-            ))
+            db.execute_unprepared("ALTER TABLE accounts_new RENAME TO accounts")
             .await
             .map_err(|e| anyhow::anyhow!("重命名表失败: {}", e))?;
 
             // 5. 重建索引
-            db.execute(Statement::from_string(
-                db.get_database_backend(),
+            db.execute_unprepared(
                 r#"
                     CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
                     CREATE INDEX IF NOT EXISTS idx_accounts_provider ON accounts(provider);
-                "#.to_string(),
-            ))
+                "#,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("创建索引失败: {}", e))?;
 

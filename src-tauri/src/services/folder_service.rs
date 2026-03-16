@@ -12,7 +12,7 @@ use crate::models::{folder, FolderEntity};
 fn decode_imap_utf7(imap_name: &str) -> String {
     // 如果没有 & 符号，说明不是 UTF-7 编码
     if !imap_name.contains('&') {
-        return imap_name.to_string();
+        return String::from(imap_name);
     }
 
     // 常见的中文邮箱文件夹名称映射（163、QQ 邮箱等）
@@ -34,12 +34,12 @@ fn decode_imap_utf7(imap_name: &str) -> String {
 
     for (encoded, decoded) in common_mappings.iter() {
         if imap_name == *encoded || imap_name.ends_with(encoded) {
-            return decoded.to_string();
+            return String::from(*decoded);
         }
     }
 
     // 如果不在映射表中，返回原始名称
-    imap_name.to_string()
+    String::from(imap_name)
 }
 
 /// 映射 IMAP 文件夹名称到标准名称
@@ -59,7 +59,7 @@ pub fn map_folder_name(imap_name: &str) -> String {
         "SPAM" | "JUNK" | "JUNK E-MAIL" | "垃圾邮件" | "POSTINI" => "spam".to_string(),
         "ARCHIVE" | "ARCHIVES" | "归档" | "ALL MAIL" => "archive".to_string(),
         "STARRED" | "星标邮件" | "已加星标" => "starred".to_string(),
-        _ => imap_name.to_string(),  // 使用原始 IMAP 名称作为标准名称
+        _ => String::from(imap_name),  // 使用原始 IMAP 名称作为标准名称
     }
 }
 
@@ -119,8 +119,8 @@ pub async fn find_or_create(
     let now = chrono::Utc::now().timestamp();
     let new_folder = folder::ActiveModel {
         account_id: Set(account_id),
-        name: Set(name.to_string()),
-        imap_name: Set(imap_name.to_string()),
+        name: Set(String::from(name)),
+        imap_name: Set(String::from(imap_name)),
         synced_at: Set(Some(now)),
         ..Default::default()
     };
@@ -161,8 +161,8 @@ pub async fn find_or_create_with_metadata(
     let now = chrono::Utc::now().timestamp();
     let new_folder = folder::ActiveModel {
         account_id: Set(account_id),
-        name: Set(name.to_string()),
-        imap_name: Set(imap_name.to_string()),
+        name: Set(String::from(name)),
+        imap_name: Set(String::from(imap_name)),
         uidvalidity: Set(Some(uidvalidity)),
         uidnext: Set(Some(uidnext)),
         highest_modseq: Set(highest_modseq),
