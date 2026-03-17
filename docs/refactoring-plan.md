@@ -259,6 +259,15 @@ async fn incremental_sync_folder(...) {
 | 企业邮箱自动发现 | 无 | Autodiscover/MX检测 | 2 天 |
 | 企业通讯录集成 | 未实现 | Graph API 支持 | 3 天 |
 | 自定义企业服务器配置 | 未实现 | 完整UI配置 | 2 天 |
+| 邮件操作队列 | 未实现 | 完整实现 | 3 天 |
+| 多客户端同步 | 未实现 | 冲突检测+解决 | 3 天 |
+| 附件下载管理 | 未实现 | 断点续传+缓存 | 2 天 |
+| 邮件全文搜索 | 部分 | FTS5索引+混合搜索 | 3 天 |
+| 邮件发送流程 | 未实现 | SMTP发送+离线队列 | 3 天 |
+| 草稿保存机制 | 未实现 | 自动保存+同步 | 2 天 |
+| 性能优化框架 | 未实现 | 监控+优化策略 | 3 天 |
+| 安全审计日志 | 未实现 | 安全事件追踪 | 2 天 |
+| 日志监控系统 | 未实现 | 结构化日志+告警 | 2 天 |
 
 ---
 
@@ -308,6 +317,9 @@ Week 5-6: 认证与同步层重构（含企业认证）
 Week 7-8: 通知与调度层实现
 Week 9-10: 企业特性与测试优化
 Week 11-12: 企业高级特性与集成测试
+Week 13-14: 邮件操作流与多客户端同步
+Week 15-16: 邮件搜索、发送与草稿功能
+Week 17-18: 性能优化、安全与日志监控
 ```
 
 ### 阶段划分
@@ -1526,7 +1538,1232 @@ CREATE INDEX idx_refresh_state_next ON refresh_state(next_refresh_at);
 
 ---
 
-### 阶段 4: 同步层重构 (Week 7-8)
+### 任务 3.6: 操作管理器实现
+
+**目标**：实现邮件操作的统一管理
+
+**实现文件**：`src-tauri/src/operations/operation_manager.rs`
+
+**关键功能**：
+
+```rust
+/// 操作类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationType {
+    /// 标记已读/未读
+    MarkRead { email_id: i32, is_read: bool },
+    /// 星标/取消星标
+    ToggleFlag { email_id: i32, flagged: bool },
+    /// 移动邮件
+    MoveEmail { email_id: i32, from_folder: String, to_folder: String },
+    /// 删除邮件（移到垃圾箱）
+    DeleteEmail { email_id: i32 },
+    /// 永久删除
+    PermanentDelete { email_id: i32 },
+    /// 恢复邮件
+    RestoreEmail { email_id: i32, to_folder: String },
+}
+
+/// 操作状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OperationStatus {
+    /// 待处理
+    Pending,
+    /// 处理中
+    Processing,
+    /// 已完成
+    Completed,
+    /// 失败
+    Failed { error: String },
+    /// 待重试
+    RetryPending { retry_count: u32 },
+}
+
+/// 操作管理器
+pub struct OperationManager {
+    db: Arc<DbConn>,
+    queue: Arc<OperationQueue>,
+    sync_engine: Arc<SyncEngine>,
+}
+
+impl OperationManager {
+    /// 执行操作（本地优先）
+    pub async fn execute(&self, operation: OperationType) -> Result<String>;
+    
+    /// 获取操作状态
+    pub async fn get_status(&self, operation_id: &str) -> Result<OperationStatus>;
+    
+    /// 取消操作（如果可能）
+    pub async fn cancel(&self, operation_id: &str) -> Result<()>;
+    
+    /// 重试失败的操作
+    pub async fn retry(&self, operation_id: &str) -> Result<()>;
+}
+```
+
+**验收标准**：
++- [ ] 操作类型定义完整
++- [ ] 本地优先更新机制
++- [ ] 操作队列管理
++- [ ] 操作状态追踪
++- [ ] 失败重试机制
+
+**预计工时**：2 天
+
+---
+
+### 任务 3.7: 操作队列实现
+
+**目标**：实现离线操作队列和同步机制
+
+**实现文件**：`src-tauri/src/operations/operation_queue.rs`
+
+**数据库设计**：
+```sql
+-- 操作队列表
+CREATE TABLE operation_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id TEXT UNIQUE NOT NULL,
+    account_id INTEGER NOT NULL,
+    operation_type TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id INTEGER NOT NULL,
+    payload TEXT NOT NULL,  -- JSON
+    status TEXT NOT NULL,
+    retry_count INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    synced_at INTEGER,
+    error_message TEXT,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 操作历史表
+CREATE TABLE operation_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    operation_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    before_state TEXT,  -- JSON
+    after_state TEXT,   -- JSON
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+```
+
+**验收标准**：
++- [ ] 操作持久化存储
++- [ ] 离线队列支持
++- [ ] 按时间排序处理
++- [ ] 操作去重优化
+
+**预计工时**：1 天
+
+---
+
+### 任务 3.8: 冲突解决器实现
+
+**目标**：实现多客户端操作冲突的检测与解决
+
+**实现文件**：`src-tauri/src/operations/conflict_resolver.rs`
+
+**关键功能**：
+
+```rust
+/// 冲突类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConflictType {
+    /// 标志冲突（已读/未读、星标状态不一致）
+    FlagConflict {
+        local_flags: Vec<String>,
+        server_flags: Vec<String>,
+    },
+    /// 位置冲突（邮件在不同文件夹）
+    LocationConflict {
+        local_folder: String,
+        server_folder: String,
+    },
+    /// 删除冲突（本地存在，服务器已删除）
+    DeleteConflict {
+        local_exists: bool,
+        server_exists: bool,
+    },
+}
+
+/// 冲突解决策略
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResolutionStrategy {
+    /// 最后写入胜出（采用服务器状态）
+    LastWriteWins,
+    /// 本地优先（保留本地状态）
+    LocalWins,
+    /// 服务器优先（采用服务器状态）
+    ServerWins,
+    /// 合并策略（尝试合并变更）
+    Merge,
+    /// 用户决定（提示用户选择）
+    UserDecision,
+}
+
+/// 冲突解决器
+pub struct ConflictResolver {
+    config: ConflictResolutionConfig,
+}
+
+impl ConflictResolver {
+    /// 检测冲突
+    pub async fn detect_conflicts(
+        &self,
+        local_state: &EmailState,
+        server_state: &EmailState,
+    ) -> Vec<ConflictType>;
+    
+    /// 解决冲突
+    pub async fn resolve(
+        &self,
+        conflict: &ConflictType,
+        strategy: ResolutionStrategy,
+    ) -> Result<ResolvedState>;
+    
+    /// 自动选择解决策略
+    pub fn select_strategy(&self, conflict: &ConflictType) -> ResolutionStrategy {
+        match conflict {
+            ConflictType::FlagConflict { .. } => ResolutionStrategy::ServerWins,
+            ConflictType::LocationConflict { .. } => ResolutionStrategy::LastWriteWins,
+            ConflictType::DeleteConflict { server_exists, .. } => {
+                if !server_exists {
+                    ResolutionStrategy::ServerWins
+                } else {
+                    ResolutionStrategy::LocalWins
+                }
+            }
+        }
+    }
+}
+
+/// 冲突解决配置
+#[derive(Debug, Clone)]
+pub struct ConflictResolutionConfig {
+    /// 默认解决策略
+    pub default_strategy: ResolutionStrategy,
+    /// 是否记录冲突日志
+    pub log_conflicts: bool,
+    /// 是否通知用户
+    pub notify_user: bool,
+}
+```
+
+**验收标准**：
++- [ ] 冲突类型检测
++- [ ] 多种解决策略
++- [ ] 自动策略选择
++- [ ] 冲突日志记录
++- [ ] 单元测试覆盖
+
+**预计工时**：2 天
+
+---
+
+### 任务 3.9: 附件下载管理器实现
+
+**目标**：实现附件下载、缓存和断点续传
+
+**实现文件**：`src-tauri/src/operations/attachment_manager.rs`
+
+**关键功能**：
+
+```rust
+/// 附件下载状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DownloadStatus {
+    /// 未下载
+    NotDownloaded,
+    /// 下载中
+    Downloading { progress: u8 },
+    /// 已暂停
+    Paused { progress: u8 },
+    /// 下载完成
+    Completed { local_path: String },
+    /// 下载失败
+    Failed { error: String },
+    /// 缓存过期
+    Expired,
+}
+
+/// 附件下载管理器
+pub struct AttachmentManager {
+    db: Arc<DbConn>,
+    cache_dir: PathBuf,
+    download_queue: Arc<RwLock<Vec<DownloadTask>>>,
+}
+
+impl AttachmentManager {
+    /// 下载附件
+    pub async fn download(
+        &self,
+        email_id: i32,
+        part_id: &str,
+        filename: &str,
+    ) -> Result<String>;
+    
+    /// 暂停下载
+    pub async fn pause(&self, download_id: &str) -> Result<()>;
+    
+    /// 恢复下载
+    pub async fn resume(&self, download_id: &str) -> Result<()>;
+    
+    /// 获取下载进度
+    pub async fn get_progress(&self, download_id: &str) -> Result<DownloadStatus>;
+    
+    /// 检查缓存
+    pub async fn check_cache(
+        &self,
+        email_id: i32,
+        part_id: &str,
+    ) -> Option<String>;
+    
+    /// 清理过期缓存
+    pub async fn cleanup_cache(&self, max_age_days: u64) -> Result<u64>;
+    
+    /// 分块下载（支持断点续传）
+    async fn download_chunked(
+        &self,
+        task: &mut DownloadTask,
+        imap: &mut ImapSession,
+    ) -> Result<()>;
+}
+
+/// 下载任务
+#[derive(Debug, Clone)]
+pub struct DownloadTask {
+    pub id: String,
+    pub email_id: i32,
+    pub part_id: String,
+    pub filename: String,
+    pub total_size: u64,
+    pub downloaded_size: u64,
+    pub status: DownloadStatus,
+    pub temp_path: PathBuf,
+    pub final_path: PathBuf,
+}
+```
+
+**数据库设计**：
+```sql
+-- 附件下载记录表
+CREATE TABLE attachment_downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id INTEGER NOT NULL,
+    part_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    total_size INTEGER,
+    downloaded_size INTEGER DEFAULT 0,
+    status TEXT NOT NULL,
+    local_path TEXT,
+    temp_path TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(email_id, part_id),
+    FOREIGN KEY (email_id) REFERENCES emails(id)
+);
+
+-- 附件缓存表
+CREATE TABLE attachment_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_id INTEGER NOT NULL,
+    part_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    local_path TEXT NOT NULL,
+    size INTEGER,
+    mime_type TEXT,
+    downloaded_at INTEGER NOT NULL,
+    last_accessed_at INTEGER NOT NULL,
+    UNIQUE(email_id, part_id),
+    FOREIGN KEY (email_id) REFERENCES emails(id)
+);
+```
+
+**验收标准**：
++- [ ] 附件下载功能
++- [ ] 下载进度追踪
++- [ ] 断点续传支持
++- [ ] 本地缓存管理
++- [ ] 缓存清理机制
++- [ ] 下载暂停/恢复
+
+**预计工时**：2 天
+
+---
+
+### 任务 3.10: 变更检测器实现
+
+**目标**：检测服务器端的邮件变更
+
+**实现文件**：`src-tauri/src/sync/change_detector.rs`
+
+**关键功能**：
+
+```rust
+/// 变更类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChangeType {
+    /// 新邮件
+    NewEmail { uid: u32 },
+    /// 标志变更
+    FlagsChanged { uid: u32, old_flags: Vec<String>, new_flags: Vec<String> },
+    /// 邮件移动
+    EmailMoved { uid: u32, from_folder: String, to_folder: String },
+    /// 邮件删除
+    EmailDeleted { uid: u32 },
+    /// 文件夹变更
+    FolderChanged { folder: String, change: FolderChange },
+}
+
+/// 变更检测器
+pub struct ChangeDetector {
+    db: Arc<DbConn>,
+}
+
+impl ChangeDetector {
+    /// 检测变更
+    pub async fn detect_changes(
+        &self,
+        account_id: i32,
+        folder: &str,
+        last_state: &SyncState,
+        current_state: &FolderState,
+    ) -> Result<Vec<ChangeType>>;
+    
+    /// 检测标志变更
+    pub async fn detect_flag_changes(
+        &self,
+        local_email: &Email,
+        server_flags: &[Flag],
+    ) -> Option<ChangeType>;
+    
+    /// 检测删除
+    pub async fn detect_deletions(
+        &self,
+        account_id: i32,
+        folder: &str,
+        server_uids: &[u32],
+    ) -> Result<Vec<u32>>;
+}
+```
+
+**验收标准**：
++- [ ] 变更类型检测
++- [ ] 增量变更检测
++- [ ] 删除检测
++- [ ] 标志变更检测
+
+**预计工时**：1 天
+
+---
+
+### 阶段 3.5: 邮件搜索功能 (Week 15)
+
+#### 任务 3.11: 全文搜索引擎实现
+
+**目标**：实现基于 FTS5 的邮件全文搜索功能
+
+**实现文件**：`src-tauri/src/search/search_engine.rs`
+
+**关键功能**：
+
+```rust
+/// 搜索类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SearchType {
+    /// 全文搜索
+    FullText,
+    /// 字段搜索
+    Field { field: SearchField, value: String },
+    /// 日期范围搜索
+    DateRange { start: i64, end: i64 },
+    /// 组合搜索
+    Combined { queries: Vec<SearchQuery>, operator: LogicalOperator },
+}
+
+/// 搜索字段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SearchField {
+    From,
+    To,
+    Cc,
+    Subject,
+    Body,
+    AttachmentName,
+}
+
+/// 搜索服务
+pub struct SearchService {
+    db: Arc<DbConn>,
+    index_manager: Arc<IndexManager>,
+    cache: Arc<SearchCache>,
+}
+
+impl SearchService {
+    /// 执行搜索
+    pub async fn search(
+        &self,
+        account_id: Option<i32>,
+        query: &str,
+        filters: SearchFilters,
+        page: u32,
+        page_size: u32,
+    ) -> Result<SearchResult>;
+    
+    /// 索引邮件
+    pub async fn index_email(&self, email: &Email) -> Result<()>;
+    
+    /// 删除索引
+    pub async fn remove_index(&self, email_id: i32) -> Result<()>;
+    
+    /// 重建索引
+    pub async fn rebuild_index(&self, account_id: i32) -> Result<()>;
+}
+
+/// 搜索结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub items: Vec<SearchItem>,
+    pub total: u32,
+    pub page: u32,
+    pub page_size: u32,
+    pub has_more: bool,
+    pub query_time_ms: u64,
+}
+
+/// 搜索结果项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchItem {
+    pub email_id: i32,
+    pub subject: String,
+    pub sender: String,
+    pub date: i64,
+    pub snippet: String,
+    pub highlights: Vec<Highlight>,
+    pub folder: String,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub has_attachment: bool,
+}
+```
+
+**数据库设计**：
+```sql
+-- FTS5 全文索引虚拟表
+CREATE VIRTUAL TABLE emails_fts USING fts5(
+    email_id UNINDEXED,
+    subject,
+    sender,
+    recipients,
+    body_text,
+    attachment_names,
+    content='emails',
+    content_rowid='id'
+);
+
+-- 搜索历史
+CREATE TABLE search_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    query TEXT NOT NULL,
+    result_count INTEGER,
+    searched_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 索引状态
+CREATE TABLE index_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    last_indexed_uid INTEGER,
+    last_indexed_at INTEGER,
+    total_indexed INTEGER DEFAULT 0,
+    index_status TEXT DEFAULT 'idle',
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+```
+
+**验收标准**：
+- [ ] FTS5 全文索引实现
+- [ ] 多字段搜索支持
+- [ ] 搜索结果高亮
+- [ ] 搜索历史记录
+- [ ] 增量索引更新
+- [ ] 索引重建功能
+- [ ] 搜索性能优化（< 100ms）
+- [ ] 单元测试覆盖
+
+**预计工时**：3 天
+
+---
+
+#### 任务 3.12: 搜索查询解析器实现
+
+**目标**：实现类似 Gmail 的搜索语法解析
+
+**实现文件**：`src-tauri/src/search/query_parser.rs`
+
+**支持的搜索语法**：
+```
+基本搜索:
+  keyword                    # 搜索所有字段
+  
+字段搜索:
+  from:john@example.com      # 发件人
+  to:mary@example.com        # 收件人
+  subject:project            # 主题
+  has:attachment             # 有附件
+  is:read / is:unread        # 已读/未读
+  is:starred                 # 星标
+  
+日期搜索:
+  after:2024-01-01           # 日期之后
+  before:2024-12-31          # 日期之前
+  
+组合搜索:
+  from:john subject:project  # AND 组合
+  from:john OR from:mary     # OR 组合
+  -project                   # 排除关键词
+```
+
+**验收标准**：
+- [ ] 搜索语法解析
+- [ ] 语法错误提示
+- [ ] 搜索建议
+
+**预计工时**：1 天
+
+---
+
+### 阶段 3.6: 邮件发送功能 (Week 15-16)
+
+#### 任务 3.13: SMTP 发送服务实现
+
+**目标**：实现完整的邮件发送流程
+
+**实现文件**：`src-tauri/src/sending/smtp_sender.rs`
+
+**关键功能**：
+
+```rust
+/// 发送状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SendStatus {
+    /// 草稿
+    Draft,
+    /// 排队中
+    Queued,
+    /// 发送中
+    Sending { progress: u8 },
+    /// 已发送
+    Sent { sent_at: i64 },
+    /// 发送失败
+    Failed { error: String, retry_count: u32 },
+}
+
+/// SMTP 发送器
+pub struct SmtpSender {
+    config: SmtpConfig,
+}
+
+impl SmtpSender {
+    /// 发送邮件
+    pub async fn send(
+        &self,
+        message: &MimeMessage,
+    ) -> Result<SendResult>;
+    
+    /// 连接服务器
+    async fn connect(&self) -> Result<SmtpConnection>;
+    
+    /// 认证
+    async fn authenticate(
+        &self,
+        conn: &mut SmtpConnection,
+        credentials: &Credentials,
+    ) -> Result<()>;
+    
+    /// 发送 MIME 内容
+    async fn send_data(
+        &self,
+        conn: &mut SmtpConnection,
+        message: &MimeMessage,
+    ) -> Result<()>;
+}
+
+/// MIME 消息构建器
+pub struct MimeBuilder {
+    headers: HashMap<String, String>,
+    body_text: Option<String>,
+    body_html: Option<String>,
+    attachments: Vec<Attachment>,
+}
+
+impl MimeBuilder {
+    /// 设置主题
+    pub fn subject(mut self, subject: &str) -> Self;
+    
+    /// 设置发件人
+    pub fn from(mut self, address: &str) -> Self;
+    
+    /// 设置收件人
+    pub fn to(mut self, addresses: &[String]) -> Self;
+    
+    /// 添加附件
+    pub fn attachment(mut self, path: &Path) -> Result<Self>;
+    
+    /// 构建 MIME 消息
+    pub fn build(self) -> Result<MimeMessage>;
+}
+```
+
+**验收标准**：
+- [ ] SMTP 连接与认证
+- [ ] TLS/SSL 支持
+- [ ] MIME 消息构建
+- [ ] 附件编码
+- [ ] 发送状态追踪
+- [ ] 错误处理
+
+**预计工时**：2 天
+
+---
+
+#### 任务 3.14: 发送队列实现
+
+**目标**：实现离线发送队列和重试机制
+
+**实现文件**：`src-tauri/src/sending/send_queue.rs`
+
+**数据库设计**：
+```sql
+-- 发送队列
+CREATE TABLE send_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    message_id TEXT UNIQUE NOT NULL,
+    recipients TEXT NOT NULL,
+    subject TEXT,
+    mime_content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    retry_count INTEGER DEFAULT 0,
+    next_retry_at INTEGER,
+    created_at INTEGER NOT NULL,
+    sent_at INTEGER,
+    error_message TEXT,
+    error_code TEXT,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 发送历史
+CREATE TABLE send_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    message_id TEXT NOT NULL,
+    recipients TEXT NOT NULL,
+    subject TEXT,
+    status TEXT NOT NULL,
+    sent_at INTEGER,
+    duration_ms INTEGER,
+    smtp_response TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+```
+
+**验收标准**：
+- [ ] 发送队列管理
+- [ ] 离线发送支持
+- [ ] 失败重试机制
+- [ ] 发送历史记录
+- [ ] 并发发送控制
+
+**预计工时**：1 天
+
+---
+
+### 阶段 3.7: 草稿管理功能 (Week 16)
+
+#### 任务 3.15: 草稿管理器实现
+
+**目标**：实现草稿自动保存和同步
+
+**实现文件**：`src-tauri/src/drafts/draft_manager.rs`
+
+**关键功能**：
+
+```rust
+/// 草稿状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DraftStatus {
+    /// 新建
+    New,
+    /// 已保存本地
+    SavedLocal,
+    /// 同步中
+    Syncing,
+    /// 已同步
+    Synced,
+    /// 同步失败
+    SyncFailed { error: String },
+    /// 发送中
+    Sending,
+    /// 已发送
+    Sent,
+}
+
+/// 草稿管理器
+pub struct DraftManager {
+    db: Arc<DbConn>,
+    imap_sync: Arc<DraftImapSync>,
+    auto_save: Arc<AutoSaveEngine>,
+}
+
+impl DraftManager {
+    /// 创建草稿
+    pub async fn create(&self, account_id: i32) -> Result<Draft>;
+    
+    /// 保存草稿
+    pub async fn save(&self, draft: &Draft) -> Result<()>;
+    
+    /// 自动保存（内部触发）
+    async fn auto_save(&self, draft: &Draft) -> Result<()>;
+    
+    /// 同步到 IMAP
+    pub async fn sync_to_imap(&self, draft_id: i32) -> Result<()>;
+    
+    /// 删除草稿
+    pub async fn delete(&self, draft_id: i32) -> Result<()>;
+    
+    /// 获取草稿列表
+    pub async fn list(&self, account_id: i32) -> Result<Vec<Draft>>;
+}
+
+/// 自动保存引擎
+pub struct AutoSaveEngine {
+    config: AutoSaveConfig,
+    pending_changes: Arc<RwLock<HashMap<i32, Draft>>>,
+}
+
+impl AutoSaveEngine {
+    /// 内容变更通知
+    pub async fn on_content_change(&self, draft_id: i32, content: DraftContent);
+    
+    /// 启动定时保存
+    pub async fn start(&self);
+    
+    /// 停止
+    pub async fn stop(&self);
+}
+
+/// 自动保存配置
+#[derive(Debug, Clone)]
+pub struct AutoSaveConfig {
+    /// 停止输入后保存延迟（毫秒）
+    pub debounce_ms: u64,
+    /// 定时保存间隔（毫秒）
+    pub interval_ms: u64,
+    /// 最大版本保留数
+    pub max_versions: u32,
+}
+```
+
+**数据库设计**：
+```sql
+-- 草稿表
+CREATE TABLE drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    message_id TEXT UNIQUE,
+    imap_uid TEXT,
+    subject TEXT,
+    recipients_to TEXT,
+    recipients_cc TEXT,
+    recipients_bcc TEXT,
+    body_text TEXT,
+    body_html TEXT,
+    reply_to TEXT,
+    in_reply_to TEXT,
+    references TEXT,
+    attachments TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    synced_at INTEGER,
+    is_synced INTEGER DEFAULT 0,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 草稿版本历史
+CREATE TABLE draft_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id INTEGER NOT NULL,
+    content_snapshot TEXT NOT NULL,
+    saved_at INTEGER NOT NULL,
+    trigger_type TEXT NOT NULL,
+    FOREIGN KEY (draft_id) REFERENCES drafts(id)
+);
+```
+
+**验收标准**：
+- [ ] 草稿 CRUD 操作
+- [ ] 自动保存机制（防抖 + 定时）
+- [ ] IMAP 草稿同步
+- [ ] 版本历史管理
+- [ ] 离线编辑支持
+- [ ] 多设备同步
+
+**预计工时**：2 天
+
+---
+
+### 阶段 3.8: 性能优化框架 (Week 17)
+
+#### 任务 3.16: 性能监控系统实现
+
+**目标**：实现应用性能监控和优化框架
+
+**实现文件**：`src-tauri/src/performance/mod.rs`
+
+**关键功能**：
+
+```rust
+/// 性能指标
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceMetrics {
+    /// 启动时间（毫秒）
+    pub startup_time_ms: u64,
+    /// 内存使用（MB）
+    pub memory_usage_mb: f64,
+    /// CPU使用率（%）
+    pub cpu_usage_percent: f64,
+    /// 数据库查询时间（毫秒）
+    pub db_query_time_ms: HashMap<String, f64>,
+    /// 同步性能
+    pub sync_metrics: SyncMetrics,
+    /// UI响应时间（毫秒）
+    pub ui_response_time_ms: HashMap<String, f64>,
+}
+
+/// 性能监控器
+pub struct PerformanceMonitor {
+    config: MonitorConfig,
+    metrics: Arc<RwLock<PerformanceMetrics>>,
+    alerts: Vec<AlertRule>,
+}
+
+impl PerformanceMonitor {
+    /// 启动监控
+    pub async fn start(&self) -> Result<()>;
+    
+    /// 记录指标
+    pub async fn record(&self, metric: MetricType, value: f64);
+    
+    /// 获取当前指标
+    pub async fn get_metrics(&self) -> PerformanceMetrics;
+    
+    /// 性能报告
+    pub async fn generate_report(&self) -> PerformanceReport;
+}
+
+/// 启动优化器
+pub struct StartupOptimizer {
+    /// 延迟加载项
+    lazy_items: Vec<LazyLoadItem>,
+    /// 并行初始化项
+    parallel_items: Vec<ParallelInitItem>,
+}
+
+impl StartupOptimizer {
+    /// 优化启动序列
+    pub async fn optimize_startup(&self) -> Result<StartupResult>;
+    
+    /// 注册延迟加载项
+    pub fn register_lazy(&mut self, item: LazyLoadItem);
+    
+    /// 注册并行初始化项
+    pub fn register_parallel(&mut self, item: ParallelInitItem);
+}
+```
+
+**验收标准**：
++- [ ] 启动时间监控
++- [ ] 内存使用监控
++- [ ] CPU使用监控
++- [ ] 数据库性能监控
++- [ ] 同步性能监控
++- [ ] UI响应时间监控
++- [ ] 性能报告生成
+
+**预计工时**：2 天
+
+---
+
+#### 任务 3.17: 内存优化实现
+
+**目标**：实现内存管理和缓存优化
+
+**实现文件**：`src-tauri/src/performance/memory_manager.rs`
+
+**关键功能**：
+
+```rust
+/// LRU缓存
+pub struct LruCache<K, V> {
+    capacity: usize,
+    cache: LinkedHashMap<K, V>,
+    stats: CacheStats,
+}
+
+impl<K, V> LruCache<K, V> {
+    /// 获取缓存
+    pub fn get(&mut self, key: &K) -> Option<&V>;
+    
+    /// 插入缓存
+    pub fn put(&mut self, key: K, value: V);
+    
+    /// 清理缓存
+    pub fn evict(&mut self) -> usize;
+    
+    /// 获取统计
+    pub fn stats(&self) -> &CacheStats;
+}
+
+/// 内存管理器
+pub struct MemoryManager {
+    /// 内存阈值（MB）
+    threshold_mb: f64,
+    /// 缓存池
+    caches: HashMap<String, Box<dyn CacheTrait>>,
+    /// 监控器
+    monitor: MemoryMonitor,
+}
+
+impl MemoryManager {
+    /// 检查内存压力
+    pub async fn check_pressure(&self) -> MemoryPressure;
+    
+    /// 执行内存清理
+    pub async fn cleanup(&self) -> CleanupResult;
+    
+    /// 注册缓存
+    pub fn register_cache(&mut self, name: &str, cache: Box<dyn CacheTrait>);
+}
+
+/// 内存压力级别
+pub enum MemoryPressure {
+    /// 正常
+    Normal,
+    /// 警告
+    Warning,
+    /// 紧急
+    Critical,
+}
+```
+
+**验收标准**：
++- [ ] LRU缓存实现
++- [ ] 内存压力检测
++- [ ] 自动内存清理
++- [ ] 大文件流式处理
++- [ ] 缓存命中率统计
+
+**预计工时**：1 天
+
+---
+
+### 阶段 3.9: 安全审计系统 (Week 17-18)
+
+#### 任务 3.18: 安全审计日志实现
+
+**目标**：实现安全事件审计和追踪
+
+**实现文件**：`src-tauri/src/security/audit_log.rs`
+
+**关键功能**：
+
+```rust
+/// 安全事件类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SecurityEvent {
+    /// 登录成功
+    LoginSuccess { account_id: i32 },
+    /// 登录失败
+    LoginFailed { email: String, reason: String },
+    /// Token刷新
+    TokenRefreshed { account_id: i32 },
+    /// Token过期
+    TokenExpired { account_id: i32 },
+    /// 授权撤销
+    AuthRevoked { account_id: i32, reason: String },
+    /// 可疑活动
+    SuspiciousActivity { description: String, details: JsonValue },
+    /// 密码更改
+    PasswordChanged { account_id: i32 },
+    /// 账号锁定
+    AccountLocked { account_id: i32, reason: String },
+    /// 多次登录失败
+    MultipleLoginFailed { email: String, count: u32 },
+}
+
+/// 安全审计器
+pub struct SecurityAuditor {
+    db: Arc<DbConn>,
+    config: AuditConfig,
+}
+
+impl SecurityAuditor {
+    /// 记录安全事件
+    pub async fn log(&self, event: SecurityEvent) -> Result<()>;
+    
+    /// 查询审计日志
+    pub async fn query(&self, filter: AuditFilter) -> Result<Vec<AuditEntry>>;
+    
+    /// 检测可疑活动
+    pub async fn detect_suspicious(&self) -> Result<Vec<SuspiciousActivity>>;
+    
+    /// 生成安全报告
+    pub async fn generate_report(&self, period: TimePeriod) -> Result<SecurityReport>;
+}
+
+/// 审计配置
+pub struct AuditConfig {
+    /// 保留天数
+    pub retention_days: u32,
+    /// 是否记录IP地址
+    pub log_ip_address: bool,
+    /// 是否记录用户代理
+    pub log_user_agent: bool,
+    /// 登录失败阈值
+    pub login_failure_threshold: u32,
+    /// 告警通知
+    pub alert_notifications: Vec<AlertChannel>,
+}
+```
+
+**数据库设计**：
+```sql
+-- 安全审计日志
+CREATE TABLE security_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    account_id INTEGER,
+    ip_address TEXT,
+    user_agent TEXT,
+    details TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+-- 创建索引
+CREATE INDEX idx_audit_event_type ON security_audit_log(event_type);
+CREATE INDEX idx_audit_account ON security_audit_log(account_id);
+CREATE INDEX idx_audit_created ON security_audit_log(created_at);
+```
+
+**验收标准**：
++- [ ] 安全事件记录
++- [ ] 审计日志查询
++- [ ] 可疑活动检测
++- [ ] 安全报告生成
++- [ ] 日志自动清理
+
+**预计工时**：2 天
+
+---
+
+### 阶段 3.10: 日志监控系统 (Week 18)
+
+#### 任务 3.19: 结构化日志系统实现
+
+**目标**：实现结构化日志和集中管理
+
+**实现文件**：`src-tauri/src/logging/logger.rs`
+
+**关键功能**：
+
+```rust
+/// 日志配置
+pub struct LogConfig {
+    /// 日志级别
+    pub level: LogLevel,
+    /// 输出目标
+    pub targets: Vec<LogTarget>,
+    /// 日志格式
+    pub format: LogFormat,
+    /// 日志轮转
+    pub rotation: LogRotation,
+    /// 敏感字段脱敏
+    pub sensitive_fields: Vec<String>,
+}
+
+/// 结构化日志器
+pub struct StructuredLogger {
+    config: LogConfig,
+    writers: Vec<Box<dyn LogWriter>>,
+    sanitizer: LogSanitizer,
+}
+
+impl StructuredLogger {
+    /// 记录日志
+    pub fn log(&self, record: &LogRecord);
+    
+    /// 带上下文记录
+    pub fn log_with_context(&self, record: &LogRecord, context: JsonValue);
+    
+    /// 刷新缓冲
+    pub fn flush(&self);
+}
+
+/// 日志脱敏器
+pub struct LogSanitizer {
+    rules: Vec<SanitizationRule>,
+}
+
+impl LogSanitizer {
+    /// 脱敏处理
+    pub fn sanitize(&self, content: &str) -> String;
+    
+    /// 添加规则
+    pub fn add_rule(&mut self, rule: SanitizationRule);
+}
+
+/// 脱敏规则
+pub struct SanitizationRule {
+    /// 字段名模式
+    pub pattern: Regex,
+    /// 脱敏策略
+    pub strategy: SanitizationStrategy,
+}
+
+/// 脱敏策略
+pub enum SanitizationStrategy {
+    /// 完全隐藏
+    Hide,
+    /// 保留首尾
+    KeepEdges { start: usize, end: usize },
+    /// 哈希
+    Hash,
+    /// 部分显示
+    Partial { visible_chars: usize },
+}
+```
+
+**验收标准**：
++- [ ] 结构化日志格式
++- [ ] 多输出目标支持
++- [ ] 日志轮转
++- [ ] 敏感信息脱敏
++- [ ] 日志级别动态调整
++- [ ] 日志文件压缩归档
+
+**预计工时**：1层重构 (Week 7-8)
 
 #### 任务 4.1: DeltaSync 实现
 
@@ -1838,6 +3075,18 @@ tests/
 | **Token 定期刷新** | Token 即将过期 | 自动刷新，无感知 |
 | **Token 刷新失败** | 网络错误/Token 失效 | 重试后通知用户 |
 | **多账号刷新** | 多个账号同时过期 | 并发刷新，控制并发数 |
+| **离线操作** | 离线标记已读 | 操作入队，恢复后同步 |
+| **多客户端同步** | 其他客户端标记已读 | 自动检测并更新本地状态 |
+| **操作冲突** | 同时修改邮件标志 | 正确解决冲突 |
+| **附件下载** | 下载大附件 | 断点续传，显示进度 |
+| **附件缓存** | 重复下载同一附件 | 命中缓存，直接打开 |
+| **全文搜索** | 搜索关键词 | 返回匹配结果，高亮显示 |
+| **高级搜索** | 使用搜索语法 | 正确解析并执行 |
+| **发送邮件** | 发送带附件邮件 | SMTP发送成功 |
+| **离线发送** | 离线发送邮件 | 入队，恢复后发送 |
+| **发送失败** | SMTP错误 | 重试后通知用户 |
+| **草稿自动保存** | 编辑邮件 | 自动保存，不丢失 |
+| **草稿同步** | 多设备编辑草稿 | 正确同步状态 |
 
 ---
 
@@ -1919,6 +3168,25 @@ tests/
 | `src-tauri/src/auth/token_manager.rs` | Token 管理器 |
 | `src-tauri/src/auth/token_refresh_scheduler.rs` | Token 刷新调度器 |
 | `src-tauri/src/auth/enterprise_auth.rs` | 企业认证处理器 |
+| `src-tauri/src/operations/mod.rs` | 操作模块入口 |
+| `src-tauri/src/operations/operation_manager.rs` | 操作管理器 |
+| `src-tauri/src/operations/operation_queue.rs` | 操作队列 |
+| `src-tauri/src/operations/conflict_resolver.rs` | 冲突解决器 |
+| `src-tauri/src/operations/attachment_manager.rs` | 附件下载管理器 |
+| `src-tauri/src/sync/change_detector.rs` | 变更检测器 |
+| `src-tauri/src/sync/state_tracker.rs` | 状态追踪器 |
+| `src-tauri/src/search/mod.rs` | 搜索模块入口 |
+| `src-tauri/src/search/search_engine.rs` | 搜索引擎 |
+| `src-tauri/src/search/query_parser.rs` | 查询解析器 |
+| `src-tauri/src/search/index_manager.rs` | 索引管理器 |
+| `src-tauri/src/sending/mod.rs` | 发送模块入口 |
+| `src-tauri/src/sending/smtp_sender.rs` | SMTP发送器 |
+| `src-tauri/src/sending/send_queue.rs` | 发送队列 |
+| `src-tauri/src/sending/mime_builder.rs` | MIME构建器 |
+| `src-tauri/src/drafts/mod.rs` | 草稿模块入口 |
+| `src-tauri/src/drafts/draft_manager.rs` | 草稿管理器 |
+| `src-tauri/src/drafts/auto_save.rs` | 自动保存引擎 |
+| `src-tauri/src/drafts/draft_imap_sync.rs` | 草稿IMAP同步 |
 | `src-tauri/src/error/mod.rs` | 错误模块入口 |
 | `src-tauri/src/error/types.rs` | 错误类型定义 |
 | `src-tauri/src/error/retry.rs` | 重试策略 |
@@ -1941,6 +3209,10 @@ tests/
 | `src-tauri/migration/add_account_type.sql` | 添加账号类型字段 |
 | `src-tauri/migration/create_enterprise_configs.sql` | 创建企业配置表 |
 | `src-tauri/migration/create_refresh_tables.sql` | 创建刷新历史和状态表 |
+| `src-tauri/migration/create_operation_tables.sql` | 创建操作队列和历史表 |
+| `src-tauri/migration/create_search_tables.sql` | 创建搜索索引和历史表 |
+| `src-tauri/migration/create_sending_tables.sql` | 创建发送队列和历史表 |
+| `src-tauri/migration/create_drafts_tables.sql` | 创建草稿和版本表 |
 
 ### B. 环境变量配置
 

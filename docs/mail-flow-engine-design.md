@@ -675,6 +675,509 @@ stateDiagram-v2
     end note
 ```
 
+## 邮件操作流设计
+
+### 操作类型概述
+
+邮件客户端支持多种操作类型，每种操作都有不同的同步策略和冲突处理方式：
+
+| 操作类型 | IMAP 命令 | 本地优先 | 服务端确认 | 可离线 |
+|----------|-----------|----------|------------|--------|
+| 标记已读/未读 | STORE \Seen | 是 | 是 | 是 |
+| 星标/取消星标 | STORE \Flagged | 是 | 是 | 是 |
+| 删除（移到垃圾箱） | MOVE/STORE \Deleted | 是 | 是 | 是 |
+| 永久删除 | EXPUNGE | 否 | 是 | 否 |
+| 移动到文件夹 | MOVE/COPY | 是 | 是 | 是 |
+| 附件下载 | FETCH BODY[] | 否 | 是 | 部分 |
+
+### 邮件操作流程图
+
+```mermaid
+flowchart TB
+    subgraph UserAction["用户操作"]
+        Action[用户执行操作] --> CheckOffline{离线模式?}
+        CheckOffline -->|是| QueueLocal[加入本地操作队列]
+        CheckOffline -->|否| LocalUpdate[更新本地状态]
+    end
+    
+    subgraph LocalProcessing["本地处理"]
+        LocalUpdate --> GenOpId[生成操作ID]
+        GenOpId --> UpdateDB[更新本地数据库]
+        UpdateDB --> UpdateUI[更新UI状态]
+        UpdateUI --> EmitEvent[发送操作事件]
+    end
+    
+    subgraph SyncProcessing["同步处理"]
+        EmitEvent --> CheckOnline{在线状态?}
+        CheckOnline -->|是| SyncToServer[同步到服务器]
+        CheckOnline -->|否| QueuePending[加入待同步队列]
+        
+        QueueLocal --> QueuePending
+        QueuePending --> WaitOnline[等待网络恢复]
+        WaitOnline --> SyncToServer
+        
+        SyncToServer --> ExecIMAP[执行 IMAP 命令]
+        ExecIMAP --> ServerResponse{服务器响应}
+        
+        ServerResponse -->|成功| ConfirmOp[确认操作]
+        ServerResponse -->|失败| HandleError[错误处理]
+        
+        ConfirmOp --> UpdateSynced[更新同步状态]
+        HandleError --> RetryCheck{可重试?}
+        RetryCheck -->|是| RetryQueue[加入重试队列]
+        RetryCheck -->|否| RollbackOp[回滚本地操作]
+        
+        RollbackOp --> NotifyUser[通知用户失败]
+    end
+```
+
+### 标志操作详细流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant UI as 前端界面
+    participant Op as OperationManager
+    participant DB as 本地数据库
+    participant Queue as 操作队列
+    participant IMAP as IMAP服务器
+    
+    User->>UI: 点击"标记已读"
+    UI->>Op: mark_as_read(email_id, true)
+    
+    Op->>Op: 生成操作ID (op_123)
+    Op->>Op: 记录操作开始时间
+    
+    rect rgb(240, 255, 240)
+        note right of Op: 阶段1: 本地更新
+        Op->>DB: UPDATE emails SET is_read = true
+        DB-->>Op: 更新成功
+        Op->>UI: 发送状态更新事件
+        UI-->>User: 显示已读状态
+    end
+    
+    rect rgb(240, 248, 255)
+        note right of Op: 阶段2: 服务器同步
+        Op->>Queue: 加入待同步队列
+        Queue->>IMAP: UID STORE {uid} +FLAGS (\Seen)
+        
+        alt 同步成功
+            IMAP-->>Queue: OK
+            Queue->>DB: 更新 sync_status = synced
+            Queue->>Op: 操作完成
+            Op->>DB: 记录操作历史
+        else 同步失败
+            IMAP-->>Queue: NO/BAD
+            Queue->>Op: 同步失败
+            Op->>DB: 标记为待重试
+            Op->>UI: 发送同步失败警告
+        end
+    end
+```
+
+### 邮件删除流程
+
+```mermaid
+flowchart TB
+    subgraph DeleteFlow["删除流程"]
+        Delete[用户点击删除] --> CheckLocation{当前文件夹}
+        
+        CheckLocation -->|"收件箱/其他"| MoveTrash[移动到垃圾箱]
+        CheckLocation -->|"垃圾箱"| AskPerm{确认永久删除?}
+        CheckLocation -->|"已删除"| AskPerm
+        
+        MoveTrash --> LocalMove[本地移动]
+        LocalMove --> SyncMove[同步 MOVE 命令]
+        
+        AskPerm -->|是| PermDelete[永久删除]
+        AskPerm -->|否| Cancel[取消]
+        
+        PermDelete --> LocalDelete[本地删除]
+        LocalDelete --> SyncExpunge[同步 EXPUNGE 命令]
+    end
+    
+    subgraph RecoveryFlow["恢复流程"]
+        Restore[用户点击恢复] --> CheckFolder{从哪里恢复?}
+        CheckFolder -->|"垃圾箱"| RestoreTo[选择恢复位置]
+        CheckFolder -->|"其他"| RestoreInbox[恢复到收件箱]
+        
+        RestoreTo --> MoveBack[移动邮件]
+        RestoreInbox --> MoveBack
+    end
+```
+
+### 附件下载管理
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant UI as 前端界面
+    participant Attach as AttachmentManager
+    participant Cache as 本地缓存
+    participant IMAP as IMAP服务器
+    participant FS as 文件系统
+    
+    User->>UI: 点击下载附件
+    UI->>Attach: download_attachment(email_id, part_id)
+    
+    Attach->>Cache: 检查缓存
+    alt 缓存命中
+        Cache-->>Attach: 返回缓存路径
+        Attach-->>UI: 直接打开文件
+    else 缓存未命中
+        Attach->>Attach: 创建下载任务
+        Attach->>UI: 发送下载开始事件
+        
+        loop 分块下载
+            Attach->>IMAP: FETCH BODY[{section}]<range>
+            IMAP-->>Attach: 返回数据块
+            Attach->>FS: 写入临时文件
+            Attach->>UI: 更新下载进度
+        end
+        
+        Attach->>Cache: 移动到缓存目录
+        Attach->>DB: 记录下载状态
+        Attach-->>UI: 下载完成
+    end
+```
+
+### 附件下载状态管理
+
+```mermaid
+stateDiagram-v2
+    [*] --> NotDownloaded: 邮件接收
+    
+    NotDownloaded --> Downloading: 用户请求下载
+    Downloading --> Paused: 用户暂停
+    Paused --> Downloading: 用户恢复
+    
+    Downloading --> Downloaded: 下载完成
+    Downloaded --> Cached: 缓存中
+    
+    Downloading --> Failed: 下载失败
+    Failed --> Downloading: 重试
+    
+    Cached --> NotDownloaded: 缓存清理
+    Cached --> Expired: 缓存过期
+    Expired --> NotDownloaded: 清理
+    
+    note right of Downloading
+        状态: 下载中
+        进度: 0-100%
+        支持断点续传
+    end note
+    
+    note right of Cached
+        状态: 已缓存
+        路径: 本地缓存
+        可直接访问
+    end note
+```
+
+---
+
+## 多客户端同步设计
+
+### 同步场景概述
+
+多客户端同步需要处理以下场景：
+
+| 场景 | 描述 | 解决策略 |
+|------|------|----------|
+| 本地操作同步到服务器 | 用户在客户端操作后同步 | 操作队列 + 确认机制 |
+| 服务器变更同步到本地 | 其他客户端的操作 | 增量同步 + 变更检测 |
+| 并发操作冲突 | 多客户端同时修改 | 最后写入胜出 + 操作日志 |
+| 离线操作同步 | 离线后恢复在线 | 操作队列 + 幂等处理 |
+| 部分同步失败 | 网络不稳定 | 重试 + 回滚 |
+
+### 多客户端同步架构
+
+```mermaid
+graph TB
+    subgraph LocalClient["本地客户端"]
+        UI[用户界面]
+        OpManager[OperationManager<br/>操作管理器]
+        OpQueue[OperationQueue<br/>操作队列]
+        SyncEngine[SyncEngine<br/>同步引擎]
+        LocalDB[(本地数据库)]
+    end
+    
+    subgraph SyncLayer["同步层"]
+        ConflictResolver[ConflictResolver<br/>冲突解决器]
+        ChangeDetector[ChangeDetector<br/>变更检测器]
+        StateTracker[StateTracker<br/>状态追踪器]
+    end
+    
+    subgraph Server["服务器"]
+        IMAP[IMAP服务器]
+        Flags[邮件标志]
+        Folders[文件夹结构]
+    end
+    
+    subgraph OtherClients["其他客户端"]
+        Client1[Web客户端]
+        Client2[移动客户端]
+        Client3[桌面客户端]
+    end
+    
+    UI --> OpManager
+    OpManager --> OpQueue
+    OpManager --> LocalDB
+    
+    OpQueue --> SyncEngine
+    SyncEngine --> ConflictResolver
+    SyncEngine --> ChangeDetector
+    
+    ConflictResolver --> IMAP
+    ChangeDetector --> IMAP
+    StateTracker --> IMAP
+    
+    IMAP --> Flags
+    IMAP --> Folders
+    
+    Client1 --> IMAP
+    Client2 --> IMAP
+    Client3 --> IMAP
+```
+
+### 操作队列设计
+
+```mermaid
+erDiagram
+    OperationQueue {
+        bigint id PK
+        string operation_id UK
+        int account_id FK
+        string operation_type
+        string resource_type
+        bigint resource_id
+        json payload
+        string status
+        int retry_count
+        datetime created_at
+        datetime updated_at
+        datetime synced_at
+        string error_message
+    }
+    
+    OperationHistory {
+        bigint id PK
+        string operation_id FK
+        int account_id FK
+        string operation_type
+        string status
+        json before_state
+        json after_state
+        datetime created_at
+    }
+    
+    SyncState {
+        bigint id PK
+        int account_id FK
+        string folder_name
+        bigint last_uid
+        bigint last_modseq
+        datetime last_sync_at
+        string sync_status
+    }
+```
+
+### 双向同步流程
+
+```mermaid
+sequenceDiagram
+    participant App as 本地客户端
+    participant Queue as 操作队列
+    participant Sync as 同步引擎
+    participant IMAP as IMAP服务器
+    participant Other as 其他客户端
+    
+    rect rgb(255, 245, 230)
+        note over App,Other: 场景1: 本地操作同步到服务器
+        App->>Queue: 用户标记邮件已读
+        Queue->>Sync: 处理操作
+        Sync->>IMAP: STORE +FLAGS (\Seen)
+        IMAP-->>Sync: OK
+        Sync->>Queue: 标记操作完成
+    end
+    
+    rect rgb(240, 255, 240)
+        note over App,Other: 场景2: 其他客户端变更同步到本地
+        Other->>IMAP: 标记邮件已读
+        IMAP-->>Other: OK
+        
+        App->>Sync: 定时增量同步
+        Sync->>IMAP: SEARCH MODSEQ {last_modseq}
+        IMAP-->>Sync: 返回变更邮件
+        Sync->>Sync: 检测标志变化
+        Sync->>App: 更新本地状态
+    end
+    
+    rect rgb(240, 248, 255)
+        note over App,Other: 场景3: 并发操作处理
+        App->>Queue: 操作A: 标记已读
+        Other->>IMAP: 操作B: 标记未读
+        
+        App->>IMAP: 同步操作A
+        IMAP-->>App: OK
+        App->>Sync: 拉取最新状态
+        
+        Sync->>IMAP: FETCH FLAGS
+        IMAP-->>Sync: 返回当前标志
+        Note over Sync: 检测到冲突
+        Sync->>Sync: 应用"最后写入胜出"
+        Sync->>App: 更新为未读状态
+    end
+```
+
+### 离线操作队列
+
+```mermaid
+flowchart TB
+    subgraph OfflineMode["离线模式"]
+        Offline[检测到离线] --> QueueOnly[操作仅入队]
+        QueueOnly --> LocalUpdate[更新本地状态]
+        LocalUpdate --> MarkPending[标记为待同步]
+    end
+    
+    subgraph OnlineRecovery["恢复在线"]
+        Online[检测到在线] --> ProcessQueue[处理待同步队列]
+        ProcessQueue --> SortOps[按时间排序操作]
+        SortOps --> DedupOps[去重优化]
+        
+        DedupOps --> ProcessEach{处理每个操作}
+        ProcessEach --> SyncOp[同步到服务器]
+        
+        SyncOp --> OpSuccess{成功?}
+        OpSuccess -->|是| MarkSynced[标记已同步]
+        OpSuccess -->|否| HandleFail[处理失败]
+        
+        HandleFail --> RetryCheck{可重试?}
+        RetryCheck -->|是| Requeue[重新入队]
+        RetryCheck -->|否| Rollback[回滚本地]
+        
+        MarkSynced --> MoreOps{还有操作?}
+        MoreOps -->|是| ProcessEach
+        MoreOps -->|否| PullChanges[拉取服务器变更]
+    end
+```
+
+### 冲突检测与解决
+
+```mermaid
+flowchart TB
+    subgraph Detection["冲突检测"]
+        Pull[拉取服务器状态] --> Compare[与本地状态对比]
+        Compare --> Diff{发现差异?}
+        
+        Diff -->|是| Analyze[分析冲突类型]
+        Diff -->|否| NoConflict[无冲突]
+        
+        Analyze --> TypeCheck{冲突类型}
+        TypeCheck -->|标志冲突| FlagConflict[标志状态冲突]
+        TypeCheck -->|位置冲突| MoveConflict[邮件位置冲突]
+        TypeCheck -->|删除冲突| DeleteConflict[删除状态冲突]
+    end
+    
+    subgraph Resolution["冲突解决"]
+        FlagConflict --> FlagStrategy["最后写入胜出"<br/>采用服务器状态]
+        MoveConflict --> MoveStrategy["位置优先"<br/>保留最新移动]
+        DeleteConflict --> DeleteStrategy["删除优先"<br/>已删除则保持删除]
+        
+        FlagStrategy --> ApplyResolution
+        MoveStrategy --> ApplyResolution
+        DeleteStrategy --> ApplyResolution
+        
+        ApplyResolution[应用解决结果]
+        ApplyResolution --> UpdateLocal[更新本地状态]
+        UpdateLocal --> LogConflict[记录冲突日志]
+    end
+```
+
+### 操作幂等性设计
+
+为确保重试安全，所有操作需要幂等性设计：
+
+| 操作类型 | 幂等性实现 | 操作ID生成 |
+|----------|------------|------------|
+| 标记已读 | `STORE` 命令本身幂等 | `{email_id}_read_{timestamp}` |
+| 星标 | `STORE` 命令本身幂等 | `{email_id}_flag_{timestamp}` |
+| 移动 | 检查当前位置后执行 | `{email_id}_move_{timestamp}` |
+| 删除 | 检查存在性后执行 | `{email_id}_delete_{timestamp}` |
+
+### 操作确认与回滚
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant App as 应用
+    participant Queue as 操作队列
+    participant DB as 数据库
+    participant Server as 服务器
+    
+    User->>App: 执行操作
+    App->>DB: 开始事务
+    DB-->>App: 事务ID
+    
+    App->>DB: 保存操作前状态
+    App->>DB: 应用本地变更
+    App->>Queue: 加入同步队列
+    
+    alt 同步成功
+        Queue->>Server: 执行操作
+        Server-->>Queue: 成功
+        Queue->>DB: 提交事务
+        Queue->>App: 操作完成
+    else 同步失败
+        Queue->>Server: 执行操作
+        Server-->>Queue: 失败
+        Queue->>DB: 回滚事务
+        Queue->>DB: 恢复操作前状态
+        Queue->>App: 操作失败
+        App->>User: 显示错误提示
+    end
+```
+
+### 同步状态监控
+
+```mermaid
+stateDiagram-v2
+    [*] --> Synced: 初始同步完成
+    
+    Synced --> LocalPending: 本地操作
+    LocalPending --> Syncing: 开始同步
+    Syncing --> Synced: 同步成功
+    Syncing --> SyncFailed: 同步失败
+    
+    SyncFailed --> RetryQueue: 加入重试
+    RetryQueue --> Syncing: 重试同步
+    
+    SyncFailed --> Conflict: 检测到冲突
+    Conflict --> Resolving: 解决冲突
+    Resolving --> Synced: 解决完成
+    
+    Synced --> ServerChanged: 服务器变更
+    ServerChanged --> Pulling: 拉取变更
+    Pulling --> Synced: 更新完成
+    
+    note right of Synced
+        完全同步
+        本地=服务器
+    end note
+    
+    note right of LocalPending
+        本地有未同步操作
+        等待同步
+    end note
+    
+    note right of Conflict
+        检测到冲突
+        需要解决
+    end note
+```
+
+---
+
 ### Token 定期刷新机制
 
 #### 刷新策略概述
@@ -1666,6 +2169,1292 @@ stateDiagram-v2
         或OAuth过期
     end note
 ```
+
+---
+
+## 邮件搜索功能设计
+
+### 搜索类型概述
+
+邮件搜索支持多种搜索类型，满足不同场景的需求：
+
+| 搜索类型 | 描述 | 实现方式 | 性能 |
+|----------|------|----------|------|
+| **全文搜索** | 搜索邮件正文和主题 | FTS5 全文索引 | 快 |
+| **字段搜索** | 搜索特定字段 | SQL LIKE / 索引查询 | 中 |
+| **日期搜索** | 按日期范围筛选 | 索引查询 | 快 |
+| **附件搜索** | 搜索附件文件名 | 元数据索引 | 快 |
+| **标志搜索** | 按已读/星标筛选 | 数据库查询 | 快 |
+| **服务端搜索** | IMAP SEARCH 命令 | 实时查询 | 慢 |
+
+### 搜索架构设计
+
+```mermaid
+graph TB
+    subgraph UserInput["用户输入"]
+        Query[搜索关键词]
+        Filters[筛选条件]
+    end
+    
+    subgraph SearchEngine["搜索引擎"]
+        Parser[QueryParser<br/>查询解析器]
+        Optimizer[QueryOptimizer<br/>查询优化器]
+        Executor[QueryExecutor<br/>查询执行器]
+    end
+    
+    subgraph IndexLayer["索引层"]
+        FTSIndex[FTS5 全文索引]
+        MetaIndex[元数据索引]
+        Cache[搜索缓存]
+    end
+    
+    subgraph DataLayer["数据层"]
+        LocalDB[(本地数据库)]
+        IMAP[IMAP 服务端]
+    end
+    
+    subgraph Results["结果处理"]
+        Ranker[结果排序]
+        Pager[分页器]
+        Highlighter[高亮器]
+    end
+    
+    Query --> Parser
+    Filters --> Parser
+    Parser --> Optimizer
+    Optimizer --> Executor
+    
+    Executor --> FTSIndex
+    Executor --> MetaIndex
+    Executor --> Cache
+    
+    FTSIndex --> LocalDB
+    MetaIndex --> LocalDB
+    Cache --> LocalDB
+    
+    Executor -->|服务端搜索| IMAP
+    
+    Executor --> Ranker
+    Ranker --> Pager
+    Pager --> Highlighter
+```
+
+### 搜索流程详细时序图
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant UI as 前端界面
+    participant Search as SearchService
+    participant Parser as QueryParser
+    participant Index as FTSIndex
+    participant Cache as 搜索缓存
+    participant DB as 数据库
+    participant IMAP as IMAP服务器
+    
+    User->>UI: 输入搜索关键词
+    UI->>Search: search(query, filters)
+    
+    Search->>Parser: 解析查询
+    Parser-->>Search: 解析结果
+    
+    alt 缓存命中
+        Search->>Cache: 检查缓存
+        Cache-->>Search: 返回缓存结果
+        Search-->>UI: 返回搜索结果
+    else 缓存未命中
+        Search->>Index: 执行全文搜索
+        
+        Index->>DB: FTS5 查询
+        DB-->>Index: 匹配的邮件ID
+        
+        Index-->>Search: 搜索结果
+        
+        Search->>Search: 应用筛选条件
+        Search->>Search: 排序和分页
+        
+        Search->>Cache: 缓存结果
+        
+        Search-->>UI: 返回搜索结果
+        UI-->>User: 显示结果列表
+    end
+```
+
+### 全文索引设计
+
+```mermaid
+erDiagram
+    emails_fts {
+        int rowid PK
+        int email_id FK
+        string subject
+        string sender
+        string recipients
+        string body_text
+        string attachment_names
+    }
+    
+    search_index {
+        int id PK
+        int email_id FK
+        string token
+        int position
+        string field
+    }
+    
+    search_history {
+        int id PK
+        string query
+        int result_count
+        datetime searched_at
+        string account_filter
+    }
+    
+    emails ||--o{ emails_fts : indexed
+    emails ||--o{ search_index : tokens
+```
+
+### 搜索索引构建流程
+
+```mermaid
+flowchart TB
+    subgraph IndexBuild["索引构建"]
+        NewEmail[新邮件到达] --> Extract[提取文本内容]
+        Extract --> Tokenize[分词处理]
+        Tokenize --> BuildFTS[构建FTS索引]
+        BuildFTS --> StoreIndex[存储索引]
+    end
+    
+    subgraph IncrementalUpdate["增量更新"]
+        EmailUpdate[邮件更新] --> DetectChange[检测变更]
+        DetectChange --> UpdateIndex[更新索引]
+        UpdateIndex --> CleanOld[清理旧索引]
+    end
+    
+    subgraph BackgroundJobs["后台任务"]
+        Schedule[定时任务] --> RebuildIndex[重建索引]
+        Schedule --> CleanIndex[清理过期索引]
+        Schedule --> OptimizeIndex[优化索引]
+    end
+```
+
+### 搜索查询语法
+
+```
+搜索语法示例：
+
+# 基本搜索
+keyword                    # 搜索所有字段
+
+# 字段搜索
+from:john@example.com      # 发件人
+to:mary@example.com        # 收件人
+subject:project            # 主题
+has:attachment             # 有附件
+is:read                    # 已读
+is:unread                  # 未读
+is:starred                 # 星标
+
+# 日期搜索
+after:2024-01-01           # 日期之后
+before:2024-12-31          # 日期之前
+
+# 组合搜索
+from:john subject:project  # AND 组合
+from:john OR from:mary     # OR 组合
+-project                   # 排除关键词
+```
+
+### 混合搜索策略
+
+```mermaid
+flowchart TB
+    Query[搜索请求] --> CheckScope{搜索范围}
+    
+    CheckScope -->|本地| LocalSearch[本地索引搜索]
+    CheckScope -->|服务端| ServerSearch[IMAP SEARCH]
+    CheckScope -->|混合| HybridSearch[混合搜索]
+    
+    LocalSearch --> LocalResult[本地结果]
+    
+    ServerSearch --> IMAPSearch[IMAP SEARCH 命令]
+    IMAPSearch --> ServerResult[服务端结果]
+    ServerResult --> MergeLocal[合并到本地]
+    
+    HybridSearch --> LocalFirst[本地搜索]
+    LocalFirst --> CheckEnough{结果足够?}
+    CheckEnough -->|是| ReturnLocal[返回本地结果]
+    CheckEnough -->|否| ServerQuery[服务端查询]
+    ServerQuery --> MergeResults[合并结果]
+```
+
+---
+
+## 邮件发送流程设计
+
+### 发送流程概述
+
+邮件发送涉及多个阶段，从邮件创建到发送确认：
+
+| 阶段 | 描述 | 关键操作 |
+|------|------|----------|
+| **邮件创建** | 构建 MIME 格式邮件 | 设置头部、正文、附件 |
+| **本地保存** | 保存到本地数据库 | 存入发件箱/草稿箱 |
+| **SMTP 连接** | 连接 SMTP 服务器 | TLS 握手、认证 |
+| **邮件传输** | 发送邮件内容 | DATA 命令、分块传输 |
+| **发送确认** | 确认发送结果 | 更新状态、移动到已发送 |
+| **错误处理** | 处理发送失败 | 重试、通知用户 |
+
+### 邮件发送完整流程图
+
+```mermaid
+flowchart TB
+    subgraph Compose["邮件创建"]
+        Start[用户编写邮件] --> SetHeaders[设置邮件头]
+        SetHeaders --> SetBody[设置正文]
+        SetBody --> AddAttach{有附件?}
+        AddAttach -->|是| ProcessAttach[处理附件]
+        AddAttach -->|否| BuildMIME[构建 MIME]
+        ProcessAttach --> EncodeAttach[编码附件]
+        EncodeAttach --> BuildMIME
+    end
+    
+    subgraph LocalSave["本地保存"]
+        BuildMIME --> SaveLocal[保存到本地]
+        SaveLocal --> SaveOutbox[存入发件箱]
+        SaveOutbox --> ShowSending[显示发送中状态]
+    end
+    
+    subgraph Sending["发送处理"]
+        ShowSending --> CheckOffline{离线模式?}
+        CheckOffline -->|是| QueueOffline[加入发送队列]
+        CheckOffline -->|否| ConnectSMTP[连接 SMTP]
+        
+        QueueOffline --> WaitOnline[等待在线]
+        WaitOnline --> ConnectSMTP
+        
+        ConnectSMTP --> TLSHandshake[TLS 握手]
+        TLSHandshake --> Authenticate[认证]
+        Authenticate --> SendData[发送邮件数据]
+        
+        SendData --> ServerResp{服务器响应}
+        ServerResp -->|成功| SendSuccess[发送成功]
+        ServerResp -->|失败| SendFailed[发送失败]
+    end
+    
+    subgraph Completion["完成处理"]
+        SendSuccess --> MoveSent[移动到已发送]
+        MoveSent --> UpdateStatus[更新状态]
+        UpdateStatus --> NotifySuccess[通知成功]
+        
+        SendFailed --> CheckError{错误类型}
+        CheckError -->|临时错误| RetryQueue[加入重试队列]
+        CheckError -->|永久错误| NotifyFailed[通知失败]
+        
+        RetryQueue --> ScheduleRetry[安排重试]
+        ScheduleRetry --> ConnectSMTP
+    end
+```
+
+### SMTP 发送详细时序图
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant UI as 前端界面
+    participant Send as SendService
+    participant Queue as 发送队列
+    participant SMTP as SMTP服务器
+    participant DB as 本地数据库
+    
+    User->>UI: 点击发送
+    UI->>Send: send_email(draft)
+    
+    Send->>Send: 构建 MIME 邮件
+    Send->>DB: 保存到发件箱 (status=sending)
+    DB-->>Send: 保存成功
+    Send-->>UI: 显示发送中
+    
+    Send->>Queue: 加入发送队列
+    Queue->>SMTP: 连接服务器
+    
+    SMTP-->>Queue: 220 Ready
+    Queue->>SMTP: EHLO
+    SMTP-->>Queue: 250 OK
+    Queue->>SMTP: STARTTLS
+    SMTP-->>Queue: 220 Ready
+    Queue->>SMTP: EHLO (TLS)
+    SMTP-->>Queue: 250 OK
+    Queue->>SMTP: AUTH
+    SMTP-->>Queue: 334
+    Queue->>SMTP: credentials
+    SMTP-->>Queue: 235 Authenticated
+    
+    Queue->>SMTP: MAIL FROM
+    SMTP-->>Queue: 250 OK
+    Queue->>SMTP: RCPT TO
+    SMTP-->>Queue: 250 OK
+    Queue->>SMTP: DATA
+    SMTP-->>Queue: 354 Ready
+    
+    Queue->>SMTP: 发送邮件内容
+    Queue->>SMTP: CRLF.CRLF
+    SMTP-->>Queue: 250 OK (queued)
+    
+    Queue->>SMTP: QUIT
+    SMTP-->>Queue: 221 Bye
+    
+    Queue->>DB: 更新状态 (status=sent)
+    Queue->>DB: 移动到已发送文件夹
+    
+    Queue-->>Send: 发送成功
+    Send-->>UI: 发送成功通知
+    UI-->>User: 显示发送成功
+```
+
+### 发送队列设计
+
+```mermaid
+erDiagram
+    send_queue {
+        bigint id PK
+        int account_id FK
+        string message_id UK
+        string recipients
+        string subject
+        text mime_content
+        string status
+        int retry_count
+        datetime next_retry_at
+        datetime created_at
+        datetime sent_at
+        string error_message
+        string error_code
+    }
+    
+    send_history {
+        bigint id PK
+        int account_id FK
+        string message_id
+        string recipients
+        string subject
+        string status
+        datetime sent_at
+        int duration_ms
+        string smtp_response
+    }
+    
+    Account ||--o{ send_queue : has
+    Account ||--o{ send_history : has
+```
+
+### 发送错误处理策略
+
+| 错误类型 | SMTP 代码 | 处理策略 | 重试次数 |
+|----------|-----------|----------|----------|
+| 连接超时 | - | 指数退避重试 | 5 |
+| 认证失败 | 535 | 不重试，通知用户 | 0 |
+| 收件人不存在 | 550 | 不重试，通知用户 | 0 |
+| 邮箱已满 | 552 | 延迟重试 | 3 |
+| 附件过大 | 552 | 通知用户压缩 | 0 |
+| 被标记为垃圾邮件 | 550 | 通知用户 | 0 |
+| 服务暂时不可用 | 421 | 指数退避重试 | 5 |
+| 速率限制 | 451 | 等待后重试 | 3 |
+
+### 附件处理流程
+
+```mermaid
+flowchart TB
+    subgraph AttachProcess["附件处理"]
+        AddAttach[添加附件] --> CheckSize{检查大小}
+        CheckSize -->|超过限制| Compress[压缩/分割]
+        CheckSize -->|正常| Encode[Base64 编码]
+        Compress --> Encode
+        Encode --> CreateCID[创建 Content-ID]
+        CreateCID --> AddMIME[添加 MIME 部分]
+    end
+    
+    subgraph LargeFile["大文件处理"]
+        LargeAttach[大附件] --> CheckProvider{服务商限制}
+        CheckProvider -->|Gmail| CloudLink[生成云端链接]
+        CheckProvider -->|Outlook| OneDriveLink[OneDrive 链接]
+        CheckProvider -->|其他| ChunkSend[分块发送]
+    end
+```
+
+---
+
+## 草稿保存机制设计
+
+### 草稿保存策略
+
+草稿保存采用多策略结合，确保用户编辑内容不丢失：
+
+| 策略 | 触发条件 | 保存位置 | 优先级 |
+|------|----------|----------|--------|
+| **自动保存** | 内容变更 + 停止输入 3秒 | 本地 + IMAP | 高 |
+| **定时保存** | 每 30 秒 | 本地 | 中 |
+| **手动保存** | 用户点击保存 | 本地 + IMAP | 高 |
+| **退出保存** | 关闭编辑器 | 本地 + IMAP | 最高 |
+
+### 草稿保存流程图
+
+```mermaid
+flowchart TB
+    subgraph Triggers["保存触发"]
+        Type[用户输入] --> StopTyping{停止输入3秒}
+        StopTyping --> AutoSave[自动保存]
+        
+        Timer[定时器] --> TimerTrigger{每30秒}
+        TimerTrigger --> PeriodicSave[定时保存]
+        
+        ClickSave[点击保存] --> ManualSave[手动保存]
+        CloseEditor[关闭编辑器] --> ExitSave[退出保存]
+    end
+    
+    subgraph SaveProcess["保存处理"]
+        AutoSave --> CheckChange{内容变更?}
+        PeriodicSave --> CheckChange
+        ManualSave --> BuildDraft[构建草稿对象]
+        ExitSave --> BuildDraft
+        
+        CheckChange -->|是| BuildDraft
+        CheckChange -->|否| Skip[跳过]
+        
+        BuildDraft --> SaveLocal[保存到本地]
+        SaveLocal --> UpdateUI[更新 UI 状态]
+        
+        UpdateUI --> CheckOnline{在线状态?}
+        CheckOnline -->|是| SyncIMAP[同步到 IMAP]
+        CheckOnline -->|否| MarkPending[标记待同步]
+        
+        SyncIMAP --> IMAPResult{同步结果}
+        IMAPResult -->|成功| UpdateSynced[更新同步状态]
+        IMAPResult -->|失败| RetryLater[稍后重试]
+    end
+```
+
+### 草稿生命周期状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> New: 创建新草稿
+    
+    New --> Draft: 首次保存
+    Draft --> Draft: 内容更新
+    Draft --> Syncing: 同步到 IMAP
+    
+    Syncing --> Synced: 同步成功
+    Syncing --> SyncFailed: 同步失败
+    SyncFailed --> Syncing: 重试
+    
+    Draft --> Sending: 发送中
+    Synced --> Sending: 发送中
+    
+    Sending --> Sent: 发送成功
+    Sending --> SendFailed: 发送失败
+    SendFailed --> Draft: 返回草稿
+    
+    Sent --> [*]: 移到已发送
+    Draft --> Deleted: 用户删除
+    Deleted --> [*]
+    
+    note right of Draft
+        本地草稿
+        可离线编辑
+    end note
+    
+    note right of Synced
+        已同步
+        多设备可见
+    end note
+```
+
+### 草稿 IMAP 同步流程
+
+```mermaid
+sequenceDiagram
+    participant App as 本地客户端
+    participant DB as 本地数据库
+    participant IMAP as IMAP服务器
+    participant Other as 其他客户端
+    
+    rect rgb(240, 255, 240)
+        note over App,IMAP: 场景1: 本地保存到服务器
+        App->>DB: 保存草稿到本地
+        DB-->>App: 草稿 ID
+        
+        App->>IMAP: SELECT Drafts
+        IMAP-->>App: OK
+        
+        App->>IMAP: APPEND Drafts {draft-mime}
+        IMAP-->>App: OK [APPENDUID uid]
+        
+        App->>DB: 更新 UID 和同步状态
+    end
+    
+    rect rgb(240, 248, 255)
+        note over App,Other: 场景2: 多设备同步
+        Other->>IMAP: 保存草稿
+        IMAP-->>Other: OK
+        
+        App->>IMAP: 定时同步 Drafts 文件夹
+        IMAP-->>App: 返回邮件列表
+        
+        App->>App: 对比本地草稿
+        App->>App: 检测新增/修改/删除
+        
+        alt 服务器有新草稿
+            App->>IMAP: FETCH 新草稿
+            IMAP-->>App: 草稿内容
+            App->>DB: 保存到本地
+        end
+        
+        alt 本地有未同步草稿
+            App->>IMAP: APPEND 本地草稿
+            IMAP-->>App: OK
+            App->>DB: 更新同步状态
+        end
+    end
+```
+
+### 草稿数据模型
+
+```mermaid
+erDiagram
+    drafts {
+        bigint id PK
+        int account_id FK
+        string message_id UK
+        string imap_uid
+        string subject
+        text recipients_to
+        text recipients_cc
+        text recipients_bcc
+        text body_text
+        text body_html
+        string reply_to
+        string in_reply_to
+        string references
+        text attachments
+        string status
+        datetime created_at
+        datetime updated_at
+        datetime synced_at
+        bool is_synced
+    }
+    
+    draft_versions {
+        bigint id PK
+        int draft_id FK
+        text content_snapshot
+        datetime saved_at
+        string trigger "auto/manual"
+    }
+    
+    Account ||--o{ drafts : has
+    drafts ||--o{ draft_versions : has
+```
+
+### 草稿版本管理
+
+```mermaid
+flowchart TB
+    subgraph VersionControl["版本控制"]
+        Save[保存草稿] --> CheckInterval{距上次保存<br/>超过1分钟?}
+        CheckInterval -->|是| CreateVersion[创建版本快照]
+        CheckInterval -->|否| UpdateCurrent[更新当前版本]
+        
+        CreateVersion --> StoreSnapshot[存储快照]
+        StoreSnapshot --> CleanOld[清理旧版本]
+        
+        CleanOld --> KeepVersions{保留策略}
+        KeepVersions -->|最近10个版本| Keep10[保留10个]
+        KeepVersions -->|最近24小时| Keep24h[保留24小时内]
+    end
+    
+    subgraph Restore["版本恢复"]
+        UserRestore[用户请求恢复] --> ListVersions[列出版本]
+        ListVersions --> SelectVersion[选择版本]
+        SelectVersion --> LoadSnapshot[加载快照]
+        LoadSnapshot --> RestoreDraft[恢复草稿]
+    end
+```
+
+### 草稿与邮件关联
+
+```mermaid
+flowchart LR
+    subgraph Relations["关联关系"]
+        Original[原始邮件] --> Reply[回复草稿]
+        Original --> Forward[转发草稿]
+        
+        Reply --> ReplyDraft[回复草稿]
+        ReplyDraft --> ReplySent[回复邮件]
+        
+        Forward --> ForwardDraft[转发草稿]
+        ForwardDraft --> ForwardSent[转发邮件]
+    end
+    
+    subgraph Metadata["元数据"]
+        InReplyTo["In-Reply-To: <original@message.id>"]
+        References["References: <original@message.id>"]
+        ThreadTopic["Thread-Topic: 原始主题"]
+    end
+```
+
+---
+
+## 性能优化策略设计
+
+### 性能优化领域概述
+
+性能优化覆盖多个关键领域，确保邮件客户端流畅运行：
+
+| 优化领域 | 目标指标 | 优化策略 | 优先级 |
+|----------|----------|----------|--------|
+| **启动性能** | 冷启动 < 3s | 延迟加载、后台初始化 | P0 |
+| **同步性能** | 1000封/分钟 | 批量获取、并发同步 | P0 |
+| **UI响应** | < 100ms | 虚拟列表、懒加载 | P0 |
+| **内存占用** | < 200MB | LRU缓存、流式处理 | P1 |
+| **数据库性能** | 查询 < 50ms | 索引优化、WAL模式 | P1 |
+| **网络性能** | 连接复用 | 连接池、压缩传输 | P2 |
+
+### 启动性能优化
+
+```mermaid
+flowchart TB
+    subgraph StartupSequence["启动序列优化"]
+        Start[应用启动] --> Critical[加载关键资源]
+        Critical --> ShowUI[显示主界面]
+        
+        ShowUI --> Parallel{并行初始化}
+        Parallel --> DB[数据库连接池]
+        Parallel --> Cache[预加载缓存]
+        Parallel --> Providers[初始化服务商]
+        
+        DB --> Ready[就绪状态]
+        Cache --> Ready
+        Providers --> Ready
+        
+        Ready --> Background[后台任务]
+        Background --> Sync[静默同步]
+        Background --> Index[索引更新]
+    end
+    
+    subgraph LazyLoading["延迟加载"]
+        Lazy1[账号列表] --> Lazy2[邮件内容]
+        Lazy2 --> Lazy3[附件数据]
+        Lazy3 --> Lazy4[搜索索引]
+    end
+```
+
+### 同步性能优化策略
+
+```mermaid
+flowchart LR
+    subgraph BatchOptimization["批量优化"]
+        Fetch[获取邮件] --> Batch[批量获取]
+        Batch --> Size{每批大小}
+        Size -->|100封| Process[并行处理]
+        Process --> Write[批量写入]
+    end
+    
+    subgraph ConcurrentSync["并发同步"]
+        Folders[文件夹列表] --> Select[选择优先级]
+        Select --> Inbox[收件箱 P0]
+        Select --> Sent[已发送 P1]
+        Select --> Others[其他 P2]
+        
+        Inbox --> ParallelSync[并发同步]
+        Sent --> ParallelSync
+        Others --> Sequential[顺序同步]
+    end
+    
+    subgraph ConnectionReuse["连接复用"]
+        Pool[连接池] --> KeepAlive[保活连接]
+        KeepAlive --> Reuse[复用连接]
+        Reuse --> Reduce[减少握手]
+    end
+```
+
+### UI响应性能优化
+
+```mermaid
+flowchart TB
+    subgraph VirtualList["虚拟列表渲染"]
+        Viewport[视口区域] --> CalcVisible[计算可见项]
+        CalcVisible --> RenderVisible[仅渲染可见]
+        RenderVisible --> Recycle[回收不可见项]
+        Recycle --> Viewport
+    end
+    
+    subgraph LazyLoading["懒加载策略"]
+        List[邮件列表] --> Headers[仅加载头信息]
+        Headers --> Scroll[滚动触发]
+        Scroll --> LoadBody[加载正文]
+        LoadBody --> LoadAttach[加载附件]
+    end
+    
+    subgraph BackgroundProcess["后台处理"]
+        UserAction[用户操作] --> CheckBlocking{是否阻塞?}
+        CheckBlocking -->|是| Offload[移至后台线程]
+        CheckBlocking -->|否| Direct[直接执行]
+        Offload --> Notify[完成后通知]
+    end
+```
+
+### 内存优化策略
+
+```mermaid
+flowchart TB
+    subgraph MemoryManagement["内存管理"]
+        Alloc[内存分配] --> Track[追踪使用]
+        Track --> Threshold{超过阈值?}
+        Threshold -->|是| Cleanup[清理缓存]
+        Threshold -->|否| Continue[继续使用]
+    end
+    
+    subgraph CacheStrategy["缓存策略"]
+        Cache[缓存数据] --> LRU[LRU算法]
+        LRU --> Evict[淘汰最少使用]
+        Evict --> Size{数据大小}
+        Size -->|小| MemoryCache[内存缓存]
+        Size -->|大| DiskCache[磁盘缓存]
+    end
+    
+    subgraph LargeData["大数据处理"]
+        LargeFile[大文件] --> Stream[流式处理]
+        Stream --> Chunk[分块读取]
+        Chunk --> Process[处理块]
+        Process --> Release[释放内存]
+    end
+```
+
+### 数据库性能优化
+
+```mermaid
+flowchart TB
+    subgraph IndexStrategy["索引策略"]
+        Table[数据表] --> QueryPattern[查询模式分析]
+        QueryPattern --> CreateIndex[创建索引]
+        CreateIndex --> IndexTypes{索引类型}
+        IndexTypes --> Primary[主键索引]
+        IndexTypes --> Unique[唯一索引]
+        IndexTypes --> Composite[组合索引]
+        IndexTypes --> FTS[全文索引]
+    end
+    
+    subgraph WriteOptimization["写入优化"]
+        Write[写入操作] --> Batch[批量写入]
+        Batch --> Transaction[事务包装]
+        Transaction --> WAL[WAL模式]
+        WAL --> AsyncFlush[异步刷盘]
+    end
+    
+    subgraph QueryOptimization["查询优化"]
+        Query[查询请求] --> Plan[查询计划]
+        Plan --> Analyze[分析成本]
+        Analyze --> Optimize[优化执行]
+        Optimize --> Cache[结果缓存]
+    end
+```
+
+### 性能监控指标
+
+```mermaid
+graph TB
+    subgraph Metrics["性能指标"]
+        Startup[启动时间]
+        Response[响应时间]
+        Throughput[吞吐量]
+        Memory[内存使用]
+        CPU[CPU使用率]
+        Network[网络延迟]
+        DBQuery[数据库查询时间]
+    end
+    
+    subgraph Collection["采集方式"]
+        Metrics --> Timer[计时器]
+        Metrics --> Counter[计数器]
+        Metrics --> Sampler[采样器]
+        Metrics --> Profiler[性能分析器]
+    end
+    
+    subgraph Analysis["分析报告"]
+        Collection --> Dashboard[仪表盘]
+        Collection --> Alert[告警]
+        Collection --> Report[报告]
+    end
+```
+
+---
+
+## 安全性设计
+
+### 安全威胁模型
+
+```mermaid
+graph TB
+    subgraph Threats["威胁类型"]
+        T1[凭证泄露]
+        T2[中间人攻击]
+        T3[数据窃取]
+        T4[注入攻击]
+        T5[暴力破解]
+        T6[会话劫持]
+    end
+    
+    subgraph AttackSurface["攻击面"]
+        A1[网络通信]
+        A2[本地存储]
+        A3[用户界面]
+        A4[OAuth流程]
+        A5[IMAP/SMTP连接]
+    end
+    
+    subgraph Mitigations["缓解措施"]
+        M1[加密存储]
+        M2[TLS验证]
+        M3[输入验证]
+        M4[速率限制]
+        M5[PKCE流程]
+        M6[安全会话]
+    end
+    
+    Threats --> AttackSurface
+    AttackSurface --> Mitigations
+```
+
+### 认证安全设计
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant App as 应用
+    participant Auth as 认证服务
+    participant Storage as 安全存储
+    
+    rect rgb(255, 240, 240)
+        note over User,Storage: OAuth 2.0 PKCE 流程
+        User->>App: 发起登录
+        App->>App: 生成 code_verifier
+        App->>App: 计算 code_challenge
+        App->>Auth: 授权请求 (code_challenge)
+        Auth-->>User: 授权页面
+        User->>Auth: 同意授权
+        Auth-->>App: 授权码
+        App->>Auth: Token请求 (code + verifier)
+        Auth->>Auth: 验证 challenge
+        Auth-->>App: Access Token
+        App->>Storage: 加密存储 Token
+    end
+```
+
+### 数据安全架构
+
+```mermaid
+graph TB
+    subgraph DataClassification["数据分类"]
+        Critical[关键数据<br/>密码/Token]
+        Sensitive[敏感数据<br/>邮件内容]
+        Normal[普通数据<br/>配置信息]
+        Public[公开数据<br/>UI资源]
+    end
+    
+    subgraph Protection["保护措施"]
+        Critical --> Keyring[系统Keyring]
+        Critical --> Encryption[AES-256加密]
+        Sensitive --> DBEncryption[数据库加密]
+        Sensitive --> SecureDelete[安全删除]
+        Normal --> AccessControl[访问控制]
+    end
+    
+    subgraph StorageLocation["存储位置"]
+        Keyring --> OSKeystore[操作系统密钥库]
+        Encryption --> SecureStorage[加密存储]
+        DBEncryption --> SQLiteDatabase[SQLite数据库]
+        AccessControl --> ConfigFiles[配置文件]
+    end
+```
+
+### 通信安全设计
+
+```mermaid
+flowchart TB
+    subgraph TLSConfig["TLS配置"]
+        Connect[建立连接] --> TLS13{TLS 1.3?}
+        TLS13 -->|支持| UseTLS13[使用TLS 1.3]
+        TLS13 -->|不支持| TLS12[TLS 1.2]
+        
+        UseTLS13 --> CipherSuites[加密套件选择]
+        TLS12 --> CipherSuites
+        
+        CipherSuites --> Strong[强加密套件]
+        Strong --> Verify[证书验证]
+    end
+    
+    subgraph CertValidation["证书验证"]
+        Verify --> Chain[证书链验证]
+        Chain --> Expiry[有效期检查]
+        Expiry --> Revocation[吊销检查]
+        Revocation --> Pinning{证书钉扎?}
+        Pinning -->|是| CheckPin[验证钉扎]
+        Pinning -->|否| TrustAnchor[信任锚点]
+    end
+    
+    subgraph SecurityHeaders["安全头"]
+        HTTPS[HTTPS Only]
+        HSTS[Strict-Transport-Security]
+        CSP[Content-Security-Policy]
+    end
+```
+
+### 密码安全存储
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant App as 应用
+    participant Keyring as 系统Keyring
+    participant DB as 数据库
+    
+    User->>App: 输入密码
+    App->>App: 验证密码格式
+    
+    alt 新账号
+        App->>Keyring: 存储密码
+        Keyring-->>App: 存储成功
+        App->>DB: 存储账号信息(不含密码)
+    else 获取密码
+        App->>Keyring: 请求密码
+        Keyring-->>App: 返回密码
+        App->>App: 使用后立即清除内存
+    end
+    
+    note over App: 密码永不明文存储
+    note over App: 使用后立即清除内存
+```
+
+### 安全审计日志
+
+```mermaid
+erDiagram
+    security_audit_log {
+        bigint id PK
+        string event_type
+        string severity
+        int account_id
+        string ip_address
+        string user_agent
+        json details
+        datetime timestamp
+    }
+    
+    security_events {
+        string event_type PK
+        string description
+        string severity
+        bool notify_admin
+        bool notify_user
+    }
+    
+    security_audit_log ||--o{ security_events : type
+```
+
+### 安全事件类型
+
+| 事件类型 | 严重级别 | 描述 | 通知 |
+|----------|----------|------|------|
+| `LOGIN_SUCCESS` | INFO | 登录成功 | 否 |
+| `LOGIN_FAILED` | WARNING | 登录失败 | 3次后 |
+| `TOKEN_REFRESH` | INFO | Token刷新 | 否 |
+| `TOKEN_EXPIRED` | WARNING | Token过期 | 是 |
+| `AUTH_REVOKED` | CRITICAL | 授权被撤销 | 是 |
+| `SUSPICIOUS_ACTIVITY` | CRITICAL | 可疑活动 | 是 |
+| `PASSWORD_CHANGED` | INFO | 密码更改 | 是 |
+| `ACCOUNT_LOCKED` | CRITICAL | 账号锁定 | 是 |
+
+---
+
+## 日志与监控设计
+
+### 日志系统架构
+
+```mermaid
+graph TB
+    subgraph LogSources["日志来源"]
+        App[应用日志]
+        Auth[认证日志]
+        Sync[同步日志]
+        Network[网络日志]
+        Error[错误日志]
+        Security[安全日志]
+    end
+    
+    subgraph LogCollection["日志收集"]
+        Sources[日志源] --> Collector[收集器]
+        Collector --> Filter[过滤器]
+        Filter --> Format[格式化]
+        Format --> Buffer[缓冲区]
+    end
+    
+    subgraph LogStorage["日志存储"]
+        Buffer --> Rotate[日志轮转]
+        Rotate --> Files[日志文件]
+        Rotate --> Archive[归档压缩]
+        Archive --> Cleanup[定期清理]
+    end
+    
+    subgraph LogAnalysis["日志分析"]
+        Files --> Search[日志搜索]
+        Files --> Stats[统计分析]
+        Files --> Alert[告警触发]
+    end
+    
+    LogSources --> Sources
+```
+
+### 日志级别与分类
+
+```mermaid
+flowchart LR
+    subgraph Levels["日志级别"]
+        ERROR[ERROR<br/>错误]
+        WARN[WARN<br/>警告]
+        INFO[INFO<br/>信息]
+        DEBUG[DEBUG<br/>调试]
+        TRACE[TRACE<br/>追踪]
+    end
+    
+    subgraph Categories["日志分类"]
+        Auth[认证日志]
+        Sync[同步日志]
+        API[API日志]
+        DB[数据库日志]
+        UI[界面日志]
+        Security[安全日志]
+    end
+    
+    subgraph Output["输出目标"]
+        Console[控制台]
+        File[文件]
+        Remote[远程服务]
+    end
+    
+    Levels --> Categories
+    Categories --> Output
+```
+
+### 结构化日志格式
+
+```json
+{
+    "timestamp": "2024-01-15T10:30:00.000Z",
+    "level": "INFO",
+    "category": "sync",
+    "message": "Email sync completed",
+    "context": {
+        "account_id": 1,
+        "folder": "INBOX",
+        "emails_synced": 150,
+        "duration_ms": 2340
+    },
+    "trace_id": "abc123def456",
+    "span_id": "span789",
+    "user_id": "user@example.com",
+    "session_id": "sess_12345",
+    "version": "2.0.0",
+    "environment": "production"
+}
+```
+
+### 性能监控系统
+
+```mermaid
+graph TB
+    subgraph MetricsCollection["指标采集"]
+        AppMetrics[应用指标]
+        SystemMetrics[系统指标]
+        NetworkMetrics[网络指标]
+        DBMetrics[数据库指标]
+    end
+    
+    subgraph MetricTypes["指标类型"]
+        Counter[计数器<br/>请求次数/错误次数]
+        Gauge[仪表盘<br/>内存/CPU使用率]
+        Histogram[直方图<br/>响应时间分布]
+        Summary[摘要<br/>百分位数统计]
+    end
+    
+    subgraph Processing["处理流程"]
+        Collect[采集] --> Aggregate[聚合]
+        Aggregate --> Store[存储]
+        Store --> Analyze[分析]
+        Analyze --> Alert[告警]
+        Alert --> Notify[通知]
+    end
+    
+    AppMetrics --> MetricTypes
+    SystemMetrics --> MetricTypes
+    NetworkMetrics --> MetricTypes
+    DBMetrics --> MetricTypes
+```
+
+### 关键性能指标定义
+
+| 指标名称 | 类型 | 描述 | 阈值 | 告警级别 |
+|----------|------|------|------|----------|
+| `app_startup_time` | Gauge | 应用启动时间 | < 3s | WARNING |
+| `sync_duration_ms` | Histogram | 同步耗时 | < 60s | WARNING |
+| `email_list_load_ms` | Histogram | 列表加载时间 | < 100ms | WARNING |
+| `memory_usage_mb` | Gauge | 内存使用量 | < 200MB | WARNING |
+| `cpu_usage_percent` | Gauge | CPU使用率 | < 50% | WARNING |
+| `db_query_time_ms` | Histogram | 数据库查询时间 | < 50ms | WARNING |
+| `imap_connection_count` | Gauge | IMAP连接数 | < 10 | INFO |
+| `error_rate` | Counter | 错误率 | < 1% | CRITICAL |
+
+### 错误追踪系统
+
+```mermaid
+flowchart TB
+    subgraph ErrorCapture["错误捕获"]
+        Throw[异常抛出] --> Catch[捕获异常]
+        Catch --> Context[收集上下文]
+        Context --> Stack[堆栈追踪]
+        Stack --> Fingerprint[生成指纹]
+    end
+    
+    subgraph ErrorProcessing["错误处理"]
+        Fingerprint --> Dedupe[去重]
+        Dedupe --> Classify[分类]
+        Classify --> Severity{严重级别}
+        
+        Severity -->|Critical| Immediate[立即告警]
+        Severity -->|Error| Queue[加入队列]
+        Severity -->|Warning| Log[记录日志]
+    end
+    
+    subgraph ErrorStorage["错误存储"]
+        Queue --> SaveDB[保存数据库]
+        SaveDB --> Group[错误聚合]
+        Group --> Trend[趋势分析]
+    end
+```
+
+### 健康检查机制
+
+```mermaid
+sequenceDiagram
+    participant Scheduler as 调度器
+    participant Health as 健康检查
+    participant DB as 数据库
+    participant IMAP as IMAP服务
+    participant SMTP as SMTP服务
+    
+    loop 每60秒
+        Scheduler->>Health: 执行健康检查
+        
+        Health->>DB: 检查连接
+        DB-->>Health: 状态 OK
+        
+        Health->>IMAP: 检查连接池
+        IMAP-->>Health: 活跃连接数
+        
+        Health->>SMTP: 检查可用性
+        SMTP-->>Health: 状态 OK
+        
+        Health->>Health: 汇总状态
+        Health-->>Scheduler: 健康报告
+    end
+```
+
+### 监控仪表盘设计
+
+```mermaid
+graph TB
+    subgraph Dashboard["监控仪表盘"]
+        subgraph SystemStatus["系统状态"]
+            CPU[CPU使用率]
+            Memory[内存使用]
+            Disk[磁盘空间]
+            Network[网络状态]
+        end
+        
+        subgraph AppStatus["应用状态"]
+            Accounts[账号状态]
+            SyncStatus[同步状态]
+            ErrorRate[错误率]
+            ResponseTime[响应时间]
+        end
+        
+        subgraph BusinessMetrics["业务指标"]
+            TotalEmails[邮件总数]
+            UnreadCount[未读数量]
+            SyncCount[同步次数]
+            SendCount[发送次数]
+        end
+        
+        subgraph Alerts["告警面板"]
+            ActiveAlerts[活动告警]
+            AlertHistory[告警历史]
+            MutedAlerts[静默告警]
+        end
+    end
+```
+
+### 告警规则配置
+
+```rust
+/// 告警规则
+pub struct AlertRule {
+    /// 规则ID
+    pub id: String,
+    /// 规则名称
+    pub name: String,
+    /// 指标名称
+    pub metric: String,
+    /// 条件
+    pub condition: AlertCondition,
+    /// 持续时间（秒）
+    pub duration: u64,
+    /// 严重级别
+    pub severity: AlertSeverity,
+    /// 通知渠道
+    pub channels: Vec<NotificationChannel>,
+    /// 静默时间（秒）
+    pub silence_duration: u64,
+}
+
+/// 告警条件
+pub enum AlertCondition {
+    GreaterThan(f64),
+    LessThan(f64),
+    Equals(f64),
+    NotEquals(f64),
+    RateOfChange(f64),
+    Absent,
+}
+
+/// 告警级别
+pub enum AlertSeverity {
+    Info,
+    Warning,
+    Error,
+    Critical,
+}
+```
+
+### 日志脱敏规则
+
+| 字段类型 | 脱敏规则 | 示例 |
+|----------|----------|------|
+| 邮箱地址 | 保留首尾字符 | `j***n@example.com` |
+| 密码 | 完全隐藏 | `***` |
+| Token | 保留前8字符 | `abc12345***` |
+| 手机号 | 保留前3后4 | `138****5678` |
+| IP地址 | 隐藏最后一段 | `192.168.1.*` |
+| 文件路径 | 仅保留文件名 | `***/document.pdf` |
 
 ---
 
