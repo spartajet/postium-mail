@@ -851,31 +851,114 @@ impl AsyncImapClient {
 
     /// 检查是否支持 CONDSTORE 扩展
     ///
-    /// 通过 CAPABILITY 命令检测服务器是否支持 CONDSTORE
+    /// 使用 CAPABILITY 命令检测服务器是否支持 CONDSTORE。
+    ///
+    /// **注意**：async-imap 0.11 原生支持 `capabilities()` 方法。
+    ///
+    /// # RFC 4551 CONDSTORE
+    ///
+    /// CONDSTORE 扩展允许客户端：
+    /// - 使用 MODSEQ（修改序列号）进行增量同步
+    /// - 使用 UNCHANGEDSINCE 参数检测变更
+    /// - 使用 SEARCH MODSEQ 查找修改的邮件
+    ///
+    /// # 支持的服务商
+    ///
+    /// - ✅ Gmail (imap.gmail.com)
+    /// - ✅ iCloud (imap.mail.me.com)
+    /// - ❌ Outlook (outlook.office365.com) - 不支持
+    /// - ❌ Yahoo (imap.mail.yahoo.com) - 不支持
+    ///
+    /// # 返回
+    ///
+    /// - `Ok(true)` - 服务器支持 CONDSTORE
+    /// - `Ok(false)` - 服务器不支持 CONDSTORE
+    /// - `Err` - IMAP 未连接或命令执行失败
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// let supported = client.check_condstore_support().await?;
+    /// if supported {
+    ///     println!("服务器支持 CONDSTORE");
+    /// }
+    /// ```
     pub async fn check_condstore_support(&mut self) -> Result<bool> {
-        let _session = self
+        let session = self
             .session
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        // TODO: 实现 CAPABILITY 命令
-        // 由于 async-imap 可能不直接支持 capability() 方法，
-        // 需要使用以下方法之一：
-        // 1. 使用 run_command_and_read_response 发送原始 CAPABILITY 命令
-        // 2. 升级到支持 CAPABILITY 的 IMAP 库版本
-        //
-        // 正确的命令格式：CAPABILITY
-        //
-        // 临时实现：根据服务器类型推断
-        // Gmail 支持 CONDSTORE，Outlook 可能不支持
-        tracing::warn!("CONDSTORE 检测尚未完整实现，默认返回 false");
-        Ok(false)
+        // 使用 async-imap 0.11 的 capabilities() 方法
+        let capabilities = session
+            .capabilities()
+            .await
+            .map_err(|e| anyhow!("获取服务器能力失败: {}", e))?;
+
+        // 检查是否包含 CONDSTORE
+        let has_condstore = capabilities
+            .iter()
+            .any(|cap| {
+                // 将 Capability 转换为字符串进行比较
+                let cap_str = format!("{:?}", cap);
+                cap_str.to_ascii_uppercase().contains("CONDSTORE")
+                    || cap_str == "Condstore"
+            });
+
+        if has_condstore {
+            tracing::info!("服务器支持 CONDSTORE 扩展");
+        } else {
+            tracing::debug!("服务器不支持 CONDSTORE 扩展");
+        }
+
+        Ok(has_condstore)
     }
 
     /// 选择文件夹（带 CONDSTORE 参数）
     ///
-    /// 使用 UNCHANGEDSINCE 参数进行增量同步
-    /// 返回 (邮件数量, HIGHESTMODSEQ)
+    /// 使用 CONDSTORE 扩展选择文件夹，支持 UNCHANGEDSINCE 参数进行增量同步。
+    ///
+    /// **注意**：async-imap 0.11 原生支持 `select_condstore()` 方法。
+    ///
+    /// # 参数
+    ///
+    /// * `folder` - 文件夹名称
+    /// * `changed_since` - 起始 MODSEQ 值（None 表示普通 CONDSTORE SELECT）
+    ///
+    /// # 返回
+    ///
+    /// (邮件数量, HIGHESTMODSEQ)
+    ///
+    /// # 实现说明
+    ///
+    /// **当前**：使用 `select_condstore()` 启用 CONDSTORE 模式。
+    ///
+    /// **UNCHANGEDSINCE 参数**：
+    /// - async-imap 0.11 的 `select_condstore()` 启用 CONDSTORE 模式
+    /// - UNCHANGEDSINCE 参数需要使用原始命令实现
+    /// - 当前实现总是启用 CONDSTORE，不使用 UNCHANGEDSINCE 过滤
+    ///
+    /// **正确的命令格式**：
+    /// ```text
+    /// A1 SELECT INBOX (CONDSTORE)
+    /// * 172 EXISTS
+    /// * OK [HIGHESTMODSEQ 1234567900] Highest
+    /// A1 OK [READ-WRITE] Select completed (0.001 + 0.000 secs).
+    /// ```
+    ///
+    /// # 返回值
+    ///
+    /// - 邮件数量：邮箱中的邮件总数
+    /// - HIGHESTMODSEQ：邮箱当前最高的修改序列号
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// // 启用 CONDSTORE 模式
+    /// let (count, highest_modseq) = client.select_with_condstore("INBOX", None).await?;
+    ///
+    /// // 注意：UNCHANGEDSINCE 过滤需要使用原始命令（未来实现）
+    /// ```
     pub async fn select_with_condstore(
         &mut self,
         folder: &str,
@@ -886,99 +969,202 @@ impl AsyncImapClient {
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        // 根据是否指定 CHANGEDSINCE 选择命令
-        let mailbox = if let Some(modseq) = changed_since {
-            // CONDSTORE 模式：SELECT ... UNCHANGEDSINCE <modseq>
-            tracing::debug!("SELECT {} with UNCHANGEDSINCE {}", folder, modseq);
+        if changed_since.is_some() {
+            tracing::warn!(
+                "UNCHANGEDSINCE 参数尚未实现（需要原始命令），使用普通 CONDSTORE SELECT"
+            );
+        }
 
-            // 注意：async-imap 可能不直接支持 UNCHANGEDSINCE 参数
-            // 这里需要使用原始命令或升级库
-            // 临时实现：先执行普通 SELECT
-            session
-                .select(folder)
-                .await
-                .map_err(|e| anyhow!("选择文件夹失败: {}", e))?
-        } else {
-            // 普通 SELECT
-            session
-                .select(folder)
-                .await
-                .map_err(|e| anyhow!("选择文件夹失败: {}", e))?
-        };
+        // 使用 async-imap 0.11 的 select_condstore() 方法
+        // 这会启用 CONDSTORE 模式，但不支持 UNCHANGEDSINCE 参数
+        let mailbox = session
+            .select_condstore(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败 (CONDSTORE): {}", e))?;
 
-        // 获取 HIGHESTMODSEQ（如果服务器支持）
+        // 获取 HIGHESTMODSEQ（服务器支持 CONDSTORE 时返回）
         let highest_modseq = mailbox.highest_modseq.map(|v| v as u64);
+
+        tracing::debug!(
+            "CONDSTORE SELECT: folder={}, exists={}, highest_modseq={:?}",
+            folder,
+            mailbox.exists,
+            highest_modseq
+        );
 
         Ok((mailbox.exists as usize, highest_modseq))
     }
 
     /// 搜索修改的邮件（MODSEQ）
     ///
-    /// 使用 SEARCH MODSEQ 命令查找自指定 MODSEQ 后修改的邮件
-    pub async fn search_modified_since(&mut self, modseq: u64) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
-
-        tracing::debug!("SEARCH MODSEQ {}:*", modseq);
-
-        // TODO: 实现 SEARCH MODSEQ 命令
-        // async-imap 可能不直接支持 MODSEQ 搜索
-        // 需要使用原始命令或升级库
-        //
-        // 正确的命令格式：
-        // SEARCH MODSEQ <modseq>:* ALL
-        //
-        // 临时实现：返回空列表
-        tracing::warn!("SEARCH MODSEQ 尚未完整实现，返回空列表");
-        Ok(Vec::new())
+    /// 使用 SEARCH MODSEQ 命令查找自指定 MODSEQ 后修改的邮件。
+    ///
+    /// **注意**：此方法需要异步 IMAP 库支持 MODSEQ 搜索语法。
+    ///
+    /// # 参数
+    ///
+    /// * `modseq` - 起始 MODSEQ 值
+    ///
+    /// # 返回
+    ///
+    /// 修改的邮件 UID 列表
+    ///
+    /// # 命令格式
+    ///
+    /// ```text
+    /// A1 SEARCH MODSEQ 1234567890:* ALL
+    /// * SEARCH 1 3 5 7 9
+    /// A1 OK Search completed
+    /// ```
+    ///
+    /// # 实现说明
+    ///
+    /// **当前**：async-imap 0.11 的 `search()` 方法不支持 MODSEQ 语法。
+    ///
+    /// **建议**：使用 UID SEARCH 降级策略：
+    /// - `UID SEARCH SINCE <date>` - 搜索指定日期后的邮件
+    /// - 然后逐个检查邮件的 FLAGS 变更
+    ///
+    /// # 降级策略
+    ///
+    /// 如果命令执行失败或服务器不支持 CONDSTORE：
+    /// - 使用 `uid_search()` 方法配合时间范围
+    /// - 逐个对比 FLAGS 来检测变更
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// // 当前实现返回错误，建议使用降级策略
+    /// match client.search_modified_since(1234567890).await {
+    ///     Ok(uids) => { /* 使用 MODSEQ 结果 */ }
+    ///     Err(_) => {
+    ///         // 降级到 UID SEARCH
+    ///         let uids = client.uid_search("SINCE 17-Mar-2026").await?;
+    ///     }
+    /// }
+    /// ```
+    pub async fn search_modified_since(&mut self, _modseq: u64) -> Result<Vec<u32>> {
+        // 当前 async-imap 0.11 不支持 SEARCH MODSEQ 语法
+        // 建议使用 UID SEARCH 降级策略
+        Err(anyhow!(
+            "SEARCH MODSEQ 尚未实现（async-imap 限制），请使用 UID SEARCH 降级策略"
+        ))
     }
 
     /// 获取邮件及其 MODSEQ
     ///
-    /// FETCH 邮件时同时获取 MODSEQ 值
+    /// FETCH 邮件时同时获取 MODSEQ 值。
+    ///
+    /// **注意**：此方法需要异步 IMAP 库支持 MODSEQ 响应解析。
+    ///
+    /// # 参数
+    ///
+    /// * `folder` - 文件夹名称
+    /// * `uid` - 邮件 UID
+    ///
+    /// # 返回
+    ///
+    /// (邮件数据, MODSEQ 值)
+    ///
+    /// # 命令格式
+    ///
+    /// ```text
+    /// A1 FETCH 123 (FLAGS BODY.PEEK[] MODSEQ)
+    /// * 123 FETCH (FLAGS (\Seen) BODY[...] {size} MODSEQ (1234567890))
+    /// A1 OK Fetch completed
+    /// ```
+    ///
+    /// # 实现说明
+    ///
+    /// **当前**：使用 `fetch_email()` 获取邮件数据，MODSEQ 暂时无法获取。
+    ///
+    /// **原因**：async-imap 0.11 的 `fetch()` 方法不返回 MODSEQ 值。
+    ///
+    /// **建议**：
+    /// - 使用 SELECT CONDSTORE 后，邮箱会返回 HIGHESTMODSEQ
+    /// - 可以通过对比本地和服务器状态来检测变更
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// let (email, modseq) = client.fetch_with_modseq("INBOX", 123).await?;
+    /// // modseq 当前为 None
+    /// // 可以使用 HIGHESTMODSEQ 来检测变更
+    /// ```
     pub async fn fetch_with_modseq(
         &mut self,
         folder: &str,
         uid: u32,
     ) -> Result<(EmailData, Option<u64>)> {
-        let session = self
+        let _session = self
             .session
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        // 确保选择了正确的文件夹
-        // TODO: 跟踪当前选择的文件夹
+        tracing::debug!("FETCH UID {} (MODSEQ 尚不支持)", uid);
 
-        tracing::debug!("FETCH UID {} with MODSEQ", uid);
-
-        // TODO: 实现 FETCH MODSEQ 命令
-        // 正确的命令格式：
-        // FETCH <uid> (FLAGS BODY.PEEK[] MODSEQ)
-        //
-        // 临时实现：先使用普通 fetch，然后获取邮件数据
+        // 使用普通 fetch 获取邮件数据
         let email_data = self.fetch_email(folder, uid).await?;
 
-        // 暂时返回 None 作为 MODSEQ
+        // MODSEQ 暂时无法获取（async-imap 限制）
         Ok((email_data, None))
     }
 
     /// 获取多个邮件的 MODSEQ 值
     ///
-    /// 批量获取邮件的 MODSEQ，用于变更检测
+    /// 批量获取邮件的 MODSEQ，用于变更检测。
+    ///
+    /// **注意**：此方法需要异步 IMAP 库支持批量 MODSEQ 查询。
+    ///
+    /// # 参数
+    ///
+    /// * `uids` - 邮件 UID 列表
+    ///
+    /// # 返回
+    ///
+    /// (UID, MODSEQ) 列表
+    ///
+    /// # 命令格式
+    ///
+    /// ```text
+    /// A1 FETCH 1,2,3 (FLAGS MODSEQ)
+    /// * 1 FETCH (FLAGS () MODSEQ (1234567880))
+    /// * 2 FETCH (FLAGS (\Seen) MODSEQ (1234567890))
+    /// * 3 FETCH (FLAGS (\Flagged) MODSEQ (1234567900))
+    /// A1 OK Fetch completed
+    /// ```
+    ///
+    /// # 实现说明
+    ///
+    /// **当前**：返回 UID 列表，所有 MODSEQ 值为 None。
+    ///
+    /// **原因**：async-imap 0.11 的 `fetch()` 方法不返回 MODSEQ 值。
+    ///
+    /// **建议**：
+    /// - 使用 SELECT CONDSTORE 后的 HIGHESTMODSEQ 来检测整体变更
+    /// - 对于具体的邮件变更检测，使用 UID 对比策略
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// let uids = vec![1, 2, 3, 4, 5];
+    /// let results = client.fetch_modseqs(&uids).await?;
+    /// // 所有 MODSEQ 值为 None
+    /// // 建议使用其他策略检测变更
+    /// ```
     pub async fn fetch_modseqs(&mut self, uids: &[u32]) -> Result<Vec<(u32, Option<u64>)>> {
-        let session = self
+        let _session = self
             .session
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        tracing::debug!("FETCH MODSEQ for {} emails", uids.len());
+        if !uids.is_empty() {
+            tracing::debug!(
+                "FETCH MODSEQ batch 尚未实现（async-imap 限制），返回 UID 列表"
+            );
+        }
 
-        // TODO: 批量获取 MODSEQ
-        // 命令格式：FETCH <uid1>,<uid2>,... (MODSEQ)
-        //
-        // 临时实现：返回空结果
+        // 返回 UID 列表，MODSEQ 为 None
         Ok(uids.iter().map(|&uid| (uid, None)).collect())
     }
 }
