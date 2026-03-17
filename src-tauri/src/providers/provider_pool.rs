@@ -3,7 +3,43 @@
 //! 管理所有邮件服务商实例
 
 use crate::error::{Result, MailError};
-use super::{MailProvider, AccountType};
+use super::{MailProvider, AccountType, AuthType, ProviderCapabilities};
+
+/// 服务商信息（用于前端展示）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProviderInfo {
+    /// 服务商唯一标识
+    pub id: String,
+    /// 服务商显示名称
+    pub name: String,
+    /// 账号类型
+    pub account_type: AccountType,
+    /// 支持的认证类型
+    pub auth_types: Vec<AuthType>,
+    /// 支持的域名列表
+    pub domains: Vec<String>,
+    /// 服务商能力
+    pub capabilities: ProviderCapabilities,
+    /// 是否支持 OAuth
+    pub supports_oauth: bool,
+}
+
+impl From<&dyn MailProvider> for ProviderInfo {
+    fn from(provider: &dyn MailProvider) -> Self {
+        Self {
+            id: provider.provider_id().to_string(),
+            name: provider.provider_name().to_string(),
+            account_type: provider.account_type(),
+            auth_types: provider.auth_types(),
+            domains: provider.supported_domains()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            capabilities: provider.capabilities(),
+            supports_oauth: provider.oauth_config().is_some(),
+        }
+    }
+}
 
 /// 服务商池
 pub struct ProviderPool {
@@ -17,15 +53,70 @@ impl ProviderPool {
         }
     }
 
+    /// 使用所有默认服务商初始化池
+    pub fn with_defaults() -> Self {
+        use super::personal::{GmailProvider, OutlookProvider, YahooProvider, NativeProvider};
+        use super::enterprise::{Microsoft365Provider, GoogleWorkspaceProvider, CustomProvider};
+
+        let mut pool = Self::new();
+
+        // 个人邮箱服务商
+        pool.register(Box::new(GmailProvider));
+        pool.register(Box::new(OutlookProvider));
+        pool.register(Box::new(YahooProvider));
+
+        // NativeProvider 是枚举，注册每个变体
+        pool.register(Box::new(NativeProvider::Mail163));
+        pool.register(Box::new(NativeProvider::QqMail));
+        pool.register(Box::new(NativeProvider::ICloud));
+
+        // 企业邮箱服务商（使用默认配置）
+        pool.register(Box::new(Microsoft365Provider { tenant_id: None }));
+        pool.register(Box::new(GoogleWorkspaceProvider { domain: None }));
+        pool.register(Box::new(CustomProvider {
+            name: "Custom".to_string(),
+            imap_host: String::new(),
+            imap_port: 993,
+            smtp_host: String::new(),
+            smtp_port: 587,
+        }));
+
+        pool
+    }
+
     /// 注册服务商
     pub fn register(&mut self, provider: Box<dyn MailProvider>) {
         self.providers.push(provider);
     }
 
-    /// 根据邮箱地址检测服务商
+    /// 根据邮箱地址智能检测服务商
+    ///
+    /// 检测策略：
+    /// 1. 首先检查个人邮箱服务商的域名
+    /// 2. 如果没有匹配，尝试查询 MX 记录检测企业邮箱
+    /// 3. 最后回退到自定义服务商
     pub async fn detect_provider(&self, email: &str) -> Result<Box<dyn MailProvider>> {
+        // 1. 先尝试域名匹配
         for provider in &self.providers {
-            if provider.detect(email).await? {
+            if provider.account_type() == AccountType::Personal
+                && provider.detect(email).await?
+            {
+                return Ok(provider.box_clone());
+            }
+        }
+
+        // 2. 尝试 MX 记录检测企业邮箱
+        let domain = email.split('@').nth(1).ok_or_else(|| {
+            MailError::Internal("无效的邮箱地址".to_string())
+        })?;
+
+        if let Some(provider) = self.detect_enterprise_provider(domain).await {
+            return Ok(provider);
+        }
+
+        // 3. 回退到自定义服务商
+        for provider in &self.providers {
+            if provider.provider_id() == "custom" {
                 return Ok(provider.box_clone());
             }
         }
@@ -33,18 +124,127 @@ impl ProviderPool {
         Err(MailError::Internal(format!("未找到适合的服务商: {}", email)))
     }
 
-    /// 获取所有服务商
+    /// 通过 MX 记录检测企业邮箱服务商
+    ///
+    /// 返回识别到的服务商，如果没有识别到则返回 None
+    pub async fn detect_enterprise_provider(&self, domain: &str) -> Option<Box<dyn MailProvider>> {
+        // TODO: 实现 MX 记录查询
+        // 当前使用简单的启发式规则
+
+        // Microsoft 365 特征域名
+        if self.is_microsoft_365_domain(domain).await {
+            return self.find_provider_by_id("microsoft365");
+        }
+
+        // Google Workspace 特征域名
+        if self.is_google_workspace_domain(domain).await {
+            return self.find_provider_by_id("googleworkspace");
+        }
+
+        None
+    }
+
+    /// 检查是否为 Microsoft 365 域名
+    async fn is_microsoft_365_domain(&self, domain: &str) -> bool {
+        // 常见的 Microsoft 365 MX 记录模式
+        let _microsoft_mx_patterns = [
+            "*.mail.protection.outlook.com",
+            "*.outlook.com",
+        ];
+
+        // TODO: 实际查询 MX 记录
+        // 当前使用已知的企业域名列表作为替代
+        let _known_enterprise_domains: [&str; 0] = [
+            // 企业通常使用自己的域名
+        ];
+
+        // 简单的启发式：如果域名不是常见的个人邮箱域名，
+        // 且以 .com、.org、.net 等顶级域名结尾，可能是企业邮箱
+        let common_personal_domains = [
+            "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk",
+            "hotmail.com", "outlook.com", "live.com", "163.com", "126.com",
+            "qq.com", "foxmail.com", "icloud.com", "me.com",
+        ];
+
+        if common_personal_domains.contains(&domain) {
+            return false;
+        }
+
+        // TODO: 这里应该查询实际的 MX 记录
+        // 当前返回 false，等待实际实现
+        false
+    }
+
+    /// 检查是否为 Google Workspace 域名
+    async fn is_google_workspace_domain(&self, domain: &str) -> bool {
+        // Google Workspace MX 记录模式
+        let _google_mx_patterns = [
+            "*.gmail.com",
+            "googlemail.com",
+        ];
+
+        // TODO: 实际查询 MX 记录
+        // 当前返回 false，等待实际实现
+        false
+    }
+
+    /// 根据 ID 查找服务商
+    fn find_provider_by_id(&self, id: &str) -> Option<Box<dyn MailProvider>> {
+        for provider in &self.providers {
+            if provider.provider_id() == id {
+                return Some(provider.box_clone());
+            }
+        }
+        None
+    }
+
+    /// 根据邮箱地址快速获取服务商信息（不检测）
+    pub fn get_provider_info_by_email(&self, email: &str) -> Vec<ProviderInfo> {
+        let domain = email.split('@').nth(1).unwrap_or("");
+
+        self.providers
+            .iter()
+            .filter(|p| {
+                p.supported_domains().iter().any(|d| d == &domain)
+            })
+            .map(|p| ProviderInfo::from(p.as_ref()))
+            .collect()
+    }
+
+    /// 获取所有服务商信息
+    pub fn get_providers_info(&self) -> Vec<ProviderInfo> {
+        self.providers
+            .iter()
+            .map(|p| ProviderInfo::from(p.as_ref()))
+            .collect()
+    }
+
+    /// 按账号类型筛选服务商
+    pub fn get_providers_by_type(&self, account_type: AccountType) -> Vec<ProviderInfo> {
+        self.providers
+            .iter()
+            .filter(|p| p.account_type() == account_type)
+            .map(|p| ProviderInfo::from(p.as_ref()))
+            .collect()
+    }
+
+    /// 获取所有服务商实例
     pub fn list_providers(&self) -> Vec<Box<dyn MailProvider>> {
         self.providers.iter().map(|p| p.box_clone()).collect()
     }
 
-    /// 按账号类型筛选服务商
+    /// 按账号类型筛选服务商实例
     pub fn list_by_type(&self, account_type: AccountType) -> Vec<Box<dyn MailProvider>> {
         self.providers
             .iter()
             .filter(|p| p.account_type() == account_type)
             .map(|p| p.box_clone())
             .collect()
+    }
+
+    /// 根据邮箱地址检测服务商（旧方法，保留向后兼容）
+    pub async fn detect(&self, email: &str) -> Result<Box<dyn MailProvider>> {
+        self.detect_provider(email).await
     }
 }
 
@@ -57,7 +257,7 @@ impl Default for ProviderPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities};
+    use super::super::{ImapServerConfig, SmtpServerConfig};
     use async_trait::async_trait;
 
     struct MockProvider {
@@ -89,7 +289,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_provider_pool() {
+    async fn test_provider_pool_detection() {
         let mut pool = ProviderPool::new();
 
         let provider = Box::new(MockProvider {
@@ -107,5 +307,53 @@ mod tests {
         // 测试未找到
         let not_found = pool.detect_provider("user@other.com").await;
         assert!(not_found.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_with_defaults() {
+        let pool = ProviderPool::with_defaults();
+
+        // 应该包含所有默认服务商
+        let providers = pool.get_providers_info();
+        assert!(providers.len() >= 9); // Gmail, Outlook, Yahoo, 163, QQ, iCloud, Microsoft365, GoogleWorkspace, Custom
+
+        // 验证包含关键服务商
+        let ids: Vec<_> = providers.iter().map(|p| p.id.clone()).collect();
+        assert!(ids.contains(&"gmail".to_string()));
+        assert!(ids.contains(&"outlook".to_string()));
+        assert!(ids.contains(&"yahoo".to_string()));
+        assert!(ids.contains(&"163".to_string()));
+        assert!(ids.contains(&"qq".to_string()));
+        assert!(ids.contains(&"icloud".to_string()));
+        assert!(ids.contains(&"microsoft365".to_string()));
+        assert!(ids.contains(&"google-workspace".to_string()));
+        assert!(ids.contains(&"custom".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_providers_by_type() {
+        let pool = ProviderPool::with_defaults();
+
+        let personal = pool.get_providers_by_type(AccountType::Personal);
+        assert!(!personal.is_empty());
+
+        let enterprise = pool.get_providers_by_type(AccountType::Enterprise);
+        assert!(!enterprise.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_detect_gmail() {
+        let pool = ProviderPool::with_defaults();
+
+        let provider = pool.detect_provider("user@gmail.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "gmail");
+    }
+
+    #[tokio::test]
+    async fn test_detect_outlook() {
+        let pool = ProviderPool::with_defaults();
+
+        let provider = pool.detect_provider("user@outlook.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "outlook");
     }
 }

@@ -5,6 +5,7 @@
 #[allow(unused_imports)]
 mod account_type;
 mod config;
+mod oauth_utils;
 mod personal;
 mod enterprise;
 mod provider_pool;

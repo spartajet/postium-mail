@@ -44,19 +44,26 @@ impl MailProvider for GmailProvider {
     }
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
-        Some(OAuthConfig {
-            client_id: "".to_string(), // 从环境变量加载
-            client_secret: None,
-            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            token_url: "https://oauth2.googleapis.com/token".to_string(),
-            redirect_uri: "http://localhost:3000/callback".to_string(),
-            scopes: vec![
-                "https://mail.google.com/".to_string(),
-                "https://www.googleapis.com/auth/userinfo.email".to_string(),
-            ],
-            pkce_enabled: true,
-            tenant_id: None,
-        })
+        // 尝试从环境变量加载配置
+        match OAuthConfig::from_env_for_provider("gmail") {
+            Ok(config) => Some(config),
+            Err(_) => {
+                // 回退到默认配置（仅作为参考）
+                Some(OAuthConfig {
+                    client_id: "".to_string(),
+                    client_secret: None,
+                    auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+                    token_url: "https://oauth2.googleapis.com/token".to_string(),
+                    redirect_uri: "postium-mail://oauth/callback".to_string(),
+                    scopes: vec![
+                        "https://mail.google.com/".to_string(),
+                        "https://www.googleapis.com/auth/userinfo.email".to_string(),
+                    ],
+                    pkce_enabled: true,
+                    tenant_id: None,
+                })
+            }
+        }
     }
 
     fn capabilities(&self) -> ProviderCapabilities {

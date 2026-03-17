@@ -1,3 +1,32 @@
+#![deprecated(
+    since = "0.1.0",
+    note = "使用 providers::personal::outlook_oauth::OutlookOAuthService 代替。此模块已迁移到服务商适配层。"
+)]
+
+//! # Microsoft OAuth 2.0 服务（已废弃）
+//!
+//! **此模块已废弃，请使用 `providers::personal::outlook_oauth::OutlookOAuthService` 代替**
+//!
+//! 迁移指南：
+//! - 使用 `OutlookOAuthService::from_env()` 从环境变量加载配置
+//! - 使用 `OutlookOAuthService::get_auth_url()` 获取授权 URL
+//! - 使用 `OutlookOAuthService::exchange_code()` 交换授权码
+//! - 使用 `OutlookOAuthService::refresh_token()` 刷新 token
+//!
+//! ## 旧用法（不推荐）
+//!
+//! ```ignore
+//! let oauth_service = OAuthService::new(config);
+//! let auth_url = oauth_service.get_auth_url(&state).await?;
+//! ```
+//!
+//! ## 新用法（推荐）
+//!
+//! ```ignore
+//! let oauth_service = OutlookOAuthService::from_env()?;
+//! let auth_url = oauth_service.get_auth_url(&state)?;
+//! ```
+
 use anyhow::{anyhow, Result};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
@@ -70,7 +99,7 @@ impl OAuthService {
 
     /// 从环境变量加载配置并创建OAuth服务
     pub fn from_env() -> Result<Self> {
-        let config = crate::config::load_oauth_config()?;
+        let config = crate::config::load_microsoft_oauth_config()?;
         Self::new(config)
     }
 
