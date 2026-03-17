@@ -4,8 +4,9 @@
 
 use crate::error::{MailError, Result};
 use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor};
-use crate::auth::AuthManager;
-use crate::providers::ProviderPool;
+use crate::auth::{AuthManager, ImapAuthInfo};
+use crate::providers::{ProviderPool, AuthType};
+use crate::services::imap::{AsyncImapClient, ImapAuth};
 use sea_orm::DbConn;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -118,7 +119,12 @@ impl SyncManager {
         // 3. 获取 IMAP 配置
         let imap_config = provider.default_imap_config();
 
-        // 4. 发送文件夹同步开始事件
+        // 4. 连接到 IMAP 服务器
+        let mut imap_client = self
+            .connect_imap(account_id, &imap_config, &account.email, &account.auth_type)
+            .await?;
+
+        // 5. 发送文件夹同步开始事件
         let _ = self.emit_progress(
             account_id,
             SyncProgress {
@@ -130,39 +136,206 @@ impl SyncManager {
             },
         );
 
-        // TODO: 实现完整的同步流程
-        // 5. 连接到 IMAP 服务器
-        // let imap_client = connect_to_imap(&imap_config, &account.email, account.auth_type).await?;
+        // 6. 同步文件夹列表
+        let folder_infos = imap_client.list_folders_with_attributes().await.map_err(|e| {
+            MailError::Internal(format!("获取文件夹列表失败: {}", e))
+        })?;
 
-        // 6. 同步文件夹 (使用 FolderManager)
-        // let imap_folders = imap_client.list_folders().await?;
-        // let folder_result = self.folder_manager.sync_folders(account_id, imap_folders).await?;
+        tracing::info!("获取到 {} 个文件夹", folder_infos.len());
 
-        // 7. 对每个文件夹执行增量同步
-        // for folder in &folders {
-        //     let sync_result = self.sync_folder_internal(
-        //         account_id,
-        //         folder,
-        //         &imap_client,
-        //     ).await?;
-        // }
+        // 7. 使用 FolderManager 同步文件夹到数据库
+        let folder_sync_result = self
+            .folder_manager
+            .sync_folders_from_info(account_id, &folder_infos)
+            .await?;
 
-        // 8. 更新同步状态
+        tracing::info!(
+            "文件夹同步完成: created={}, updated={}",
+            folder_sync_result.new_folders,
+            folder_sync_result.updated_folders
+        );
+
+        // 8. 对每个文件夹执行增量同步
+        let mut total_synced = 0;
+        let mut sync_errors = 0;
+
+        for (idx, folder_info) in folder_infos.iter().enumerate() {
+            // 更新进度
+            let _ = self.emit_progress(
+                account_id,
+                SyncProgress {
+                    stage: SyncStage::SyncingEmails,
+                    folder: Some(folder_info.name.clone()),
+                    current: idx + 1,
+                    total: folder_infos.len(),
+                    message: format!("正在同步 {}...", folder_info.name),
+                },
+            );
+
+            // 同步单个文件夹
+            match self
+                .sync_folder_internal(account_id, &folder_info.name, &mut imap_client)
+                .await
+            {
+                Ok(result) => {
+                    total_synced += result.total_changes();
+                    tracing::info!(
+                        "文件夹 {} 同步完成: new={}, modified={}, deleted={}",
+                        folder_info.name,
+                        result.new_emails,
+                        result.modified_emails,
+                        result.deleted_emails
+                    );
+                }
+                Err(e) => {
+                    sync_errors += 1;
+                    tracing::error!("文件夹 {} 同步失败: {}", folder_info.name, e);
+                }
+            }
+        }
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
         tracing::info!(
-            "账号同步完成: account_id={}, duration={}ms",
+            "账号同步完成: account_id={}, synced={}, errors={}, duration={}ms",
             account_id,
+            total_synced,
+            sync_errors,
             duration_ms
         );
 
+        // 发送完成事件
+        let _ = self.emit_progress(
+            account_id,
+            SyncProgress {
+                stage: SyncStage::Completed,
+                folder: None,
+                current: total_synced,
+                total: folder_infos.len(),
+                message: format!("同步完成，共处理 {} 封邮件", total_synced),
+            },
+        );
+
         Ok(SyncResult {
-            total_synced: 0,
-            folders_synced: 0,
-            errors: 0,
+            total_synced,
+            folders_synced: folder_infos.len(),
+            errors: sync_errors,
             duration_ms,
         })
+    }
+
+    /// 连接到 IMAP 服务器
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `imap_config` - IMAP 服务器配置
+    /// * `email` - 邮箱地址
+    /// * `auth_type_str` - 认证类型字符串（"password" 或 "oauth2"）
+    ///
+    /// # 返回
+    ///
+    /// 返回已连接的 IMAP 客户端
+    async fn connect_imap(
+        &self,
+        account_id: i32,
+        imap_config: &crate::providers::ImapServerConfig,
+        email: &str,
+        auth_type_str: &str,
+    ) -> Result<AsyncImapClient> {
+        tracing::info!(
+            "连接到 IMAP 服务器: {}:{}, auth_type={}",
+            imap_config.host,
+            imap_config.port,
+            auth_type_str
+        );
+
+        // 将字符串转换为 AuthType
+        let auth_type = match auth_type_str {
+            "oauth2" => AuthType::OAuth2,
+            "password" => AuthType::Password,
+            _ => return Err(MailError::Internal(format!("不支持的认证类型: {}", auth_type_str))),
+        };
+
+        // 使用 AuthManager 获取认证信息
+        let auth_info = self
+            .auth_manager
+            .get_imap_auth(account_id, email, &auth_type)
+            .await?;
+
+        // 将 ImapAuthInfo 转换为 ImapAuth
+        let imap_auth = match auth_info {
+            ImapAuthInfo::Password { username, password } => {
+                ImapAuth::Password(password)
+            }
+            ImapAuthInfo::OAuth { email: oauth_email, xoauth2 } => {
+                ImapAuth::OAuth2 {
+                    email: oauth_email,
+                    access_token: xoauth2,
+                }
+            }
+        };
+
+        // 创建 IMAP 客户端并连接
+        let mut imap_client = AsyncImapClient::new();
+        imap_client
+            .connect(
+                &imap_config.host,
+                imap_config.port,
+                email,
+                imap_auth,
+            )
+            .await
+            .map_err(|e| MailError::Internal(format!("IMAP 连接失败: {}", e)))?;
+
+        tracing::info!("IMAP 连接成功");
+
+        Ok(imap_client)
+    }
+
+    /// 内部方法：同步单个文件夹
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `imap_client` - IMAP 客户端引用
+    async fn sync_folder_internal(
+        &self,
+        account_id: i32,
+        folder: &str,
+        imap_client: &mut AsyncImapClient,
+    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+        tracing::debug!(
+            "开始同步文件夹: account_id={}, folder={}",
+            account_id,
+            folder
+        );
+
+        // TODO: 实现完整的文件夹同步流程
+        // 1. 检查 CONDSTORE 支持
+        // let supports_condstore = imap_client.check_condstore_support().await?;
+
+        // 2. 获取服务器 UID 列表
+        // let server_uids = imap_client.search_all().await?;
+
+        // 3. 获取服务器标志（如果支持 CONDSTORE，使用 MODSEQ）
+        // let server_uids_with_flags = if supports_condstore {
+        //     imap_client.fetch_modseqs(&server_uids).await?
+        // } else {
+        //     // 降级：使用普通 FETCH
+        //     vec![]
+        // };
+
+        // 4. 调用 sync_folder 进行增量同步
+        // let result = self
+        //     .sync_folder(account_id, folder, Some(&server_uids), Some(&server_uids_with_flags))
+        //     .await?;
+
+        // 临时实现：返回空结果
+        Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
+            crate::sync::delta_sync::SyncStrategy::UidSearch,
+        ))
     }
 
     /// 同步单个文件夹

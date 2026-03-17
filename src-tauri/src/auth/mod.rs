@@ -9,4 +9,4 @@ mod password_auth;
 mod token_manager;
 
 // 重新导出主要类型
-pub use auth_manager::AuthManager;
+pub use auth_manager::{AuthManager, ImapAuthInfo};
