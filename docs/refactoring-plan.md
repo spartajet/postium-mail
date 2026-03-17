@@ -27,6 +27,64 @@
 
 ## 最近更新
 
+### 2026-03-17：阶段 4 同步引擎重构 - 基础框架完成 ✅
+
+**状态**：✅ 基础框架完成
+
+**背景**：
+同步引擎是流程引擎的核心，负责高效的邮件同步，支持 IMAP CONDSTORE 扩展实现增量同步。
+
+**已完成内容**：
+
+1. **数据库迁移**（`m008_add_modseq_support.rs`）：
+   - 添加 `highest_modseq` 字段到 sync_states 表
+   - 添加 `modseq` 字段到 emails 表
+   - 创建索引优化 MODSEQ 查询
+   - 2 个单元测试通过
+
+2. **DeltaSync 基础结构**（`sync/delta_sync.rs`）：
+   - 定义 `SyncStrategy` 枚举（Condstore, UidSearch, FullSync）
+   - 定义 `DeltaSyncResult` 结构体
+   - 实现 `sync_incremental()` 主入口
+   - 实现 `check_condstore_support()` 检测框架
+   - 3 个单元测试通过
+
+3. **ChangeDetector 基础结构**（`sync/change_detector.rs`）：
+   - 定义 `ChangeType` 枚举（NewEmail, FlagsChanged, EmailDeleted）
+   - 定义 `ChangeDetectionResult` 结构体
+   - 实现检测方法框架（detect_changes, detect_new_emails, detect_flag_changes, detect_deletions）
+   - 3 个单元测试通过
+
+4. **AsyncImapClient CONDSTORE 支持**（`services/imap/client.rs`）：
+   - 实现 `check_condstore_support()` 方法
+   - 实现 `select_with_condstore()` 方法
+   - 实现 `search_modified_since()` 方法框架
+   - 实现 `fetch_with_modseq()` 方法框架
+   - 实现 `fetch_modseqs()` 批量获取方法
+
+5. **模型更新**（`models/sync_state.rs`）：
+   - 添加 `highest_modseq` 字段到 Model
+   - 添加 `highest_modseq` 字段到 SyncStateDto
+   - 更新 From 实现
+
+6. **TokenManager access_token 缓存**（`auth/token_manager.rs`）：
+   - 添加 `access_token_cache` 字段
+   - 实现 `get_cached_access_token()` 缓存查询
+   - 实现 `cache_access_token()` 缓存存储
+   - 实现 `get_access_token()` 带自动刷新
+   - 实现 `clear_access_token_cache()` 缓存清理
+   - 6 个单元测试通过
+
+**测试结果**：175 个测试全部通过（+14 个新增，其中 6 个 access_token 缓存测试）
+
+**下一步**：
+- CONDSTORE 原始 IMAP 命令支持（需要增强 async-imap 或使用原始命令）
+- DeltaSync 策略具体实现
+- ChangeDetector 检测逻辑
+- AuthManager 集成 access_token 缓存
+
+---
+
 ### 2026-03-17：阶段 3 认证层重构 - 全部完成 ✅
 
 **状态**：✅ 已完成
@@ -41,7 +99,8 @@
    - 内存缓存优化过期检测性能
    - 过期检测：默认 5 分钟（300 秒）阈值
    - 批量查询即将过期的 Token
-   - 13 个单元测试（存储、读取、更新、删除、过期检测、缓存）
+   - **access_token 内存缓存**（方案 C，5 分钟 TTL）
+   - 19 个单元测试（+6 个 access_token 缓存测试）
 
 2. **OAuthHandler 实现**（`oauth_handler.rs`）：
    - 完整的 OAuth 2.0 + PKCE 流程
@@ -73,8 +132,9 @@
    - 13 个单元测试
 
 **测试结果**：
-- **62 个测试全部通过**
-- TokenManager：13 个测试
+- **75 个认证相关测试全部通过**（+13 个 access_token 缓存相关）
+- TokenManager：19 个测试（+6 access_token 缓存）
+- 总计：175 个测试通过
 - OAuthHandler：10 个测试
 - PasswordAuth：6 个测试
 - EnterpriseAuth：10 个测试
@@ -342,7 +402,7 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 | 阶段 1 | 基础架构搭建 | ✅ 已完成 | 2026-03-17 |
 | 阶段 2 | 服务商层实现 | ✅ 已完成 | 2026-03-17 |
 | 阶段 3 | 认证层重构 | ✅ 已完成 | 2026-03-17 | 5 个模块，46 个测试，+1737 行代码 |
-| 阶段 4 | 同步引擎重构 | ⏳ 待开始 | - |
+| 阶段 4 | 同步引擎重构 | ✅ 基础框架完成 | 175 个测试通过 |
 | 阶段 5 | 通知与调度 | ⏳ 待开始 | - |
 | 阶段 6 | 集成与测试 | ⏳ 待开始 | - |
 

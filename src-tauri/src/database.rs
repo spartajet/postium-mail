@@ -43,5 +43,11 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
     // 添加离线操作和同步元数据表
     crate::migration::m006_20250315_add_sync_operations::add_sync_operations(db).await?;
 
+    // 添加账号类型支持（个人/企业）
+    crate::migration::m007_20250317_add_account_types::migrate(db).await?;
+
+    // 添加 MODSEQ 支持（CONDSTORE 扩展）
+    crate::migration::m008_20250317_add_modseq_support::migrate(db).await?;
+
     Ok(())
 }

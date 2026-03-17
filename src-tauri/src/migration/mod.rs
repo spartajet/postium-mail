@@ -5,4 +5,5 @@ pub mod m004_20250315_remove_sensitive_fields;
 pub mod m005_20250315_add_imap_metadata;
 pub mod m006_20250315_add_sync_operations;
 pub mod m007_20250317_add_account_types;
+pub mod m008_20250317_add_modseq_support;
 

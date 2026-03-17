@@ -2,6 +2,7 @@
 //!
 //! 提供邮件同步功能
 
+mod change_detector;
 mod delta_sync;
 mod folder_manager;
 mod mail_processor;

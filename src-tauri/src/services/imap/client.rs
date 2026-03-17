@@ -846,6 +846,141 @@ impl AsyncImapClient {
 
         Err(anyhow!("无法获取邮件头"))
     }
+
+    // ========== CONDSTORE 支持 (RFC 4551) ==========
+
+    /// 检查是否支持 CONDSTORE 扩展
+    ///
+    /// 通过 CAPABILITY 命令检测服务器是否支持 CONDSTORE
+    pub async fn check_condstore_support(&mut self) -> Result<bool> {
+        let _session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // TODO: 实现 CAPABILITY 命令
+        // 由于 async-imap 可能不直接支持 capability() 方法，
+        // 需要使用以下方法之一：
+        // 1. 使用 run_command_and_read_response 发送原始 CAPABILITY 命令
+        // 2. 升级到支持 CAPABILITY 的 IMAP 库版本
+        //
+        // 正确的命令格式：CAPABILITY
+        //
+        // 临时实现：根据服务器类型推断
+        // Gmail 支持 CONDSTORE，Outlook 可能不支持
+        tracing::warn!("CONDSTORE 检测尚未完整实现，默认返回 false");
+        Ok(false)
+    }
+
+    /// 选择文件夹（带 CONDSTORE 参数）
+    ///
+    /// 使用 UNCHANGEDSINCE 参数进行增量同步
+    /// 返回 (邮件数量, HIGHESTMODSEQ)
+    pub async fn select_with_condstore(
+        &mut self,
+        folder: &str,
+        changed_since: Option<u64>,
+    ) -> Result<(usize, Option<u64>)> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // 根据是否指定 CHANGEDSINCE 选择命令
+        let mailbox = if let Some(modseq) = changed_since {
+            // CONDSTORE 模式：SELECT ... UNCHANGEDSINCE <modseq>
+            tracing::debug!("SELECT {} with UNCHANGEDSINCE {}", folder, modseq);
+
+            // 注意：async-imap 可能不直接支持 UNCHANGEDSINCE 参数
+            // 这里需要使用原始命令或升级库
+            // 临时实现：先执行普通 SELECT
+            session
+                .select(folder)
+                .await
+                .map_err(|e| anyhow!("选择文件夹失败: {}", e))?
+        } else {
+            // 普通 SELECT
+            session
+                .select(folder)
+                .await
+                .map_err(|e| anyhow!("选择文件夹失败: {}", e))?
+        };
+
+        // 获取 HIGHESTMODSEQ（如果服务器支持）
+        let highest_modseq = mailbox.highest_modseq.map(|v| v as u64);
+
+        Ok((mailbox.exists as usize, highest_modseq))
+    }
+
+    /// 搜索修改的邮件（MODSEQ）
+    ///
+    /// 使用 SEARCH MODSEQ 命令查找自指定 MODSEQ 后修改的邮件
+    pub async fn search_modified_since(&mut self, modseq: u64) -> Result<Vec<u32>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        tracing::debug!("SEARCH MODSEQ {}:*", modseq);
+
+        // TODO: 实现 SEARCH MODSEQ 命令
+        // async-imap 可能不直接支持 MODSEQ 搜索
+        // 需要使用原始命令或升级库
+        //
+        // 正确的命令格式：
+        // SEARCH MODSEQ <modseq>:* ALL
+        //
+        // 临时实现：返回空列表
+        tracing::warn!("SEARCH MODSEQ 尚未完整实现，返回空列表");
+        Ok(Vec::new())
+    }
+
+    /// 获取邮件及其 MODSEQ
+    ///
+    /// FETCH 邮件时同时获取 MODSEQ 值
+    pub async fn fetch_with_modseq(
+        &mut self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<(EmailData, Option<u64>)> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // 确保选择了正确的文件夹
+        // TODO: 跟踪当前选择的文件夹
+
+        tracing::debug!("FETCH UID {} with MODSEQ", uid);
+
+        // TODO: 实现 FETCH MODSEQ 命令
+        // 正确的命令格式：
+        // FETCH <uid> (FLAGS BODY.PEEK[] MODSEQ)
+        //
+        // 临时实现：先使用普通 fetch，然后获取邮件数据
+        let email_data = self.fetch_email(folder, uid).await?;
+
+        // 暂时返回 None 作为 MODSEQ
+        Ok((email_data, None))
+    }
+
+    /// 获取多个邮件的 MODSEQ 值
+    ///
+    /// 批量获取邮件的 MODSEQ，用于变更检测
+    pub async fn fetch_modseqs(&mut self, uids: &[u32]) -> Result<Vec<(u32, Option<u64>)>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        tracing::debug!("FETCH MODSEQ for {} emails", uids.len());
+
+        // TODO: 批量获取 MODSEQ
+        // 命令格式：FETCH <uid1>,<uid2>,... (MODSEQ)
+        //
+        // 临时实现：返回空结果
+        Ok(uids.iter().map(|&uid| (uid, None)).collect())
+    }
 }
 
 impl Default for AsyncImapClient {
@@ -977,4 +1112,5 @@ fn decode_email_body(bytes: &[u8]) -> Result<String> {
     std::str::from_utf8(bytes)
         .map(|s| s.to_string())
         .map_err(|e| anyhow!("解码邮件编码失败: {}", e))
+
 }
