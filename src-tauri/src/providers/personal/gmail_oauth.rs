@@ -11,6 +11,35 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use crate::error::{MailError, Result};
 
+impl GmailOAuthService {
+    /// Gmail 默认客户端 ID
+    ///
+    /// 注册地址: https://console.cloud.google.com/
+    /// 应用类型: Desktop app
+    /// 授权重定向 URI: postium-mail://oauth/callback
+    const DEFAULT_CLIENT_ID: &str = "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
+
+    /// Gmail 默认重定向 URI
+    ///
+    /// 使用自定义 Deep Link 方案，需要在 Google Cloud Console 中注册此 URI
+    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
+
+    /// Gmail 默认授权端点
+    const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+
+    /// Gmail 默认令牌端点
+    const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+    /// Gmail 默认 OAuth Scopes
+    ///
+    /// - https://mail.google.com/ - 完整访问 Gmail（读取、发送、管理邮件）
+    /// - https://www.googleapis.com/auth/userinfo.email - 获取用户邮箱地址
+    const DEFAULT_SCOPES: &[&str] = &[
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/userinfo.email",
+    ];
+}
+
 /// Gmail OAuth 服务
 pub struct GmailOAuthService {
     client_id: String,
@@ -19,7 +48,20 @@ pub struct GmailOAuthService {
 }
 
 impl GmailOAuthService {
+    /// 使用默认配置创建 OAuth 服务
+    ///
+    /// 这是推荐的方式，使用预配置的 Gmail OAuth 凭证。
+    pub fn with_defaults() -> Result<Self> {
+        Ok(Self {
+            client_id: Self::DEFAULT_CLIENT_ID.to_string(),
+            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
     /// 从配置创建新的 OAuth 服务
+    ///
+    /// 用于自定义配置或特殊场景
     pub fn new(
         client_id: String,
         redirect_uri: String,
@@ -39,13 +81,28 @@ impl GmailOAuthService {
     }
 
     /// 从环境变量加载配置并创建服务
+    ///
+    /// 优先使用环境变量（如果设置），否则使用默认值
     pub fn from_env() -> Result<Self> {
-        let config = crate::config::load_google_oauth_config()
-            .map_err(|e| MailError::Internal(format!("加载 Google OAuth 配置失败: {}", e)))?;
+        use std::env;
+
+        let client_id = env::var("GOOGLE_CLIENT_ID")
+            .unwrap_or_else(|_| Self::DEFAULT_CLIENT_ID.to_string());
+
+        let redirect_uri = env::var("GOOGLE_REDIRECT_URI")
+            .unwrap_or_else(|_| Self::DEFAULT_REDIRECT_URI.to_string());
+
+        let scopes_str = env::var("GOOGLE_SCOPES")
+            .unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));
+
+        let scopes = scopes_str.split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
-            client_id: config.client_id,
-            redirect_uri: config.redirect_uri,
-            scopes: config.scopes,
+            client_id,
+            redirect_uri,
+            scopes,
         })
     }
 
@@ -255,6 +312,17 @@ impl GmailTokenResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_gmail_oauth_service_with_defaults() {
+        let service = GmailOAuthService::with_defaults();
+
+        assert!(service.is_ok());
+        let service = service.unwrap();
+        assert_eq!(service.client_id, GmailOAuthService::DEFAULT_CLIENT_ID);
+        assert_eq!(service.redirect_uri, GmailOAuthService::DEFAULT_REDIRECT_URI);
+        assert_eq!(service.scopes.len(), GmailOAuthService::DEFAULT_SCOPES.len());
+    }
 
     #[test]
     fn test_gmail_oauth_service_new() {
