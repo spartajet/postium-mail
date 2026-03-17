@@ -6,12 +6,24 @@
 2. [架构设计](#架构设计)
 3. [服务商抽象层](#服务商抽象层)
 4. [认证流程](#认证流程)
-5. [首次同步流程](#首次同步流程)
-6. [文件夹匹配与同步](#文件夹匹配与同步)
-7. [增量同步机制](#增量同步机制)
-8. [新邮件通知机制](#新邮件通知机制)
-9. [错误处理与重试策略](#错误处理与重试策略)
-10. [Rust 引擎框架代码](#rust-引擎框架代码)
+5. [邮件操作流设计](#邮件操作流设计)
+6. [多客户端同步设计](#多客户端同步设计)
+7. [Token 定期刷新机制](#token-定期刷新机制)
+8. [首次同步流程](#首次同步流程)
+9. [文件夹匹配与同步](#文件夹匹配与同步)
+10. [增量同步机制](#增量同步机制)
+11. [新邮件通知机制](#新邮件通知机制)
+12. [错误处理与重试策略](#错误处理与重试策略)
+13. [邮件搜索功能设计](#邮件搜索功能设计)
+14. [邮件发送流程设计](#邮件发送流程设计)
+15. [草稿保存机制设计](#草稿保存机制设计)
+16. [性能优化策略设计](#性能优化策略设计)
+17. [安全性设计](#安全性设计)
+18. [日志与监控设计](#日志与监控设计)
+19. [全局数据库 Schema](#全局数据库-schema)
+20. [Rust 引擎框架代码](#rust-引擎框架代码)
+21. [Tauri 集成与命令层适配](#tauri-集成与命令层适配)
+22. [总结](#总结)
 
 ---
 
@@ -3464,40 +3476,136 @@ pub enum AlertSeverity {
 
 ```
 src-tauri/src/
-├── engine/
-│   ├── mod.rs                    # 模块导出
-│   ├── flow_engine.rs            # 流程引擎核心
-│   ├── task_scheduler.rs        # 任务调度器
-│   └── notification_manager.rs  # 通知管理器
-├── providers/
-│   ├── mod.rs                    # 模块导出
-│   ├── traits.rs                 # 服务商 trait 定义
-│   ├── provider_pool.rs          # 服务商池
-│   ├── gmail.rs                  # Gmail 适配器
-│   ├── outlook.rs                # Outlook 适配器
-│   ├── yahoo.rs                  # Yahoo 适配器
-│   ├── native.rs                 # 国内外邮箱适配器 (163/QQ/iCloud)
-│   └── config.rs                  # 服务商配置
-├── auth/
-│   ├── mod.rs                    # 模块导出
-│   ├── auth_manager.rs           # 认证管理器
-│   ├── oauth_handler.rs          # OAuth 处理器
-│   ├── password_auth.rs          # 密码认证
-│   └── token_manager.rs          # Token 管理
-├── sync/
-│   ├── mod.rs                    # 模块导出
-│   ├── sync_manager.rs           # 同步管理器
-│   ├── folder_manager.rs         # 文件夹管理
-│   ├── mail_processor.rs         # 邮件处理器
-│   ├── delta_sync.rs             # 增量同步
-│   └── sync_state.rs              # 同步状态
-├── error/
-│   ├── mod.rs                    # 模块导出
-│   ├── types.rs                  # 错误类型定义
-│   └── retry.rs                   # 重试策略
-└── config/
-    └── provider_config.rs        # 服务商配置
+├── lib.rs                              # 应用入口，FlowEngine 初始化
+├── config.rs                           # 配置加载（OAuth等）
+├── database.rs                         # 数据库连接管理
+├── crypto.rs                           # 加密工具
+│
+├── engine/                             # ★ 流程引擎层（新增）
+│   ├── mod.rs
+│   ├── flow_engine.rs                  # 引擎核心，统一入口
+│   ├── task_scheduler.rs               # 定时任务调度器
+│   └── notification_manager.rs        # 通知管理器（去重/合并）
+│
+├── providers/                          # ★ 服务商适配层（重构）
+│   ├── mod.rs
+│   ├── traits.rs                       # MailProvider trait 定义
+│   ├── account_type.rs                 # AccountType + EnterpriseConfig
+│   ├── provider_pool.rs                # 服务商池（个人+企业分离）
+│   ├── personal/                       # 个人邮件服务商
+│   │   ├── mod.rs
+│   │   ├── gmail.rs                    # Gmail 个人版
+│   │   ├── outlook.rs                  # Outlook 个人版
+│   │   ├── yahoo.rs                    # Yahoo
+│   │   └── native.rs                   # 163 / QQ / iCloud
+│   └── enterprise/                     # 企业邮件服务商
+│       ├── mod.rs
+│       ├── microsoft_365.rs            # Microsoft 365
+│       ├── google_workspace.rs         # Google Workspace
+│       └── custom.rs                   # 自建/自定义企业邮箱
+│
+├── auth/                               # ★ 认证模块（新增）
+│   ├── mod.rs
+│   ├── auth_manager.rs                 # 统一认证入口
+│   ├── oauth_handler.rs                # OAuth 2.0 + PKCE 处理
+│   ├── enterprise_auth.rs              # 企业认证（域认证/SAML）
+│   ├── password_auth.rs                # 密码认证 + IMAP/SMTP 测试
+│   ├── token_manager.rs                # Token 生命周期管理
+│   └── token_refresh_scheduler.rs      # Token 定期刷新调度器
+│
+├── sync/                               # ★ 同步模块（重构）
+│   ├── mod.rs
+│   ├── sync_manager.rs                 # 同步管理器（首次/增量）
+│   ├── folder_manager.rs               # 文件夹发现与映射
+│   ├── mail_processor.rs               # 邮件解析与存储
+│   ├── delta_sync.rs                   # CONDSTORE/UID增量同步
+│   ├── change_detector.rs              # 服务器变更检测
+│   └── sync_state.rs                   # 同步状态持久化
+│
+├── operations/                         # ★ 操作模块（新增）
+│   ├── mod.rs
+│   ├── operation_manager.rs            # 操作统一入口（本地优先）
+│   ├── operation_queue.rs              # 操作队列（支持离线）
+│   ├── conflict_resolver.rs            # 冲突检测与解决
+│   └── attachment_manager.rs           # 附件下载/缓存/断点续传
+│
+├── search/                             # ★ 搜索模块（新增）
+│   ├── mod.rs
+│   ├── search_engine.rs                # FTS5 全文搜索引擎
+│   ├── query_parser.rs                 # 搜索语法解析器
+│   └── index_manager.rs                # 索引构建与维护
+│
+├── sending/                            # ★ 发送模块（新增）
+│   ├── mod.rs
+│   ├── smtp_sender.rs                  # SMTP 发送器
+│   ├── send_queue.rs                   # 离线发送队列
+│   └── mime_builder.rs                 # MIME 消息构建器
+│
+├── drafts/                             # ★ 草稿模块（新增）
+│   ├── mod.rs
+│   ├── draft_manager.rs                # 草稿 CRUD + 版本管理
+│   ├── auto_save.rs                    # 自动保存引擎（防抖+定时）
+│   └── draft_imap_sync.rs              # 草稿 IMAP 双向同步
+│
+├── security/                           # ★ 安全模块（新增）
+│   ├── mod.rs
+│   └── audit_log.rs                    # 安全审计日志
+│
+├── logging/                            # ★ 日志模块（新增）
+│   ├── mod.rs
+│   └── logger.rs                       # 结构化日志 + 脱敏器
+│
+├── performance/                        # ★ 性能模块（新增）
+│   ├── mod.rs
+│   ├── monitor.rs                      # 性能指标采集
+│   └── memory_manager.rs               # 内存优化（LRU缓存/压力检测）
+│
+├── error/                              # ★ 错误处理模块（新增）
+│   ├── mod.rs
+│   ├── types.rs                        # 统一错误类型定义
+│   └── retry.rs                        # 指数退避重试策略
+│
+├── services/                           # ◎ 保留现有服务（逐步迁移）
+│   ├── imap/                           # IMAP 客户端（扩展IDLE/CONDSTORE）
+│   │   ├── client.rs
+│   │   ├── service.rs
+│   │   ├── parser.rs
+│   │   └── types.rs
+│   ├── account_service.rs              # → 迁移到 auth/
+│   ├── email_service.rs                # → 迁移到 sync/mail_processor.rs
+│   ├── folder_service.rs               # → 迁移到 sync/folder_manager.rs
+│   ├── oauth_service.rs                # → 迁移到 auth/oauth_handler.rs
+│   ├── smtp_service.rs                 # → 迁移到 sending/smtp_sender.rs
+│   └── search_service.rs               # → 迁移到 search/search_engine.rs
+│
+├── models/                             # ◎ 数据模型层（保留并扩展）
+│   ├── account.rs                      # 账号模型（新增 account_type 字段）
+│   ├── email.rs
+│   ├── folder.rs
+│   ├── attachment.rs
+│   ├── sync_state.rs
+│   └── sync_error.rs
+│
+├── command/                            # ◎ Tauri 命令层（薄适配层）
+│   ├── account.rs
+│   ├── email.rs
+│   ├── sync.rs
+│   ├── search.rs
+│   ├── send.rs
+│   ├── draft.rs
+│   └── oauth.rs
+│
+└── migration/                          # ◎ 数据库迁移脚本
+    ├── add_account_type.sql
+    ├── create_enterprise_configs.sql
+    ├── create_operation_tables.sql
+    ├── create_refresh_tables.sql
+    ├── create_search_tables.sql
+    ├── create_sending_tables.sql
+    └── create_drafts_tables.sql
 ```
+
+> **标注说明**：★ 新增模块  ◎ 保留现有模块（逐步迁移）  → 迁移方向
 
 ### 1. 服务商 Trait 定义
 
@@ -5644,7 +5752,483 @@ pub use sync_state::*;
 
 ---
 
-## 总结
+### 11. Yahoo / NativeProvider 适配器实现
+
+```rust
+// src-tauri/src/providers/personal/yahoo.rs
+
+use super::super::traits::*;
+use async_trait::async_trait;
+
+pub struct YahooProvider {
+    oauth_config: OAuthConfig,
+}
+
+impl YahooProvider {
+    pub fn new(client_id: String, client_secret: String) -> Self {
+        Self {
+            oauth_config: OAuthConfig {
+                client_id,
+                client_secret: Some(client_secret),
+                auth_url: "https://api.login.yahoo.com/oauth2/request_auth".to_string(),
+                token_url: "https://api.login.yahoo.com/oauth2/get_token".to_string(),
+                redirect_uri: "postium://oauth/callback".to_string(),
+                scopes: vec![
+                    "mail-r".to_string(),
+                    "mail-w".to_string(),
+                    "openid".to_string(),
+                ],
+                pkce_enabled: true,
+                tenant_id: None,
+            },
+        }
+    }
+    pub fn from_env() -> anyhow::Result<Self> {
+        let id = std::env::var("YAHOO_CLIENT_ID")?;
+        let secret = std::env::var("YAHOO_CLIENT_SECRET")?;
+        Ok(Self::new(id, secret))
+    }
+}
+
+#[async_trait]
+impl MailProvider for YahooProvider {
+    fn provider_id(&self) -> &str { "yahoo" }
+    fn provider_name(&self) -> &str { "Yahoo Mail" }
+    fn account_type(&self) -> AccountType { AccountType::Personal }
+    fn auth_types(&self) -> Vec<AuthType> {
+        vec![AuthType::OAuth2, AuthType::AppPassword]
+    }
+    fn default_imap_config(&self) -> ImapConfig {
+        ImapConfig { host: "imap.mail.yahoo.com".to_string(), port: 993, ssl: SslMode::Implicit }
+    }
+    fn default_smtp_config(&self) -> SmtpConfig {
+        SmtpConfig { host: "smtp.mail.yahoo.com".to_string(), port: 587, ssl: SslMode::StartTls }
+    }
+    fn oauth_config(&self) -> Option<OAuthConfig> { Some(self.oauth_config.clone()) }
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_idle: true, supports_condstore: false,
+            supports_push: false, supports_oauth: true,
+            supports_enterprise: false, max_message_size: Some(25 * 1024 * 1024),
+        }
+    }
+    fn detect(&self, email: &str) -> bool {
+        let d = email.split('@').last().unwrap_or("").to_lowercase();
+        matches!(d.as_str(), "yahoo.com" | "yahoo.co.jp" | "ymail.com")
+    }
+    fn supported_domains(&self) -> Vec<&str> { vec!["yahoo.com", "yahoo.co.jp", "ymail.com"] }
+    fn box_clone(&self) -> Box<dyn MailProvider> { Box::new(self.clone()) }
+}
+impl Clone for YahooProvider {
+    fn clone(&self) -> Self { Self { oauth_config: self.oauth_config.clone() } }
+}
+```
+
+```rust
+// src-tauri/src/providers/personal/native.rs
+// 支持 163 / QQ / iCloud（均为密码/授权码认证，无 OAuth）
+
+use super::super::traits::*;
+use async_trait::async_trait;
+
+pub struct NativeProvider {
+    id: &'static str,
+    name: &'static str,
+    domains: Vec<&'static str>,
+    imap: ImapConfig,
+    smtp: SmtpConfig,
+}
+
+impl NativeProvider {
+    pub fn new_163() -> Self {
+        Self {
+            id: "163", name: "163 邮箱",
+            domains: vec!["163.com", "126.com", "yeah.net"],
+            imap: ImapConfig { host: "imap.163.com".to_string(), port: 993, ssl: SslMode::Implicit },
+            smtp: SmtpConfig { host: "smtp.163.com".to_string(), port: 465, ssl: SslMode::Implicit },
+        }
+    }
+    pub fn new_qq() -> Self {
+        Self {
+            id: "qq", name: "QQ 邮箱",
+            domains: vec!["qq.com", "foxmail.com"],
+            imap: ImapConfig { host: "imap.qq.com".to_string(), port: 993, ssl: SslMode::Implicit },
+            smtp: SmtpConfig { host: "smtp.qq.com".to_string(), port: 465, ssl: SslMode::Implicit },
+        }
+    }
+    pub fn new_icloud() -> Self {
+        Self {
+            id: "icloud", name: "iCloud Mail",
+            domains: vec!["icloud.com", "me.com", "mac.com"],
+            imap: ImapConfig { host: "imap.mail.me.com".to_string(), port: 993, ssl: SslMode::Implicit },
+            smtp: SmtpConfig { host: "smtp.mail.me.com".to_string(), port: 587, ssl: SslMode::StartTls },
+        }
+    }
+}
+
+#[async_trait]
+impl MailProvider for NativeProvider {
+    fn provider_id(&self) -> &str { self.id }
+    fn provider_name(&self) -> &str { self.name }
+    fn account_type(&self) -> AccountType { AccountType::Personal }
+    fn auth_types(&self) -> Vec<AuthType> {
+        vec![AuthType::Password, AuthType::AppPassword]
+    }
+    fn default_imap_config(&self) -> ImapConfig { self.imap.clone() }
+    fn default_smtp_config(&self) -> SmtpConfig { self.smtp.clone() }
+    fn oauth_config(&self) -> Option<OAuthConfig> { None }
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_idle: true, supports_condstore: false,
+            supports_push: false, supports_oauth: false,
+            supports_enterprise: false, max_message_size: Some(50 * 1024 * 1024),
+        }
+    }
+    fn detect(&self, email: &str) -> bool {
+        let d = email.split('@').last().unwrap_or("").to_lowercase();
+        self.domains.contains(&d.as_str())
+    }
+    fn supported_domains(&self) -> Vec<&str> { self.domains.clone() }
+    fn box_clone(&self) -> Box<dyn MailProvider> { Box::new(self.clone()) }
+}
+
+impl Clone for NativeProvider {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id, name: self.name,
+            domains: self.domains.clone(),
+            imap: self.imap.clone(), smtp: self.smtp.clone(),
+        }
+    }
+}
+```
+
+### 12. lib.rs FlowEngine 集成示例
+
+```rust
+// src-tauri/src/lib.rs
+// 新架构中 FlowEngine 替代原有分散的 State 管理
+
+use std::sync::Arc;
+use tauri::{Manager, Emitter};
+use crate::engine::FlowEngine;
+
+/// 全局引擎状态
+pub struct EngineState(pub Arc<FlowEngine>);
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tracing_subscriber::fmt::init();
+
+    tauri::Builder::default()
+        // ... 插件注册不变 ...
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            // ========== 数据库初始化 ==========
+            tauri::async_runtime::block_on(async {
+                let db = crate::database::establish_connection()
+                    .await
+                    .expect("数据库连接失败");
+                crate::database::init_database(&db)
+                    .await
+                    .expect("数据库初始化失败");
+
+                // ========== FlowEngine 初始化 ==========
+                let engine = FlowEngine::new(app_handle.clone(), Arc::new(db));
+                engine.initialize()
+                    .await
+                    .expect("FlowEngine 初始化失败");
+
+                // 注册到 Tauri 状态
+                app_handle.manage(EngineState(Arc::new(engine)));
+            });
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // 账号管理
+            command::add_account,
+            command::list_accounts,
+            command::delete_account,
+            // 邮件操作
+            command::list_emails,
+            command::get_email,
+            command::mark_as_read,
+            command::toggle_star,
+            command::delete_email,
+            command::move_email,
+            // 同步
+            command::sync_account,
+            command::sync_account_with_progress,
+            // 搜索
+            command::search_emails,
+            // 发送
+            command::send_email,
+            // 草稿
+            command::save_draft,
+            command::list_drafts,
+            command::delete_draft,
+            // OAuth
+            command::get_oauth_auth_url,
+            command::exchange_oauth_code,
+        ])
+        .run(tauri::generate_context!())
+        .expect("Tauri 启动失败");
+}
+```
+
+### 13. Tauri 命令层适配示例
+
+命令层作为**薄适配层**，仅负责参数转换和权限校验，核心逻辑全部委托给 `FlowEngine`：
+
+```rust
+// src-tauri/src/command/email.rs
+
+use tauri::State;
+use crate::EngineState;
+use crate::operations::OperationType;
+
+/// 标记已读 —— 委托给 FlowEngine
+#[tauri::command]
+pub async fn mark_as_read(
+    engine: State<'_, EngineState>,
+    email_id: i32,
+    is_read: bool,
+) -> Result<(), String> {
+    engine.0
+        .operation_manager()
+        .execute(OperationType::MarkRead { email_id, is_read })
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// 搜索邮件 —— 委托给 SearchService
+#[tauri::command]
+pub async fn search_emails(
+    engine: State<'_, EngineState>,
+    query: String,
+    account_id: Option<i32>,
+    page: u32,
+    page_size: u32,
+) -> Result<serde_json::Value, String> {
+    engine.0
+        .search_service()
+        .search(account_id, &query, Default::default(), page, page_size)
+        .await
+        .map(|r| serde_json::to_value(r).unwrap())
+        .map_err(|e| e.to_string())
+}
+
+/// 发送邮件 —— 委托给 SendQueue
+#[tauri::command]
+pub async fn send_email(
+    engine: State<'_, EngineState>,
+    account_id: i32,
+    to: Vec<String>,
+    subject: String,
+    body_html: String,
+    attachments: Vec<String>,
+) -> Result<String, String> {
+    engine.0
+        .send_queue()
+        .enqueue(account_id, to, subject, body_html, attachments)
+        .await
+        .map_err(|e| e.to_string())
+}
+```
+
+---
+
+## 全局数据库 Schema
+
+### 完整 ER 图（所有表关系）
+
+```mermaid
+erDiagram
+    accounts {
+        int id PK
+        string name
+        string email
+        string provider
+        string account_type "personal/enterprise"
+        string auth_type "password/oauth2"
+        string imap_host
+        int imap_port
+        string smtp_host
+        int smtp_port
+        bool sync_enabled
+        int last_sync_at
+        int enterprise_config_id FK
+        int created_at
+        int updated_at
+    }
+
+    enterprise_configs {
+        int id PK
+        string tenant_id
+        string domain
+        bool conditional_access
+        bool mfa_required
+        bool custom_server
+        int created_at
+    }
+
+    folders {
+        int id PK
+        int account_id FK
+        string name
+        string imap_name
+        string folder_type
+        int uidvalidity
+        int uidnext
+        int email_count
+        int unread_count
+    }
+
+    emails {
+        int id PK
+        int account_id FK
+        int folder_id FK
+        int uid
+        string message_id
+        string subject
+        string sender
+        string recipients_to
+        string recipients_cc
+        bool is_read
+        bool is_starred
+        bool has_attachment
+        text body_text
+        text body_html
+        int date
+        int created_at
+    }
+
+    attachments {
+        int id PK
+        int email_id FK
+        string filename
+        string content_type
+        int size
+        string content_id
+    }
+
+    sync_state {
+        int id PK
+        int account_id FK
+        string folder_name
+        int last_uid
+        int last_modseq
+        int last_uidvalidity
+        int last_sync_at
+        string status
+        int retry_count
+    }
+
+    sync_errors {
+        int id PK
+        int account_id FK
+        string folder_name
+        string error_type
+        string error_message
+        int occurred_at
+        int retry_count
+    }
+
+    operation_queue {
+        int id PK
+        string operation_id UK
+        int account_id FK
+        string operation_type
+        int resource_id
+        text payload
+        string status "pending/processing/done/failed"
+        int retry_count
+        int created_at
+        int synced_at
+    }
+
+    operation_history {
+        int id PK
+        string operation_id FK
+        string status
+        text before_state
+        text after_state
+        int created_at
+    }
+
+    drafts {
+        int id PK
+        int account_id FK
+        string message_id UK
+        string imap_uid
+        string subject
+        text recipients_to
+        text body_html
+        string reply_to
+        string in_reply_to
+        string status
+        bool is_synced
+        int created_at
+        int updated_at
+    }
+
+    draft_versions {
+        int id PK
+        int draft_id FK
+        text content_snapshot
+        string trigger_type
+        int saved_at
+    }
+
+    send_queue {
+        int id PK
+        int account_id FK
+        string message_id UK
+        string recipients
+        string subject
+        text mime_content
+        string status
+        int retry_count
+        int next_retry_at
+        int created_at
+        int sent_at
+    }
+
+    attachment_cache {
+        int id PK
+        int email_id FK
+        string part_id
+        string filename
+        string local_path
+        int size
+        int downloaded_at
+        int last_accessed_at
+    }
+
+    refresh_state {
+        int account_id PK
+        string status "idle/scheduled/refreshing"
+        int last_refresh_at
+        int next_refresh_at
+        int retry_count
+        string last_error
+    }
+
+    refresh_history {
+        int id PK
+        int account_id FK
+        string status
+        string error_code
+        int started_at
+        int completed_at
+        int old_expires_at
+        int new_expires_at
+    }
+
+    emails_fts {
 
 本文档定义了 Postium Mail 邮件客户端流程引擎的完整架构，包括：
 
