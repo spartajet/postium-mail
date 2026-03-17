@@ -326,38 +326,119 @@ Week 17-18: 性能优化、安全与日志监控
 
 ```mermaid
 gantt
-    title 重构进度甘特图
+    title 重构进度甘特图（Week 1–18）
     dateFormat  YYYY-MM-DD
-    section 阶段1-基础架构
-    项目结构重组           :a1, 2024-01-15, 3d
-    错误类型定义           :a2, after a1, 2d
-    服务商 Trait 定义      :a3, after a2, 3d
-    
-    section 阶段2-服务商层
-    ProviderPool 实现      :b1, after a3, 2d
-    Gmail 适配器           :b2, after b1, 2d
-    Outlook 适配器         :b3, after b2, 1d
-    Native 适配器          :b4, after b3, 1d
-    
-    section 阶段3-认证层
-    AuthManager 实现       :c1, after b4, 3d
-    TokenManager 实现      :c2, after c1, 2d
-    OAuth Handler 重构     :c3, after c2, 2d
-    
-    section 阶段4-同步层
-    DeltaSync 实现         :d1, after c3, 3d
-    SyncManager 重构       :d2, after d1, 3d
-    CONDSTORE 支持         :d3, after d2, 2d
-    
-    section 阶段5-通知调度
-    TaskScheduler 实现     :e1, after d3, 2d
-    NotificationManager    :e2, after e1, 2d
-    IMAP IDLE 实现         :e3, after e2, 3d
-    
-    section 阶段6-集成测试
-    集成测试               :f1, after e3, 3d
-    性能优化               :f2, after f1, 2d
-    文档完善               :f3, after f2, 2d
+
+    section 阶段1 基础架构 (W1-2)
+    账号类型抽象设计        :a0, 2024-01-15, 1d
+    项目结构重组            :a1, after a0, 1d
+    错误类型+重试策略       :a2, after a1, 2d
+    服务商 Trait 定义       :a3, after a2, 3d
+    Cargo 依赖变更          :a4, after a3, 1d
+
+    section 阶段2 服务商层 (W3-4)
+    ProviderPool 实现       :b1, after a4, 2d
+    Gmail / Outlook 适配器  :b2, after b1, 2d
+    Yahoo / Native 适配器   :b3, after b2, 1d
+    M365 / GWorkspace 适配  :b4, after b3, 2d
+    Custom 企业适配器       :b5, after b4, 1d
+
+    section 阶段3 认证层 (W5-6)
+    AuthManager 实现        :c1, after b5, 3d
+    TokenManager 实现       :c2, after c1, 2d
+    OAuth Handler 重构      :c3, after c2, 2d
+    EnterpriseAuth 实现     :c4, after c3, 2d
+    TokenRefreshScheduler   :c5, after c4, 2d
+
+    section 阶段4 同步层 (W7-8)
+    DeltaSync 实现          :d1, after c5, 3d
+    SyncManager 重构        :d2, after d1, 2d
+    CONDSTORE / IDLE 支持   :d3, after d2, 2d
+    ChangeDetector 实现     :d4, after d3, 1d
+
+    section 阶段5 通知调度 (W9-10)
+    TaskScheduler 实现      :e1, after d4, 2d
+    NotificationManager     :e2, after e1, 2d
+    IMAP IDLE 集成          :e3, after e2, 2d
+
+    section 阶段6 企业特性 (W11-12)
+    企业邮箱自动发现        :f1, after e3, 2d
+    企业 Token 租户刷新     :f2, after f1, 2d
+    M365 / GW 集成测试      :f3, after f2, 2d
+
+    section 阶段7 操作+同步 (W13-14)
+    OperationManager 实现   :g1, after f3, 2d
+    OperationQueue 离线支持 :g2, after g1, 1d
+    ConflictResolver 实现   :g3, after g2, 2d
+    AttachmentManager 实现  :g4, after g3, 2d
+    多客户端同步集成测试    :g5, after g4, 1d
+
+    section 阶段8 搜索发送草稿 (W15-16)
+    FTS5 搜索引擎           :h1, after g5, 3d
+    QueryParser 实现        :h2, after h1, 1d
+    SMTP 发送+发送队列      :h3, after h2, 2d
+    草稿管理+自动保存       :h4, after h3, 2d
+
+    section 阶段9 性能安全日志 (W17-18)
+    性能监控+内存优化       :i1, after h4, 2d
+    安全审计日志            :i2, after i1, 1d
+    结构化日志+脱敏         :i3, after i2, 1d
+    前端命令层适配          :i4, after i3, 2d
+    全量集成测试            :i5, after i4, 2d
+```
+
+---
+
+### 现有代码 → 新架构映射表
+
+重构采用**渐进迁移**策略，旧代码保留并逐步委托给新模块：
+
+| 现有文件 | 新架构模块 | 迁移策略 | 阶段 |
+|----------|------------|----------|------|
+| `services/oauth_service.rs` | `auth/oauth_handler.rs` | 提取通用逻辑，保留兼容包装 | 阶段3 |
+| `services/account_service.rs` | `auth/auth_manager.rs` + `auth/password_auth.rs` | 拆分认证与CRUD | 阶段3 |
+| `services/sync_manager.rs` | `sync/sync_manager.rs` + `sync/delta_sync.rs` | 重构使用新Delta引擎 | 阶段4 |
+| `services/email_service.rs` | `sync/mail_processor.rs` | 平移+扩展 | 阶段4 |
+| `services/folder_service.rs` | `sync/folder_manager.rs` | 平移+扩展 | 阶段4 |
+| `services/smtp_service.rs` | `sending/smtp_sender.rs` | 重构支持发送队列 | 阶段8 |
+| `services/search_service.rs` | `search/search_engine.rs` | 升级为FTS5引擎 | 阶段8 |
+| `services/imap/` | `services/imap/`（扩展） | 保留，新增IDLE/CONDSTORE | 阶段4 |
+| `command/*.rs` | `command/*.rs`（薄适配层） | 保持签名，内部委托FlowEngine | 阶段9 |
+| `crypto.rs` | `security/audit_log.rs` + Keyring | 扩展安全模块 | 阶段9 |
+| `config.rs` | `providers/config.rs` | 扩展服务商配置 | 阶段1 |
+| `lib.rs` | `lib.rs`（更新） | 引入EngineState替代分散State | 阶段9 |
+
+### Cargo.toml 新增依赖
+
+```toml
+[dependencies]
+# 已有依赖（保持版本不变）
+# async-imap、tokio、sea-orm、serde 等
+
+# 新增：服务商抽象
+async-trait = "0.1"
+
+# 新增：Token刷新调度
+tokio-cron-scheduler = "0.9"
+
+# 新增：全文搜索（通过 rusqlite FTS5，已包含在 sea-orm 的 sqlite 特性中）
+# 无需额外依赖，确保 sea-orm features 包含 "sqlite"
+
+# 新增：MIME构建
+lettre = { version = "0.11", features = ["builder", "smtp-transport", "tokio1-native-tls"] }
+
+# 新增：内存管理
+lru = "0.12"
+
+# 新增：性能指标
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.14", optional = true }
+
+# 新增：结构化日志（已有 tracing，补充 JSON 格式）
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# 新增：DNS MX 查询（企业邮箱自动发现）
+trust-dns-resolver = "0.23"
 ```
 
 ---
@@ -3096,52 +3177,120 @@ tests/
 
 | 风险 | 概率 | 影响 | 缓解措施 |
 |------|------|------|----------|
-| 现有功能回归 | 中 | 高 | 保持 API 兼容，完整测试 |
-| OAuth 配置问题 | 中 | 中 | 提供详细文档，支持环境变量 |
-| IMAP 兼容性 | 低 | 高 | 测试多服务商，优雅降级 |
-| 性能下降 | 低 | 中 | 性能测试，优化关键路径 |
-| 时间延期 | 中 | 中 | 分阶段交付，优先核心功能 |
+| 现有功能回归 | 中 | 高 | 保持命令层签名不变；每阶段回归测试 |
+| OAuth 配置问题 | 中 | 中 | 环境变量注入；提供配置文档 |
+| IMAP 服务商兼容性 | 中 | 高 | 测试6个服务商；优雅降级到UID轮询 |
+| 企业邮箱策略兼容 | 中 | 中 | 条件访问错误单独捕获；引导用户 |
+| 性能下降 | 低 | 中 | 性能基准测试；关键路径Profiling |
+| 数据库迁移失败 | 低 | 高 | 迁移前备份；事务包裹；回滚脚本 |
+| 时间延期 | 中 | 中 | 分阶段交付；P0优先；可裁剪P2 |
+| Token泄露 | 低 | 高 | Keyring存储；日志脱敏；审计追踪 |
 
 ### 回滚计划
 
-1. **代码回滚**：使用 Git 分支管理，保留旧代码
-2. **配置回滚**：支持新旧配置格式
-3. **数据迁移**：数据库变更使用迁移脚本
+1. **代码回滚**：使用 Git 分支管理（`feature/engine` → `main`），保留旧代码作为兜底
+2. **配置回滚**：支持新旧 State 格式并存过渡期
+3. **数据库回滚**：每个迁移脚本提供对应的 `down.sql`
+4. **功能开关**：通过环境变量 `USE_NEW_ENGINE=true` 控制是否启用新引擎，过渡期可回退
 
 ---
 
 ## 验收标准
 
-### 功能验收
+### 功能验收（按阶段）
 
-- [ ] 所有现有功能保持正常
-- [ ] 新服务商可配置添加
-- [ ] Google OAuth 认证通过
-- [ ] 增量同步效率提升 50%+
-- [ ] 新邮件通知正常工作
-- [ ] Token 自动刷新机制生效
+#### 阶段1-2：服务商层
+- [ ] 所有现有功能保持正常（回归测试通过）
+- [ ] `ProviderPool` 能自动检测 Gmail / Outlook / 163 / QQ
+- [ ] 企业邮箱通过 MX 记录或 Autodiscover 自动识别
+- [ ] Yahoo、NativeProvider（163/QQ/iCloud）适配器功能正常
+- [ ] 自定义企业邮箱支持手动配置 IMAP/SMTP
+
+#### 阶段3：认证层
+- [ ] Gmail OAuth 2.0 + PKCE 认证通过
+- [ ] Microsoft 365 企业租户 OAuth 认证通过
+- [ ] 密码认证（163 / QQ）连接测试通过
+- [ ] Token 自动刷新机制生效（无感知）
+- [ ] Token 刷新失败时正确通知用户重新授权
+- [ ] 企业账号 MFA 流程正确引导
+
+#### 阶段4-5：同步与通知
+- [ ] 首次同步显示骨架列表时间 < 10s
+- [ ] CONDSTORE 增量同步正常工作
+- [ ] 不支持 CONDSTORE 时降级为 UID 轮询
+- [ ] IMAP IDLE 实时收到新邮件通知
+- [ ] 定时任务调度器按设定间隔触发同步
+
+#### 阶段6-7：企业特性+操作
+- [ ] 离线操作（标记已读/删除）恢复后正确同步
+- [ ] 多客户端标志冲突按"服务器优先"解决
+- [ ] 附件断点续传功能正常
+- [ ] 附件缓存命中时直接打开，无重复下载
+
+#### 阶段8：搜索/发送/草稿
+- [ ] 全文搜索响应时间 < 100ms
+- [ ] 搜索语法（from: / subject: / is: 等）正确解析
+- [ ] SMTP 发送成功率 > 99%（正常网络）
+- [ ] 离线发送队列恢复后自动发送
+- [ ] 草稿自动保存（停止输入3秒内）
+- [ ] 草稿多设备同步一致
+
+#### 阶段9：性能/安全/日志
+- [ ] 关键安全事件记录到审计日志
+- [ ] 日志中无明文密码/Token
+- [ ] 结构化日志 JSON 格式正确输出
+- [ ] 性能监控指标正常采集
 
 ### 代码质量
 
-- [ ] 单元测试覆盖率 > 70%
-- [ ] 集成测试全部通过
-- [ ] 无 Clippy 警告
-- [ ] 文档完整
+- [ ] 单元测试覆盖率 > 70%（核心模块：auth / sync / operations）
+- [ ] 集成测试覆盖所有主要流程
+- [ ] `cargo clippy -- -D warnings` 零警告
+- [ ] `cargo test` 全部通过
+- [ ] 所有公开 API 有文档注释
 
 ### 性能指标
 
-| 指标 | 当前值 | 目标值 |
-|------|--------|--------|
-| 首次同步 1000 封邮件 | ~120s | < 60s |
-| 增量同步 10 封新邮件 | ~5s | < 2s |
-| 内存占用（空闲） | ~80MB | < 100MB |
-| 启动时间 | ~2s | < 2s |
+| 指标 | 当前值 | 目标值 | 测量方法 |
+|------|--------|--------|----------|
+| 冷启动时间 | ~2s | < 3s | 从进程启动到UI可交互 |
+| 首次同步 1000 封（骨架显示） | ~120s | < 10s | 仅头信息 |
+| 首次同步 1000 封（全量完成） | ~120s | < 60s | 含正文 |
+| 增量同步 10 封新邮件 | ~5s | < 2s | 有网络 |
+| 内存占用（空闲） | ~80MB | < 100MB | 无同步任务 |
+| 内存占用（同步中） | ~150MB | < 200MB | 并发同步 |
+| 数据库查询（列表） | ~100ms | < 50ms | 1000封邮件 |
+| 全文搜索响应 | 未测量 | < 100ms | FTS5本地索引 |
+
+### 安全验收
+
+- [ ] 密码/Token 不出现在日志或数据库明文字段
+- [ ] IMAP/SMTP 连接强制 TLS 1.2+
+- [ ] OAuth PKCE 流程完整（code_verifier 不泄露）
+- [ ] 安全审计日志记录登录/Token 变更事件
 
 ---
 
 ## 附录
 
-### A. 相关文件清单
+### A. 前端适配任务
+
+在阶段9中，前端需要配合后端新引擎做以下适配：
+
+| 前端变更 | 说明 | 影响范围 |
+|----------|------|----------|
+| 监听新引擎事件 `flow-engine-event` | 替代原有分散事件 | 全局状态管理 |
+| 账号添加表单新增企业邮箱选项 | 支持手动输入服务器/租户ID | 账号管理页 |
+| 操作状态显示（同步中/失败/待重试） | 操作队列反馈 | 邮件列表/详情 |
+| 搜索语法提示 | `from:` / `is:` 等语法高亮提示 | 搜索框 |
+| 附件下载进度条 | 断点续传进度 | 邮件详情页 |
+| 草稿自动保存状态指示 | 显示"已保存"/"同步中" | 写信页 |
+| Token 过期/重新授权提示 | 弹出 OAuth 重授权流程 | 全局通知 |
+| 离线状态提示 | 操作队列数量角标 | 状态栏 |
+
+---
+
+### B. 相关文件清单
 
 #### 新增文件
 
