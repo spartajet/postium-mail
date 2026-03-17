@@ -3280,6 +3280,95 @@ impl AsyncImapClient {
 
 ---
 
+#### 任务 4.4: ChangeDetector 实现
+
+**目标**：检测服务器端的邮件变更（新增邮件、标志变更、删除等）
+
+**实现文件**：`src-tauri/src/sync/change_detector.rs`
+
+**关键功能**：
+
+```rust
+/// 变更类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChangeType {
+    /// 新邮件
+    NewEmail { uid: u32 },
+    /// 标志变更
+    FlagsChanged {
+        uid: u32,
+        old_flags: Vec<String>,
+        new_flags: Vec<String>,
+    },
+    /// 邮件移动
+    EmailMoved {
+        uid: u32,
+        from_folder: String,
+        to_folder: String,
+    },
+    /// 邮件删除
+    EmailDeleted { uid: u32 },
+}
+
+/// 变更检测结果
+#[derive(Debug, Clone)]
+pub struct ChangeDetectionResult {
+    pub new_emails: Vec<u32>,
+    pub modified_emails: Vec<u32>,
+    pub deleted_emails: Vec<u32>,
+    pub flags_changed: Vec<u32>,
+}
+
+/// 变更检测器
+pub struct ChangeDetector {
+    db: Arc<DbConn>,
+}
+
+impl ChangeDetector {
+    /// 检测变更（统一入口）
+    pub async fn detect_changes(
+        &self,
+        account_id: i32,
+        folder: &str,
+        last_state: &SyncState,
+    ) -> Result<ChangeDetectionResult>;
+
+    /// 检测新邮件
+    async fn detect_new_emails(
+        &self,
+        account_id: i32,
+        folder: &str,
+        last_uid: Option<u32>,
+    ) -> Result<Vec<u32>>;
+
+    /// 检测标志变更（使用CONDSTORE或UID对比）
+    async fn detect_flag_changes(
+        &self,
+        account_id: i32,
+        folder: &str,
+        known_uids: Vec<u32>,
+    ) -> Result<Vec<(u32, Vec<String>, Vec<String>)>>;
+
+    /// 检测删除的邮件
+    async fn detect_deletions(
+        &self,
+        account_id: i32,
+        folder: &str,
+        server_uids: Vec<u32>,
+    ) -> Result<Vec<u32>>;
+}
+```
+
+**验收标准**：
+- [ ] 支持CONDSTORE的MODSEQ检测
+- [ ] 降级到UID搜索对比
+- [ ] 检测新邮件、标志变更、删除
+- [ ] 单元测试覆盖
+
+**预计工时**：1 天
+
+---
+
 ### 阶段 5: 通知与调度 (Week 9-10)
 
 #### 任务 5.1: TaskScheduler 实现
