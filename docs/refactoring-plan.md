@@ -1299,16 +1299,16 @@ impl Clone for Box<dyn MailProvider> {
 **实现文件**：`src-tauri/src/providers/provider_pool.rs`
 
 **关键功能**：
-+- 从环境变量初始化服务商
-+- 根据邮箱地址自动检测服务商类型（个人/企业）
-+- 分离管理个人服务商和企业服务商
-+- 企业邮箱自动发现（MX记录/Autodiscover）
+- 从环境变量初始化服务商
+- 根据邮箱地址自动检测服务商类型（个人/企业）
+- 分离管理个人服务商和企业服务商
+- 企业邮箱自动发现（MX记录/Autodiscover）
 
 **验收标准**：
-+- [x] 服务商注册与获取
-+- [x] 自动检测服务商（含个人/企业区分）
-+- [x] 企业邮箱检测逻辑
-+- [x] 单元测试覆盖
+- [x] 服务商注册与获取
+- [x] 自动检测服务商（含个人/企业区分）
+- [x] 企业邮箱检测逻辑
+- [x] 单元测试覆盖
 
 **预计工时**：3 天
 
@@ -1342,10 +1342,10 @@ supports_condstore: true
 ```
 
 **验收标准**：
-+- [x] Gmail OAuth 流程完整
-+- [x] IMAP/SMTP 配置正确
-+- [x] 标记为个人邮箱
-+- [x] 集成测试通过
+- [x] Gmail OAuth 流程完整
+- [x] IMAP/SMTP 配置正确
+- [x] 标记为个人邮箱
+- [x] 集成测试通过
 
 **预计工时**：2 天
 
@@ -1363,10 +1363,10 @@ supports_condstore: true
 3. 保持现有功能不变
 
 **验收标准**：
-+- [x] 现有 Outlook 功能保持
-+- [x] 标记为个人邮箱
-+- [x] 代码迁移完成
-+- [x] 回归测试通过
+- [x] 现有 Outlook 功能保持
+- [x] 标记为个人邮箱
+- [x] 代码迁移完成
+- [x] 回归测试通过
 
 **预计工时**：1 天
 
@@ -1379,16 +1379,16 @@ supports_condstore: true
 **实现文件**：`src-tauri/src/providers/personal/native.rs`
 
 **支持的服务商**：
-+- 163 邮箱 (`imap.163.com:993`)
-+- QQ 邮箱 (`imap.qq.com:993`)
-+- iCloud (`imap.mail.me.com:993`)
-+- Yahoo (`imap.mail.yahoo.com:993`)
+- 163 邮箱 (`imap.163.com:993`)
+- QQ 邮箱 (`imap.qq.com:993`)
+- iCloud (`imap.mail.me.com:993`)
+- Yahoo (`imap.mail.yahoo.com:993`)
 
 **验收标准**：
-+- [x] 各服务商配置正确
-+- [x] 密码认证流程完整
-+- [x] 标记为个人邮箱
-+- [x] 测试覆盖
+- [x] 各服务商配置正确
+- [x] 密码认证流程完整
+- [x] 标记为个人邮箱
+- [x] 测试覆盖
 
 **预计工时**：1 天
 
@@ -1401,10 +1401,10 @@ supports_condstore: true
 **实现文件**：`src-tauri/src/providers/enterprise/microsoft_365.rs`
 
 **关键功能**：
-+- 企业租户 OAuth 流程
-+- 条件访问策略支持
-+- MFA 认证流程
-+- 企业租户 ID 管理
+- 企业租户 OAuth 流程
+- 条件访问策略支持
+- MFA 认证流程
+- 企业租户 ID 管理
 
 **关键配置**：
 ```rust
@@ -1425,10 +1425,10 @@ mfa_required: true
 ```
 
 **验收标准**：
-+- [x] 企业租户 OAuth 流程
-+- [x] MFA 处理
-+- [x] 租户 ID 存储
-+- [x] 集成测试通过
+- [x] 企业租户 OAuth 流程
+- [x] MFA 处理
+- [x] 租户 ID 存储
+- [x] 集成测试通过
 
 **预计工时**：2 天
 
@@ -1441,9 +1441,9 @@ mfa_required: true
 **实现文件**：`src-tauri/src/providers/enterprise/google_workspace.rs`
 
 **关键功能**：
-+- 企业域 OAuth 流程
-+- 企业安全管理支持
-+- 企业通讯录 API 范围
+- 企业域 OAuth 流程
+- 企业安全管理支持
+- 企业通讯录 API 范围
 
 **关键配置**：
 ```rust
@@ -1462,9 +1462,9 @@ domain: custom_domain
 ```
 
 **验收标准**：
-+- [x] 企业域 OAuth 流程
-+- [x] 企业特性配置
-+- [x] 集成测试通过
+- [x] 企业域 OAuth 流程
+- [x] 企业特性配置
+- [x] 集成测试通过
 
 **预计工时**：2 天
 
@@ -1477,14 +1477,14 @@ domain: custom_domain
 **实现文件**：`src-tauri/src/providers/enterprise/custom.rs`
 
 **关键功能**：
-+- 完全自定义 IMAP/SMTP 配置
-+- 支持多种认证方式
-+- 灵活的服务器参数
+- 完全自定义 IMAP/SMTP 配置
+- 支持多种认证方式
+- 灵活的服务器参数
 
 **验收标准**：
-+- [x] 自定义服务器配置 UI
-+- [x] 多种认证方式支持
-+- [x] 测试覆盖
+- [x] 自定义服务器配置 UI
+- [x] 多种认证方式支持
+- [x] 测试覆盖
 
 **预计工时**：1 天
 
@@ -1545,11 +1545,11 @@ impl AuthManager {
 ```
 
 **验收标准**：
-+- [ ] 统一认证入口
-+- [ ] 自动选择认证方式
-+- [ ] 企业认证支持
-+- [ ] 账号类型检测
-+- [ ] 集成测试通过
+- [ ] 统一认证入口
+- [ ] 自动选择认证方式
+- [ ] 企业认证支持
+- [ ] 账号类型检测
+- [ ] 集成测试通过
 
 **预计工时**：4 天
 
@@ -1611,10 +1611,10 @@ impl TokenManager {
 ```
 
 **验收标准**：
-+- [ ] 自动刷新过期 Token
-+- [ ] 安全存储 Token
-+- [ ] 企业租户 Token 管理
-+- [ ] 单元测试覆盖
+- [ ] 自动刷新过期 Token
+- [ ] 安全存储 Token
+- [ ] 企业租户 Token 管理
+- [ ] 单元测试覆盖
 
 **预计工时**：3 天
 
@@ -1659,10 +1659,10 @@ impl OAuthHandler {
 ```
 
 **验收标准**：
-+- [ ] 通用 OAuth 流程
-+- [ ] 支持 Google 和 Microsoft（个人+企业）
-+- [ ] 企业租户端点支持
-+- [ ] 回归测试通过
+- [ ] 通用 OAuth 流程
+- [ ] 支持 Google 和 Microsoft（个人+企业）
+- [ ] 企业租户端点支持
+- [ ] 回归测试通过
 
 **预计工时**：3 天
 
@@ -1675,16 +1675,16 @@ impl OAuthHandler {
 **实现文件**：`src-tauri/src/auth/enterprise_auth.rs`
 
 **关键功能**：
-+- 域认证（Kerberos/NTLM）
-+- SAML SSO 流程
-+- 条件访问策略处理
-+- MFA 状态管理
+- 域认证（Kerberos/NTLM）
+- SAML SSO 流程
+- 条件访问策略处理
+- MFA 状态管理
 
 **验收标准**：
-+- [ ] 域认证支持
-+- [ ] SAML SSO 流程
-+- [ ] MFA 状态处理
-+- [ ] 测试覆盖
+- [ ] 域认证支持
+- [ ] SAML SSO 流程
+- [ ] MFA 状态处理
+- [ ] 测试覆盖
 
 **预计工时**：3 天
 
@@ -1922,11 +1922,11 @@ impl OperationManager {
 ```
 
 **验收标准**：
-+- [ ] 操作类型定义完整
-+- [ ] 本地优先更新机制
-+- [ ] 操作队列管理
-+- [ ] 操作状态追踪
-+- [ ] 失败重试机制
+- [ ] 操作类型定义完整
+- [ ] 本地优先更新机制
+- [ ] 操作队列管理
+- [ ] 操作状态追踪
+- [ ] 失败重试机制
 
 **预计工时**：2 天
 
@@ -1973,10 +1973,10 @@ CREATE TABLE operation_history (
 ```
 
 **验收标准**：
-+- [ ] 操作持久化存储
-+- [ ] 离线队列支持
-+- [ ] 按时间排序处理
-+- [ ] 操作去重优化
+- [ ] 操作持久化存储
+- [ ] 离线队列支持
+- [ ] 按时间排序处理
+- [ ] 操作去重优化
 
 **预计工时**：1 天
 
@@ -2075,11 +2075,11 @@ pub struct ConflictResolutionConfig {
 ```
 
 **验收标准**：
-+- [ ] 冲突类型检测
-+- [ ] 多种解决策略
-+- [ ] 自动策略选择
-+- [ ] 冲突日志记录
-+- [ ] 单元测试覆盖
+- [ ] 冲突类型检测
+- [ ] 多种解决策略
+- [ ] 自动策略选择
+- [ ] 冲突日志记录
+- [ ] 单元测试覆盖
 
 **预计工时**：2 天
 
@@ -2205,12 +2205,12 @@ CREATE TABLE attachment_cache (
 ```
 
 **验收标准**：
-+- [ ] 附件下载功能
-+- [ ] 下载进度追踪
-+- [ ] 断点续传支持
-+- [ ] 本地缓存管理
-+- [ ] 缓存清理机制
-+- [ ] 下载暂停/恢复
+- [ ] 附件下载功能
+- [ ] 下载进度追踪
+- [ ] 断点续传支持
+- [ ] 本地缓存管理
+- [ ] 缓存清理机制
+- [ ] 下载暂停/恢复
 
 **预计工时**：2 天
 
@@ -2273,10 +2273,10 @@ impl ChangeDetector {
 ```
 
 **验收标准**：
-+- [ ] 变更类型检测
-+- [ ] 增量变更检测
-+- [ ] 删除检测
-+- [ ] 标志变更检测
+- [ ] 变更类型检测
+- [ ] 增量变更检测
+- [ ] 删除检测
+- [ ] 标志变更检测
 
 **预计工时**：1 天
 
@@ -2812,13 +2812,13 @@ impl StartupOptimizer {
 ```
 
 **验收标准**：
-+- [ ] 启动时间监控
-+- [ ] 内存使用监控
-+- [ ] CPU使用监控
-+- [ ] 数据库性能监控
-+- [ ] 同步性能监控
-+- [ ] UI响应时间监控
-+- [ ] 性能报告生成
+- [ ] 启动时间监控
+- [ ] 内存使用监控
+- [ ] CPU使用监控
+- [ ] 数据库性能监控
+- [ ] 同步性能监控
+- [ ] UI响应时间监控
+- [ ] 性能报告生成
 
 **预计工时**：2 天
 
@@ -2887,11 +2887,11 @@ pub enum MemoryPressure {
 ```
 
 **验收标准**：
-+- [ ] LRU缓存实现
-+- [ ] 内存压力检测
-+- [ ] 自动内存清理
-+- [ ] 大文件流式处理
-+- [ ] 缓存命中率统计
+- [ ] LRU缓存实现
+- [ ] 内存压力检测
+- [ ] 自动内存清理
+- [ ] 大文件流式处理
+- [ ] 缓存命中率统计
 
 **预计工时**：1 天
 
@@ -2988,11 +2988,11 @@ CREATE INDEX idx_audit_created ON security_audit_log(created_at);
 ```
 
 **验收标准**：
-+- [ ] 安全事件记录
-+- [ ] 审计日志查询
-+- [ ] 可疑活动检测
-+- [ ] 安全报告生成
-+- [ ] 日志自动清理
+- [ ] 安全事件记录
+- [ ] 审计日志查询
+- [ ] 可疑活动检测
+- [ ] 安全报告生成
+- [ ] 日志自动清理
 
 **预计工时**：2 天
 
@@ -3076,12 +3076,12 @@ pub enum SanitizationStrategy {
 ```
 
 **验收标准**：
-+- [ ] 结构化日志格式
-+- [ ] 多输出目标支持
-+- [ ] 日志轮转
-+- [ ] 敏感信息脱敏
-+- [ ] 日志级别动态调整
-+- [ ] 日志文件压缩归档
+- [ ] 结构化日志格式
+- [ ] 多输出目标支持
+- [ ] 日志轮转
+- [ ] 敏感信息脱敏
+- [ ] 日志级别动态调整
+- [ ] 日志文件压缩归档
 
 **预计工时**：1层重构 (Week 7-8)
 
@@ -3636,25 +3636,25 @@ RUST_LOG=info,postium_mail=debug
 ### C. 参考资源
 
 #### 协议规范
-+- [RFC 3501 - IMAP4rev1](https://tools.ietf.org/html/rfc3501)
-+- [RFC 4549 - IMAP CONDSTORE](https://tools.ietf.org/html/rfc4549)
-+- [RFC 2177 - IMAP IDLE](https://tools.ietf.org/html/rfc2177)
-+- [OAuth 2.0 RFC 6749](https://tools.ietf.org/html/rfc6749)
+- [RFC 3501 - IMAP4rev1](https://tools.ietf.org/html/rfc3501)
+- [RFC 4549 - IMAP CONDSTORE](https://tools.ietf.org/html/rfc4549)
+- [RFC 2177 - IMAP IDLE](https://tools.ietf.org/html/rfc2177)
+- [OAuth 2.0 RFC 6749](https://tools.ietf.org/html/rfc6749)
 
 #### 个人邮件服务商 API
-+- [Gmail API Documentation](https://developers.google.com/gmail/api)
-+- [Microsoft Outlook REST API](https://docs.microsoft.com/outlook/rest/)
+- [Gmail API Documentation](https://developers.google.com/gmail/api)
+- [Microsoft Outlook REST API](https://docs.microsoft.com/outlook/rest/)
 
 #### 企业邮件服务商 API
-+- [Microsoft Graph API](https://docs.microsoft.com/graph/)
-+- [Microsoft 365 Exchange Online](https://docs.microsoft.com/exchange/exchange-online)
-+- [Google Workspace APIs](https://developers.google.com/workspace/apis)
-+- [Exchange Autodiscover](https://docs.microsoft.com/exchange/client-developer/exchange-web-services/autodiscover-for-exchange)
+- [Microsoft Graph API](https://docs.microsoft.com/graph/)
+- [Microsoft 365 Exchange Online](https://docs.microsoft.com/exchange/exchange-online)
+- [Google Workspace APIs](https://developers.google.com/workspace/apis)
+- [Exchange Autodiscover](https://docs.microsoft.com/exchange/client-developer/exchange-web-services/autodiscover-for-exchange)
 
 #### 企业认证相关
-+- [Azure AD OAuth 2.0](https://docs.microsoft.com/azure/active-directory/develop/v2-oauth2-auth-code-flow)
-+- [Azure AD Conditional Access](https://docs.microsoft.com/azure/active-directory/conditional-access/)
-+- [Google Workspace SAML](https://support.google.com/a/answer/6087519)
+- [Azure AD OAuth 2.0](https://docs.microsoft.com/azure/active-directory/develop/v2-oauth2-auth-code-flow)
+- [Azure AD Conditional Access](https://docs.microsoft.com/azure/active-directory/conditional-access/)
+- [Google Workspace SAML](https://support.google.com/a/answer/6087519)
 
 ---
 
