@@ -4,6 +4,8 @@
 
 use crate::error::{MailError, Result};
 use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor};
+use crate::auth::AuthManager;
+use crate::providers::ProviderPool;
 use sea_orm::DbConn;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -44,6 +46,8 @@ pub struct SyncResult {
 pub struct SyncManager {
     db: Arc<DbConn>,
     app_handle: AppHandle,
+    auth_manager: Arc<AuthManager>,
+    provider_pool: Arc<ProviderPool>,
     delta_sync: Arc<DeltaSync>,
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
@@ -51,7 +55,12 @@ pub struct SyncManager {
 
 impl SyncManager {
     /// 创建新的同步管理器
-    pub fn new(db: Arc<DbConn>, app_handle: AppHandle) -> Self {
+    pub fn new(
+        db: Arc<DbConn>,
+        app_handle: AppHandle,
+        auth_manager: Arc<AuthManager>,
+        provider_pool: Arc<ProviderPool>,
+    ) -> Self {
         let delta_sync = Arc::new(DeltaSync::new(db.clone()));
         let folder_manager = Arc::new(FolderManager::new(db.clone()));
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
@@ -59,6 +68,8 @@ impl SyncManager {
         Self {
             db,
             app_handle,
+            auth_manager,
+            provider_pool,
             delta_sync,
             folder_manager,
             mail_processor,
@@ -91,13 +102,60 @@ impl SyncManager {
             },
         );
 
+        // 1. 获取账号信息
+        let account = crate::services::account_service::get_by_id(&self.db, account_id)
+            .await
+            .map_err(|e| MailError::Internal(format!("获取账号信息失败: {}", e)))?
+            .ok_or_else(|| MailError::Internal(format!("账号 {} 不存在", account_id)))?;
+
+        // 2. 检测服务商
+        let provider = self
+            .provider_pool
+            .detect_provider(&account.email)
+            .await
+            .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
+
+        // 3. 获取 IMAP 配置
+        let imap_config = provider.default_imap_config();
+
+        // 4. 发送文件夹同步开始事件
+        let _ = self.emit_progress(
+            account_id,
+            SyncProgress {
+                stage: SyncStage::SyncingFolders,
+                folder: None,
+                current: 0,
+                total: 0,
+                message: "正在同步文件夹...".to_string(),
+            },
+        );
+
         // TODO: 实现完整的同步流程
-        // 1. 连接到 IMAP 服务器
-        // 2. 同步文件夹 (使用 FolderManager)
-        // 3. 同步邮件 (使用 DeltaSync + MailProcessor)
-        // 4. 更新同步状态
+        // 5. 连接到 IMAP 服务器
+        // let imap_client = connect_to_imap(&imap_config, &account.email, account.auth_type).await?;
+
+        // 6. 同步文件夹 (使用 FolderManager)
+        // let imap_folders = imap_client.list_folders().await?;
+        // let folder_result = self.folder_manager.sync_folders(account_id, imap_folders).await?;
+
+        // 7. 对每个文件夹执行增量同步
+        // for folder in &folders {
+        //     let sync_result = self.sync_folder_internal(
+        //         account_id,
+        //         folder,
+        //         &imap_client,
+        //     ).await?;
+        // }
+
+        // 8. 更新同步状态
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        tracing::info!(
+            "账号同步完成: account_id={}, duration={}ms",
+            account_id,
+            duration_ms
+        );
 
         Ok(SyncResult {
             total_synced: 0,
