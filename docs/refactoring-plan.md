@@ -116,7 +116,7 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 | 阶段 | 任务 | 状态 | 完成日期 |
 |------|------|------|----------|
 | 阶段 1 | 基础架构搭建 | ✅ 已完成 | 2026-03-17 |
-| 阶段 2 | 服务商层实现 | ⏳ 待开始 | - |
+| 阶段 2 | 服务商层实现 | 🔄 进行中 | 2026-03-17 |
 | 阶段 3 | 认证层重构 | ⏳ 待开始 | - |
 | 阶段 4 | 同步引擎重构 | ⏳ 待开始 | - |
 | 阶段 5 | 通知与调度 | ⏳ 待开始 | - |
@@ -130,7 +130,16 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 - ✅ 定义 MailProvider trait 抽象（13 个方法）
 - ✅ 65 个测试全部通过，0 个 clippy 警告
 
-**下一步**：阶段 2 - 服务商层实现（Gmail、Outlook、Native、Microsoft 365、Google Workspace 等）
+**阶段 2 进度摘要**（2026-03-17 更新）：
+- ✅ Gmail/Outlook/Yahoo 个人服务商实现
+- ✅ NativeProvider 拆分为独立服务商（163、QQ、iCloud）
+- ✅ ProviderPool 服务商池实现与自动检测
+- ✅ 企业服务商（Microsoft 365、Google Workspace、Custom）框架
+- ✅ 49 个服务商相关测试全部通过
+- 🔄 **进行中**：OAuth 服务迁移与完善
+- ⏳ **待开始**：TokenManager、AuthManager 实现
+
+**下一步**：完成阶段 2 - OAuth 服务完善和 AuthManager 实现
 
 ### 参考文档
 
