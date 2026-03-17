@@ -4,6 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::models::folder;
+use crate::services::imap::{FolderInfo, FolderInfo as ImapFolderInfo};
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -181,6 +182,81 @@ impl FolderManager {
             deleted_folders: 0,
             total_folders,
         })
+    }
+
+    /// 从 FolderInfo 列表同步文件夹
+    ///
+    /// 这是 `sync_folders` 的便捷方法，直接接受 AsyncImapClient 返回的 FolderInfo
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder_infos` - 从 IMAP 服务器获取的文件夹信息列表
+    ///
+    /// # 返回
+    ///
+    /// 返回同步结果
+    pub async fn sync_folders_from_info(
+        &self,
+        account_id: i32,
+        folder_infos: &[ImapFolderInfo],
+    ) -> Result<FolderSyncResult> {
+        // 转换 ImapFolderInfo 为 ImapFolder
+        let imap_folders: Vec<ImapFolder> = folder_infos
+            .iter()
+            .map(|info| {
+                // 转换 SpecialUse (imap::types -> folder_manager)
+                let special_use = match &info.special_use {
+                    Some(use_type) => match use_type {
+                        crate::services::imap::SpecialUse::All => SpecialUse::All,
+                        crate::services::imap::SpecialUse::Archive => SpecialUse::Archive,
+                        crate::services::imap::SpecialUse::Drafts => SpecialUse::Drafts,
+                        crate::services::imap::SpecialUse::Flagged => SpecialUse::Flagged,
+                        crate::services::imap::SpecialUse::Junk => SpecialUse::Junk,
+                        crate::services::imap::SpecialUse::Sent => SpecialUse::Sent,
+                        crate::services::imap::SpecialUse::Trash => SpecialUse::Trash,
+                    },
+                    None => {
+                        // 如果没有 special-use，根据名称推断
+                        Self::infer_special_use_from_name(&info.name)
+                    }
+                };
+
+                ImapFolder {
+                    imap_name: info.name.clone(),
+                    special_use,
+                    attributes: vec![],
+                    uidvalidity: None,
+                    uidnext: None,
+                    highest_modseq: None,
+                }
+            })
+            .collect();
+
+        self.sync_folders(account_id, imap_folders).await
+    }
+
+    /// 从文件夹名称推断 Special-Use 类型
+    fn infer_special_use_from_name(name: &str) -> SpecialUse {
+        let name_lower = name.to_lowercase();
+
+        if name_lower.contains("inbox") || name_lower == "inbox" {
+            SpecialUse::Inbox
+        } else if name_lower.contains("sent") || name_lower.contains("已发送") {
+            SpecialUse::Sent
+        } else if name_lower.contains("draft") || name_lower.contains("草稿") {
+            SpecialUse::Drafts
+        } else if name_lower.contains("trash") || name_lower.contains("deleted") || name_lower.contains("已删除") || name_lower.contains("垃圾箱") {
+            SpecialUse::Trash
+        } else if name_lower.contains("junk") || name_lower.contains("spam") || name_lower.contains("垃圾邮件") {
+            SpecialUse::Junk
+        } else if name_lower.contains("archive") || name_lower.contains("归档") {
+            SpecialUse::Archive
+        } else if name_lower.contains("flagged") || name_lower.contains("star") || name_lower.contains("标记") {
+            SpecialUse::Flagged
+        } else {
+            SpecialUse::Inbox // 默认为收件箱
+        }
     }
 
     /// 获取本地文件夹列表
