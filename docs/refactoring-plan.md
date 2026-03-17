@@ -27,6 +27,142 @@
 
 ## 最近更新
 
+### 2026-03-17：阶段 2 服务商层实现 - 全部完成 ✅
+
+**状态**：✅ 已完成
+
+**背景**：
+服务商层是整个流程引擎架构的基础，负责抽象各种邮件服务商的配置和能力。
+
+**完成内容**：
+
+1. **个人邮箱服务商完善**：
+   - Gmail：添加硬编码 OAuth 配置常量
+   - Outlook：添加硬编码 OAuth 配置常量
+   - Yahoo：完整实现
+   - Native（163、QQ、iCloud）：拆分为独立实现
+
+2. **企业邮箱服务商完善**：
+   - Microsoft 365：硬编码 OAuth、租户管理、12 个测试
+   - Google Workspace：硬编码 OAuth、域名支持、13 个测试
+   - 自定义邮箱：灵活配置、SSL 模式、12 个测试
+
+3. **服务商池（ProviderPool）**：
+   - 服务商注册与获取
+   - 智能邮箱检测
+   - 个人/企业区分
+   - 企业邮箱检测框架
+
+4. **统一 API 设计**：
+   ```rust
+   // 使用默认配置
+   let provider = GmailProvider; // 或 GmailProvider (unit struct)
+
+   // 针对性配置
+   let provider = Microsoft365Provider::with_tenant("tenant-id");
+   let provider = GoogleWorkspaceProvider::with_domain("example.com");
+
+   // 完全自定义
+   let provider = CustomProvider::new(...);
+   ```
+
+**测试结果**：
+- **88 个测试全部通过**
+- 个人邮箱：36 个测试（Gmail 6 + Outlook 6 + Yahoo 6 + 163 6 + QQ 6 + iCloud 6）
+- 企业邮箱：37 个测试（Microsoft 365 12 + Google Workspace 13 + Custom 12）
+- 工具和池：15 个测试
+
+**OAuth 配置汇总**：
+
+| 服务商 | Client ID | 租户/域名 | 用途 |
+|--------|-----------|----------|------|
+| Gmail | `56071600997-2gg...` | - | 个人邮箱 |
+| Outlook | `67acce3b-a85a-40c1...` | common | 个人邮箱 |
+| Microsoft 365 | `67acce3b-a85a-40c1...` | common/企业租户 | 企业邮箱 |
+| Google Workspace | `56071600997-2gg...` | 企业域名 | 企业邮箱 |
+
+**关键成就**：
+- 零配置开箱即用（OAuth 凭证预配置）
+- 一致的 API 设计模式
+- 完整的测试覆盖
+- 清晰的个人/企业架构分离
+
+---
+
+### 2026-03-17：企业邮箱服务商完善（任务 2.5、2.6、2.7）
+
+**状态**：✅ 已完成
+
+**背景**：
+企业邮箱适配器（Microsoft 365、Google Workspace、Custom）需要完整的 OAuth 配置支持、灵活的配置选项和全面的测试覆盖。
+
+**变更内容**：
+
+1. **Microsoft 365 服务商完善**（`microsoft_365.rs`）：
+   - 添加硬编码 OAuth 配置常量（Client ID、Scopes、Endpoints）
+   - 实现 `with_defaults()` 和 `with_tenant()` 便捷构造方法
+   - 实现 `oauth_config()` 方法返回完整配置
+   - 添加 12 个单元测试（配置、域名检测、企业特性）
+
+2. **Google Workspace 服务商完善**（`google_workspace.rs`）：
+   - 添加硬编码 OAuth 配置常量
+   - 实现 `with_defaults()` 和 `with_domain()` 便捷构造方法
+   - 实现 `oauth_config()` 方法返回完整配置
+   - 添加 13 个单元测试（配置、域名检测、企业特性）
+
+3. **自定义企业邮箱服务商完善**（`custom.rs`）：
+   - 重构结构体，添加 `imap_ssl` 和 `smtp_ssl` 字段
+   - 实现三种构造方法：
+     - `with_servers()` - 仅指定服务器地址（使用默认端口和 SSL）
+     - `with_defaults()` - 指定服务器和端口（使用默认 SSL 模式）
+     - `new()` - 完全自定义配置（包括 SSL 模式）
+   - 更新 `enterprise_config()` 返回正确的 SSL 配置
+   - 添加 12 个单元测试（各种构造方式、配置验证）
+
+4. **ProviderPool 更新**：
+   - 更新 `with_defaults()` 使用新的构造方法
+   - 确保向后兼容
+
+**测试结果**：
+- 企业邮箱服务商：37 个测试全部通过
+- 所有服务商：88 个测试全部通过
+
+**使用示例**：
+
+```rust
+// Microsoft 365 - 使用默认配置
+let provider = Microsoft365Provider::with_defaults();
+
+// Microsoft 365 - 指定企业租户
+let provider = Microsoft365Provider::with_tenant("8aef722a-1234-5678-9abc-123456789012");
+
+// Google Workspace - 使用默认配置
+let provider = GoogleWorkspaceProvider::with_defaults();
+
+// Google Workspace - 指定企业域名
+let provider = GoogleWorkspaceProvider::with_domain("example.com");
+
+// 自定义邮箱 - 简化配置（默认端口和SSL）
+let provider = CustomProvider::with_servers(
+    "My Company Mail",
+    "mail.company.com",
+    "smtp.company.com"
+);
+
+// 自定义邮箱 - 完全自定义配置
+let provider = CustomProvider::new(
+    "My Company Mail".to_string(),
+    "imap.company.com".to_string(),
+    993,
+    SslMode::Implicit,
+    "smtp.company.com".to_string(),
+    587,
+    SslMode::StartTls,
+);
+```
+
+---
+
 ### 2025-01-XX：NativeProvider 拆分重构
 
 **状态**：✅ 已完成
@@ -116,7 +252,7 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 | 阶段 | 任务 | 状态 | 完成日期 |
 |------|------|------|----------|
 | 阶段 1 | 基础架构搭建 | ✅ 已完成 | 2026-03-17 |
-| 阶段 2 | 服务商层实现 | 🔄 进行中 | 2026-03-17 |
+| 阶段 2 | 服务商层实现 | ✅ 已完成 | 2026-03-17 |
 | 阶段 3 | 认证层重构 | ⏳ 待开始 | - |
 | 阶段 4 | 同步引擎重构 | ⏳ 待开始 | - |
 | 阶段 5 | 通知与调度 | ⏳ 待开始 | - |
@@ -130,16 +266,18 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 - ✅ 定义 MailProvider trait 抽象（13 个方法）
 - ✅ 65 个测试全部通过，0 个 clippy 警告
 
-**阶段 2 进度摘要**（2026-03-17 更新）：
-- ✅ Gmail/Outlook/Yahoo 个人服务商实现
+**阶段 2 完成摘要**（2026-03-17 完成）：
+- ✅ Gmail/Outlook/Yahoo 个人服务商实现（硬编码 OAuth 配置）
 - ✅ NativeProvider 拆分为独立服务商（163、QQ、iCloud）
 - ✅ ProviderPool 服务商池实现与自动检测
-- ✅ 企业服务商（Microsoft 365、Google Workspace、Custom）框架
-- ✅ 49 个服务商相关测试全部通过
-- 🔄 **进行中**：OAuth 服务迁移与完善
-- ⏳ **待开始**：TokenManager、AuthManager 实现
+- ✅ **OAuth 凭证硬编码**：所有主要服务商（Gmail、Outlook、Microsoft 365、Google Workspace）
+- ✅ **Microsoft 365 企业适配器**：完整实现 OAuth 配置、租户管理、企业特性（12 个测试）
+- ✅ **Google Workspace 企业适配器**：完整实现 OAuth 配置、域名支持、企业特性（13 个测试）
+- ✅ **自定义企业邮箱适配器**：灵活配置服务器、端口、SSL 模式（12 个测试）
+- ✅ 88 个服务商相关测试全部通过
+- ✅ 一致的 API 设计模式（with_defaults、with_xxx、new）
 
-**下一步**：完成阶段 2 - OAuth 服务完善和 AuthManager 实现
+**下一步**：开始阶段 3 - 认证层重构（TokenManager、AuthManager 实现）
 
 ### 参考文档
 

@@ -72,15 +72,13 @@ impl ProviderPool {
         pool.register(Box::new(ICloudProvider));
 
         // 企业邮箱服务商（使用默认配置）
-        pool.register(Box::new(Microsoft365Provider { tenant_id: None }));
-        pool.register(Box::new(GoogleWorkspaceProvider { domain: None }));
-        pool.register(Box::new(CustomProvider {
-            name: "Custom".to_string(),
-            imap_host: String::new(),
-            imap_port: 993,
-            smtp_host: String::new(),
-            smtp_port: 587,
-        }));
+        pool.register(Box::new(Microsoft365Provider::with_defaults()));
+        pool.register(Box::new(GoogleWorkspaceProvider::with_defaults()));
+        pool.register(Box::new(CustomProvider::with_servers(
+            "Custom",
+            "",
+            ""
+        )));
 
         pool
     }
