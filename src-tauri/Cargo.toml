@@ -17,6 +17,11 @@ name = "postium_mail_lib"
 [dependencies]
 # 错误处理
 anyhow = "1"
+thiserror = "2"
+# 异步 trait 支持
+async-trait = "0.1"
+# 随机数生成（用于重试抖动）
+rand = "0.8"
 # 邮件协议
 # imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
 async-imap = { version = "0.11", default-features = false, features = [
@@ -62,7 +67,6 @@ tauri-plugin-keyring = "0.1"
 tauri-plugin-opener = "2"
 tauri-plugin-positioner = "2"
 tauri-plugin-single-instance = "2"
-thiserror = "2"
 # 异步运行时
 tokio = { version = "1", features = ["full"] }
 tokio-native-tls = "0.3"  # Tokio TLS 支持
