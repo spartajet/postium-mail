@@ -3,7 +3,7 @@
 //! 管理邮件同步流程，协调所有同步组件
 
 use crate::error::{MailError, Result};
-use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor};
+use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector};
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::providers::{ProviderPool, AuthType};
 use crate::services::imap::{AsyncImapClient, ImapAuth};
@@ -52,6 +52,7 @@ pub struct SyncManager {
     delta_sync: Arc<DeltaSync>,
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
+    change_detector: Arc<ChangeDetector>,
 }
 
 impl SyncManager {
@@ -65,6 +66,7 @@ impl SyncManager {
         let delta_sync = Arc::new(DeltaSync::new(db.clone()));
         let folder_manager = Arc::new(FolderManager::new(db.clone()));
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
+        let change_detector = Arc::new(ChangeDetector::new(db.clone()));
 
         Self {
             db,
@@ -74,6 +76,7 @@ impl SyncManager {
             delta_sync,
             folder_manager,
             mail_processor,
+            change_detector,
         }
     }
 
@@ -312,30 +315,71 @@ impl SyncManager {
             folder
         );
 
-        // TODO: 实现完整的文件夹同步流程
         // 1. 检查 CONDSTORE 支持
-        // let supports_condstore = imap_client.check_condstore_support().await?;
+        let supports_condstore = imap_client
+            .check_condstore_support()
+            .await
+            .unwrap_or(false);
 
-        // 2. 获取服务器 UID 列表
-        // let server_uids = imap_client.search_all().await?;
+        tracing::info!(
+            "文件夹 {} CONDSTORE 支持: {}",
+            folder,
+            supports_condstore
+        );
 
-        // 3. 获取服务器标志（如果支持 CONDSTORE，使用 MODSEQ）
-        // let server_uids_with_flags = if supports_condstore {
-        //     imap_client.fetch_modseqs(&server_uids).await?
-        // } else {
-        //     // 降级：使用普通 FETCH
-        //     vec![]
-        // };
+        // 2. 获取服务器所有 UID 列表
+        let server_uids = imap_client.list_uids(folder, 10000).await.map_err(|e| {
+            MailError::Internal(format!("获取服务器 UID 列表失败: {}", e))
+        })?;
+
+        tracing::info!(
+            "文件夹 {} 服务器邮件数: {}",
+            folder,
+            server_uids.len()
+        );
+
+        // 3. 获取服务器标志（如果支持 CONDSTORE，尝试使用 MODSEQ）
+        let server_uids_with_flags: Vec<(u32, Vec<String>)> = if supports_condstore && !server_uids.is_empty() {
+            // 尝试使用 CONDSTORE 获取 MODSEQ
+            let modseq_result = imap_client.fetch_modseqs(&server_uids).await;
+
+            match modseq_result {
+                Ok(uids_modseq) => {
+                    tracing::info!("使用 MODSEQ 获取标志: {} 个邮件", uids_modseq.len());
+                    uids_modseq
+                        .into_iter()
+                        .map(|(uid, modseq)| {
+                            // 转换为标志列表（简化版本）
+                            let flags = if modseq.is_some() {
+                                vec!["$MODSEQ".to_string()] // 占位符，表示有 MODSEQ
+                            } else {
+                                vec![]
+                            };
+                            (uid, flags)
+                        })
+                        .collect()
+                }
+                Err(_) => {
+                    tracing::warn!("CONDSTORE FETCH 失败，降级到无标志模式");
+                    server_uids.iter().map(|&uid| (uid, vec![])).collect()
+                }
+            }
+        } else {
+            // 不支持 CONDSTORE，使用普通模式
+            server_uids.iter().map(|&uid| (uid, vec![])).collect()
+        };
 
         // 4. 调用 sync_folder 进行增量同步
-        // let result = self
-        //     .sync_folder(account_id, folder, Some(&server_uids), Some(&server_uids_with_flags))
-        //     .await?;
+        let result = self
+            .sync_folder(
+                account_id,
+                folder,
+                Some(&server_uids),
+                Some(&server_uids_with_flags),
+            )
+            .await?;
 
-        // 临时实现：返回空结果
-        Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
-            crate::sync::delta_sync::SyncStrategy::UidSearch,
-        ))
+        Ok(result)
     }
 
     /// 同步单个文件夹
@@ -354,21 +398,86 @@ impl SyncManager {
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::info!(
-            "开始同步文件夹: account_id={}, folder={}",
+            "开始同步文件夹: account_id={}, folder={}, server_uids={}",
             account_id,
-            folder
+            folder,
+            server_uids.map(|u| u.len()).unwrap_or(0)
         );
 
-        // TODO: 实现文件夹同步
-        // 1. 检查 CONDSTORE 支持
-        // 2. 获取同步状态
-        // 3. 调用 DeltaSync 进行增量同步
-        // 4. 使用 MailProcessor 处理邮件
+        // 如果没有提供服务器数据，返回空结果
+        let (server_uids, server_uids_with_flags) = match (server_uids, server_uids_with_flags) {
+            (Some(uids), Some(flags)) => (uids, flags),
+            _ => {
+                tracing::warn!("缺少服务器数据，跳过同步");
+                return Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
+                    crate::sync::delta_sync::SyncStrategy::UidSearch,
+                ));
+            }
+        };
 
-        // 临时实现：返回空结果
-        Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
-            crate::sync::delta_sync::SyncStrategy::UidSearch,
-        ))
+        // 1. 使用 ChangeDetector 检测变更
+        // 注意：这里暂时使用 None 作为 last_sync_uid，ChangeDetector 会自动推断
+        let change_detection_result = self
+            .change_detector
+            .detect_changes(
+                account_id,
+                folder,
+                server_uids,
+                None, // last_sync_uid - 从本地状态推断
+                false, // supports_condstore - 暂时使用 false
+            )
+            .await
+            .map_err(|e| {
+                MailError::Internal(format!("变更检测失败: {}", e))
+            })?;
+
+        tracing::info!(
+            "变更检测结果: new={}, modified={}, deleted={}",
+            change_detection_result.new_emails.len(),
+            change_detection_result.modified_emails.len(),
+            change_detection_result.deleted_emails.len()
+        );
+
+        // 如果没有变更，直接返回
+        if !change_detection_result.has_changes() {
+            tracing::info!("无变更，跳过同步");
+            return Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
+                crate::sync::delta_sync::SyncStrategy::UidSearch,
+            ));
+        }
+
+        // 2. 使用 MailProcessor 处理新邮件
+        let new_emails_count = change_detection_result.new_emails.len();
+        let modified_emails_count = change_detection_result.modified_emails.len();
+
+        // TODO: 实际获取和处理邮件内容
+        // let new_uids: Vec<u32> = change_detection_result.new_emails.iter().map(|&uid| uid).collect();
+        // for uid in new_uids {
+        //     // 使用 AsyncImapClient 获取邮件
+        //     let email_data = imap_client.fetch_email(folder, uid).await?;
+        //     // 使用 MailProcessor 保存到数据库
+        //     self.mail_processor.save_mail_to_db(account_id, folder, &email_data).await?;
+        // }
+
+        // 3. 更新已删除的邮件
+        if !change_detection_result.deleted_emails.is_empty() {
+            self.mail_processor
+                .delete_mails(account_id, folder, &change_detection_result.deleted_emails)
+                .await
+                .map_err(|e| MailError::Internal(format!("删除邮件失败: {}", e)))?;
+
+            tracing::info!("已删除 {} 个邮件", change_detection_result.deleted_emails.len());
+        }
+
+        // 4. 返回同步结果
+        Ok(crate::sync::delta_sync::DeltaSyncResult {
+            strategy_used: crate::sync::delta_sync::SyncStrategy::UidSearch,
+            new_emails: new_emails_count,
+            modified_emails: modified_emails_count,
+            deleted_emails: change_detection_result.deleted_emails.len(),
+            flags_changed: 0,
+            duration_ms: 0, // TODO: 添加实际耗时统计
+        })
     }
 
     /// 停止同步
@@ -414,6 +523,11 @@ impl SyncManager {
     /// 获取 MailProcessor 引用
     pub fn mail_processor(&self) -> &Arc<MailProcessor> {
         &self.mail_processor
+    }
+
+    /// 获取 ChangeDetector 引用
+    pub fn change_detector(&self) -> &Arc<ChangeDetector> {
+        &self.change_detector
     }
 }
 
