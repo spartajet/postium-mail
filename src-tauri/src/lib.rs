@@ -1,4 +1,4 @@
-#![allow(dead_code, ambiguous_glob_reexports)]
+#![allow(dead_code, ambiguous_glob_reexports, unused_variables)]
 mod command;
 mod config;
 mod crypto;
@@ -6,6 +6,20 @@ mod database;
 mod migration;
 mod models;
 pub mod services;
+
+// 新增模块
+mod engine;
+mod error;
+mod providers;
+mod auth;
+mod sync;
+
+// 重新导出关键类型
+pub use error::{MailError, Result};
+pub use providers::{AccountType, MailProvider, ProviderPool};
+pub use auth::AuthManager;
+pub use sync::SyncManager;
+pub use engine::FlowEngine;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
