@@ -2,12 +2,12 @@ use super::{
     types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
     ImapAuth,
 };
+use crate::services::oauth_service::OAuthService;
 use anyhow::{anyhow, Result};
 use chrono::Datelike;
 use futures::TryStreamExt;
 use std::time::Instant;
 use tokio::net::TcpStream;
-use crate::services::oauth_service::OAuthService;
 
 /// 异步 IMAP 客户端会话
 pub struct AsyncImapClient {
@@ -147,10 +147,12 @@ impl AsyncImapClient {
         // 3. 或使用其他支持OAuth2的IMAP库
 
         // 这里我们返回一个错误，指示需要实现OAuth2认证
-        Err(anyhow!("OAuth2 IMAP认证需要进一步实现。请考虑：\n\
+        Err(anyhow!(
+            "OAuth2 IMAP认证需要进一步实现。请考虑：\n\
             1. 升级async-imap到支持SASL的版本\n\
             2. 手动实现IMAP AUTHENTICATE命令\n\
-            3. 使用支持OAuth2的其他IMAP库"))
+            3. 使用支持OAuth2的其他IMAP库"
+        ))
 
         // 如果async-imap支持authenticate方法，正确的实现应该是：
         // client.authenticate("XOAUTH2", xoauth2_str).await
@@ -237,7 +239,10 @@ impl AsyncImapClient {
 
     /// 获取文件夹 IMAP 元数据（UIDVALIDITY, UIDNEXT 等）
     /// 使用 STATUS 命令获取文件夹元数据而不选中文件夹
-    pub async fn fetch_folder_metadata(&mut self, folder: &str) -> Result<super::types::FolderMetadata> {
+    pub async fn fetch_folder_metadata(
+        &mut self,
+        folder: &str,
+    ) -> Result<super::types::FolderMetadata> {
         use super::types::FolderMetadata;
 
         let session = self
@@ -256,15 +261,9 @@ impl AsyncImapClient {
         let mailbox = status_response;
 
         // 处理 Option 类型的字段，允许服务器不返回某些字段
-        let uidvalidity = mailbox
-            .uid_validity
-            .map(|v| v as u64)
-            .unwrap_or(1); // 默认值为 1
+        let uidvalidity = mailbox.uid_validity.map(|v| v as u64).unwrap_or(1); // 默认值为 1
 
-        let uidnext = mailbox
-            .uid_next
-            .map(|v| v as u64)
-            .unwrap_or(1); // 默认值为 1
+        let uidnext = mailbox.uid_next.map(|v| v as u64).unwrap_or(1); // 默认值为 1
 
         // 如果服务器未返回 UIDVALIDITY 或 UIDNEXT，记录警告
         if mailbox.uid_validity.is_none() {
@@ -332,15 +331,22 @@ impl AsyncImapClient {
 
         // 根据名称推断（包括解码后的中文名称）
         let name_lower = decoded_name.to_lowercase();
-        if name_lower.contains("inbox") || name_lower == "inbox" || name_lower.contains("收件箱") {
+        if name_lower.contains("inbox") || name_lower == "inbox" || name_lower.contains("收件箱")
+        {
             "inbox".to_string()
         } else if name_lower.contains("sent") || name_lower.contains("已发送") {
             "sent".to_string()
         } else if name_lower.contains("draft") || name_lower.contains("草稿") {
             "drafts".to_string()
-        } else if name_lower.contains("spam") || name_lower.contains("junk") || name_lower.contains("垃圾邮件") {
+        } else if name_lower.contains("spam")
+            || name_lower.contains("junk")
+            || name_lower.contains("垃圾邮件")
+        {
             "spam".to_string()
-        } else if name_lower.contains("trash") || name_lower.contains("deleted") || name_lower.contains("已删除") {
+        } else if name_lower.contains("trash")
+            || name_lower.contains("deleted")
+            || name_lower.contains("已删除")
+        {
             "trash".to_string()
         } else if name_lower.contains("archive") || name_lower.contains("归档") {
             "archive".to_string()
@@ -458,7 +464,11 @@ impl AsyncImapClient {
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        tracing::info!("🔍 list_uids_since 开始: folder={}, date_since={}", folder, date_since);
+        tracing::info!(
+            "🔍 list_uids_since 开始: folder={}, date_since={}",
+            folder,
+            date_since
+        );
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         session
@@ -483,9 +493,16 @@ impl AsyncImapClient {
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
-        tracing::info!("📥 SINCE 命令返回 {} 个 UID (预期: 所有近一年的邮件)", uids.len());
-        tracing::info!("📊 比例: {}/{} ({:.1}%)", uids.len(), all_uids.len(),
-            (uids.len() as f64 / all_uids.len() as f64) * 100.0);
+        tracing::info!(
+            "📥 SINCE 命令返回 {} 个 UID (预期: 所有近一年的邮件)",
+            uids.len()
+        );
+        tracing::info!(
+            "📊 比例: {}/{} ({:.1}%)",
+            uids.len(),
+            all_uids.len(),
+            (uids.len() as f64 / all_uids.len() as f64) * 100.0
+        );
 
         // 如果 SINCE 返回的结果太少，记录警告
         if all_uids.len() > 100 && uids.len() < all_uids.len() / 2 {
@@ -577,7 +594,11 @@ impl AsyncImapClient {
 
     /// 仅获取邮件头（用于骨架同步，不获取正文）
     /// 使用 BODY.PEEK[HEADER] 避免设置已读标志
-    pub async fn fetch_email_headers(&mut self, folder: &str, uid: u32) -> Result<super::types::EmailHeader> {
+    pub async fn fetch_email_headers(
+        &mut self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<super::types::EmailHeader> {
         let session = self
             .session
             .as_mut()
@@ -612,9 +633,15 @@ impl AsyncImapClient {
 
         // 解析标志
         let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
-        let flagged = message.flags().any(|f| f == async_imap::types::Flag::Flagged);
-        let answered = message.flags().any(|f| f == async_imap::types::Flag::Answered);
-        let deleted = message.flags().any(|f| f == async_imap::types::Flag::Deleted);
+        let flagged = message
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Flagged);
+        let answered = message
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Answered);
+        let deleted = message
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Deleted);
 
         Ok(super::types::EmailHeader {
             flags: super::types::EmailFlags {
@@ -896,14 +923,11 @@ impl AsyncImapClient {
             .map_err(|e| anyhow!("获取服务器能力失败: {}", e))?;
 
         // 检查是否包含 CONDSTORE
-        let has_condstore = capabilities
-            .iter()
-            .any(|cap| {
-                // 将 Capability 转换为字符串进行比较
-                let cap_str = format!("{:?}", cap);
-                cap_str.to_ascii_uppercase().contains("CONDSTORE")
-                    || cap_str == "Condstore"
-            });
+        let has_condstore = capabilities.iter().any(|cap| {
+            // 将 Capability 转换为字符串进行比较
+            let cap_str = format!("{:?}", cap);
+            cap_str.to_ascii_uppercase().contains("CONDSTORE") || cap_str == "Condstore"
+        });
 
         if has_condstore {
             tracing::info!("服务器支持 CONDSTORE 扩展");
@@ -1159,9 +1183,7 @@ impl AsyncImapClient {
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
         if !uids.is_empty() {
-            tracing::debug!(
-                "FETCH MODSEQ batch 尚未实现（async-imap 限制），返回 UID 列表"
-            );
+            tracing::debug!("FETCH MODSEQ batch 尚未实现（async-imap 限制），返回 UID 列表");
         }
 
         // 返回 UID 列表，MODSEQ 为 None
@@ -1298,5 +1320,4 @@ fn decode_email_body(bytes: &[u8]) -> Result<String> {
     std::str::from_utf8(bytes)
         .map(|s| s.to_string())
         .map_err(|e| anyhow!("解码邮件编码失败: {}", e))
-
 }

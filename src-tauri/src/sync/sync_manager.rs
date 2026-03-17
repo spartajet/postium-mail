@@ -338,38 +338,58 @@ impl SyncManager {
             server_uids.len()
         );
 
-        // 3. 获取服务器标志（如果支持 CONDSTORE，尝试使用 MODSEQ）
-        let server_uids_with_flags: Vec<(u32, Vec<String>)> = if supports_condstore && !server_uids.is_empty() {
-            // 尝试使用 CONDSTORE 获取 MODSEQ
-            let modseq_result = imap_client.fetch_modseqs(&server_uids).await;
+        // 3. CONDSTORE 增量同步（如果支持）
+        let (condstore_modified_uids, highest_modseq) = if supports_condstore && !server_uids.is_empty() {
+            // TODO: 从 SyncState 获取上一次同步的 highest_modseq
+            // 临时实现：使用 0 表示获取所有变更
+            let last_modseq = 0u64;
 
-            match modseq_result {
-                Ok(uids_modseq) => {
-                    tracing::info!("使用 MODSEQ 获取标志: {} 个邮件", uids_modseq.len());
-                    uids_modseq
-                        .into_iter()
-                        .map(|(uid, modseq)| {
-                            // 转换为标志列表（简化版本）
-                            let flags = if modseq.is_some() {
-                                vec!["$MODSEQ".to_string()] // 占位符，表示有 MODSEQ
-                            } else {
-                                vec![]
-                            };
-                            (uid, flags)
-                        })
-                        .collect()
+            // 尝试使用 SEARCH MODSEQ 获取变更的邮件
+            tracing::info!("尝试 SEARCH MODSEQ {}:*", last_modseq);
+
+            match imap_client.search_modified_since(last_modseq).await {
+                Ok(modified_uids) => {
+                    tracing::info!("SEARCH MODSEQ 返回 {} 个变更邮件", modified_uids.len());
+
+                    // 获取当前的 HIGHESTMODSEQ（用于下次同步）
+                    // 注意：这需要重新 SELECT 文件夹才能获取
+                    let highest_modseq = None; // TODO: 从 SELECT 响应中获取
+
+                    (Some(modified_uids), highest_modseq)
                 }
-                Err(_) => {
-                    tracing::warn!("CONDSTORE FETCH 失败，降级到无标志模式");
-                    server_uids.iter().map(|&uid| (uid, vec![])).collect()
+                Err(e) => {
+                    tracing::warn!("SEARCH MODSEQ 失败: {}, 降级到 UID 搜索", e);
+                    (None, None)
                 }
             }
         } else {
-            // 不支持 CONDSTORE，使用普通模式
-            server_uids.iter().map(|&uid| (uid, vec![])).collect()
+            (None, None)
         };
 
-        // 4. 调用 sync_folder 进行增量同步（传递 IMAP 客户端）
+        // 4. 获取服务器标志（用于 UID 搜索降级）
+        let server_uids_with_flags: Vec<(u32, Vec<String>)> = if condstore_modified_uids.is_none() && !server_uids.is_empty() {
+            // 不支持 CONDSTORE 或 CONDSTORE 失败，使用 UID 搜索模式
+            if let Ok(uids_modseq) = imap_client.fetch_modseqs(&server_uids).await {
+                uids_modseq
+                    .into_iter()
+                    .map(|(uid, modseq)| {
+                        let flags = if modseq.is_some() {
+                            vec!["$MODSEQ".to_string()]
+                        } else {
+                            vec![]
+                        };
+                        (uid, flags)
+                    })
+                    .collect()
+            } else {
+                server_uids.iter().map(|&uid| (uid, vec![])).collect()
+            }
+        } else {
+            // CONDSTORE 模式，不需要获取 flags
+            vec![]
+        };
+
+        // 5. 调用 sync_folder 进行增量同步（传递 IMAP 客户端和 CONDSTORE 数据）
         let result = self
             .sync_folder(
                 account_id,
@@ -377,6 +397,8 @@ impl SyncManager {
                 Some(&server_uids),
                 Some(&server_uids_with_flags),
                 Some(imap_client),
+                condstore_modified_uids.as_deref(),
+                highest_modseq,
             )
             .await?;
 
@@ -392,6 +414,8 @@ impl SyncManager {
     /// * `server_uids` - 服务器 UID 列表（可选）
     /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选）
     /// * `imap_client` - IMAP 客户端引用（可选，用于获取邮件内容）
+    /// * `condstore_modified_uids` - CONDSTORE SEARCH MODSEQ 返回的修改 UID（可选）
+    /// * `highest_modseq` - 服务器当前的 HIGHESTMODSEQ（可选）
     pub async fn sync_folder(
         &self,
         account_id: i32,
@@ -399,6 +423,8 @@ impl SyncManager {
         server_uids: Option<&[u32]>,
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
         imap_client: Option<&mut AsyncImapClient>,
+        condstore_modified_uids: Option<&[u32]>,
+        highest_modseq: Option<u64>,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::info!(
             "开始同步文件夹: account_id={}, folder={}, server_uids={}",
