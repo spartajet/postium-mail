@@ -419,7 +419,7 @@ gantt
 async-trait = "0.1"
 
 # 新增：Token刷新调度
-tokio-cron-scheduler = "0.9"
+tokio-cron-scheduler = "0.15"
 
 # 新增：全文搜索（通过 rusqlite FTS5，已包含在 sea-orm 的 sqlite 特性中）
 # 无需额外依赖，确保 sea-orm features 包含 "sqlite"
@@ -428,11 +428,11 @@ tokio-cron-scheduler = "0.9"
 lettre = { version = "0.11", features = ["builder", "smtp-transport", "tokio1-native-tls"] }
 
 # 新增：内存管理
-lru = "0.12"
+lru = "0.16"
 
 # 新增：性能指标
-metrics = "0.23"
-metrics-exporter-prometheus = { version = "0.14", optional = true }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18", optional = true }
 
 # 新增：结构化日志（已有 tracing，补充 JSON 格式）
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
