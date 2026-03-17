@@ -10,6 +10,44 @@ use oauth2::{
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+impl OutlookOAuthService {
+    /// Microsoft 默认客户端 ID
+    ///
+    /// 注册地址: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+    /// 应用类型: Public client (desktop)
+    /// 授权重定向 URI: postium-mail://oauth/callback
+    const DEFAULT_CLIENT_ID: &str = "67acce3b-a85a-40c1-be02-44d954282442";
+
+    /// Microsoft 默认租户 ID
+    ///
+    /// "common" 表示允许使用个人账号（@outlook.com, @hotmail.com 等）和企业账号
+    const DEFAULT_TENANT: &str = "common";
+
+    /// Outlook 默认重定向 URI
+    ///
+    /// 使用自定义 Deep Link 方案，需要在 Azure Portal 中注册此 URI
+    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
+
+    /// Outlook 默认授权端点（使用 common 租户）
+    const DEFAULT_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+
+    /// Outlook 默认令牌端点（使用 common 租户）
+    const DEFAULT_TOKEN_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+
+    /// Outlook 默认 OAuth Scopes
+    ///
+    /// - https://outlook.office.com/IMAP.AccessAsUser.All - 读取和管理邮箱中的所有邮件
+    /// - https://outlook.office.com/SMTP.Send - 发送邮件
+    /// - offline_access - 获取 refresh_token 以实现自动刷新
+    /// - openid - 需要 openid 才能获取 JWT 格式的 access token（用于提取用户信息）
+    const DEFAULT_SCOPES: &[&str] = &[
+        "https://outlook.office.com/IMAP.AccessAsUser.All",
+        "https://outlook.office.com/SMTP.Send",
+        "offline_access",
+        "openid",
+    ];
+}
+
 /// Outlook OAuth 服务
 pub struct OutlookOAuthService {
     client_id: String,
@@ -19,7 +57,21 @@ pub struct OutlookOAuthService {
 }
 
 impl OutlookOAuthService {
+    /// 使用默认配置创建 OAuth 服务
+    ///
+    /// 这是推荐的方式，使用预配置的 Microsoft OAuth 凭证。
+    pub fn with_defaults() -> Result<Self> {
+        Ok(Self {
+            client_id: Self::DEFAULT_CLIENT_ID.to_string(),
+            tenant: Self::DEFAULT_TENANT.to_string(),
+            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
     /// 从配置创建新的 OAuth 服务
+    ///
+    /// 用于自定义配置或特殊场景
     pub fn new(
         client_id: String,
         tenant: String,
@@ -41,14 +93,33 @@ impl OutlookOAuthService {
     }
 
     /// 从环境变量加载配置并创建服务
+    ///
+    /// 优先使用环境变量（如果设置），否则使用默认值
     pub fn from_env() -> Result<Self> {
-        let config = crate::config::load_microsoft_oauth_config()
-            .map_err(|e| MailError::Internal(format!("加载 OAuth 配置失败: {}", e)))?;
+        use std::env;
+
+        let client_id =
+            env::var("MICROSOFT_CLIENT_ID").unwrap_or_else(|_| Self::DEFAULT_CLIENT_ID.to_string());
+
+        let tenant =
+            env::var("MICROSOFT_TENANT").unwrap_or_else(|_| Self::DEFAULT_TENANT.to_string());
+
+        let redirect_uri = env::var("MICROSOFT_REDIRECT_URI")
+            .unwrap_or_else(|_| Self::DEFAULT_REDIRECT_URI.to_string());
+
+        let scopes_str =
+            env::var("MICROSOFT_SCOPES").unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));
+
+        let scopes = scopes_str
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
         Ok(Self {
-            client_id: config.client_id,
-            tenant: config.tenant,
-            redirect_uri: config.redirect_uri,
-            scopes: config.scopes,
+            client_id,
+            tenant,
+            redirect_uri,
+            scopes,
         })
     }
 
@@ -299,6 +370,24 @@ impl OutlookTokenResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_outlook_oauth_service_with_defaults() {
+        let service = OutlookOAuthService::with_defaults();
+
+        assert!(service.is_ok());
+        let service = service.unwrap();
+        assert_eq!(service.client_id, OutlookOAuthService::DEFAULT_CLIENT_ID);
+        assert_eq!(service.tenant, OutlookOAuthService::DEFAULT_TENANT);
+        assert_eq!(
+            service.redirect_uri,
+            OutlookOAuthService::DEFAULT_REDIRECT_URI
+        );
+        assert_eq!(
+            service.scopes.len(),
+            OutlookOAuthService::DEFAULT_SCOPES.len()
+        );
+    }
 
     #[test]
     fn test_outlook_oauth_service_new() {
