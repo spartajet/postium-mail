@@ -1,6 +1,6 @@
 #![allow(dead_code, ambiguous_glob_reexports, unused_variables)]
 mod command;
-mod config;
+pub mod config;
 mod crypto;
 mod database;
 mod migration;
@@ -8,18 +8,18 @@ mod models;
 pub mod services;
 
 // 新增模块
+mod auth;
 mod engine;
 mod error;
 mod providers;
-mod auth;
 mod sync;
 
 // 重新导出关键类型
-pub use error::{MailError, Result};
-pub use providers::{AccountType, MailProvider, ProviderPool};
 pub use auth::AuthManager;
-pub use sync::SyncManager;
 pub use engine::FlowEngine;
+pub use error::{MailError, Result};
+pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
+pub use sync::SyncManager;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -208,7 +208,8 @@ pub fn run() {
                     db,
                 ))));
 
-                let oauth_config = config::load_oauth_config().expect("无法加载OAuth配置");
+                let oauth_config =
+                    config::load_microsoft_oauth_config().expect("无法加载OAuth配置");
                 let oauth_service = services::oauth_service::OAuthService::new(oauth_config)
                     .expect("无法初始化OAuth服务");
                 app.manage(OAuthState(oauth_service));

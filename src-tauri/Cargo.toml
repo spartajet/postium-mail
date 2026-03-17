@@ -44,13 +44,15 @@ lettre = "0.11"
 mail-parser = "0.11"
 native-tls = "0.2"  # 保留用于旧的 imap_service.rs
 # OAuth 2.0 相关（最新版本）
-# 使用curl HTTP客户端以避免与Tauri的reqwest冲突
-oauth2 = { version = "5", features = ["curl"] }
+# 同时启用 curl 和 reqwest 以支持不同的 HTTP 客户端
+oauth2 = { version = "5", features = ["curl", "reqwest"] }
+# SHA-256 哈希（用于 PKCE）
+sha2 = "0.10"
 # 全局静态变量
 once_cell = "1"
 # 正则表达式（用于解析RFC 2047编码）
 regex = "1"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "form"] }
 # rusqlite = { version = "=0.38.0", features = ["bundled"] }
 # 数据库相关
 sea-orm = { version = "2.0.0-rc.37", features = [

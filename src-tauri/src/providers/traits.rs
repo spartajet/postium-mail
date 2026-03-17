@@ -82,6 +82,62 @@ pub struct OAuthConfig {
     pub tenant_id: Option<String>,
 }
 
+impl OAuthConfig {
+    /// 从环境变量加载指定服务商的配置
+    pub fn from_env_for_provider(provider_id: &str) -> Result<Self> {
+        let config = crate::config::load_oauth_config_for_provider(provider_id)
+            .map_err(|e| crate::error::MailError::Internal(format!("加载 OAuth 配置失败: {}", e)))?;
+
+        // 将 config::OAuthConfig 转换为 traits::OAuthConfig
+        Ok(Self {
+            client_id: config.client_id,
+            client_secret: None, // 公共客户端不需要 secret
+            auth_url: config.auth_url,
+            token_url: config.token_url,
+            redirect_uri: config.redirect_uri,
+            scopes: config.scopes,
+            pkce_enabled: true, // 默认启用 PKCE
+            tenant_id: if config.tenant.is_empty() {
+                None
+            } else {
+                Some(config.tenant)
+            },
+        })
+    }
+
+    /// 验证配置是否有效
+    pub fn validate(&self) -> Result<()> {
+        use crate::error::{MailError, AuthError};
+
+        // 检查 client_id
+        if self.client_id.is_empty() {
+            return Err(MailError::Authentication(AuthError::InvalidCredentials));
+        }
+
+        // 检查 redirect_uri
+        if self.redirect_uri.is_empty() {
+            return Err(MailError::Authentication(AuthError::InvalidCredentials));
+        }
+
+        // 检查 auth_url 格式
+        if !self.auth_url.starts_with("https://") {
+            return Err(MailError::Authentication(AuthError::InvalidCredentials));
+        }
+
+        // 检查 token_url 格式
+        if !self.token_url.starts_with("https://") {
+            return Err(MailError::Authentication(AuthError::InvalidCredentials));
+        }
+
+        // 检查 scopes
+        if self.scopes.is_empty() {
+            return Err(MailError::Authentication(AuthError::InvalidCredentials));
+        }
+
+        Ok(())
+    }
+}
+
 /// 服务商标识类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ProviderAccountType {
