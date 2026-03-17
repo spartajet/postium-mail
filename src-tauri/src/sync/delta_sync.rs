@@ -71,16 +71,17 @@ impl DeltaSyncResult {
 /// 负责高效的增量同步，自动选择最佳策略
 pub struct DeltaSync {
     db: Arc<DbConn>,
+    change_detector: ChangeDetector,
     // TODO: 添加更多依赖
     // imap_client: Arc<AsyncImapClient>,
     // auth_manager: Arc<AuthManager>,
-    // change_detector: Arc<ChangeDetector>,
 }
 
 impl DeltaSync {
     /// 创建新的增量同步器
     pub fn new(db: Arc<DbConn>) -> Self {
-        Self { db }
+        let change_detector = ChangeDetector::new(db.clone());
+        Self { db, change_detector }
     }
 
     /// 检查是否支持 CONDSTORE
@@ -94,29 +95,65 @@ impl DeltaSync {
         Ok(false) // 暂时返回 false
     }
 
+    /// 增量同步（简化版本）
+    ///
+    /// 不需要服务器 UID 列表的简化版本，用于向后兼容
+    ///
+    /// # 注意
+    ///
+    /// 此方法返回空结果，需要使用完整版本的 `sync_incremental`
+    pub async fn sync_incremental_simple(
+        &self,
+        account_id: i32,
+        folder: &str,
+    ) -> Result<DeltaSyncResult> {
+        // TODO: 需要集成 IMAP 客户端才能获取服务器 UID
+        // 临时实现：返回空结果
+        tracing::warn!(
+            "sync_incremental_simple 尚未集成 IMAP 客户端，返回空结果: account_id={}, folder={}",
+            account_id,
+            folder
+        );
+        Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch))
+    }
+
     /// 增量同步（主入口）
     ///
     /// 自动选择最佳同步策略：
     /// - 如果支持 CONDSTORE，使用 MODSEQ 增量同步
     /// - 否则，降级到 UID 搜索对比
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `server_uids` - 服务器上的 UID 列表
+    /// * `last_sync_uid` - 上次同步的最高 UID（可选）
+    /// * `supports_condstore` - 是否支持 CONDSTORE（由调用者检测）
+    /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选，用于标志变更检测）
     pub async fn sync_incremental(
         &self,
         account_id: i32,
         folder: &str,
+        server_uids: &[u32],
+        last_sync_uid: Option<u32>,
+        supports_condstore: bool,
+        server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
     ) -> Result<DeltaSyncResult> {
         let start = std::time::Instant::now();
 
-        // 1. 检查 CONDSTORE 支持
-        let supports_condstore = self.check_condstore_support(account_id).await?;
-
-        // 2. 根据支持情况选择策略
+        // 根据支持情况选择策略
         let result = if supports_condstore {
-            self.sync_with_condstore(account_id, folder).await?
+            // TODO: 实现真正的 CONDSTORE 同步
+            // 临时：降级到 UID 搜索
+            self.sync_with_uid_search(account_id, folder, server_uids, last_sync_uid, server_uids_with_flags)
+                .await?
         } else {
-            self.sync_with_uid_search(account_id, folder).await?
+            self.sync_with_uid_search(account_id, folder, server_uids, last_sync_uid, server_uids_with_flags)
+                .await?
         };
 
-        // 3. 记录耗时
+        // 记录耗时
         let duration_ms = start.elapsed().as_millis() as u64;
 
         Ok(DeltaSyncResult {
@@ -144,18 +181,62 @@ impl DeltaSync {
     /// 使用 UID 搜索策略同步
     ///
     /// 使用 UID 搜索对比，适用于不支持 CONDSTORE 的服务器
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `server_uids` - 服务器上的 UID 列表（由调用者从 IMAP 服务器获取）
+    /// * `last_sync_uid` - 上次同步的最高 UID（可选）
+    /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选，用于标志变更检测）
     pub async fn sync_with_uid_search(
         &self,
-        _account_id: i32,
-        _folder: &str,
+        account_id: i32,
+        folder: &str,
+        server_uids: &[u32],
+        last_sync_uid: Option<u32>,
+        server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
     ) -> Result<DeltaSyncResult> {
-        // TODO: 实现 UID 搜索同步逻辑
-        // 1. 获取上一次同步的 last_sync_uid
-        // 2. 执行 UID SEARCH SINCE <last_uid>
-        // 3. 检查所有邮件的 flags 变更
-        // 4. 检测删除的邮件
-        // 5. 更新 last_sync_uid
-        Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch))
+        // 1. 检测新邮件
+        let new_emails = self
+            .change_detector
+            .detect_new_emails(account_id, folder, server_uids, last_sync_uid)
+            .await?;
+
+        // 2. 检测删除的邮件
+        let deleted_emails = self
+            .change_detector
+            .detect_deletions(account_id, folder, server_uids)
+            .await?;
+
+        // 3. 检测标志变更（如果提供了服务器 flags）
+        let modified_emails = if let Some(uids_with_flags) = server_uids_with_flags {
+            self.change_detector
+                .detect_flag_changes_uid_search(account_id, folder, uids_with_flags)
+                .await?
+        } else {
+            Vec::new()
+        };
+
+        let flags_changed = modified_emails.len();
+
+        tracing::info!(
+            "UID 搜索同步完成: account_id={}, folder={}, new={}, deleted={}, modified={}",
+            account_id,
+            folder,
+            new_emails.len(),
+            deleted_emails.len(),
+            modified_emails.len()
+        );
+
+        Ok(DeltaSyncResult {
+            strategy_used: SyncStrategy::UidSearch,
+            new_emails: new_emails.len(),
+            modified_emails: modified_emails.len(),
+            deleted_emails: deleted_emails.len(),
+            flags_changed,
+            duration_ms: 0, // 由调用者设置
+        })
     }
 
     /// 完整同步
