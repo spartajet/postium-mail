@@ -20,6 +20,9 @@ pub use traits::{
     AuthType, ImapServerConfig, SmtpServerConfig, SslMode,
     OAuthConfig
 };
+
+// OAuth 工具导出（供 auth 模块使用）
+pub use oauth_utils::{PkceVerifierStore, OAuthTokenResponse, generate_xoauth2_string, validate_access_token};
 pub use provider_pool::ProviderPool;
 
 // 个人邮箱（阶段2使用）
