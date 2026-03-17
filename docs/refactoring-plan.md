@@ -25,6 +25,57 @@
 
 ---
 
+## 最近更新
+
+### 2025-01-XX：NativeProvider 拆分重构
+
+**状态**：✅ 已完成
+
+**背景**：
+原有的 `NativeProvider` 枚举将三个国内邮件服务商（163、QQ、iCloud）合并在一起，与 Gmail、Outlook 等独立实现模式不一致。
+
+**变更内容**：
+
+1. **新增独立服务商标实现**：
+   - `src-tauri/src/providers/personal/mail163.rs` - Mail163Provider（支持 163.com、126.com、yeah.net）
+   - `src-tauri/src/providers/personal/qq.rs` - QqMailProvider（支持 qq.com、foxmail.com）
+   - `src-tauri/src/providers/personal/icloud.rs` - ICloudProvider（支持 icloud.com、me.com、mac.com）
+
+2. **向后兼容**：
+   - 保留 `native.rs` 文件，标记为 `#[deprecated]`
+   - 添加完整的迁移指南和文档
+
+3. **ProviderPool 更新**：
+   - 注册独立的结构体实例替代枚举变体
+   - 添加 163、QQ、iCloud 的检测测试
+
+4. **测试覆盖**：
+   - 每个新提供商包含 6 个单元测试
+   - ProviderPool 添加邮箱自动检测测试
+
+**迁移指南**：
+
+```rust
+// 旧代码
+use crate::providers::personal::NativeProvider;
+let provider = NativeProvider::Mail163;
+
+// 新代码
+use crate::providers::personal::Mail163Provider;
+let provider = Mail163Provider;
+```
+
+```rust
+// 旧代码（邮箱检测）
+let provider = NativeProvider::from_email("user@163.com");
+
+// 新代码
+let pool = ProviderPool::with_defaults();
+let provider = pool.detect_provider("user@163.com").await?;
+```
+
+---
+
 ## 概述
 
 ### 背景
@@ -578,9 +629,14 @@ src-tauri/src/
 │   ├── personal/              # 个人邮件服务商
 │   │   ├── mod.rs
 │   │   ├── gmail.rs           # Gmail 个人版
+│   │   ├── gmail_oauth.rs     # Gmail OAuth 服务
 │   │   ├── outlook.rs         # Outlook 个人版
+│   │   ├── outlook_oauth.rs   # Outlook OAuth 服务
 │   │   ├── yahoo.rs           # Yahoo
-│   │   └── native.rs          # 国内邮箱（163/QQ/iCloud）
+│   │   ├── mail163.rs         # 网易邮箱（163、126、yeah.net）
+│   │   ├── qq.rs              # QQ 邮箱
+│   │   ├── icloud.rs          # iCloud
+│   │   └── native.rs          # 国内邮箱枚举（已废弃，保留向后兼容）
 │   ├── enterprise/            # 企业邮件服务商
 │   │   ├── mod.rs
 │   │   ├── microsoft_365.rs   # Microsoft 365
@@ -3342,8 +3398,14 @@ tests/
 | `src-tauri/src/providers/provider_pool.rs` | 服务商池（个人+企业） |
 | `src-tauri/src/providers/personal/mod.rs` | 个人邮件服务商模块 |
 | `src-tauri/src/providers/personal/gmail.rs` | Gmail 个人适配器 |
+| `src-tauri/src/providers/personal/gmail_oauth.rs` | Gmail OAuth 服务 |
 | `src-tauri/src/providers/personal/outlook.rs` | Outlook 个人适配器 |
-| `src-tauri/src/providers/personal/native.rs` | 国内邮箱适配器 |
+| `src-tauri/src/providers/personal/outlook_oauth.rs` | Outlook OAuth 服务 |
+| `src-tauri/src/providers/personal/yahoo.rs` | Yahoo 个人适配器 |
+| `src-tauri/src/providers/personal/mail163.rs` | 网易邮箱适配器（163/126/yeah.net） |
+| `src-tauri/src/providers/personal/qq.rs` | QQ 邮箱适配器 |
+| `src-tauri/src/providers/personal/icloud.rs` | iCloud 适配器 |
+| `src-tauri/src/providers/personal/native.rs` | 国内邮箱枚举（已废弃） |
 | `src-tauri/src/providers/enterprise/mod.rs` | 企业邮件服务商模块 |
 | `src-tauri/src/providers/enterprise/microsoft_365.rs` | Microsoft 365 企业适配器 |
 | `src-tauri/src/providers/enterprise/google_workspace.rs` | Google Workspace 企业适配器 |

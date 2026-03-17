@@ -1,11 +1,75 @@
-//! 国内邮件服务商（163、QQ、iCloud）
+//! 国内邮件服务商（已废弃）
+//!
+//! 此模块已被拆分为独立的服务商实现：
+//! - [`Mail163Provider`] - 支持 163.com、126.com、yeah.net
+//! - [`QqMailProvider`] - 支持 qq.com、foxmail.com
+//! - [`ICloudProvider`] - 支持 icloud.com、me.com、mac.com
+//!
+//! # 迁移指南
+//!
+//! ## 1. 替换导入
+//!
+//! ```rust,ignore
+//! // 旧代码
+//! use crate::providers::personal::NativeProvider;
+//!
+//! // 新代码
+//! use crate::providers::personal::{Mail163Provider, QqMailProvider, ICloudProvider};
+//! ```
+//!
+//! ## 2. 替换服务商创建
+//!
+//! ```rust,ignore
+//! // 旧代码
+//! let provider = NativeProvider::Mail163;
+//!
+//! // 新代码
+//! let provider = Mail163Provider;
+//! ```
+//!
+//! ## 3. 替换邮箱检测
+//!
+//! ```rust,ignore
+//! // 旧代码
+//! let provider = NativeProvider::from_email("user@163.com");
+//!
+//! // 新代码
+//! let pool = ProviderPool::with_defaults();
+//! let provider = pool.detect_provider("user@163.com").await?;
+//! ```
+//!
+//! # 为什么废弃？
+//!
+//! - **架构一致性**：与其他服务商（Gmail、Outlook）保持一致的实现模式
+//! - **代码可维护性**：每个服务商独立文件，更易于维护和扩展
+//! - **类型安全**：独立结构体提供更好的类型安全性
+//! - **测试隔离**：每个服务商可以独立测试，互不影响
 
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, ProviderCapabilities, SmtpServerConfig,
 };
 use async_trait::async_trait;
 
-/// 国内邮件服务商
+/// 国内邮件服务商（已废弃）
+///
+/// 请使用以下替代品：
+/// - [`Mail163Provider`] - 网易邮箱
+/// - [`QqMailProvider`] - QQ 邮箱
+/// - [`ICloudProvider`] - iCloud
+///
+/// # 迁移示例
+///
+/// ```rust,ignore
+/// // 旧代码
+/// let provider = NativeProvider::Mail163;
+///
+/// // 新代码
+/// let provider = Mail163Provider;
+/// ```
+#[deprecated(
+    since = "0.2.0",
+    note = "请使用 Mail163Provider、QqMailProvider 或 ICloudProvider 替代"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeProvider {
     Mail163,
