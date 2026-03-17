@@ -15,76 +15,64 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 name = "postium_mail_lib"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-deep-link = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-single-instance = "2"
-tauri-plugin-positioner = "2"
-
-# 数据库相关
-sea-orm = { version = "=2.0.0-rc.37", features = [
-  "macros",
-  "runtime-tokio-rustls",
-  "sqlx-sqlite"
-] }
-
-futures = "0.3"
-# 异步运行时
-tokio = { version = "1.35", features = ["full"] }
-
-# 时间处理
-chrono = "0.4"
-
+# 错误处理
+anyhow = "1"
 # 邮件协议
 # imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
 async-imap = { version = "0.11", default-features = false, features = [
   "runtime-tokio"
 ] }
-async-native-tls = "0.5"
+async-native-tls = "0.6"
+base64 = "0.22"
+# 时间处理
+chrono = "0.4"
+curl = "0.4"
+# 文件系统
+dirs = "6"
+# 环境变量
+dotenv = "0.15"
 encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
+futures = "0.3"
+getrandom = "0.4"
+hex = "0.4"
 lettre = "0.11"
 mail-parser = "0.11"
 native-tls = "0.2"  # 保留用于旧的 imap_service.rs
-tokio-native-tls = "0.3"  # Tokio TLS 支持
-tokio-util = { version = "0.7", features = ["compat"] }
-
-base64 = "0.22"
-curl = "0.4"
 # OAuth 2.0 相关（最新版本）
 # 使用curl HTTP客户端以避免与Tauri的reqwest冲突
-oauth2 = { version = "5.0", features = ["curl"] }
+oauth2 = { version = "5", features = ["curl"] }
+# 全局静态变量
+once_cell = "1"
+# 正则表达式（用于解析RFC 2047编码）
+regex = "1"
 reqwest = { version = "0.13", features = ["json"] }
-url = "2.5"
-
-getrandom = "0.4"
-hex = "0.4"
+# 数据库相关
+sea-orm = { version = "2", features = [
+  "macros",
+  "runtime-tokio-rustls",
+  "sqlx-sqlite"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-deep-link = "2"
 # Keyring 安全存储（系统原生密钥链）
 tauri-plugin-keyring = "0.1"
-
-# 错误处理
-anyhow = "1.0"
-thiserror = "1.0"
-
-# 正则表达式（用于解析RFC 2047编码）
-regex = "1.10"
-
+tauri-plugin-opener = "2"
+tauri-plugin-positioner = "2"
+tauri-plugin-single-instance = "2"
+thiserror = "2"
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+tokio-native-tls = "0.3"  # Tokio TLS 支持
+tokio-util = { version = "0.7", features = ["compat"] }
 # 日志
 tracing = "0.1"
 tracing-subscriber = "0.3"
+url = "2"
 
-# 环境变量
-dotenv = "0.15"
-
-# 文件系统
-dirs = "5.0"
-
-# 全局静态变量
-once_cell = "0.2"
+[dev-dependencies]
+rusqlite = "0.39"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-
-[dev-dependencies]
-rusqlite = "0.32"
