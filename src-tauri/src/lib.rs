@@ -8,11 +8,11 @@ mod models;
 pub mod services;
 
 // 新增模块
-mod auth;
-mod engine;
-mod error;
-mod providers;
-mod sync;
+pub mod auth;  // 公开以支持测试
+pub mod engine;
+pub mod error;
+pub mod providers;  // 公开以支持测试
+pub mod sync;  // 公开以支持测试
 
 // 重新导出关键类型
 pub use auth::AuthManager;

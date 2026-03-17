@@ -60,7 +60,27 @@
 //! | `test_imap_logout` | LOGOUT 命令 | ✅ |
 //! | `test_complete_imap_session` | 完整会话流程 | ✅ |
 //! | `test_greenmail_imap_capabilities` | CAPABILITY 命令 | ✅ |
+//!
+//! ### 组件测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_folder_manager_init` | FolderManager 初始化 | ✅ |
+//! | `test_change_detector_init` | ChangeDetector 初始化 | ✅ |
+//! | `test_mail_processor_init` | MailProcessor 初始化 | ✅ |
+//! | `test_sync_state_manager_init` | SyncStateManager 初始化 | ✅ |
+//! | `test_delta_sync_init` | DeltaSync 初始化 | ✅ |
+//! | `test_sync_components_integration` | 组件集成测试 | ✅ |
+//! | `test_imap_auth_info` | ImapAuthInfo 类型测试 | ✅ |
+//! | `test_auth_type` | AuthType 枚举测试 | ✅ |
+//! | `test_mail_provider_capabilities` | MailProvider 能力测试 | ✅ |
+//! | `test_imap_server_config` | ImapServerConfig 测试 | ✅ |
+//! | `test_greenmail_config` | GreenMail 配置测试 | ✅ |
+//! | `test_sync_strategy` | SyncStrategy 枚举测试 | ✅ |
+//! | `test_delta_sync_result` | DeltaSyncResult 测试 | ✅ |
+//! | `test_sync_stage` | SyncStage 枚举测试 | ✅ |
+//! | `test_sync_progress` | SyncProgress 测试 | ✅ |
 
 mod greenmail_sync_test;
 mod sync_flow_test;
+mod full_sync_test;
 mod test_helpers;
