@@ -3,7 +3,7 @@
 //! 管理邮件同步流程，协调所有同步组件
 
 use crate::error::{MailError, Result};
-use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector};
+use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector, sync_state::SyncStateManager};
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::providers::{ProviderPool, AuthType};
 use crate::services::imap::{AsyncImapClient, ImapAuth};
@@ -53,6 +53,7 @@ pub struct SyncManager {
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
     change_detector: Arc<ChangeDetector>,
+    sync_state_manager: Arc<SyncStateManager>,
 }
 
 impl SyncManager {
@@ -67,6 +68,7 @@ impl SyncManager {
         let folder_manager = Arc::new(FolderManager::new(db.clone()));
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
         let change_detector = Arc::new(ChangeDetector::new(db.clone()));
+        let sync_state_manager = Arc::new(SyncStateManager::new(db.clone()));
 
         Self {
             db,
@@ -77,6 +79,7 @@ impl SyncManager {
             folder_manager,
             mail_processor,
             change_detector,
+            sync_state_manager,
         }
     }
 
@@ -534,7 +537,20 @@ impl SyncManager {
             tracing::info!("已删除 {} 个邮件", change_detection_result.deleted_emails.len());
         }
 
-        // 4. 返回同步结果
+        // 4. 更新同步状态
+        let total_synced = new_emails_count + modified_emails_count;
+        if total_synced > 0 {
+            // 更新同步完成状态
+            if let Err(e) = self
+                .sync_state_manager
+                .update_sync_completed(account_id, folder, total_synced as i32)
+                .await
+            {
+                tracing::warn!("更新同步状态失败: {}", e);
+            }
+        }
+
+        // 5. 返回同步结果
         Ok(crate::sync::delta_sync::DeltaSyncResult {
             strategy_used: crate::sync::delta_sync::SyncStrategy::UidSearch,
             new_emails: new_emails_count,
