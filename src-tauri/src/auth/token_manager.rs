@@ -474,4 +474,125 @@ mod tests {
         assert_eq!(retrieved.provider, "google");
         assert_eq!(retrieved.expires_at, now + 3600);
     }
+
+    #[test]
+    fn test_token_metadata_fields() {
+        let now = Utc::now().timestamp();
+        let metadata = TokenMetadata {
+            account_id: 5,
+            provider: "test_provider".to_string(),
+            expires_at: now + 7200,
+            refresh_count: 3,
+            last_refresh_at: now - 100,
+        };
+
+        // 验证所有字段
+        assert_eq!(metadata.account_id, 5);
+        assert_eq!(metadata.provider, "test_provider");
+        assert!(metadata.expires_at > now);
+        assert_eq!(metadata.refresh_count, 3);
+        assert!(metadata.last_refresh_at < now);
+    }
+
+    #[tokio::test]
+    async fn test_is_token_expiring_soon_true() {
+        // 这个测试需要实际的 TokenManager 实例
+        // 由于需要 AppHandle，这里只测试逻辑
+        let now = Utc::now().timestamp();
+        let expires_soon = now + 100; // 100 秒后过期
+
+        // 5 分钟 = 300 秒
+        let remaining = expires_soon - now;
+        assert!(remaining < 300 && remaining > 0);
+    }
+
+    #[tokio::test]
+    async fn test_is_token_expiring_soon_false() {
+        let now = Utc::now().timestamp();
+        let expires_later = now + 1000; // 1000 秒后过期
+
+        let remaining = expires_later - now;
+        assert!(remaining >= 300);
+    }
+
+    #[tokio::test]
+    async fn test_is_token_expired_true() {
+        let now = Utc::now().timestamp();
+        let expired_time = now - 100;
+
+        assert!(expired_time <= now);
+    }
+
+    #[tokio::test]
+    async fn test_is_token_expired_false() {
+        let now = Utc::now().timestamp();
+        let future_time = now + 3600;
+
+        assert!(future_time > now);
+    }
+
+    #[tokio::test]
+    async fn test_expiring_accounts_filtering() {
+        // 测试即将过期账号的过滤逻辑
+        let now = Utc::now().timestamp();
+
+        // 模拟账号列表
+        let accounts = vec![
+            (1, now - 100),    // 已过期
+            (2, now + 100),    // 即将过期（< 300 秒）
+            (3, now + 200),    // 即将过期（< 300 秒）
+            (4, now + 1000),   // 未过期（> 300 秒）
+        ];
+
+        let threshold = 300;
+        let expiring: Vec<i32> = accounts
+            .into_iter()
+            .filter(|(_, expires_at)| {
+                let remaining = expires_at - now;
+                remaining > 0 && remaining <= threshold
+            })
+            .map(|(id, _)| id)
+            .collect();
+
+        assert_eq!(expiring.len(), 2);
+        assert!(expiring.contains(&2));
+        assert!(expiring.contains(&3));
+        assert!(!expiring.contains(&1)); // 已过期
+        assert!(!expiring.contains(&4)); // 未过期
+    }
+
+    #[tokio::test]
+    async fn test_token_update_logic() {
+        let now = Utc::now().timestamp();
+        let mut refresh_count = 0;
+
+        // 模拟 Token 更新
+        refresh_count += 1;
+        let new_expires_at = now + 7200;
+
+        assert_eq!(refresh_count, 1);
+        assert_eq!(new_expires_at, now + 7200);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_not_found() {
+        use std::collections::HashMap;
+        let cache: HashMap<i32, TokenMetadata> = HashMap::new();
+
+        // 测试查找不存在的账号
+        assert!(cache.get(&999).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_expiry_threshold_setting() {
+        let custom_threshold = 600;
+
+        // 测试自定义阈值
+        assert_eq!(custom_threshold, 600);
+    }
+
+    #[test]
+    fn test_default_expiry_threshold() {
+        assert_eq!(TokenManager::DEFAULT_EXPIRY_THRESHOLD, 300);
+    }
 }

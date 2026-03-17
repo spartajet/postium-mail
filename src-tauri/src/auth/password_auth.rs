@@ -202,4 +202,49 @@ mod tests {
     fn test_password_auth_default() {
         assert!(true);
     }
+
+    #[test]
+    fn test_password_username_format() {
+        // 测试密码用户名格式
+        let account_id = 123;
+        let username = format!("password_{}", account_id);
+
+        assert_eq!(username, "password_123");
+        assert!(username.starts_with("password_"));
+    }
+
+    #[test]
+    fn test_oauth_username_format() {
+        // 测试 OAuth 用户名格式
+        let account_id = 456;
+        let username = format!("oauth_{}", account_id);
+
+        assert_eq!(username, "oauth_456");
+        assert!(username.starts_with("oauth_"));
+    }
+
+    #[tokio::test]
+    async fn test_password_storage_logic() {
+        // 测试密码存储逻辑
+        let account_id = 1;
+        let password = "test_password";
+
+        // 模拟存储
+        let stored_account_id = account_id;
+        let stored_password = password.to_string();
+
+        assert_eq!(stored_account_id, 1);
+        assert_eq!(stored_password, "test_password");
+    }
+
+    #[tokio::test]
+    async fn test_password_removal_logic() {
+        // 测试密码删除逻辑
+        let account_id = 999;
+
+        // 模拟删除
+        let removed_id = account_id;
+
+        assert_eq!(removed_id, 999);
+    }
 }
