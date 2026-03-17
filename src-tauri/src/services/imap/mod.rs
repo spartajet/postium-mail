@@ -1,4 +1,5 @@
 mod client;
+mod condstore_helpers;
 mod error;
 mod parser;
 mod service;
@@ -6,6 +7,7 @@ mod tests;
 mod types;
 
 pub use client::{AsyncImapClient, three_months_ago_imap_format};
+pub use condstore_helpers::CondstoreCommands;
 // 向后兼容别名
 pub use AsyncImapClient as ImapClient;
 pub use error::{ImapError, Result};

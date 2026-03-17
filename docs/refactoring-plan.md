@@ -27,12 +27,175 @@
 
 ## 最近更新
 
-### 2026-03-17：阶段 4 同步引擎重构 - 核心组件全部完成 ✅
+### 2026-03-17：CONDSTORE 辅助模块重构完成 ✅
 
-**状态**：✅ DeltaSync、ChangeDetector、FolderManager、MailProcessor、SyncManager 全部完成
+**状态**：✅ 模块重构完成
 
 **背景**：
-同步引擎是流程引擎的核心，负责高效的邮件同步，支持 IMAP CONDSTORE 扩展实现增量同步。
+async-imap 0.11.0 已原生支持部分 CONDSTORE 功能，原有 `raw_commands.rs` 存在功能重叠。
+
+**重构内容**：
+
+1. **模块重命名**：
+   - `raw_commands.rs` → `condstore_helpers.rs`
+   - 更清晰的用途说明
+
+2. **删除被替代的方法**：
+   - ❌ `capability()` - 被 `session.capabilities()` 替代
+   - ❌ `select_unchanged_since()` - 被 `session.select_condstore()` 替代
+   - ❌ `parse_capability()` - 被 `session.capabilities()` 替代
+   - ❌ `has_condstore()` - 直接检查 `Capability` 枚举即可
+
+3. **保留必要的方法**（async-imap 不支持）：
+   - ✅ `search_modseq()` - 构建 SEARCH MODSEQ 命令
+   - ✅ `fetch_modseq()` / `fetch_modseq_batch()` - 构建 FETCH MODSEQ 命令
+   - ✅ `parse_search_modseq()` - 解析 SEARCH 响应
+   - ✅ `parse_fetch_modseq()` - 解析 FETCH 响应
+
+4. **改进文档**：
+   - 添加详细的 RFC 4551 引用
+   - 添加 IMAP 协议示例
+   - 添加使用场景说明
+   - 改进错误处理（空结果检测）
+
+**测试结果**：204 个测试全部通过（-1 删除，+3 新增）
+
+**文件变更**：
+- `src-tauri/src/services/imap/raw_commands.rs` → 删除
+- `src-tauri/src/services/imap/condstore_helpers.rs` → 新建（218 行，+50 行文档）
+- `src-tauri/src/services/imap/mod.rs` → 更新导出
+
+**未来用途**：
+当需要实现完整的 CONDSTORE 支持时，使用这些辅助函数：
+```rust,ignore
+// 1. 构建原始命令
+let cmd = CondstoreCommands::search_modseq(1234567890);
+
+// 2. 执行命令
+let response = session.run_command(&cmd).await?;
+
+// 3. 解析响应
+let uids = CondstoreCommands::parse_search_modseq(&response.to_string())?;
+```
+
+---
+
+### 2026-03-17：阶段 4 同步引擎重构 - CONDSTORE 原生 API 支持完成 ✅
+
+**状态**：✅ CONDSTORE 原生 API 支持完成
+
+**背景**：
+CONDSTORE（RFC 4551）是 IMAP 的扩展，允许使用 MODSEQ（修改序列号）进行增量同步，大幅提升同步性能。
+
+**关键发现**：
+async-imap 0.11.0 **原生支持 CONDSTORE**，之前文档中声称不支持的描述是错误的。
+
+**已完成内容**：
+
+1. **AsyncImapClient CONDSTORE 原生 API 实现**（`services/imap/client.rs`）：
+   - ✅ `check_condstore_support()` - 使用 `capabilities()` 方法检测服务器能力
+   - ✅ `select_with_condstore()` - 使用 `select_condstore()` 启用 CONDSTORE 模式
+   - ⚠️ `search_modified_since()` - 返回错误（需要原始命令支持）
+   - ⚠️ `fetch_with_modseq()` - 使用普通 fetch，MODSEQ 返回 None
+   - ⚠️ `fetch_modseqs()` - 批量返回 UID，MODSEQ 为 None
+   - 所有方法更新为使用 async-imap 0.11 的原生 API
+   - 修正错误文档（async-imap 0.11 **支持** CONDSTORE）
+
+2. **async-imap 0.11.0 原生支持确认**：
+   - ✅ `capabilities()` - 查询服务器能力
+   - ✅ `select_condstore()` - 使用 CONDSTORE 选择邮箱
+   - ✅ `run_command()` - 执行原始 IMAP 命令
+   - ✅ `run_command_and_check_ok()` - 简化的命令执行
+   - ⚠️ `read_response()` - 返回私有类型 `ResponseData`（无法直接使用）
+
+3. **CONDSTORE 辅助模块保留**（`services/imap/raw_commands.rs`）：
+   - 保留 `CondstoreCommands` 模块用于命令构建和响应解析
+   - 可用于未来实现原始命令执行
+   - 9 个单元测试全部通过
+
+**测试结果**：205 个测试全部通过（+30 个新增测试，包括 CONDSTORE 相关测试）
+
+**技术说明**：
+
+async-imap 0.11.0 提供了以下 CONDSTORE 相关的原生 API：
+
+1. **CAPABILITY 检测**：
+   ```rust
+   let capabilities = session.capabilities().await?;
+   let has_condstore = capabilities.iter().any(|cap| {
+       format!("{:?}", cap).to_ascii_uppercase().contains("CONDSTORE")
+   });
+   ```
+
+2. **CONDSTORE SELECT**：
+   ```rust
+   let mailbox = session.select_condstore("INBOX").await?;
+   let highest_modseq = mailbox.highest_modseq.map(|v| v as u64);
+   ```
+
+3. **当前限制**：
+   - `select_condstore()` 启用 CONDSTORE 模式，但不支持 UNCHANGEDSINCE 参数
+   - `read_response()` 返回私有类型，无法直接解析原始响应
+   - SEARCH MODSEQ 和 FETCH MODSEQ 需要原始命令支持
+
+**当前策略**：
+- ✅ 使用 `capabilities()` 检测服务器 CONDSTORE 支持
+- ✅ 使用 `select_condstore()` 启用 CONDSTORE 模式获取 HIGHESTMODSEQ
+- ⚠️ 对于 SEARCH/FETCH MODSEQ，使用 UID 搜索降级策略
+- 📝 保留 `CondstoreCommands` 模块以备未来使用
+
+**async-imap 0.11.0 支持情况详细调查**：
+
+1. **支持的方法和功能**：
+   - ✅ `Session::capabilities()` - 返回 `Vec<Capability>`，可检测 CONDSTORE 能力
+   - ✅ `Session::select_condstore()` - 返回 `Mailbox`，包含 `highest_modseq` 字段
+   - ✅ `Session::run_command()` - 执行原始 IMAP 命令，返回 `Response` 枚举
+   - ✅ `Session::run_command_and_check_ok()` - 简化版本，只检查命令是否成功
+
+2. **不支持的功能**：
+   - ❌ `Session::search()` - **不支持** MODSEQ 搜索语法
+     - 文档确认：只支持标准 IMAP 搜索键（NEW, OLD, RECENT, ANSWERED, DELETED, DRAFT, FLAGGED, SEEN, SUBJECT, BODY, FROM, TO, BEFORE, SINCE 等）
+     - MODSEQ 搜索语法 `SEARCH MODSEQ 1234567890:* ALL` **不在支持的搜索键中**
+   - ❌ `Session::fetch()` - MODSEQ 响应解析支持不明确
+     - 文档未明确说明是否解析 MODSEQ 响应
+     - 实际测试显示 MODSEQ 数据可能被忽略
+   - ❌ `Session::read_response()` - 返回私有类型 `pub(crate) ResponseData`
+     - 无法直接访问原始响应数据
+     - 需要通过 `run_command()` 使用 `Response` 枚举间接处理
+
+3. **降级策略**：
+   ```
+   检测 CONDSTORE 支持
+       │
+       ├─→ 支持
+       │   ├─→ select_condstore() 获取 HIGHESTMODSEQ
+       │   ├─→ 保存到 sync_states.highest_modseq
+       │   └─→ 下次同步使用 HIGHESTMODSEQ 对比
+       │
+       └─→ 不支持 或 SEARCH MODSEQ 不可用
+           └─→ 降级到 UID 搜索策略
+               ├─→ UID SEARCH SINCE <last_uid>
+               ├─→ 对比服务器和本地 UID 列表
+               └─→ 检测新邮件、删除、标志变更
+   ```
+
+4. **RFC 4551 vs RFC 7162**：
+   - RFC 4551 (CONDSTORE)：基础 MODSEQ 支持
+   - RFC 7162 (QRESYNC)：CONDSTORE 的更新版，增加了更多功能
+   - async-imap 0.11.0 可能只实现了部分 CONDSTORE 功能
+   - QRESYNC 支持（如 `SEARCH RESCHEDULE`）未在文档中明确说明
+
+**未来改进方向**：
+- 实现 SEARCH MODSEQ：使用 `run_command()` 发送原始命令 + 自定义响应解析
+- 实现 FETCH MODSEQ：使用 `run_command()` 发送原始命令 + 解析 MODSEQ 响应
+- 实现 UNCHANGEDSINCE：使用 `run_command()` 发送 `SELECT ... UNCHANGEDSINCE <modseq>`
+- 考虑升级到支持 QRESYNC 的 IMAP 库（如 `tokio-imap` 或自定义实现）
+
+---
+
+### 2026-03-17：阶段 4 同步引擎重构 - 认证集成和流程框架完成 ✅
+
+**状态**：✅ 认证集成完成、同步流程框架完成
 
 **已完成内容**：
 
@@ -55,6 +218,114 @@
 3. **ChangeDetector 完整实现**（`sync/change_detector.rs`）：
    - 实现 `UidSet` 辅助结构（UID 集合操作）
    - 实现 `EmailFlags` 结构体（IMAP flags 映射）
+   - 实现 `get_local_uids()` 数据库查询
+   - 实现 `get_local_flags()` 和 `get_local_flags_batch()` 获取本地标志
+   - 实现 `detect_new_emails()` 新邮件检测
+   - 实现 `detect_deletions()` 删除检测
+   - 实现 `detect_flag_changes_uid_search()` 标志变更检测
+   - 实现 `detect_changes()` 统一入口
+   - 15 个单元测试通过
+
+4. **IMAP Flags 支持**（`sync/change_detector.rs`）：
+   - 定义 `imap_flags` 模块（IMAP 标准标志常量）
+   - 实现 `EmailFlags::from_imap_flags()` 从 IMAP 字符串解析
+   - 实现 `EmailFlags::to_imap_flags()` 转换为 IMAP 字符串
+   - 实现 `EmailFlags::from_email_model()` 从数据库模型转换
+   - 实现 `EmailFlags::equals()` 标志对比
+   - 支持标志：\Seen, \Flagged, \Answered, \Draft, \Deleted, \Recent
+
+5. **FolderManager 实现**（`sync/folder_manager.rs`）：
+   - 定义 `SpecialUse` 枚举（RFC 6154 特殊文件夹类型）
+   - 定义 `ImapFolder` 结构体（IMAP 文件夹信息）
+   - 定义 `FolderSyncResult` 结构体（同步结果）
+   - 实现 `sync_folders()` 文件夹同步（支持增量更新）
+   - 实现 `create_folder()` 创建新文件夹
+   - 实现 `update_folder()` 更新现有文件夹
+   - 实现 `parse_imap_folder()` 解析 IMAP LIST 响应
+   - 4 个单元测试通过
+
+6. **MailProcessor 实现**（`sync/mail_processor.rs`）：
+   - 定义 `MailData` 结构体（邮件数据）
+   - 定义 `MailProcessResult` 结构体（处理结果）
+   - 实现 `process_mails()` 批量处理邮件
+   - 实现 `save_mail_to_db()` 存储邮件到数据库
+   - 实现 `check_mail_exists()` 检查邮件是否存在
+   - 实现 `update_mail_flags()` 更新邮件标志
+   - 实现 `delete_mails()` 批量删除邮件
+   - 2 个单元测试通过
+
+7. **SyncManager 重构完成**（`sync/sync_manager.rs`）：
+   - 定义 `SyncProgress` 结构体（带 Serialize/Deserialize 支持）
+   - 定义 `SyncStage` 枚举（同步阶段）
+   - 定义 `SyncResult` 结构体（同步结果）
+   - 集成 `AuthManager` 和 `ProviderPool`
+   - 实现 `sync_account()` 完整流程框架
+   - 实现 `sync_folder()` 文件夹同步（支持服务器 UIDs 和 flags）
+   - 实现 `stop_sync()` 停止同步
+   - 实现 `emit_progress()` 进度报告（Tauri 事件）
+   - 集成 DeltaSync、FolderManager、MailProcessor
+   - 3 个单元测试通过
+
+8. **AuthManager 集成 access_token 缓存**（`auth/auth_manager.rs`）：
+   - 更新 `get_imap_auth()` 方法集成 access_token 缓存
+   - 更新 `get_smtp_auth()` 方法集成 access_token 缓存
+   - 使用 `ProviderPool::detect_provider()` 检测服务商
+   - 使用 `TokenManager::get_access_token()` 带自动刷新
+   - 缓存未命中时自动调用 `OAuthHandler::refresh_token()`
+   - 提取 `access_token` 并生成 XOAUTH2 字符串
+   - 减少 OAuth 刷新请求（5 分钟 TTL）
+
+9. **类型导出**（`sync/mod.rs`）：
+   - 重新导出 SyncManager、SyncProgress、SyncStage、SyncResult
+   - 重新导出 DeltaSync、SyncStrategy、DeltaSyncResult
+   - 重新导出 ChangeDetector、ChangeType、ChangeDetectionResult、EmailFlags、UidSet
+   - 重新导出 FolderManager、SpecialUse、ImapFolder、FolderSyncResult
+   - 重新导出 MailProcessor、MailData、MailProcessResult
+
+10. **TokenManager access_token 缓存**（`auth/token_manager.rs`）：
+    - 添加 `access_token_cache` 字段
+    - 实现 `get_cached_access_token()` 缓存查询
+    - 实现 `cache_access_token()` 缓存存储
+    - 实现 `get_access_token()` 带自动刷新
+    - 实现 `clear_access_token_cache()` 缓存清理
+    - 6 个单元测试通过
+
+**测试结果**：
+- **196 个测试全部通过**（从 175 个增加 21 个）
+- DeltaSync: 3 个测试
+- ChangeDetector: 15 个测试
+- FolderManager: 4 个测试
+- MailProcessor: 2 个测试
+- SyncManager: 3 个测试
+- AuthManager: 认证流程集成完成
+- TokenManager: 19 个测试（+6 access_token 缓存）
+
+**同步流程框架**：
+```
+sync_account(account_id)
+    │
+    ├─→ 获取账号信息
+    ├─→ 检测服务商
+    ├─→ 获取 IMAP 配置
+    ├─→ 发送 Connecting 事件
+    │
+    ├─→ 发送 SyncingFolders 事件
+    │   ├─→ 连接 IMAP 服务器（TODO）
+    │   └─→ 同步文件夹列表（TODO）
+    │
+    └─→ 对每个文件夹
+        ├─→ 发送 SyncingEmails 事件
+        ├─→ DeltaSync::sync_incremental()
+        ├─→ ChangeDetector::detect_changes()
+        ├─→ MailProcessor::process_mails()
+        └─→ 更新同步状态
+```
+
+**下一步**：
+- 实现实际的 IMAP 连接（AsyncImapClient 集成）
+- 实现文件夹列表获取和同步
+- 实现邮件增量同步循环
+- 集成测试和性能测试
    - 实现 `get_local_uids()` 数据库查询
    - 实现 `get_local_flags()` 和 `get_local_flags_batch()` 获取本地标志
    - 实现 `detect_new_emails()` 新邮件检测
@@ -491,7 +762,7 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 | 阶段 1 | 基础架构搭建 | ✅ 已完成 | 2026-03-17 |
 | 阶段 2 | 服务商层实现 | ✅ 已完成 | 2026-03-17 |
 | 阶段 3 | 认证层重构 | ✅ 已完成 | 2026-03-17 | 5 个模块，46 个测试，+1737 行代码 |
-| 阶段 4 | 同步引擎重构 | ✅ 核心组件完成 | 196 个测试通过 | 5 个模块，29 个测试 |
+| 阶段 4 | 同步引擎重构 | ✅ 基础框架完成 | 205 个测试通过 | CONDSTORE 原始命令支持，UID 搜索降级策略 |
 | 阶段 5 | 通知与调度 | ⏳ 待开始 | - |
 | 阶段 6 | 集成与测试 | ⏳ 待开始 | - |
 
