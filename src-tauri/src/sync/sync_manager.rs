@@ -369,13 +369,14 @@ impl SyncManager {
             server_uids.iter().map(|&uid| (uid, vec![])).collect()
         };
 
-        // 4. 调用 sync_folder 进行增量同步
+        // 4. 调用 sync_folder 进行增量同步（传递 IMAP 客户端）
         let result = self
             .sync_folder(
                 account_id,
                 folder,
                 Some(&server_uids),
                 Some(&server_uids_with_flags),
+                Some(imap_client),
             )
             .await?;
 
@@ -390,12 +391,14 @@ impl SyncManager {
     /// * `folder` - 文件夹名称
     /// * `server_uids` - 服务器 UID 列表（可选）
     /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选）
+    /// * `imap_client` - IMAP 客户端引用（可选，用于获取邮件内容）
     pub async fn sync_folder(
         &self,
         account_id: i32,
         folder: &str,
         server_uids: Option<&[u32]>,
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
+        imap_client: Option<&mut AsyncImapClient>,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::info!(
             "开始同步文件夹: account_id={}, folder={}, server_uids={}",
@@ -446,18 +449,54 @@ impl SyncManager {
             ));
         }
 
-        // 2. 使用 MailProcessor 处理新邮件
+        // 2. 处理新邮件和修改的邮件
         let new_emails_count = change_detection_result.new_emails.len();
         let modified_emails_count = change_detection_result.modified_emails.len();
 
-        // TODO: 实际获取和处理邮件内容
-        // let new_uids: Vec<u32> = change_detection_result.new_emails.iter().map(|&uid| uid).collect();
-        // for uid in new_uids {
-        //     // 使用 AsyncImapClient 获取邮件
-        //     let email_data = imap_client.fetch_email(folder, uid).await?;
-        //     // 使用 MailProcessor 保存到数据库
-        //     self.mail_processor.save_mail_to_db(account_id, folder, &email_data).await?;
-        // }
+        // 如果提供了 IMAP 客户端，获取邮件内容
+        if let Some(client) = imap_client {
+            // 合并新邮件和修改的邮件 UID
+            let all_uids: Vec<u32> = change_detection_result.new_emails
+                .iter()
+                .chain(change_detection_result.modified_emails.iter())
+                .copied()
+                .collect();
+
+            tracing::info!("获取 {} 个邮件的内容", all_uids.len());
+
+            // 批量获取邮件
+            let mut mail_data_list = Vec::new();
+            for uid in all_uids {
+                match client.fetch_email(folder, uid).await {
+                    Ok(email_data) => {
+                        // 转换 EmailData → MailData
+                        let mail_data = crate::sync::mail_processor::from_imap_email(&email_data);
+                        mail_data_list.push(mail_data);
+                    }
+                    Err(e) => {
+                        tracing::error!("获取邮件失败: uid={}, error={}", uid, e);
+                        // 继续处理下一个邮件
+                    }
+                }
+            }
+
+            // 使用 MailProcessor 批量处理邮件
+            if !mail_data_list.is_empty() {
+                let process_result = self.mail_processor
+                    .process_mails(account_id, folder, mail_data_list)
+                    .await
+                    .map_err(|e| MailError::Internal(format!("处理邮件失败: {}", e)))?;
+
+                tracing::info!(
+                    "邮件处理完成: success={}, failed={}, skipped={}",
+                    process_result.success_count,
+                    process_result.failed_count,
+                    process_result.skipped_count
+                );
+            }
+        } else {
+            tracing::warn!("未提供 IMAP 客户端，跳过邮件内容获取");
+        }
 
         // 3. 更新已删除的邮件
         if !change_detection_result.deleted_emails.is_empty() {
