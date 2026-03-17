@@ -79,8 +79,20 @@
 //! | `test_delta_sync_result` | DeltaSyncResult 测试 | ✅ |
 //! | `test_sync_stage` | SyncStage 枚举测试 | ✅ |
 //! | `test_sync_progress` | SyncProgress 测试 | ✅ |
+//!
+//! ### SyncManager 测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_sync_stages` | 同步阶段枚举 | ✅ |
+//! | `test_sync_result` | 同步结果结构 | ✅ |
+//! | `test_sync_stage_serialization` | SyncStage 序列化 | ✅ |
+//! | `test_sync_progress_serialization` | SyncProgress 序列化 | ✅ |
+//! | `test_sync_result_serialization` | SyncResult 序列化 | ✅ |
+//! | `test_all_sync_stages` | 所有同步阶段 | ✅ |
+//! | `test_sync_progress_fields` | SyncProgress 字段完整性 | ✅ |
 
 mod greenmail_sync_test;
 mod sync_flow_test;
 mod full_sync_test;
+mod sync_manager_test;
 mod test_helpers;
