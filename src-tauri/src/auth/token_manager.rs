@@ -33,6 +33,7 @@ pub struct TokenMetadata {
 /// 负责 OAuth Token 的：
 /// - 存储到 Keyring（只存储 refresh_token）
 /// - 内存缓存元数据（快速查询）
+/// - 内存缓存 access_token（短期缓存，5 分钟）
 /// - 过期检测
 /// - 批量刷新查询
 pub struct TokenManager {
@@ -40,6 +41,9 @@ pub struct TokenManager {
     app_handle: Arc<AppHandle>,
     /// 内存缓存：account_id -> TokenMetadata
     cache: Arc<RwLock<HashMap<i32, TokenMetadata>>>,
+    /// access_token 缓存：account_id -> (token, expires_at)
+    /// 短期缓存（5 分钟），减少刷新请求
+    access_token_cache: Arc<RwLock<HashMap<i32, (String, i64)>>>,
     /// Token 过期检测阈值（秒），默认 300 秒（5 分钟）
     expiry_threshold: i64,
 }
@@ -47,6 +51,9 @@ pub struct TokenManager {
 impl TokenManager {
     /// 默认过期阈值（秒）
     const DEFAULT_EXPIRY_THRESHOLD: i64 = 300; // 5 分钟
+
+    /// access_token 缓存时间（秒）
+    const ACCESS_TOKEN_CACHE_TTL: i64 = 300; // 5 分钟
 
     /// 创建新的 TokenManager
     ///
@@ -63,6 +70,7 @@ impl TokenManager {
         Ok(Self {
             app_handle: Arc::new(app_handle.clone()),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            access_token_cache: Arc::new(RwLock::new(HashMap::new())),
             expiry_threshold: Self::DEFAULT_EXPIRY_THRESHOLD,
         })
     }
@@ -77,6 +85,7 @@ impl TokenManager {
         Ok(Self {
             app_handle: Arc::new(app_handle.clone()),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            access_token_cache: Arc::new(RwLock::new(HashMap::new())),
             expiry_threshold,
         })
     }
@@ -422,6 +431,114 @@ impl TokenManager {
     pub fn app_handle(&self) -> &AppHandle {
         &self.app_handle
     }
+
+    // ========== access_token 内存缓存（方案 C）==========
+
+    /// 获取缓存的 access_token
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    ///
+    /// # 返回
+    ///
+    /// - `Some(token)` - 缓存命中且未过期
+    /// - `None` - 缓存未命中或已过期
+    pub async fn get_cached_access_token(&self, account_id: i32) -> Option<String> {
+        let cache = self.access_token_cache.read().await;
+        if let Some((token, expires_at)) = cache.get(&account_id) {
+            let now = Utc::now().timestamp();
+            if *expires_at > now {
+                tracing::debug!("access_token 缓存命中: account_id={}", account_id);
+                return Some(token.clone());
+            } else {
+                tracing::debug!("access_token 缓存已过期: account_id={}", account_id);
+            }
+        }
+        None
+    }
+
+    /// 缓存 access_token
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `access_token` - access_token 值
+    ///
+    /// # 说明
+    ///
+    /// access_token 将被缓存 5 分钟（ACCESS_TOKEN_CACHE_TTL）
+    pub async fn cache_access_token(&self, account_id: i32, access_token: String) {
+        let expires_at = Utc::now().timestamp() + Self::ACCESS_TOKEN_CACHE_TTL;
+        self.access_token_cache.write().await.insert(account_id, (access_token, expires_at));
+        tracing::debug!(
+            "缓存 access_token: account_id={}, expires_at={}",
+            account_id,
+            expires_at
+        );
+    }
+
+    /// 清除 access_token 缓存
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    pub async fn clear_access_token_cache(&self, account_id: i32) {
+        self.access_token_cache.write().await.remove(&account_id);
+        tracing::debug!("清除 access_token 缓存: account_id={}", account_id);
+    }
+
+    /// 清除所有 access_token 缓存
+    pub async fn clear_all_access_token_cache(&self) {
+        let count = self.access_token_cache.write().await.len();
+        self.access_token_cache.write().await.clear();
+        tracing::debug!("清除所有 access_token 缓存: {} 个", count);
+    }
+
+    /// 获取 access_token（带自动刷新）
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `refresh_fn` - 刷新函数，当缓存未命中时调用
+    ///
+    /// # 返回
+    ///
+    /// 返回 access_token
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let access_token = token_manager.get_access_token(1, || async {
+    ///     // 调用 OAuthHandler 刷新 token
+    ///     Ok(new_token)
+    /// }).await?;
+    /// ```
+    pub async fn get_access_token<F, Fut>(
+        &self,
+        account_id: i32,
+        refresh_fn: F,
+    ) -> Result<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        // 1. 检查缓存
+        if let Some(token) = self.get_cached_access_token(account_id).await {
+            return Ok(token);
+        }
+
+        // 2. 缓存未命中或已过期，调用刷新函数
+        tracing::debug!("刷新 access_token: account_id={}", account_id);
+        let new_token = refresh_fn().await.map_err(|e| {
+            MailError::Internal(format!("刷新 access_token 失败: {}", e))
+        })?;
+
+        // 3. 缓存新 token（5 分钟）
+        self.cache_access_token(account_id, new_token.clone()).await;
+
+        Ok(new_token)
+    }
 }
 
 #[cfg(test)]
@@ -594,5 +711,90 @@ mod tests {
     #[test]
     fn test_default_expiry_threshold() {
         assert_eq!(TokenManager::DEFAULT_EXPIRY_THRESHOLD, 300);
+    }
+
+    // ========== access_token 缓存测试 ==========
+
+    #[tokio::test]
+    async fn test_access_token_cache_hit() {
+        let cache: Arc<RwLock<HashMap<i32, (String, i64)>>> = Arc::new(RwLock::new(HashMap::new()));
+        let now = Utc::now().timestamp();
+
+        // 插入缓存（5分钟后过期）
+        let token = "test_access_token".to_string();
+        let expires_at = now + TokenManager::ACCESS_TOKEN_CACHE_TTL;
+        cache.write().await.insert(1, (token.clone(), expires_at));
+
+        // 读取缓存
+        let cache_guard = cache.read().await;
+        let retrieved = cache_guard.get(&1);
+
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().0, token);
+    }
+
+    #[tokio::test]
+    async fn test_access_token_cache_expired() {
+        let cache: Arc<RwLock<HashMap<i32, (String, i64)>>> = Arc::new(RwLock::new(HashMap::new()));
+        let now = Utc::now().timestamp();
+
+        // 插入已过期的缓存
+        let token = "expired_token".to_string();
+        let expires_at = now - 100; // 100秒前过期
+        cache.write().await.insert(1, (token, expires_at));
+
+        // 检查是否过期
+        let cache_guard = cache.read().await;
+        if let Some((_, exp)) = cache_guard.get(&1) {
+            assert!(*exp <= now);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_access_token_cache_miss() {
+        let cache: Arc<RwLock<HashMap<i32, (String, i64)>>> = Arc::new(RwLock::new(HashMap::new()));
+
+        // 读取不存在的缓存
+        let cache_guard = cache.read().await;
+        let retrieved = cache_guard.get(&999);
+
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_access_token_cache_clear() {
+        let cache: Arc<RwLock<HashMap<i32, (String, i64)>>> = Arc::new(RwLock::new(HashMap::new()));
+        let now = Utc::now().timestamp();
+
+        // 插入缓存
+        cache.write().await.insert(1, ("token".to_string(), now + 300));
+
+        // 清除缓存
+        cache.write().await.remove(&1);
+
+        // 验证已清除
+        let cache_guard = cache.read().await;
+        assert!(cache_guard.get(&1).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_access_token_cache_ttl() {
+        // 验证 TTL 常量
+        assert_eq!(TokenManager::ACCESS_TOKEN_CACHE_TTL, 300); // 5 分钟
+    }
+
+    #[tokio::test]
+    async fn test_access_token_cache_multiple() {
+        let cache: Arc<RwLock<HashMap<i32, (String, i64)>>> = Arc::new(RwLock::new(HashMap::new()));
+        let now = Utc::now().timestamp();
+
+        // 插入多个账号的缓存
+        cache.write().await.insert(1, ("token1".to_string(), now + 300));
+        cache.write().await.insert(2, ("token2".to_string(), now + 300));
+        cache.write().await.insert(3, ("token3".to_string(), now + 300));
+
+        // 验证数量
+        let cache_guard = cache.read().await;
+        assert_eq!(cache_guard.len(), 3);
     }
 }

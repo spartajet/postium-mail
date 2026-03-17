@@ -12,6 +12,7 @@ pub struct Model {
     pub last_sync_uid: Option<i32>, // 最后同步的 UID
     pub last_sync_at: Option<i64>,  // 最后同步时间
     pub highest_uid: Option<i32>,   // 文件夹最高 UID
+    pub highest_modseq: Option<i64>, // 文件夹最高 MODSEQ (CONDSTORE)
     pub total_emails: Option<i32>,  // 总邮件数
     pub sync_count: i32,            // 已同步邮件数
     pub is_first_sync: bool,        // 是否首次同步
@@ -57,6 +58,7 @@ pub struct SyncStateDto {
     pub last_sync_uid: Option<i32>,
     pub last_sync_at: Option<i64>,
     pub highest_uid: Option<i32>,
+    pub highest_modseq: Option<i64>, // 文件夹最高 MODSEQ (CONDSTORE)
     pub total_emails: Option<i32>,
     pub sync_count: i32,
     pub is_first_sync: bool,
@@ -74,6 +76,7 @@ impl From<Model> for SyncStateDto {
             last_sync_uid: model.last_sync_uid,
             last_sync_at: model.last_sync_at,
             highest_uid: model.highest_uid,
+            highest_modseq: model.highest_modseq,
             total_emails: model.total_emails,
             sync_count: model.sync_count,
             is_first_sync: model.is_first_sync,
