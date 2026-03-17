@@ -446,23 +446,46 @@ impl AuthManager {
 
         match auth_type {
             AuthType::OAuth2 => {
-                // 1. 获取 Token
-                let token = self.token_manager.get_oauth_token(account_id).await?;
+                // 1. 获取服务商（用于刷新 token）
+                let provider = self
+                    .provider_pool
+                    .detect_provider(email)
+                    .await
+                    .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
 
-                // 2. 检查是否需要刷新
-                if self.token_manager.is_token_expiring_soon(account_id).await? {
-                    self.refresh_token(account_id, email).await?;
-                }
+                // 2. 获取 access_token（带自动刷新）
+                let access_token = self
+                    .token_manager
+                    .get_access_token(account_id, || async {
+                        // 缓存未命中或已过期，执行刷新
 
-                // 3. 获取最新的 Token
-                let token = self.token_manager.get_oauth_token(account_id).await?;
+                        // 2.1 获取 refresh_token
+                        let refresh_token = self
+                            .token_manager
+                            .get_oauth_token(account_id)
+                            .await
+                            .map_err(|e| {
+                                MailError::Internal(format!("获取 refresh_token 失败: {}", e))
+                            })?;
 
-                // 4. 生成 XOAUTH2 字符串
-                // 注意：这里需要 access_token，但我们只有 refresh_token
-                // 暂时使用占位符，后续需要实现 access_token 获取
+                        // 2.2 刷新 token
+                        let token_response = self
+                            .oauth_handler
+                            .refresh_token(provider.as_ref(), &refresh_token.refresh_token)
+                            .await
+                            .map_err(|e| {
+                                MailError::Internal(format!("刷新 access_token 失败: {}", e))
+                            })?;
+
+                        // 2.3 提取 access_token（注意：不是 Option）
+                        Ok(token_response.access_token)
+                    })
+                    .await?;
+
+                // 3. 生成 XOAUTH2 字符串
                 let xoauth2 = self
                     .oauth_handler
-                    .generate_xoauth2(email, "PLACEHOLDER_ACCESS_TOKEN");
+                    .generate_xoauth2(email, &access_token);
 
                 Ok(ImapAuthInfo::OAuth {
                     email: email.to_string(),
@@ -515,21 +538,46 @@ impl AuthManager {
 
         match auth_type {
             AuthType::OAuth2 => {
-                // 1. 获取 Token
-                let token = self.token_manager.get_oauth_token(account_id).await?;
+                // 1. 获取服务商（用于刷新 token）
+                let provider = self
+                    .provider_pool
+                    .detect_provider(email)
+                    .await
+                    .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
 
-                // 2. 检查是否需要刷新
-                if self.token_manager.is_token_expiring_soon(account_id).await? {
-                    self.refresh_token(account_id, email).await?;
-                }
+                // 2. 获取 access_token（带自动刷新）
+                let access_token = self
+                    .token_manager
+                    .get_access_token(account_id, || async {
+                        // 缓存未命中或已过期，执行刷新
 
-                // 3. 获取最新的 Token
-                let token = self.token_manager.get_oauth_token(account_id).await?;
+                        // 2.1 获取 refresh_token
+                        let refresh_token = self
+                            .token_manager
+                            .get_oauth_token(account_id)
+                            .await
+                            .map_err(|e| {
+                                MailError::Internal(format!("获取 refresh_token 失败: {}", e))
+                            })?;
 
-                // 4. 生成 XOAUTH2 字符串
+                        // 2.2 刷新 token
+                        let token_response = self
+                            .oauth_handler
+                            .refresh_token(provider.as_ref(), &refresh_token.refresh_token)
+                            .await
+                            .map_err(|e| {
+                                MailError::Internal(format!("刷新 access_token 失败: {}", e))
+                            })?;
+
+                        // 2.3 提取 access_token（注意：不是 Option）
+                        Ok(token_response.access_token)
+                    })
+                    .await?;
+
+                // 3. 生成 XOAUTH2 字符串
                 let xoauth2 = self
                     .oauth_handler
-                    .generate_xoauth2(email, "PLACEHOLDER_ACCESS_TOKEN");
+                    .generate_xoauth2(email, &access_token);
 
                 Ok(SmtpAuthInfo::OAuth {
                     email: email.to_string(),
