@@ -61,6 +61,112 @@ pub struct MailProcessor {
     db: Arc<DbConn>,
 }
 
+/// 从 AsyncImapClient::EmailData 转换为 MailData
+///
+/// # 参数
+///
+/// * `email_data` - IMAP 客户端获取的邮件数据
+///
+/// # 返回
+///
+/// 返回 MailData
+pub fn from_imap_email(email_data: &crate::services::imap::EmailData) -> MailData {
+    use crate::sync::change_detector::EmailFlags;
+
+    MailData {
+        uid: email_data.uid,
+        message_id: None, // 需要从邮件头中提取
+        subject: Some(email_data.subject.clone()),
+        sender_name: extract_name_from_address(&email_data.from),
+        sender_email: extract_email_from_address(&email_data.from),
+        recipient_emails: serialize_addresses(&email_data.to),
+        cc_emails: if email_data.cc.is_empty() {
+            None
+        } else {
+            Some(serialize_addresses(&email_data.cc))
+        },
+        bcc_emails: None, // EmailData 没有包含 bcc
+        body_text: Some(email_data.body_text.clone()),
+        body_html: Some(email_data.body_html.clone()),
+        sent_at: email_data.date.timestamp(),
+        received_at: chrono::Utc::now().timestamp(),
+        flags: EmailFlags {
+            seen: email_data.flags.seen,
+            flagged: email_data.flags.flagged,
+            answered: email_data.flags.answered,
+            draft: false, // EmailData 没有包含 draft 标志
+            deleted: email_data.flags.deleted,
+            recent: false, // EmailData 没有包含 recent 标志
+        },
+        modseq: None, // TODO: 从 CONDSTORE 响应中提取 MODSEQ
+    }
+}
+
+/// 从地址字符串中提取名称
+///
+/// # 参数
+///
+/// * `address` - 地址字符串（如 "John Doe <john@example.com>" 或 "john@example.com"）
+///
+/// # 返回
+///
+/// 返回名称部分（如果有）
+fn extract_name_from_address(address: &str) -> Option<String> {
+    // 地址格式: "Name <email>" 或 "email"
+    if let Some(start) = address.find('<') {
+        if let Some(end) = address.find('>') {
+            let name_part = &address[..start].trim();
+            if !name_part.is_empty() {
+                return Some(name_part.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 从地址字符串中提取邮箱
+///
+/// # 参数
+///
+/// * `address` - 地址字符串（如 "John Doe <john@example.com>" 或 "john@example.com"）
+///
+/// # 返回
+///
+/// 返回邮箱地址
+fn extract_email_from_address(address: &str) -> String {
+    // 地址格式: "Name <email>" 或 "email"
+    if let Some(start) = address.find('<') {
+        if let Some(end) = address.find('>') {
+            return address[start + 1..end].to_string();
+        }
+    }
+    address.to_string()
+}
+
+/// 序列化地址列表为 JSON 数组
+///
+/// # 参数
+///
+/// * `addresses` - 地址字符串（多个地址用逗号分隔）
+///
+/// # 返回
+///
+/// 返回 JSON 数组字符串
+fn serialize_addresses(addresses: &str) -> String {
+    if addresses.is_empty() {
+        return "[]".to_string();
+    }
+
+    // 分割地址并提取邮箱部分
+    let emails: Vec<String> = addresses
+        .split(',')
+        .map(|addr| extract_email_from_address(addr.trim()))
+        .map(|email| format!("\"{}\"", email))
+        .collect();
+
+    format!("[{}]", emails.join(","))
+}
+
 impl MailProcessor {
     /// 创建新的邮件处理器
     pub fn new(db: Arc<DbConn>) -> Self {
@@ -154,7 +260,9 @@ impl MailProcessor {
             mail_data.uid,
             mail_data.subject
         );
-        Ok(true)
+
+        // 存储邮件到数据库（或更新已存在的邮件）
+        self.save_mail_to_db(account_id, folder, mail_data).await
     }
 
     /// 存储邮件到数据库
