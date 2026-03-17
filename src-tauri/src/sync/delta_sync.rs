@@ -131,6 +131,8 @@ impl DeltaSync {
     /// * `last_sync_uid` - 上次同步的最高 UID（可选）
     /// * `supports_condstore` - 是否支持 CONDSTORE（由调用者检测）
     /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选，用于标志变更检测）
+    /// * `condstore_modified_uids` - CONDSTORE SEARCH MODSEQ 返回的修改 UID 列表（可选）
+    /// * `highest_modseq` - 服务器当前的 HIGHESTMODSEQ（可选）
     pub async fn sync_incremental(
         &self,
         account_id: i32,
@@ -139,18 +141,32 @@ impl DeltaSync {
         last_sync_uid: Option<u32>,
         supports_condstore: bool,
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
+        condstore_modified_uids: Option<&[u32]>,
+        highest_modseq: Option<u64>,
     ) -> Result<DeltaSyncResult> {
         let start = std::time::Instant::now();
 
         // 根据支持情况选择策略
         let result = if supports_condstore {
-            // TODO: 实现真正的 CONDSTORE 同步
-            // 临时：降级到 UID 搜索
-            self.sync_with_uid_search(account_id, folder, server_uids, last_sync_uid, server_uids_with_flags)
-                .await?
+            // 使用 CONDSTORE 同步
+            self.sync_with_condstore(
+                account_id,
+                folder,
+                server_uids,
+                condstore_modified_uids,
+                highest_modseq,
+            )
+            .await?
         } else {
-            self.sync_with_uid_search(account_id, folder, server_uids, last_sync_uid, server_uids_with_flags)
-                .await?
+            // 降级到 UID 搜索
+            self.sync_with_uid_search(
+                account_id,
+                folder,
+                server_uids,
+                last_sync_uid,
+                server_uids_with_flags,
+            )
+            .await?
         };
 
         // 记录耗时
@@ -164,18 +180,91 @@ impl DeltaSync {
 
     /// 使用 CONDSTORE 策略同步
     ///
-    /// 使用 MODSEQ 进行增量同步，仅获取变更的邮件
+    /// 使用 MODSEQ 进行增量同步，仅获取变更的邮件。
+    ///
+    /// **注意**：此方法不执行 IMAP 命令，而是使用调用者提供的结果。
+    /// IMAP 命令执行应在 SyncManager 中完成。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `server_uids` - 服务器上的 UID 列表（完整列表）
+    /// * `modified_uids` - SEARCH MODSEQ 返回的修改 UID 列表（可选）
+    /// * `highest_modseq` - 服务器当前的 HIGHESTMODSEQ（可选）
+    ///
+    /// # 返回
+    ///
+    /// 返回同步结果
+    ///
+    /// # CONDSTORE 同步流程
+    ///
+    /// 1. **在 SyncManager 中**：
+    ///    - 使用 `check_condstore_support()` 检测支持
+    ///    - 使用 `select_with_condstore()` 获取 HIGHESTMODSEQ
+    ///    - 使用 `search_modified_since()` 获取变更 UID
+    ///    - 调用此方法处理结果
+    ///
+    /// 2. **在此方法中**：
+    ///    - 检测新邮件（modified_uids 中本地不存在的）
+    ///    - 检测删除的邮件（本地有但 server_uids 中没有的）
+    ///    - 标记所有 modified_uids 为已修改（包括新邮件）
     pub async fn sync_with_condstore(
         &self,
-        _account_id: i32,
-        _folder: &str,
+        account_id: i32,
+        folder: &str,
+        server_uids: &[u32],
+        modified_uids: Option<&[u32]>,
+        highest_modseq: Option<u64>,
     ) -> Result<DeltaSyncResult> {
-        // TODO: 实现 CONDSTORE 同步逻辑
-        // 1. 获取上一次同步的 highest_modseq
-        // 2. 执行 SEARCH MODSEQ <last_modseq>:*
-        // 3. 仅获取变更的邮件
-        // 4. 更新 highest_modseq
-        Ok(DeltaSyncResult::empty(SyncStrategy::Condstore))
+        // 1. 检测删除的邮件（本地有但服务器没有的）
+        let deleted_emails = self
+            .change_detector
+            .detect_deletions(account_id, folder, server_uids)
+            .await?;
+
+        // 2. 处理修改的邮件（SEARCH MODSEQ 返回的）
+        let (new_emails, modified_emails) = if let Some(modified) = modified_uids {
+            // 检测新邮件（modified 中本地不存在的）
+            let new = self
+                .change_detector
+                .detect_new_emails(account_id, folder, modified, None)
+                .await?;
+
+            // 其他的为已存在的修改邮件
+            let existing_modified: Vec<u32> = modified
+                .iter()
+                .copied()
+                .filter(|&uid| !new.contains(&uid))
+                .collect();
+
+            (new, existing_modified)
+        } else {
+            // 没有 modified_uids，说明没有变更
+            (Vec::new(), Vec::new())
+        };
+
+        tracing::info!(
+            "CONDSTORE 同步完成: account_id={}, folder={}, new={}, modified={}, deleted={}, highest_modseq={:?}",
+            account_id,
+            folder,
+            new_emails.len(),
+            modified_emails.len(),
+            deleted_emails.len(),
+            highest_modseq
+        );
+
+        // TODO: 更新 SyncState 中的 highest_modseq
+        // 这需要在 SyncStateManager 中实现 update_highest_modseq() 方法
+
+        Ok(DeltaSyncResult {
+            strategy_used: SyncStrategy::Condstore,
+            new_emails: new_emails.len(),
+            modified_emails: modified_emails.len(),
+            deleted_emails: deleted_emails.len(),
+            flags_changed: modified_emails.len(),
+            duration_ms: 0, // 由调用者设置
+        })
     }
 
     /// 使用 UID 搜索策略同步
