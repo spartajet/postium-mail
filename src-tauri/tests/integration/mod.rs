@@ -90,9 +90,42 @@
 //! | `test_sync_result_serialization` | SyncResult 序列化 | ✅ |
 //! | `test_all_sync_stages` | 所有同步阶段 | ✅ |
 //! | `test_sync_progress_fields` | SyncProgress 字段完整性 | ✅ |
+//!
+//! ### 端到端同步测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_full_sync_workflow_simplified` | 完整同步工作流 | ✅ |
+//! | `test_incremental_sync_strategies` | 增量同步策略 | ✅ |
+//! | `test_sync_state_management` | 同步状态管理 | ✅ |
+//! | `test_sync_error_handling` | 错误处理 | ✅ |
+//! | `test_sync_performance_monitoring` | 性能监控 | ✅ |
+//! | `test_concurrent_sync_limits` | 并发限制 | ✅ |
+//!
+//! ### CONDSTORE 功能验证
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_condstore_concepts` | CONDSTORE 概念 | ✅ |
+//! | `test_sync_strategy_selection` | 策略选择 | ✅ |
+//! | `test_modseq_tracking` | MODSEQ 追踪 | ✅ |
+//! | `test_delta_sync_result_structure` | DeltaSyncResult 结构 | ✅ |
+//! | `test_fallback_strategy` | 降级策略 | ✅ |
+//! | `test_sync_state_persistence` | 状态持久化 | ✅ |
+//!
+//! ### 完整同步流程测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_full_sync_workflow` | 完整同步工作流 | ✅ |
+//! | `test_incremental_sync_workflow` | 增量同步工作流 | ✅ |
+//! | `test_sync_error_recovery` | 错误恢复 | ✅ |
+//! | `test_sync_performance_metrics` | 性能指标 | ✅ |
+//! | `test_concurrent_sync` | 并发同步 | ✅ |
+//! | `test_sync_progress_reporting` | 进度报告 | ✅ |
 
 mod greenmail_sync_test;
 mod sync_flow_test;
 mod full_sync_test;
 mod sync_manager_test;
+mod e2e_sync_test;
+mod condstore_test;
+mod full_sync_workflow_test;
 mod test_helpers;
