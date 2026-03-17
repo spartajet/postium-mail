@@ -471,4 +471,33 @@ mod tests {
         // 应该不 panic
         handler.cleanup_expired_verifiers();
     }
+
+    #[tokio::test]
+    async fn test_authorization_context_fields() {
+        let handler = OAuthHandler::new();
+        let provider = GmailProvider;
+
+        let context = handler
+            .get_authorization_url(&provider)
+            .await
+            .unwrap();
+
+        // 验证所有字段都不为空
+        assert!(!context.auth_url.is_empty());
+        assert!(!context.state.is_empty());
+        assert!(!context.code_verifier.is_empty());
+        assert_eq!(context.provider, "gmail");
+    }
+
+    #[test]
+    fn test_url_encode_function() {
+        // 测试 URL 编码功能
+        let input = "user@example.com";
+        let encoded = url_encode(input);
+
+        // 验证 @ 被编码
+        assert!(encoded.contains("%40"));
+        assert!(encoded.contains("user"));
+        assert!(encoded.contains("example.com"));
+    }
 }
