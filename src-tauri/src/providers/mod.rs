@@ -25,7 +25,8 @@ pub use provider_pool::ProviderPool;
 // 个人邮箱（阶段2使用）
 #[allow(unused_imports)]
 pub use personal::{
-    GmailProvider, OutlookProvider, YahooProvider, NativeProvider
+    GmailProvider, ICloudProvider, Mail163Provider, OutlookProvider,
+    QqMailProvider, YahooProvider, NativeProvider
 };
 
 // 企业邮箱（阶段2使用）
