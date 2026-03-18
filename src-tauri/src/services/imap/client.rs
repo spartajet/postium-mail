@@ -1252,7 +1252,11 @@ impl AsyncImapClient {
     }
 
     /// 检查邮箱是否有新邮件（轻量级）
-    pub async fn check_new_emails(&mut self, folder: &str, previous_count: usize) -> Result<(usize, bool)> {
+    pub async fn check_new_emails(
+        &mut self,
+        folder: &str,
+        previous_count: usize,
+    ) -> Result<(usize, bool)> {
         let session = self
             .session
             .as_mut()

@@ -114,12 +114,12 @@ pub struct NewEmailData {
 
 /// 通知统计
 #[derive(Clone, Debug, Default)]
-struct NotificationStats {
-    total_sent: usize,
-    total_deduped: usize,
-    total_merged: usize,
-    new_email_count: usize,
-    error_count: usize,
+pub struct NotificationStats {
+    pub total_sent: usize,
+    pub total_deduped: usize,
+    pub total_merged: usize,
+    pub new_email_count: usize,
+    pub error_count: usize,
 }
 
 impl NotificationManager {
