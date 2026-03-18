@@ -1189,6 +1189,93 @@ impl AsyncImapClient {
         // 返回 UID 列表，MODSEQ 为 None
         Ok(uids.iter().map(|&uid| (uid, None)).collect())
     }
+
+    // ========== IMAP IDLE 支持 (RFC 2177) ==========
+
+    /// 检查是否支持 IDLE 扩展
+    ///
+    /// IDLE 允许服务器推送新邮件通知，而不是客户端轮询。
+    pub async fn check_idle_support(&mut self) -> Result<bool> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        let capabilities = session
+            .capabilities()
+            .await
+            .map_err(|e| anyhow!("获取服务器能力失败: {}", e))?;
+
+        let has_idle = capabilities.iter().any(|cap| {
+            let cap_str = format!("{:?}", cap);
+            cap_str.to_ascii_uppercase().contains("IDLE") || cap_str == "Idle"
+        });
+
+        if has_idle {
+            tracing::info!("服务器支持 IDLE 扩展");
+        } else {
+            tracing::debug!("服务器不支持 IDLE 扩展");
+        }
+
+        Ok(has_idle)
+    }
+
+    /// 轮询降级策略
+    pub async fn polling_fallback(&mut self, folder: &str, last_uid: u32) -> Result<Vec<u32>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        session
+            .select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        let search_cmd = format!("UID {}:{}", last_uid + 1, "*");
+        let uids = session
+            .search(&search_cmd)
+            .await
+            .map_err(|e| anyhow!("搜索新邮件失败: {}", e))?;
+
+        let uid_list: Vec<u32> = uids.into_iter().collect();
+
+        if !uid_list.is_empty() {
+            tracing::info!(
+                "📩 轮询检测到 {} 封新邮件 (UIDs: {:?})",
+                uid_list.len(),
+                uid_list
+            );
+        }
+
+        Ok(uid_list)
+    }
+
+    /// 检查邮箱是否有新邮件（轻量级）
+    pub async fn check_new_emails(&mut self, folder: &str, previous_count: usize) -> Result<(usize, bool)> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        let status_response = session
+            .status(folder, "(MESSAGES)")
+            .await
+            .map_err(|e| anyhow!("获取文件夹状态失败: {}", e))?;
+
+        let current_count = status_response.exists as usize;
+        let has_new = current_count > previous_count;
+
+        if has_new {
+            tracing::info!(
+                "📬 检测到新邮件: {} (之前: {})",
+                current_count,
+                previous_count
+            );
+        }
+
+        Ok((current_count, has_new))
+    }
 }
 
 impl Default for AsyncImapClient {
