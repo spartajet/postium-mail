@@ -1,7 +1,7 @@
 mod client;
 mod condstore_helpers;
 mod error;
-mod idle_manager;
+pub mod idle_manager;
 mod parser;
 mod service;
 mod tests;
