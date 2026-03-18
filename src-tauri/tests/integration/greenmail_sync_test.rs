@@ -1,31 +1,27 @@
 // GreenMail 集成测试 - IMAP 同步功能
 //
 // 测试环境要求：
-// 1. 启动 GreenMail: docker-compose -f docker-compose.test.yml up -d
-// 2. 等待服务就绪: docker logs -f postmium-greenmail
-// 3. 运行测试: cargo test --test integration -- --ignored
+// 使用公网 GreenMail 服务器: 139.59.228.56:3143
+// 测试账号: testuser / testpass
 //
-// GreenMail 配置：
-// - IMAP: localhost:3143
-// - 测试账号: testuser / testpass
+// 运行测试: cargo test --test mod -- --ignored
 
 // 注意：集成测试需要与主项目使用相同的 crate 名称
 // 这里的 use 语句使用主项目的内部路径
 
-use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 
 // GreenMail 配置常量
-const GREENMAIL_HOST: &str = "localhost";
+const GREENMAIL_HOST: &str = "139.59.228.56";
 const GREENMAIL_IMAP_PORT: u16 = 3143;
 const GREENMAIL_USER: &str = "testuser";
 const GREENMAIL_PASS: &str = "testpass";
 
 /// 检查 GreenMail 是否运行
 async fn check_greenmail_running() -> bool {
-    match TcpListener::bind(format!("{}:{}", GREENMAIL_HOST, GREENMAIL_IMAP_PORT)).await {
-        Ok(_) => false, // 端口未被占用，GreenMail 未运行
-        Err(_) => true, // 端口被占用，GreenMail 可能正在运行
+    match TcpStream::connect(format!("{}:{}", GREENMAIL_HOST, GREENMAIL_IMAP_PORT)).await {
+        Ok(_) => true,  // 连接成功，GreenMail 正在运行
+        Err(_) => false, // 连接失败，GreenMail 未运行
     }
 }
 

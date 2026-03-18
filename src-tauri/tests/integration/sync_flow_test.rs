@@ -3,6 +3,7 @@
 // 测试完整的同步功能，包括文件夹同步、邮件同步等
 
 use crate::integration::test_helpers::{check_greenmail_running, GreenmailConfig};
+use tokio::time::Duration;
 
 #[tokio::test]
 #[ignore]
@@ -35,34 +36,73 @@ async fn test_greenmail_imap_capabilities() {
 
     match TcpStream::connect(format!("{}:{}", config.host, config.imap_port)).await {
         Ok(mut stream) => {
-            // 读取欢迎消息
+            // 读取欢迎消息 - 使用循环读取
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
-            let _welcome = String::from_utf8_lossy(&buffer);
+            let mut welcome_data = Vec::new();
+
+            // 尝试读取欢迎消息，最多 5 秒
+            let start = std::time::Instant::now();
+            while start.elapsed().as_secs() < 5 {
+                match stream.try_read(&mut buffer) {
+                    Ok(0) => break, // 连接关闭
+                    Ok(n) => {
+                        welcome_data.extend_from_slice(&buffer[..n]);
+                        let welcome = String::from_utf8_lossy(&welcome_data);
+                        if welcome.contains("* OK") || welcome.contains("OK") {
+                            println!("📩 欢迎消息: {}", welcome.trim());
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+
+            if welcome_data.is_empty() {
+                println!("⚠️  未收到欢迎消息，继续测试...");
+            }
 
             // 发送 CAPABILITY 命令
             let cmd = "A001 CAPABILITY\r\n";
             stream.write_all(cmd.as_bytes()).await.unwrap();
 
-            // 读取响应
-            let mut buffer = [0u8; 2048];
-            let n = stream.read(&mut buffer).await.unwrap();
-            let response = String::from_utf8_lossy(&buffer[..n]);
+            // 读取响应 - 使用循环读取
+            let mut response_data = Vec::new();
+            let start = std::time::Instant::now();
 
-            println!("📩 CAPABILITY 响应:\n{}", response);
+            while start.elapsed().as_secs() < 10 {
+                match stream.try_read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        response_data.extend_from_slice(&buffer[..n]);
+                        let response = String::from_utf8_lossy(&response_data);
+                        if response.contains("A001") {
+                            // 收到完整响应
+                            println!("📩 CAPABILITY 响应:\n{}", response);
 
-            // 验证响应包含 IMAP4rev1
-            assert!(response.contains("IMAP4rev1"), "应该支持 IMAP4rev1");
+                            // 验证响应包含 IMAP4rev1
+                            assert!(response.contains("IMAP4rev1"), "应该支持 IMAP4rev1");
 
-            // 检查是否支持 CONDSTORE（GreenMail 1.6.0 可能不支持）
-            let has_condstore = response.contains("CONDSTORE");
-            if has_condstore {
-                println!("✅ GreenMail 支持 CONDSTORE");
-            } else {
-                println!("ℹ️  GreenMail 不支持 CONDSTORE（这是预期的）");
+                            // 检查是否支持 CONDSTORE
+                            let has_condstore = response.contains("CONDSTORE");
+                            if has_condstore {
+                                println!("✅ GreenMail 支持 CONDSTORE");
+                            } else {
+                                println!("ℹ️  GreenMail 不支持 CONDSTORE（这是预期的）");
+                            }
+
+                            println!("✅ CAPABILITY 命令执行成功");
+                            return;
+                        }
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
             }
 
-            println!("✅ CAPABILITY 命令执行成功");
+            panic!("❌ 读取 CAPABILITY 响应超时或响应不完整");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -89,12 +129,12 @@ async fn test_imap_list_folders() {
         Ok(mut stream) => {
             // 读取欢迎消息
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 登录
             let login_cmd = format!("A001 LOGIN {} {}\r\n", config.username, config.password);
             stream.write_all(login_cmd.as_bytes()).await.unwrap();
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 发送 LIST 命令
             let list_cmd = "A002 LIST \"\" *\r\n";
@@ -150,12 +190,12 @@ async fn test_imap_select_inbox() {
         Ok(mut stream) => {
             // 读取欢迎消息
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 登录
             let login_cmd = format!("A001 LOGIN {} {}\r\n", config.username, config.password);
             stream.write_all(login_cmd.as_bytes()).await.unwrap();
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 发送 SELECT INBOX 命令
             let select_cmd = "A002 SELECT INBOX\r\n";
@@ -215,12 +255,12 @@ async fn test_imap_search_all() {
         Ok(mut stream) => {
             // 读取欢迎消息
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 登录
             let login_cmd = format!("A001 LOGIN {} {}\r\n", config.username, config.password);
             stream.write_all(login_cmd.as_bytes()).await.unwrap();
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // SELECT INBOX
             let select_cmd = "A002 SELECT INBOX\r\n";
@@ -302,12 +342,12 @@ async fn test_imap_noop_command() {
         Ok(mut stream) => {
             // 读取欢迎消息
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 登录
             let login_cmd = format!("A001 LOGIN {} {}\r\n", config.username, config.password);
             stream.write_all(login_cmd.as_bytes()).await.unwrap();
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 发送 NOOP 命令
             let noop_cmd = "A002 NOOP\r\n";
@@ -349,12 +389,12 @@ async fn test_imap_logout() {
         Ok(mut stream) => {
             // 读取欢迎消息
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 登录
             let login_cmd = format!("A001 LOGIN {} {}\r\n", config.username, config.password);
             stream.write_all(login_cmd.as_bytes()).await.unwrap();
-            stream.read(&mut buffer).await.unwrap();
+            let _ = stream.read(&mut buffer).await.unwrap();
 
             // 发送 LOGOUT 命令
             let logout_cmd = "A002 LOGOUT\r\n";
@@ -416,7 +456,7 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!("2️⃣  登录: {}", response.lines().last().unwrap_or(&""));
+            println!("2️⃣  登录: {}", response.lines().last().unwrap_or(""));
             assert!(response.contains("A001 OK"), "登录应该成功");
 
             // 3. CAPABILITY
@@ -466,7 +506,7 @@ async fn test_complete_imap_session() {
             }
             println!(
                 "5️⃣  SELECT INBOX: {}",
-                response.lines().last().unwrap_or(&"")
+                response.lines().last().unwrap_or("")
             );
             assert!(response.contains("A004 OK"), "SELECT 应该成功");
 

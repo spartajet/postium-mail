@@ -21,11 +21,12 @@ pub async fn init_test_db(db: &DbConn) {
 
 /// 检查 GreenMail 是否运行
 pub async fn check_greenmail_running() -> bool {
-    use tokio::net::TcpListener;
+    use tokio::net::TcpStream;
 
-    match TcpListener::bind("localhost:3143").await {
-        Ok(_) => false, // 端口未被占用，GreenMail 未运行
-        Err(_) => true, // 端口被占用，GreenMail 可能正在运行
+    // 使用公网 GreenMail 服务器
+    match TcpStream::connect("139.59.228.56:3143").await {
+        Ok(_) => true,  // 连接成功，GreenMail 正在运行
+        Err(_) => false, // 连接失败，GreenMail 未运行
     }
 }
 
@@ -40,7 +41,7 @@ pub struct GreenmailConfig {
 impl Default for GreenmailConfig {
     fn default() -> Self {
         Self {
-            host: "localhost",
+            host: "139.59.228.56",
             imap_port: 3143,
             username: "testuser",
             password: "testpass",
@@ -49,12 +50,13 @@ impl Default for GreenmailConfig {
 }
 
 /// 等待 GreenMail 就绪
+#[allow(dead_code)]
 pub async fn wait_for_greenmail(max_seconds: u64) -> bool {
     use tokio::net::TcpStream;
     use tokio::time::{sleep, Duration};
 
     for _ in 0..max_seconds {
-        if TcpStream::connect("localhost:3143").await.is_ok() {
+        if TcpStream::connect("139.59.228.56:3143").await.is_ok() {
             return true;
         }
         sleep(Duration::from_secs(1)).await;
@@ -79,7 +81,7 @@ mod tests {
     #[test]
     fn test_greenmail_config_default() {
         let config = GreenmailConfig::default();
-        assert_eq!(config.host, "localhost");
+        assert_eq!(config.host, "139.59.228.56");
         assert_eq!(config.imap_port, 3143);
         assert_eq!(config.username, "testuser");
         assert_eq!(config.password, "testpass");
