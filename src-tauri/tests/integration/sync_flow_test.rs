@@ -28,8 +28,8 @@ async fn test_greenmail_imap_capabilities() {
 
     println!("🔍 测试 IMAP CAPABILITY 命令...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -80,8 +80,8 @@ async fn test_imap_list_folders() {
 
     println!("📁 测试 LIST 命令...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -141,8 +141,8 @@ async fn test_imap_select_inbox() {
 
     println!("📥 测试 SELECT INBOX 命令...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -206,8 +206,8 @@ async fn test_imap_search_all() {
 
     println!("🔍 测试 SEARCH ALL 命令...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -263,7 +263,8 @@ async fn test_imap_search_all() {
             if all_responses.contains("* SEARCH") {
                 println!("✓ 检测到 SEARCH 结果");
                 // 提取 UID 列表
-                let search_line: Vec<&str> = all_responses.lines()
+                let search_line: Vec<&str> = all_responses
+                    .lines()
                     .filter(|line| line.contains("* SEARCH"))
                     .collect();
 
@@ -292,8 +293,8 @@ async fn test_imap_noop_command() {
 
     println!("💤 测试 NOOP 命令（保持连接活跃）...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -339,8 +340,8 @@ async fn test_imap_logout() {
 
     println!("👋 测试 LOGOUT 命令...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -366,7 +367,10 @@ async fn test_imap_logout() {
             println!("📩 LOGOUT 响应: {}", response);
 
             // 验证 LOGOUT 成功
-            assert!(response.contains("A002 OK") || response.contains("BYE"), "LOGOUT 应该成功");
+            assert!(
+                response.contains("A002 OK") || response.contains("BYE"),
+                "LOGOUT 应该成功"
+            );
 
             println!("✅ LOGOUT 命令执行成功");
         }
@@ -386,8 +390,8 @@ async fn test_complete_imap_session() {
 
     println!("🔄 测试完整的 IMAP 会话流程...");
 
-    use tokio::net::TcpStream;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     let config = GreenmailConfig::default();
 
@@ -425,7 +429,14 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!("3️⃣  CAPABILITY: {}", response.lines().filter(|l| l.contains("CAPABILITY")).collect::<Vec<_>>().join(" "));
+            println!(
+                "3️⃣  CAPABILITY: {}",
+                response
+                    .lines()
+                    .filter(|l| l.contains("CAPABILITY"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
             assert!(response.contains("A002 OK"), "CAPABILITY 应该成功");
 
             // 4. LIST
@@ -453,7 +464,10 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!("5️⃣  SELECT INBOX: {}", response.lines().last().unwrap_or(&""));
+            println!(
+                "5️⃣  SELECT INBOX: {}",
+                response.lines().last().unwrap_or(&"")
+            );
             assert!(response.contains("A004 OK"), "SELECT 应该成功");
 
             // 6. SEARCH ALL
@@ -466,7 +480,14 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!("6️⃣  SEARCH ALL: {}", response.lines().filter(|l| l.contains("SEARCH")).collect::<Vec<_>>().join(" "));
+            println!(
+                "6️⃣  SEARCH ALL: {}",
+                response
+                    .lines()
+                    .filter(|l| l.contains("SEARCH"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
             assert!(response.contains("A005 OK"), "SEARCH 应该成功");
 
             // 7. NOOP
@@ -483,7 +504,10 @@ async fn test_complete_imap_session() {
             let n = stream.read(&mut buffer).await.unwrap();
             response.push_str(&String::from_utf8_lossy(&buffer[..n]));
             println!("8️⃣  LOGOUT: {}", response.trim());
-            assert!(response.contains("A007 OK") || response.contains("BYE"), "LOGOUT 应该成功");
+            assert!(
+                response.contains("A007 OK") || response.contains("BYE"),
+                "LOGOUT 应该成功"
+            );
 
             println!("✅ 完整 IMAP 会话流程成功");
         }
