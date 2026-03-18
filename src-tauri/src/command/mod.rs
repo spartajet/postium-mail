@@ -5,6 +5,7 @@
 mod account;
 mod connection;
 mod email;
+mod flow_engine;
 mod folder;
 mod oauth;
 mod sync;
@@ -12,17 +13,19 @@ mod sync;
 pub use account::*;
 pub use connection::*;
 pub use email::*;
+pub use flow_engine::*;
 pub use folder::*;
 pub use oauth::*;
 pub use sync::*;
 
 use sea_orm::DbConn;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
+use tokio::sync::Mutex;
 
 use crate::services;
 
 /// 全局数据库连接状态
-pub struct DatabaseState(pub Arc<Mutex<DbConn>>);
+pub struct DatabaseState(pub Arc<StdMutex<DbConn>>);
 
 impl DatabaseState {
     pub fn clone_conn(&self) -> DbConn {
@@ -41,3 +44,15 @@ pub struct KeyringState {
 
 /// OAuth 服务状态
 pub struct OAuthState(pub services::oauth_service::OAuthService);
+
+/// FlowEngine 状态
+///
+/// 管理流程引擎的全局单例
+pub struct FlowEngineState(pub Arc<Mutex<crate::engine::FlowEngine>>);
+
+impl FlowEngineState {
+    /// 克隆引擎实例
+    pub fn clone_engine(&self) -> Arc<Mutex<crate::engine::FlowEngine>> {
+        Arc::clone(&self.0)
+    }
+}
