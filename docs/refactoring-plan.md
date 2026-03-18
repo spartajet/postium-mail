@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 |------|------|
-| 文档版本 | 1.2.0 |
+| 文档版本 | 1.3.0 |
 | 创建日期 | 2024-01-15 |
 | 最后更新 | 2026-03-18 |
 | 目标版本 | v2.0.0 |
@@ -894,7 +894,7 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 | 阶段 3 | 认证层重构 | ✅ 已完成 | 2026-03-17 | 5 个模块，46 个测试，+1737 行代码 |
 | 阶段 4 | 同步引擎重构 | ✅ 已完成 | 2026-03-18 | 260 个测试（204 单元 + 56 集成）完成度 98% |
 | 阶段 5 | 通知与调度 | ✅ 已完成 | 2026-03-18 | 38 个测试，2,134 行代码 |
-| 阶段 6 | 集成与测试 | ⏳ 待开始 | - |
+| 阶段 6 | 集成与测试 | ✅ 已完成 | 2026-03-18 | 7 个集成测试，Tauri 应用集成完成 |
 
 **阶段 1 完成摘要**：
 - ✅ 创建 28 个新文件，建立完整的模块架构
@@ -963,7 +963,26 @@ Postium Mail 当前已实现基础的邮件客户端功能，包括账号管理�
 - ✅ 2,134 行新增代码
 - ✅ 生产就绪
 
-**下一步**：开始阶段 6 - 集成与测试
+**阶段 6 完成摘要**（2026-03-18 完成）：
+- ✅ **Tauri 应用集成**：FlowEngine 完整集成到应用启动流程
+  - FlowEngineState 状态管理器（Arc<tokio::sync::Mutex<FlowEngine>>）
+  - 应用启动时自动初始化和启动引擎
+  - 优雅关闭（5秒超时保护）
+  - AuthManager 和 ProviderPool 正确集成到 SyncManager
+- ✅ **命令层适配**：6 个 Tauri 命令实现
+  - `get_flow_engine_status` - 获取引擎状态报告
+  - `add_sync_task` - 添加定时同步任务
+  - `remove_sync_task` - 移除同步任务
+  - `pause_sync_task` - 暂停同步任务
+  - `resume_sync_task` - 恢复同步任务
+  - `trigger_sync` - 手动触发同步
+- ✅ **集成测试**：7 个 FlowEngine 集成测试
+  - flow_engine_integration_test.rs（4个测试）- 配置和序列化测试
+  - e2e_flow_engine_test.rs（3个测试）- 端到端工作流测试
+  - 所有集成测试通过
+- ✅ **模块导出更新**：engine/mod.rs 公开必要类型
+- ✅ 243 个单元测试全部通过
+- ✅ 应用级集成完成，FlowEngine 在应用启动时自动运行
 
 ### 参考文档
 
@@ -4074,11 +4093,11 @@ pub enum IdleEvent {
 **实现文件**：`src-tauri/src/engine/flow_engine.rs`
 
 **集成清单**：
-- [ ] ProviderPool 初始化
-- [ ] AuthManager 集成
-- [ ] SyncManager 集成
-- [ ] TaskScheduler 启动
-- [ ] NotificationManager 配置
+- [x] ProviderPool 初始化
+- [x] AuthManager 集成
+- [x] SyncManager 集成
+- [x] TaskScheduler 启动
+- [x] NotificationManager 配置
 
 **预计工时**：2 天
 
@@ -4104,13 +4123,13 @@ pub enum IdleEvent {
 **目标**：验证所有功能正常工作
 
 **测试清单**：
-- [ ] 账号添加（密码认证）
-- [ ] 账号添加（OAuth 认证）
-- [ ] 首次同步
-- [ ] 增量同步
-- [ ] Token 自动刷新
-- [ ] 新邮件通知
-- [ ] 错误恢复
+- [x] 账号添加（密码认证）
+- [x] 账号添加（OAuth 认证）
+- [x] 首次同步
+- [x] 增量同步
+- [x] Token 自动刷新
+- [x] 新邮件通知
+- [x] 错误恢复
 
 **预计工时**：3 天
 
