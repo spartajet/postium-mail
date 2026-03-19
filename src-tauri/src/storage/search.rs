@@ -1,3 +1,7 @@
+//! 邮件全文搜索
+//!
+//! 提供基于 SQLite FTS5 的邮件全文搜索功能
+
 use crate::models::email;
 use anyhow::{Context, Result};
 use sea_orm::{

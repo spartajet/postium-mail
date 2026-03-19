@@ -2,7 +2,6 @@
 
 use super::DatabaseState;
 use crate::models;
-use crate::services;
 use crate::storage;
 
 #[tauri::command]
@@ -63,10 +62,9 @@ pub async fn search_emails_fts(
     query: String,
     account_id: Option<i32>,
     limit: Option<u64>,
-) -> Result<Vec<services::search_service::SearchResult>, String> {
+) -> Result<Vec<storage::SearchResult>, String> {
     let db = state.clone_conn();
-    // 暂时保留旧的搜索服务
-    services::search_service::SearchService::search_emails(&db, account_id, &query, limit)
+    storage::SearchService::search_emails(&db, account_id, &query, limit)
         .await
         .map_err(|e| e.to_string())
 }

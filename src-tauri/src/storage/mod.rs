@@ -7,6 +7,7 @@ pub mod cache;
 pub mod database;
 pub mod emails;
 pub mod folders;
+pub mod search;
 
 // 重新导出常用类型
 pub use accounts::{AccountRepository, CreateAccountRequest, UpdateAccountRequest};
@@ -16,3 +17,4 @@ pub use cache::{
 pub use database::{DatabaseConnection, Repository};
 pub use emails::{EmailListResponse, EmailRepository};
 pub use folders::FolderRepository;
+pub use search::{SearchResult, SearchService};

@@ -5,7 +5,6 @@ mod crypto;
 mod database;
 mod migration;
 mod models;
-pub mod services;
 
 // 新增模块
 pub mod auth;  // 公开以支持测试

@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::error::Result;
-use crate::services::operations::{OfflineOperation, OperationType};
+use crate::error::{Result, StorageError};
+use super::operation_manager::{OfflineOperation, OperationType};
 
 /// 冲突类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -226,7 +226,7 @@ impl Default for ServerState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::operations::OperationStatus;
+    use crate::engine::operation_manager::OperationStatus;
 
     fn create_test_operation(id: i64, op_type: OperationType) -> OfflineOperation {
         OfflineOperation {
