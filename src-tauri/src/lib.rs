@@ -3,7 +3,6 @@ mod command;
 pub mod config;
 mod crypto;
 mod database;
-mod models;
 
 // 新增模块
 pub mod auth;  // 公开以支持测试

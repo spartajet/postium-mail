@@ -3,7 +3,7 @@
 //! 管理同步过程中的错误记录和状态
 
 use crate::error::{MailError, Result};
-use crate::models::sync_error;
+use crate::storage::models::sync_error;
 use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, QueryOrder, QuerySelect, sea_query::Expr};
 use std::sync::Arc;
 use chrono::Utc;

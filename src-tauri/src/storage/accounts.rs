@@ -8,7 +8,7 @@ use tauri_plugin_keyring::KeyringExt;
 
 use crate::crypto::{self, OAuthToken, KEYRING_SERVICE};
 use crate::error::{Result, StorageError};
-use crate::models::account;
+use crate::storage::models::account;
 use crate::providers::ProviderPool;
 
 /// 账号仓库

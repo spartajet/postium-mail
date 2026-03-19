@@ -5,7 +5,7 @@ use tauri_plugin_keyring::KeyringExt;
 
 use super::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
 use crate::crypto;
-use crate::models;
+use crate::storage::models;
 use crate::protocols::smtp;
 use crate::storage;
 use crate::sync;

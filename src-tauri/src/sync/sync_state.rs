@@ -3,7 +3,7 @@
 //! 管理同步状态，包括最高 MODSEQ、UID 等元数据
 
 use crate::error::{MailError, Result};
-use crate::models::sync_state;
+use crate::storage::models::sync_state;
 use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, sea_query::Expr, ExprTrait};
 use std::sync::Arc;
 use chrono::Utc;

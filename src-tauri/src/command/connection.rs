@@ -1,7 +1,7 @@
 //! 连接测试 Commands
 
 use super::KeyringState;
-use crate::models;
+use crate::storage::models;
 use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
 
 #[tauri::command]

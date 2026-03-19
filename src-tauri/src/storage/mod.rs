@@ -8,6 +8,7 @@ pub mod database;
 pub mod emails;
 pub mod folders;
 pub mod migration;
+pub mod models;
 pub mod search;
 
 // 重新导出常用类型
@@ -18,4 +19,5 @@ pub use cache::{
 pub use database::{DatabaseConnection, Repository};
 pub use emails::{EmailListResponse, EmailRepository};
 pub use folders::FolderRepository;
+pub use models::{account, attachment, email, folder, sync_error, sync_state};
 pub use search::{SearchResult, SearchService};

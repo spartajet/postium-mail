@@ -6,7 +6,7 @@ use sea_orm::{EntityTrait, QueryOrder, ColumnTrait, QueryFilter, DbConn, Conditi
 use sea_orm::ActiveModelTrait;
 
 use crate::error::{Result, StorageError};
-use crate::models::folder;
+use crate::storage::models::folder;
 
 /// 文件夹仓库
 ///
