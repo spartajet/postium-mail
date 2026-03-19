@@ -1,4 +1,8 @@
 // 测试163邮箱的文件夹名称识别
+
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 #[test]
 fn test_decode_imap_utf7() {
     // 测试 UTF-7 编码的中文文件夹名称识别
@@ -57,5 +61,5 @@ fn test_decode_imap_utf7() {
     assert_eq!(determine_standard_name("Spam"), "spam");
     assert_eq!(determine_standard_name("Trash"), "trash");
 
-    println!("✅ 所有文件夹名称识别测试通过");
+    test_success!("所有文件夹名称识别测试通过");
 }

@@ -95,9 +95,27 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
     }
 }
 
+/// 初始化 tracing 日志系统
+///
+/// 使用环境变量 `RUST_LOG` 控制日志级别，例如：
+/// - `RUST_LOG=info` - 只显示 INFO 及以上级别
+/// - `RUST_LOG=debug` - 显示 DEBUG 及以上级别（开发调试用）
+/// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
+fn init_tracing() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)  // 默认级别
+        .with_target(true)  // 显示模块路径，便于调试
+        .with_thread_ids(false)  // 线程ID通常不需要
+        .with_file(false)  // 不显示文件名，减少日志冗余
+        .with_line_number(false)  // 不显示行号
+        .compact()  // 使用紧凑格式
+        .init();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt::init();
+    // 初始化日志系统
+    init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {

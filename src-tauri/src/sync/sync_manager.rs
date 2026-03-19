@@ -12,6 +12,7 @@ use sea_orm::DbConn;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
+use tracing::instrument;
 
 /// 同步进度信息
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,6 +94,7 @@ impl SyncManager {
     /// # 返回
     ///
     /// 返回同步结果
+    #[instrument(skip(self), fields(account_id))]
     pub async fn sync_account(&self, account_id: i32) -> Result<SyncResult> {
         let start_time = std::time::Instant::now();
 

@@ -7,6 +7,7 @@ use crate::storage::models::email;
 use crate::sync::change_detector::EmailFlags;
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
+use tracing::instrument;
 
 /// 邮件处理结果
 #[derive(Debug, Clone)]
@@ -179,11 +180,19 @@ impl MailProcessor {
     ///
     /// * `account_id` - 账号 ID
     /// * `folder` - 文件夹名称
-    /// * `mails` - 邮件数据列表
+    /// * `mails` - 邮件数据列表（注意：已跳过，避免记录大量数据）
     ///
     /// # 返回
     ///
     /// 返回处理结果
+    #[instrument(
+        skip(self, mails),
+        fields(
+            account_id,
+            folder,
+            mail_count = mails.len()
+        )
+    )]
     pub async fn process_mails(
         &self,
         account_id: i32,

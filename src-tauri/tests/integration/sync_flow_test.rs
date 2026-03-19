@@ -5,10 +5,13 @@
 use crate::integration::test_helpers::{check_greenmail_running, GreenmailConfig};
 use tokio::time::Duration;
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 #[tokio::test]
 #[ignore]
 async fn test_database_initialization() {
-    println!("🗄️  测试数据库初始化...");
+    test_progress!("测试数据库初始化");
 
     use crate::integration::test_helpers::{create_test_db, init_test_db};
 
@@ -16,18 +19,18 @@ async fn test_database_initialization() {
     init_test_db(&db).await;
 
     // 验证数据库已创建
-    println!("✅ 数据库初始化成功");
+    test_success!("数据库初始化成功");
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_greenmail_imap_capabilities() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("🔍 测试 IMAP CAPABILITY 命令...");
+    test_progress!("测试 IMAP CAPABILITY 命令");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -49,7 +52,7 @@ async fn test_greenmail_imap_capabilities() {
                         welcome_data.extend_from_slice(&buffer[..n]);
                         let welcome = String::from_utf8_lossy(&welcome_data);
                         if welcome.contains("* OK") || welcome.contains("OK") {
-                            println!("📩 欢迎消息: {}", welcome.trim());
+                            test_info!("📩 欢迎消息: {}", welcome.trim());
                             break;
                         }
                     }
@@ -60,7 +63,7 @@ async fn test_greenmail_imap_capabilities() {
             }
 
             if welcome_data.is_empty() {
-                println!("⚠️  未收到欢迎消息，继续测试...");
+                test_warn!("未收到欢迎消息，继续测试...");
             }
 
             // 发送 CAPABILITY 命令
@@ -79,7 +82,7 @@ async fn test_greenmail_imap_capabilities() {
                         let response = String::from_utf8_lossy(&response_data);
                         if response.contains("A001") {
                             // 收到完整响应
-                            println!("📩 CAPABILITY 响应:\n{}", response);
+                            test_info!(CAPABILITY 响应:\n{}", response);
 
                             // 验证响应包含 IMAP4rev1
                             assert!(response.contains("IMAP4rev1"), "应该支持 IMAP4rev1");
@@ -87,12 +90,12 @@ async fn test_greenmail_imap_capabilities() {
                             // 检查是否支持 CONDSTORE
                             let has_condstore = response.contains("CONDSTORE");
                             if has_condstore {
-                                println!("✅ GreenMail 支持 CONDSTORE");
+                                test_success!(GreenMail 支持 CONDSTORE");
                             } else {
-                                println!("ℹ️  GreenMail 不支持 CONDSTORE（这是预期的）");
+                                test_info!(GreenMail 不支持 CONDSTORE（这是预期的）");
                             }
 
-                            println!("✅ CAPABILITY 命令执行成功");
+                            test_success!(CAPABILITY 命令执行成功");
                             return;
                         }
                     }
@@ -114,11 +117,11 @@ async fn test_greenmail_imap_capabilities() {
 #[ignore]
 async fn test_imap_list_folders() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("📁 测试 LIST 命令...");
+    test_progress!("测试 LIST 命令...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -158,12 +161,12 @@ async fn test_imap_list_folders() {
                 }
             }
 
-            println!("📩 LIST 响应:\n{}", all_responses);
+            test_info!(LIST 响应:\n{}", all_responses);
 
             // 验证 INBOX 存在
             assert!(all_responses.contains("INBOX"), "应该有 INBOX 文件夹");
 
-            println!("✅ LIST 命令执行成功");
+            test_success!(LIST 命令执行成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -175,11 +178,11 @@ async fn test_imap_list_folders() {
 #[ignore]
 async fn test_imap_select_inbox() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("📥 测试 SELECT INBOX 命令...");
+    test_progress!("测试 SELECT INBOX 命令...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -218,17 +221,17 @@ async fn test_imap_select_inbox() {
                 }
             }
 
-            println!("📩 SELECT 响应:\n{}", all_responses);
+            test_info!(SELECT 响应:\n{}", all_responses);
 
             // 验证 SELECT 成功
             assert!(all_responses.contains("A002 OK"), "SELECT 应该成功");
 
             // 检查邮件数量
             if all_responses.contains("EXISTS") {
-                println!("✓ 检测到 EXISTS 响应（邮件数量）");
+                test_info!(检测到 EXISTS 响应（邮件数量）");
             }
 
-            println!("✅ SELECT INBOX 成功");
+            test_success!(SELECT INBOX 成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -240,11 +243,11 @@ async fn test_imap_select_inbox() {
 #[ignore]
 async fn test_imap_search_all() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("🔍 测试 SEARCH ALL 命令...");
+    test_progress!("测试 SEARCH ALL 命令...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -294,14 +297,14 @@ async fn test_imap_search_all() {
                 }
             }
 
-            println!("📩 SEARCH 响应:\n{}", all_responses);
+            test_info!(SEARCH 响应:\n{}", all_responses);
 
             // 验证 SEARCH 成功
             assert!(all_responses.contains("A003 OK"), "SEARCH 应该成功");
 
             // 检查是否有邮件
             if all_responses.contains("* SEARCH") {
-                println!("✓ 检测到 SEARCH 结果");
+                test_info!(检测到 SEARCH 结果");
                 // 提取 UID 列表
                 let search_line: Vec<&str> = all_responses
                     .lines()
@@ -309,13 +312,13 @@ async fn test_imap_search_all() {
                     .collect();
 
                 if let Some(line) = search_line.first() {
-                    println!("📊 邮件列表: {}", line);
+                    test_info!("邮件列表: {}", line);
                 }
             } else {
-                println!("ℹ️  INBOX 为空（没有邮件）");
+                test_info!(INBOX 为空（没有邮件）");
             }
 
-            println!("✅ SEARCH ALL 成功");
+            test_success!(SEARCH ALL 成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -327,11 +330,11 @@ async fn test_imap_search_all() {
 #[ignore]
 async fn test_imap_noop_command() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("💤 测试 NOOP 命令（保持连接活跃）...");
+    test_progress!("测试 NOOP 命令（保持连接活跃）...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -357,12 +360,12 @@ async fn test_imap_noop_command() {
             let n = stream.read(&mut buffer).await.unwrap();
             let response = String::from_utf8_lossy(&buffer[..n]);
 
-            println!("📩 NOOP 响应: {}", response);
+            test_info!(NOOP 响应: {}", response);
 
             // 验证 NOOP 成功
             assert!(response.contains("A002 OK"), "NOOP 应该成功");
 
-            println!("✅ NOOP 命令执行成功");
+            test_success!(NOOP 命令执行成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -374,11 +377,11 @@ async fn test_imap_noop_command() {
 #[ignore]
 async fn test_imap_logout() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("👋 测试 LOGOUT 命令...");
+    test_progress!("测试 LOGOUT 命令...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -404,7 +407,7 @@ async fn test_imap_logout() {
             let n = stream.read(&mut buffer).await.unwrap();
             let response = String::from_utf8_lossy(&buffer[..n]);
 
-            println!("📩 LOGOUT 响应: {}", response);
+            test_info!(LOGOUT 响应: {}", response);
 
             // 验证 LOGOUT 成功
             assert!(
@@ -412,7 +415,7 @@ async fn test_imap_logout() {
                 "LOGOUT 应该成功"
             );
 
-            println!("✅ LOGOUT 命令执行成功");
+            test_success!(LOGOUT 命令执行成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);
@@ -424,11 +427,11 @@ async fn test_imap_logout() {
 #[ignore]
 async fn test_complete_imap_session() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
-    println!("🔄 测试完整的 IMAP 会话流程...");
+    test_progress!("测试完整的 IMAP 会话流程...");
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -442,7 +445,7 @@ async fn test_complete_imap_session() {
             // 1. 读取欢迎消息
             let n = stream.read(&mut buffer).await.unwrap();
             let welcome = String::from_utf8_lossy(&buffer[..n]);
-            println!("1️⃣  欢迎消息: {}", welcome.trim());
+            test_info!("1️⃣  欢迎消息: {}", welcome.trim());
             assert!(welcome.contains("* OK"), "应该收到欢迎消息");
 
             // 2. 登录
@@ -456,7 +459,7 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!("2️⃣  登录: {}", response.lines().last().unwrap_or(""));
+            test_info!("2️⃣  登录: {}", response.lines().last().unwrap_or(""));
             assert!(response.contains("A001 OK"), "登录应该成功");
 
             // 3. CAPABILITY
@@ -469,7 +472,7 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!(
+            test_info!(
                 "3️⃣  CAPABILITY: {}",
                 response
                     .lines()
@@ -490,7 +493,7 @@ async fn test_complete_imap_session() {
                 }
             }
             let folder_count = response.lines().filter(|l| l.contains("LIST")).count();
-            println!("4️⃣  LIST: 找到 {} 个文件夹", folder_count);
+            test_info!("4️⃣  LIST: 找到 {} 个文件夹", folder_count);
             assert!(response.contains("INBOX"), "应该有 INBOX");
             assert!(response.contains("A003 OK"), "LIST 应该成功");
 
@@ -504,7 +507,7 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!(
+            test_info!(
                 "5️⃣  SELECT INBOX: {}",
                 response.lines().last().unwrap_or("")
             );
@@ -520,7 +523,7 @@ async fn test_complete_imap_session() {
                     break;
                 }
             }
-            println!(
+            test_info!(
                 "6️⃣  SEARCH ALL: {}",
                 response
                     .lines()
@@ -535,7 +538,7 @@ async fn test_complete_imap_session() {
             response.clear();
             let n = stream.read(&mut buffer).await.unwrap();
             response.push_str(&String::from_utf8_lossy(&buffer[..n]));
-            println!("7️⃣  NOOP: {}", response.trim());
+            test_info!("7️⃣  NOOP: {}", response.trim());
             assert!(response.contains("A006 OK"), "NOOP 应该成功");
 
             // 8. LOGOUT
@@ -543,13 +546,13 @@ async fn test_complete_imap_session() {
             response.clear();
             let n = stream.read(&mut buffer).await.unwrap();
             response.push_str(&String::from_utf8_lossy(&buffer[..n]));
-            println!("8️⃣  LOGOUT: {}", response.trim());
+            test_info!("8️⃣  LOGOUT: {}", response.trim());
             assert!(
                 response.contains("A007 OK") || response.contains("BYE"),
                 "LOGOUT 应该成功"
             );
 
-            println!("✅ 完整 IMAP 会话流程成功");
+            test_success!(完整 IMAP 会话流程成功");
         }
         Err(e) => {
             panic!("❌ 无法连接到 GreenMail: {}", e);

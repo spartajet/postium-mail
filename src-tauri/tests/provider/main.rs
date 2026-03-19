@@ -13,6 +13,10 @@
 
 use std::env;
 
+// 引入测试辅助模块
+mod test_tracing;
+mod test_macros;
+
 /// 测试账号配置
 #[derive(Debug, Clone)]
 pub struct ProviderTestConfig {
@@ -113,20 +117,23 @@ impl Email163Config {
 }
 
 fn main() {
-    println!("Postium Mail 服务商测试");
-    println!();
-    println!("需要配置环境变量:");
-    println!();
-    println!("个人邮箱:");
-    println!("  GMAIL_EMAIL / GMAIL_APP_PASSWORD");
-    println!("  OUTLOOK_EMAIL / OUTLOOK_APP_PASSWORD");
-    println!("  EMAIL_163_ADDR / EMAIL_163_PASS");
-    println!("  EMAIL_QQ_ADDR / EMAIL_QQ_PASS");
-    println!();
-    println!("企业邮箱:");
-    println!("  MICROSOFT_365_EMAIL / MICROSOFT_365_PASSWORD");
-    println!("  GOOGLE_WORKSPACE_EMAIL / GOOGLE_WORKSPACE_PASSWORD");
-    println!();
+    // 初始化测试环境 tracing
+    test_tracing::init_test_tracing();
+
+    test_section!("Postium Mail 服务商测试");
+    tracing::info!("");
+    test_section!("需要配置环境变量");
+    tracing::info!("");
+    tracing::info!("个人邮箱:");
+    tracing::info!("  GMAIL_EMAIL / GMAIL_APP_PASSWORD");
+    tracing::info!("  OUTLOOK_EMAIL / OUTLOOK_APP_PASSWORD");
+    tracing::info!("  EMAIL_163_ADDR / EMAIL_163_PASS");
+    tracing::info!("  EMAIL_QQ_ADDR / EMAIL_QQ_PASS");
+    tracing::info!("");
+    tracing::info!("企业邮箱:");
+    tracing::info!("  MICROSOFT_365_EMAIL / MICROSOFT_365_PASSWORD");
+    tracing::info!("  GOOGLE_WORKSPACE_EMAIL / GOOGLE_WORKSPACE_PASSWORD");
+    tracing::info!("");
 
     // 检查是否配置了环境变量
     let has_config = env::vars().any(|(k, _)| {
@@ -138,10 +145,10 @@ fn main() {
     });
 
     if has_config {
-        println!("✓ 检测到环境变量配置");
+        test_success!("检测到环境变量配置");
     } else {
-        println!("⚠ 未检测到环境变量配置");
-        println!("  部分测试将被跳过");
+        test_warn!("未检测到环境变量配置");
+        tracing::info!("  部分测试将被跳过");
     }
 }
 

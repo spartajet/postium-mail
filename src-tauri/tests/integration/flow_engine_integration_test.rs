@@ -2,10 +2,13 @@
 //!
 //! 测试 FlowEngine 的数据结构和配置
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 /// 测试 FlowEngineConfig 默认值
 #[tokio::test]
 async fn test_flow_engine_config_default() {
-    println!("⚙️ 测试 FlowEngineConfig 默认值...");
+    test_progress!("测试 FlowEngineConfig 默认值");
 
     use postium_mail_lib::engine::FlowEngineConfig;
 
@@ -17,19 +20,19 @@ async fn test_flow_engine_config_default() {
     assert_eq!(config.default_sync_interval_minutes, 15, "默认同步间隔应为15分钟");
     assert_eq!(config.idle_polling_interval_secs, 300, "默认轮询间隔应为300秒");
 
-    println!("  - enable_task_scheduler: {}", config.enable_task_scheduler);
-    println!("  - enable_notification_manager: {}", config.enable_notification_manager);
-    println!("  - enable_idle_monitoring: {}", config.enable_idle_monitoring);
-    println!("  - default_sync_interval_minutes: {}", config.default_sync_interval_minutes);
-    println!("  - idle_polling_interval_secs: {}", config.idle_polling_interval_secs);
+    test_info!("enable_task_scheduler: {}", config.enable_task_scheduler);
+    test_info!("enable_notification_manager: {}", config.enable_notification_manager);
+    test_info!("enable_idle_monitoring: {}", config.enable_idle_monitoring);
+    test_info!("default_sync_interval_minutes: {}", config.default_sync_interval_minutes);
+    test_info!("idle_polling_interval_secs: {}", config.idle_polling_interval_secs);
 
-    println!("✅ FlowEngineConfig 默认值测试通过");
+    test_success!("FlowEngineConfig 默认值测试通过");
 }
 
 /// 测试 EngineState 序列化
 #[tokio::test]
 async fn test_engine_state_serialization() {
-    println!("🔤 测试 EngineState 序列化...");
+    test_progress!("测试 EngineState 序列化");
 
     use postium_mail_lib::engine::EngineState;
 
@@ -44,20 +47,20 @@ async fn test_engine_state_serialization() {
     for state in &states {
         // 测试序列化
         let json = serde_json::to_string(state).unwrap();
-        println!("  - {:?} -> {}", state, json);
+        test_info!("  - {:?} -> {}", state, json);
 
         // 测试反序列化
         let deserialized: EngineState = serde_json::from_str(&json).unwrap();
         assert_eq!(&deserialized, state);
     }
 
-    println!("✅ EngineState 序列化测试通过");
+    test_success!("EngineState 序列化测试通过");
 }
 
 /// 测试 EngineStatusReport 结构
 #[tokio::test]
 async fn test_engine_status_report_structure() {
-    println!("📊 测试 EngineStatusReport 结构...");
+    test_progress!("测试 EngineStatusReport 结构");
 
     use postium_mail_lib::engine::{EngineState, EngineStatusReport};
 
@@ -74,7 +77,7 @@ async fn test_engine_status_report_structure() {
     assert!(json.contains("running_tasks"), "JSON 应包含 running_tasks");
     assert!(json.contains("active_idle_monitors"), "JSON 应包含 active_idle_monitors");
 
-    println!("  - JSON: {}", json);
+    test_info!("JSON: {}", json);
 
     // 测试反序列化
     let deserialized: EngineStatusReport = serde_json::from_str(&json).unwrap();
@@ -84,13 +87,13 @@ async fn test_engine_status_report_structure() {
     assert_eq!(deserialized.total_notifications_sent, 10);
     assert_eq!(deserialized.uptime_seconds, 3600);
 
-    println!("✅ EngineStatusReport 结构测试通过");
+    test_success!("EngineStatusReport 结构测试通过");
 }
 
 /// 测试 FlowEngine 字段序列化
 #[tokio::test]
 async fn test_flow_engine_fields() {
-    println!("🔍 测试 FlowEngine 字段...");
+    test_progress!("测试 FlowEngine 字段");
 
     use postium_mail_lib::engine::EngineState;
 
@@ -104,6 +107,6 @@ async fn test_flow_engine_fields() {
     let json = serde_json::to_string(&error_state).unwrap();
     assert!(json.contains("测试错误"));
 
-    println!("  - 状态序列化正常");
-    println!("✅ FlowEngine 字段测试通过");
+    test_info!("状态序列化正常");
+    test_success!("FlowEngine 字段测试通过");
 }
