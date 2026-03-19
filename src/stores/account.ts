@@ -355,9 +355,13 @@ export const useAccountStore = defineStore('account', () => {
       throw new Error('没有可同步的账号')
     }
 
+    // 获取账号 email
+    const account = accounts.value.find(a => parseInt(a.id) === id)
+    const accountEmail = account?.email
+
     // 使用 sync store 进行同步
     const syncStore = useSyncStore()
-    const result = await syncStore.syncAccount(id)
+    const result = await syncStore.syncAccount(id, accountEmail)
 
     // 更新账号列表
     await fetchAccounts()
