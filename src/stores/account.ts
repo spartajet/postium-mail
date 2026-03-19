@@ -1,15 +1,21 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Account, EmailProvider } from '@/types'
+import { AccountType, AuthType } from '@/types'
 import { invoke } from '@tauri-apps/api/core'
 import { useSyncStore } from './sync'
 
+// ============================================================
 // 后端 DTO 类型定义
+// ============================================================
+
 interface AccountDto {
   id: number
   name: string
   email: string
   provider: string
+  account_type?: string
+  auth_type?: string
   imap_host: string | null
   imap_port: number | null
   imap_ssl: boolean | null
@@ -19,6 +25,10 @@ interface AccountDto {
   color: string | null
   sync_enabled: boolean
   last_sync_at: number | null
+  oauth_provider?: string | null
+  oauth_token_expiry?: number | null
+  enterprise_tenant_id?: string | null
+  enterprise_domain?: string | null
   created_at: number
   updated_at: number
 }
@@ -52,16 +62,44 @@ function dtoToAccount(dto: AccountDto): Account {
     name: dto.name,
     email: dto.email,
     provider: dto.provider as EmailProvider,
-    color: dto.color || '#7C3AED',
-    unreadCount: 0, // TODO: 从后端获取
+    // 新增字段
+    accountType: parseAccountType(dto.account_type),
+    authType: parseAuthType(dto.auth_type),
+    // IMAP/SMTP 配置
     imapHost: dto.imap_host || undefined,
     imapPort: dto.imap_port || undefined,
     imapSsl: dto.imap_ssl ?? undefined,
     smtpHost: dto.smtp_host || undefined,
     smtpPort: dto.smtp_port || undefined,
     smtpSsl: dto.smtp_ssl ?? undefined,
+    // UI 配置
+    color: dto.color || '#7C3AED',
+    unreadCount: 0, // TODO: 从后端获取
     syncEnabled: dto.sync_enabled,
     lastSyncAt: dto.last_sync_at ? new Date(dto.last_sync_at) : undefined,
+    // OAuth 相关
+    oauthProvider: dto.oauth_provider || undefined,
+    oauthTokenExpiry: dto.oauth_token_expiry ? new Date(dto.oauth_token_expiry) : undefined,
+    // 企业配置
+    enterpriseTenantId: dto.enterprise_tenant_id || undefined,
+    enterpriseDomain: dto.enterprise_domain || undefined,
+  }
+}
+
+// 解析账号类型
+function parseAccountType(type?: string): AccountType {
+  if (type === 'enterprise') return AccountType.Enterprise
+  return AccountType.Personal
+}
+
+// 解析认证类型
+function parseAuthType(type?: string): AuthType {
+  switch (type) {
+    case 'oauth2': return AuthType.OAuth2
+    case 'app_password': return AuthType.AppPassword
+    case 'domain_auth': return AuthType.DomainAuth
+    case 'saml_sso': return AuthType.SamlSso
+    default: return AuthType.Password
   }
 }
 
@@ -126,6 +164,13 @@ export const useAccountStore = defineStore('account', () => {
     })
 
     return grouped
+  })
+
+  // 按账号类型分组（个人/企业）
+  const accountsByType = computed(() => {
+    const personal = accounts.value.filter(a => a.accountType === AccountType.Personal)
+    const enterprise = accounts.value.filter(a => a.accountType === AccountType.Enterprise)
+    return { personal, enterprise }
   })
 
   // ========================================
@@ -321,6 +366,173 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   // ========================================
+  // OAuth 认证相关方法
+  // ========================================
+
+  /**
+   * 获取 OAuth 授权 URL
+   * @param provider 邮件服务商 (gmail, outlook 等)
+   * @returns 授权 URL
+   */
+  async function getOAuthAuthUrl(provider: string): Promise<string> {
+    try {
+      return await invoke<string>('get_oauth_auth_url', { provider })
+    } catch (error) {
+      console.error('[AccountStore] 获取 OAuth 授权 URL 失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 交换 OAuth 授权码以获取访问令牌并添加账号
+   * @param code OAuth 授权码
+   * @param state 状态参数
+   * @returns 新创建的账号
+   */
+  async function exchangeOAuthCode(code: string, state: string): Promise<Account> {
+    try {
+      console.log('[AccountStore] 交换 OAuth 授权码')
+      const dto = await invoke<AccountDto>('exchange_oauth_code', { code, state })
+      const account = dtoToAccount(dto)
+
+      // 检查账号是否已存在
+      const exists = accounts.value.some(a => a.email === account.email)
+      if (!exists) {
+        accounts.value.push(account)
+      }
+
+      // 自动选中新添加的账号
+      currentAccount.value = account
+
+      console.log('[AccountStore] OAuth 账号添加成功:', account)
+      return account
+    } catch (error) {
+      console.error('[AccountStore] OAuth 授权码交换失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 刷新 OAuth Token
+   * @param accountId 账号 ID
+   */
+  async function refreshOAuthToken(accountId: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 刷新 OAuth Token:', accountId)
+      await invoke('refresh_oauth_token', {
+        accountId: parseInt(accountId)
+      })
+      // 刷新成功后更新账号信息
+      await fetchAccounts()
+    } catch (error) {
+      console.error('[AccountStore] 刷新 OAuth Token 失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 验证 OAuth Token
+   * @param accountId 账号 ID
+   * @returns Token 是否有效
+   */
+  async function validateOAuthToken(accountId: string): Promise<boolean> {
+    try {
+      return await invoke<boolean>('validate_oauth_token', {
+        accountId: parseInt(accountId)
+      })
+    } catch (error) {
+      console.error('[AccountStore] 验证 OAuth Token 失败:', error)
+      return false
+    }
+  }
+
+  // ========================================
+  // FlowEngine 任务管理相关方法
+  // ========================================
+
+  /**
+   * 添加同步任务到 FlowEngine
+   * @param accountId 账号 ID
+   * @param schedule 可选的 Cron 表达式，例如每5分钟执行一次
+   */
+  async function addSyncTask(accountId: string, schedule?: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 添加同步任务:', { accountId, schedule })
+      await invoke('add_sync_task', {
+        accountId: parseInt(accountId),
+        schedule,
+      })
+    } catch (error) {
+      console.error('[AccountStore] 添加同步任务失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 从 FlowEngine 移除同步任务
+   * @param accountId 账号 ID
+   */
+  async function removeSyncTask(accountId: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 移除同步任务:', accountId)
+      await invoke('remove_sync_task', {
+        accountId: parseInt(accountId)
+      })
+    } catch (error) {
+      console.error('[AccountStore] 移除同步任务失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 暂停同步任务
+   * @param accountId 账号 ID
+   */
+  async function pauseSyncTask(accountId: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 暂停同步任务:', accountId)
+      await invoke('pause_sync_task', {
+        accountId: parseInt(accountId)
+      })
+    } catch (error) {
+      console.error('[AccountStore] 暂停同步任务失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 恢复同步任务
+   * @param accountId 账号 ID
+   */
+  async function resumeSyncTask(accountId: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 恢复同步任务:', accountId)
+      await invoke('resume_sync_task', {
+        accountId: parseInt(accountId)
+      })
+    } catch (error) {
+      console.error('[AccountStore] 恢复同步任务失败:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 触发一次性同步
+   * @param accountId 账号 ID
+   */
+  async function triggerSync(accountId: string): Promise<void> {
+    try {
+      console.log('[AccountStore] 触发一次性同步:', accountId)
+      await invoke('trigger_sync', {
+        accountId: parseInt(accountId)
+      })
+    } catch (error) {
+      console.error('[AccountStore] 触发同步失败:', error)
+      throw error
+    }
+  }
+
+  // ========================================
   // Helper Functions
   // ========================================
 
@@ -335,8 +547,9 @@ export const useAccountStore = defineStore('account', () => {
     hasAccounts,
     totalUnreadCount,
     accountsByProvider,
+    accountsByType,
 
-    // Actions
+    // Actions - 基础 CRUD
     fetchAccounts,
     selectAccount,
     selectAccountById,
@@ -344,12 +557,31 @@ export const useAccountStore = defineStore('account', () => {
     updateAccount,
     removeAccount,
     testConnection,
+
+    // Actions - 未读数管理
     updateUnreadCount,
     incrementUnreadCount,
     decrementUnreadCount,
+
+    // Actions - UI 状态
     toggleDropdown,
     closeDropdown,
     clearAccounts,
+
+    // Actions - 同步
     syncAccount,
+
+    // Actions - OAuth 认证
+    getOAuthAuthUrl,
+    exchangeOAuthCode,
+    refreshOAuthToken,
+    validateOAuthToken,
+
+    // Actions - FlowEngine 任务管理
+    addSyncTask,
+    removeSyncTask,
+    pauseSyncTask,
+    resumeSyncTask,
+    triggerSync,
   }
 })
