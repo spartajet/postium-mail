@@ -66,7 +66,7 @@ pub trait Repository: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_database_url_parsing() {

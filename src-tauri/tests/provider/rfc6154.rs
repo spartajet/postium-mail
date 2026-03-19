@@ -48,7 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rfc6154_folder_attributes() {
-        use postium_mail_lib::services::imap::{ImapAuth, ImapService};
+        use postium_mail_lib::protocols::imap::{ImapAuth, ImapService};
         use tracing::info;
 
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();

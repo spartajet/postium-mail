@@ -8,21 +8,16 @@ use tokio::net::TcpStream;
 
 /// 创建测试用内存数据库
 pub async fn create_test_db() -> sea_orm::DbConn {
-    let db_url = ":memory:";
+    let db_url = "sqlite::memory:";
 
-    let conn = sea_orm::Database::connect(sea_orm::DatabaseUrl {
-        url: db_url.to_string(),
-        scheme: sea_orm::DatabaseBackend::Sqlite.into(),
-    })
-    .await
-    .expect("Failed to connect to test database");
-
-    conn
+    sea_orm::Database::connect(db_url)
+        .await
+        .expect("Failed to connect to test database")
 }
 
 /// 初始化测试数据库表结构
 pub async fn init_test_db(db: &sea_orm::DbConn) {
-    postium_mail_lib::database::init_database(db)
+    postium_mail_lib::init_database(db)
         .await
         .expect("Failed to initialize test database");
 }

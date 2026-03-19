@@ -2,7 +2,7 @@
 mod command;
 pub mod config;
 mod crypto;
-mod database;
+pub mod database;  // 公开以支持测试
 
 // 新增模块
 pub mod auth;  // 公开以支持测试
@@ -19,6 +19,7 @@ pub use engine::FlowEngine;
 pub use error::{MailError, Result};
 pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
 pub use sync::SyncManager;
+pub use database::init_database;  // 用于测试
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;

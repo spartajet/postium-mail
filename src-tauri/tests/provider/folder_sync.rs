@@ -53,7 +53,7 @@ mod tests {
 
     #[tokio::test]
     async fn diagnose_sent_folder_sync() {
-        use postium_mail_lib::services::imap::{ImapAuth, ImapClient};
+        use postium_mail_lib::protocols::imap::{ImapAuth, ImapClient};
         use tracing::info;
 
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();

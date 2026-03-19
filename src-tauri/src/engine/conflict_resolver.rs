@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::error::{Result, StorageError};
+use crate::error::Result;
 use super::operation_manager::{OfflineOperation, OperationType};
 
 /// 冲突类型

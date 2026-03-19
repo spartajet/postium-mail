@@ -2,7 +2,7 @@
 //!
 //! 用于执行不直接被 async-imap 支持的 IMAP 命令
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 /// CONDSTORE 命令构建器
 ///

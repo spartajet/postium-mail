@@ -98,7 +98,7 @@ fn one_year_ago_imap_format() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postium_mail_lib::services::imap::{AsyncImapClient, ImapAuth};
+    use postium_mail_lib::protocols::imap::{AsyncImapClient, ImapAuth};
     use tracing::info;
 
     #[tokio::test]

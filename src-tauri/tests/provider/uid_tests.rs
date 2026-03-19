@@ -53,7 +53,7 @@ fn load_test_account() -> TestAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postium_mail_lib::services::imap::{AsyncImapClient, ImapAuth};
+    use postium_mail_lib::protocols::imap::{AsyncImapClient, ImapAuth};
     use tracing::info;
 
     #[tokio::test]
