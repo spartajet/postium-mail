@@ -120,12 +120,33 @@
 //! | `test_sync_performance_metrics` | 性能指标 | ✅ |
 //! | `test_concurrent_sync` | 并发同步 | ✅ |
 //! | `test_sync_progress_reporting` | 进度报告 | ✅ |
+//!
+//! ### FlowEngine 集成测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_flow_engine_lifecycle` | 引擎生命周期 | ✅ |
+//! | `test_flow_engine_status_report` | 状态报告 | ✅ |
+//! | `test_task_management` | 任务管理 | ✅ |
+//! | `test_manual_sync_trigger` | 手动触发同步 | ✅ |
+//! | `test_flow_engine_config_default` | 配置默认值 | ✅ |
+//! | `test_engine_state_serialization` | 状态序列化 | ✅ |
+//! | `test_engine_status_report_structure` | 报告结构 | ✅ |
+//!
+//! ### FlowEngine 端到端测试
+//! | 测试 | 描述 | 状态 |
+//! |------|------|------|
+//! | `test_complete_engine_workflow` | 完整工作流 | ✅ |
+//! | `test_engine_state_transitions` | 状态转换 | ✅ |
+//! | `test_concurrent_task_management` | 并发任务管理 | ✅ |
+//! | `test_engine_restart` | 引擎重启 | ✅ |
 
-mod greenmail_sync_test;
-mod sync_flow_test;
-mod full_sync_test;
-mod sync_manager_test;
-mod e2e_sync_test;
 mod condstore_test;
 mod full_sync_workflow_test;
 mod test_helpers;
+mod e2e_sync_test;
+mod e2e_flow_engine_test;
+mod flow_engine_integration_test;
+mod full_sync_test;
+mod greenmail_sync_test;
+mod sync_flow_test;
+mod sync_manager_test;

@@ -2,7 +2,7 @@
 //!
 //! 提供流程引擎的管理和控制功能
 
-use crate::engine::flow_engine::{EngineStatusReport, FlowEngine};
+use crate::engine::flow_engine::EngineStatusReport;
 use crate::sync::SyncResult;
 use tauri::State;
 
@@ -91,8 +91,6 @@ pub async fn trigger_sync(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_command_exports() {
         // 验证命令函数可以被导出

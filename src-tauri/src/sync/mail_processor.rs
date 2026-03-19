@@ -394,7 +394,7 @@ impl MailProcessor {
         folder: &str,
         uids: &[u32],
     ) -> Result<usize> {
-        use sea_orm::{QueryFilter, ColumnTrait, DeleteMany, EntityTrait};
+        use sea_orm::{QueryFilter, ColumnTrait, EntityTrait};
 
         let uid_i32: Vec<i32> = uids.iter().map(|&uid| uid as i32).collect();
 

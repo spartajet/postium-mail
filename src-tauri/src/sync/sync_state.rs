@@ -39,8 +39,6 @@ impl SyncStateManager {
         account_id: i32,
         folder: &str,
     ) -> Result<Option<sync_state::Model>> {
-        use sea_orm::EntityTrait;
-
         let states = sync_state::Entity::find()
             .filter(sync_state::Column::AccountId.eq(account_id))
             .filter(sync_state::Column::Folder.eq(folder))
@@ -102,7 +100,7 @@ impl SyncStateManager {
         folder: &str,
         highest_modseq: i64,
     ) -> Result<()> {
-        use sea_orm::{EntityTrait, ActiveModelTrait, IntoActiveModel};
+        use sea_orm::ActiveModelTrait;
 
         let state = self.get_or_create_state(account_id, folder).await?;
 
@@ -138,7 +136,7 @@ impl SyncStateManager {
         folder: &str,
         last_sync_uid: i32,
     ) -> Result<()> {
-        use sea_orm::{EntityTrait, ActiveModelTrait, IntoActiveModel};
+        use sea_orm::ActiveModelTrait;
 
         let state = self.get_or_create_state(account_id, folder).await?;
 
@@ -174,7 +172,7 @@ impl SyncStateManager {
         folder: &str,
         sync_count: i32,
     ) -> Result<()> {
-        use sea_orm::{EntityTrait, ActiveModelTrait, IntoActiveModel};
+        use sea_orm::ActiveModelTrait;
 
         let state = self.get_or_create_state(account_id, folder).await?;
 
@@ -218,7 +216,7 @@ impl SyncStateManager {
         folder: &str,
         error: String,
     ) -> Result<()> {
-        use sea_orm::{EntityTrait, ActiveModelTrait, IntoActiveModel};
+        use sea_orm::ActiveModelTrait;
 
         let state = self.get_or_create_state(account_id, folder).await?;
 

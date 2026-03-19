@@ -3,7 +3,7 @@
 // 测试 IMAP CONDSTORE 扩展的概念和逻辑
 
 use super::test_helpers::create_test_db;
-use postium_mail_lib::sync::{SyncStrategy, DeltaSyncResult};
+use postium_mail_lib::sync::SyncStrategy;
 
 /// 测试 CONDSTORE 概念
 #[tokio::test]

@@ -12,7 +12,7 @@ use crate::providers::{
     MailProvider, OAuthConfig,
     PkceVerifierStore, OAuthTokenResponse, generate_xoauth2_string, validate_access_token,
 };
-use crate::error::{MailError, OAuthError, Result};
+use crate::error::{OAuthError, Result};
 
 /// URL 编码（用于 OAuth 参数）
 fn url_encode(value: &str) -> String {

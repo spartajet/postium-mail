@@ -7,7 +7,7 @@
 //! - 条件访问检测
 
 use crate::providers::{AccountType, EnterpriseConfig};
-use crate::error::{AuthError, MailError, Result};
+use crate::error::{MailError, Result};
 
 /// 企业认证结果
 #[derive(Debug, Clone)]

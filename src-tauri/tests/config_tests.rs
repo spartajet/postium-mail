@@ -1,16 +1,19 @@
 //! 配置层集成测试
 //!
 //! 测试 OAuth 配置的加载和验证
+//!
+//! 注意：这些测试会修改环境变量，可能需要串行运行
+//! 使用 `cargo test --test config_tests -- --test-threads=1` 来运行
 
 use postium_mail_lib::OAuthConfig;
 
 /// 测试从环境变量加载 Microsoft OAuth 配置
 #[test]
 fn test_load_microsoft_oauth_config() {
-    // 保存原始环境变量
-    let old_client_id = std::env::var("MICROSOFT_CLIENT_ID").ok();
-    let old_redirect_uri = std::env::var("MICROSOFT_REDIRECT_URI").ok();
-    let old_tenant = std::env::var("MICROSOFT_TENANT").ok();
+    // 先清除可能被 dotenv 加载的环境变量
+    std::env::remove_var("MICROSOFT_CLIENT_ID");
+    std::env::remove_var("MICROSOFT_REDIRECT_URI");
+    std::env::remove_var("MICROSOFT_TENANT");
 
     // 设置测试环境变量
     std::env::set_var("MICROSOFT_CLIENT_ID", "test-client-id-9876");
@@ -29,30 +32,18 @@ fn test_load_microsoft_oauth_config() {
     assert_eq!(config.tenant, "test-tenant-1234");
     assert!(!config.scopes.is_empty());
 
-    // 恢复原始环境变量
-    if let Some(val) = old_client_id {
-        std::env::set_var("MICROSOFT_CLIENT_ID", val);
-    } else {
-        std::env::remove_var("MICROSOFT_CLIENT_ID");
-    }
-    if let Some(val) = old_redirect_uri {
-        std::env::set_var("MICROSOFT_REDIRECT_URI", val);
-    } else {
-        std::env::remove_var("MICROSOFT_REDIRECT_URI");
-    }
-    if let Some(val) = old_tenant {
-        std::env::set_var("MICROSOFT_TENANT", val);
-    } else {
-        std::env::remove_var("MICROSOFT_TENANT");
-    }
+    // 清理测试环境变量
+    std::env::remove_var("MICROSOFT_CLIENT_ID");
+    std::env::remove_var("MICROSOFT_REDIRECT_URI");
+    std::env::remove_var("MICROSOFT_TENANT");
 }
 
 /// 测试从环境变量加载 Google OAuth 配置
 #[test]
 fn test_load_google_oauth_config() {
-    // 保存原始环境变量
-    let old_client_id = std::env::var("GOOGLE_CLIENT_ID").ok();
-    let old_redirect_uri = std::env::var("GOOGLE_REDIRECT_URI").ok();
+    // 先清除可能被 dotenv 加载的环境变量
+    std::env::remove_var("GOOGLE_CLIENT_ID");
+    std::env::remove_var("GOOGLE_REDIRECT_URI");
 
     // 设置测试环境变量
     std::env::set_var("GOOGLE_CLIENT_ID", "test-google-client-id-9876");
@@ -67,22 +58,18 @@ fn test_load_google_oauth_config() {
     assert!(config.tenant.is_empty()); // Google 不需要 tenant
     assert!(!config.scopes.is_empty());
 
-    // 恢复原始环境变量
-    if let Some(val) = old_client_id {
-        std::env::set_var("GOOGLE_CLIENT_ID", val);
-    } else {
-        std::env::remove_var("GOOGLE_CLIENT_ID");
-    }
-    if let Some(val) = old_redirect_uri {
-        std::env::set_var("GOOGLE_REDIRECT_URI", val);
-    } else {
-        std::env::remove_var("GOOGLE_REDIRECT_URI");
-    }
+    // 清理测试环境变量
+    std::env::remove_var("GOOGLE_CLIENT_ID");
+    std::env::remove_var("GOOGLE_REDIRECT_URI");
 }
 
 /// 测试通用配置加载器
 #[test]
 fn test_load_oauth_config_for_provider() {
+    // 先清除可能被 dotenv 加载的环境变量
+    std::env::remove_var("MICROSOFT_CLIENT_ID");
+    std::env::remove_var("GOOGLE_CLIENT_ID");
+
     // 测试 Microsoft / Outlook
     std::env::set_var("MICROSOFT_CLIENT_ID", "test-client-id");
     let result = postium_mail_lib::config::load_oauth_config_for_provider("outlook");
@@ -111,10 +98,10 @@ fn test_load_oauth_config_for_provider() {
 /// 测试 OAuthConfig::from_env_for_provider
 #[test]
 fn test_oauth_config_from_env_for_provider() {
-    // 保存原始环境变量
-    let old_client_id = std::env::var("MICROSOFT_CLIENT_ID").ok();
-    let old_redirect_uri = std::env::var("MICROSOFT_REDIRECT_URI").ok();
-    let old_tenant = std::env::var("MICROSOFT_TENANT").ok();
+    // 先清除可能被 dotenv 加载的环境变量
+    std::env::remove_var("MICROSOFT_CLIENT_ID");
+    std::env::remove_var("MICROSOFT_REDIRECT_URI");
+    std::env::remove_var("MICROSOFT_TENANT");
 
     // 设置测试环境变量
     std::env::set_var("MICROSOFT_CLIENT_ID", "test-client-id-from-env-5555");
@@ -134,22 +121,10 @@ fn test_oauth_config_from_env_for_provider() {
     );
     assert!(config.client_secret.is_none());
 
-    // 恢复原始环境变量
-    if let Some(val) = old_client_id {
-        std::env::set_var("MICROSOFT_CLIENT_ID", val);
-    } else {
-        std::env::remove_var("MICROSOFT_CLIENT_ID");
-    }
-    if let Some(val) = old_redirect_uri {
-        std::env::set_var("MICROSOFT_REDIRECT_URI", val);
-    } else {
-        std::env::remove_var("MICROSOFT_REDIRECT_URI");
-    }
-    if let Some(val) = old_tenant {
-        std::env::set_var("MICROSOFT_TENANT", val);
-    } else {
-        std::env::remove_var("MICROSOFT_TENANT");
-    }
+    // 清理测试环境变量
+    std::env::remove_var("MICROSOFT_CLIENT_ID");
+    std::env::remove_var("MICROSOFT_REDIRECT_URI");
+    std::env::remove_var("MICROSOFT_TENANT");
 }
 
 /// 测试 OAuthConfig 验证

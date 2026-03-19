@@ -1,4 +1,6 @@
 //! 国内邮件服务商（已废弃）
+
+#![allow(deprecated)]
 //!
 //! 此模块已被拆分为独立的服务商实现：
 //! - [`Mail163Provider`] - 支持 163.com、126.com、yeah.net

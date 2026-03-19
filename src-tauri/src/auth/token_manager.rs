@@ -11,7 +11,7 @@ use tauri_plugin_keyring::KeyringExt;
 use tokio::sync::RwLock;
 
 use crate::crypto::{OAuthToken, KEYRING_SERVICE, oauth_username};
-use crate::error::{MailError, OAuthError, Result, StorageError};
+use crate::error::{MailError, Result, StorageError};
 
 /// Token 元数据（内存缓存）
 #[derive(Debug, Clone)]

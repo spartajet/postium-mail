@@ -395,7 +395,6 @@ impl Default for TaskScheduler {
 mod tests {
     use super::*;
     use sea_orm::Database;
-    use std::sync::Mutex as StdMutex;
 
     // 创建测试用的数据库连接
     async fn create_test_db() -> Arc<DbConn> {
