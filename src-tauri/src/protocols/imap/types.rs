@@ -1,14 +1,6 @@
 use chrono::{DateTime, Utc};
 
-/// IMAP 认证方法
-#[derive(Debug, Clone)]
-pub enum ImapAuth {
-    Password(String),
-    OAuth2 {
-        email: String,
-        access_token: String,
-    },
-}
+// 注意：ImapAuth 已移至 auth.rs 模块
 
 /// 邮件标志
 #[derive(Debug, Clone)]

@@ -363,7 +363,7 @@ pub async fn email_exists_by_uid(
 pub async fn save_email_from_imap(
     db: &DbConn,
     account_id: i32,
-    email_data: &crate::services::imap::EmailData,
+    email_data: &crate::protocols::imap::EmailData,
     folder: &str,
 ) -> Result<i32> {
     use sea_orm::ActiveValue::*;
@@ -472,7 +472,7 @@ pub async fn save_email_from_imap(
 async fn save_attachments(
     db: &DbConn,
     email_id: i32,
-    attachments: &[crate::services::imap::EmailAttachment],
+    attachments: &[crate::protocols::imap::EmailAttachment],
 ) -> Result<()> {
     use sea_orm::ActiveValue::*;
 
@@ -542,7 +542,7 @@ pub async fn update_email_status(
     account_id: i32,
     folder: &str,
     uid: i32,
-    flags: &crate::services::imap::EmailFlags,
+    flags: &crate::protocols::imap::EmailFlags,
 ) -> Result<()> {
     // 查找邮件
     let email = EmailEntity::find()

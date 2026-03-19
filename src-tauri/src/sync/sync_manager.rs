@@ -6,7 +6,7 @@ use crate::error::{MailError, Result};
 use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector, sync_state::SyncStateManager};
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::providers::{ProviderPool, AuthType};
-use crate::services::imap::{AsyncImapClient, ImapAuth};
+use crate::protocols::imap::{AsyncImapClient, ImapAuth};
 use sea_orm::DbConn;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;

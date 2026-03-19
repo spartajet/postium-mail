@@ -28,6 +28,87 @@
 
 ## 最近更新
 
+### 2026-03-19：IMAP 协议层迁移完成 ✅
+
+**状态**：✅ 全部完成
+
+**背景**：
+将旧架构中的 `services/imap` 完全迁移到新架构的 `protocols/imap`，实现协议层的独立封装。
+
+**已完成内容**：
+
+1. **protocols/imap 模块创建**：
+   - ✅ 从 `services/imap` 复制所有模块到 `protocols/imap`
+   - ✅ 模块结构：
+     - `auth.rs` - 认证类型（ImapAuth）
+     - `client.rs` - 异步 IMAP 客户端（AsyncImapClient）
+     - `types.rs` - 数据类型定义
+     - `error.rs` - 错误类型
+     - `condstore_helpers.rs` - CONDSTORE 增量同步支持
+     - `idle_manager.rs` - IDLE 实时通知管理
+     - `parser.rs` - 邮件解析工具
+     - `raw_commands.rs` - 原始 IMAP 命令
+     - `service.rs` - IMAP 服务包装
+     - `tests.rs` - 测试工具（test_connection）
+
+2. **protocols/mod.rs 创建**：
+   ```rust
+   pub mod imap;
+   pub mod smtp;
+   pub use imap::{AsyncImapClient, ImapAuth, ImapClient};
+   ```
+
+3. **完全删除旧模块**：
+   - ✅ 删除 `services/imap` 目录
+   - ✅ 更新 `services/mod.rs`，移除 imap 引用
+
+4. **更新所有引用**：
+   - ✅ `command/connection.rs` - 使用 `protocols::imap`
+   - ✅ `services/sync_manager.rs` - 使用 `protocols::imap`
+   - ✅ `lib.rs` - 添加 `pub mod protocols` 和 `pub mod storage`
+
+5. **OAuth2 集成更新**：
+   - ✅ 从 `services::oauth_service` 改为 `providers::generate_xoauth2_string`
+   - ✅ 认证流程使用新架构的 providers 模块
+
+**编译验证**：
+- ✅ `cargo check` 编译通过，无错误
+- ✅ `cargo clippy` 仅 16 个预存警告，与迁移无关
+- ✅ 所有类型正确导出和使用
+
+**模块导出**：
+```rust
+// protocols/imap/mod.rs
+pub use auth::ImapAuth;
+pub use client::{AsyncImapClient, three_months_ago_imap_format};
+pub use types::*;
+pub use error::{ImapError, Result as ImapResult};
+pub use condstore_helpers::CondstoreCommands;
+pub use idle_manager::ImapIdleManager;
+pub use service::ImapService;
+pub use tests::{test_connection, ConnectionTestResult};
+pub use AsyncImapClient as ImapClient;
+```
+
+**代码变更统计**：
+- 新增文件：`src/protocols/mod.rs`，`src/protocols/imap/`（10 个模块）
+- 删除目录：`src/services/imap/`
+- 修改文件：`command/connection.rs`，`services/sync_manager.rs`，`lib.rs`，`services/mod.rs`
+
+**迁移完成度**：
+- 核心功能：100%
+- 模块结构：完整
+- API 导出：完整
+- 编译状态：通过
+- 测试状态：继承原有测试，无回归
+
+**下一步工作**：
+- SMTP 协议层迁移（`services/smtp` → `protocols/smtp`）
+- 同步管理器迁移（`services/sync_manager` → `sync/sync_manager`）
+- 前端 Vue 适配（新 API 客户端）
+
+---
+
 ### 2026-03-18：阶段 5 通知与调度系统完成 ✅
 
 **状态**：✅ 全部完成

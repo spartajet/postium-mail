@@ -2,8 +2,8 @@
 
 use super::{
     types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
-    ImapAuth,
 };
+use super::auth::ImapAuth;
 use crate::providers::generate_xoauth2_string;
 use anyhow::{anyhow, Result};
 use chrono::Datelike;

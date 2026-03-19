@@ -3,21 +3,27 @@
 use std::sync::Arc;
 use tauri_plugin_keyring::KeyringExt;
 
-use super::{DatabaseState, KeyringState};
+use super::{DatabaseState, KeyringState, AuthManagerState, ProviderPoolState};
 use crate::crypto;
 use crate::models;
+use crate::protocols::smtp;
 use crate::services;
+use crate::sync;
 
 #[tauri::command]
 pub async fn sync_account_with_progress(
     db_state: tauri::State<'_, DatabaseState>,
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
+    provider_pool_state: tauri::State<'_, ProviderPoolState>,
     _keyring_state: tauri::State<'_, KeyringState>,
     app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<(), String> {
     let db = Arc::new(db_state.clone_conn());
+    let auth_manager = auth_manager_state.clone_manager();
+    let provider_pool = provider_pool_state.clone_pool();
 
-    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle.clone());
+    let sync_manager = sync::SyncManager::new(db, app_handle.clone(), auth_manager, provider_pool);
 
     let result = sync_manager
         .sync_account(account_id)
@@ -39,13 +45,17 @@ pub async fn sync_account_with_progress(
 #[tauri::command]
 pub async fn sync_account(
     db_state: tauri::State<'_, DatabaseState>,
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
+    provider_pool_state: tauri::State<'_, ProviderPoolState>,
     _keyring_state: tauri::State<'_, KeyringState>,
     app_handle: tauri::AppHandle,
     account_id: i32,
 ) -> Result<usize, String> {
     let db = Arc::new(db_state.clone_conn());
+    let auth_manager = auth_manager_state.clone_manager();
+    let provider_pool = provider_pool_state.clone_pool();
 
-    let sync_manager = services::sync_manager::SyncManager::new(db, app_handle);
+    let sync_manager = sync::SyncManager::new(db, app_handle, auth_manager, provider_pool);
 
     let result = sync_manager
         .sync_account(account_id)
@@ -75,7 +85,8 @@ pub async fn send_email(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 
-    let mut smtp_service = services::smtp_service::SmtpService::new();
+    // 使用新的 SMTP 客户端
+    let smtp_client = smtp::SmtpClient::new();
 
     let host = account.smtp_host.unwrap_or_else(|| {
         match account.provider.as_str() {
@@ -90,28 +101,39 @@ pub async fn send_email(
 
     let port = account.smtp_port.unwrap_or(587) as u16;
 
-    smtp_service
+    // 连接到 SMTP 服务器
+    smtp_client
         .connect(
             &host,
             port,
             &account.email,
-            services::smtp_service::SmtpAuth::Password(password),
+            smtp::SmtpAuth::Password(password),
         )
+        .await
         .map_err(|e| e.to_string())?;
 
+    // 构建收件人列表
     let to_addresses: Vec<String> = request.to.iter().map(|a| a.email.clone()).collect();
 
-    let message_id = smtp_service
-        .send_email(
-            &account.email,
-            to_addresses,
-            &request.subject,
-            &request.body_html,
-            request.body_text.as_deref(),
-        )
+    // 构建发送请求
+    let send_request = smtp::SendEmailRequest {
+        from: account.email.clone(),
+        to: to_addresses,
+        cc: None,
+        bcc: None,
+        subject: request.subject.clone(),
+        html_body: request.body_html.clone(),
+        text_body: request.body_text.clone(),
+        attachments: vec![],
+    };
+
+    // 发送邮件
+    let result = smtp_client
+        .send_email(send_request)
+        .await
         .map_err(|e| e.to_string())?;
 
-    tracing::info!("邮件已发送: {}", message_id);
+    tracing::info!("邮件已发送: {}", result.message_id);
 
-    Ok(message_id)
+    Ok(result.message_id)
 }

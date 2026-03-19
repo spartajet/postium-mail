@@ -5,8 +5,8 @@
 use crate::error::{MailError, Result};
 use crate::engine::notification_manager::NotificationManager;
 use crate::engine::task_scheduler::TaskScheduler;
-use crate::services::imap::idle_manager::ImapIdleManager;
-use crate::services::imap::AsyncImapClient;
+use crate::protocols::imap::idle_manager::ImapIdleManager;
+use crate::protocols::imap::AsyncImapClient;
 use crate::sync::SyncManager;
 use sea_orm::DbConn;
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,7 @@ impl FlowEngine {
                     Some(event) => {
                         // 处理 IDLE 事件
                         match event {
-                            crate::services::imap::IdleEvent::NewEmail { folder, uid } => {
+                            crate::protocols::imap::IdleEvent::NewEmail { folder, uid } => {
                                 tracing::info!(
                                     "📬 IDLE 事件: 新邮件 account_id={}, folder={}, uid={}",
                                     account_id,
@@ -357,10 +357,10 @@ impl FlowEngine {
                                 // 触发同步
                                 let _ = sync_manager.sync_account(account_id).await;
                             }
-                            crate::services::imap::IdleEvent::Disconnected => {
+                            crate::protocols::imap::IdleEvent::Disconnected => {
                                 tracing::warn!("⚠️  IDLE 连接断开: account_id={}", account_id);
                             }
-                            crate::services::imap::IdleEvent::Error(err) => {
+                            crate::protocols::imap::IdleEvent::Error(err) => {
                                 tracing::error!("❌ IDLE 错误: account_id={}, error={}", account_id, err);
                             }
                             _ => {}
