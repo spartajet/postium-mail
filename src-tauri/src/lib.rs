@@ -29,7 +29,7 @@ use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-use command::{DatabaseState, FlowEngineState, KeyringState, OAuthState, AuthManagerState, ProviderPoolState};
+use command::{DatabaseState, FlowEngineState, KeyringState, AuthManagerState, ProviderPoolState};
 
 /// 处理 OAuth Deep Link 回调
 fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
@@ -211,12 +211,6 @@ pub fn run() {
                 app.manage(DatabaseState(std::sync::Arc::new(std::sync::Mutex::new(
                     (*db_arc).clone(),
                 ))));
-
-                let oauth_config =
-                    config::load_microsoft_oauth_config().expect("无法加载OAuth配置");
-                let oauth_service = services::oauth_service::OAuthService::new(oauth_config)
-                    .expect("无法初始化OAuth服务");
-                app.manage(OAuthState(oauth_service));
 
                 app.manage(KeyringState {
                     app_handle: app.handle().clone(),

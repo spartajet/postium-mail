@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use base64::Engine;
 use tauri::AppHandle;
 
 use crate::providers::{ProviderPool, AuthType};
@@ -31,12 +32,16 @@ pub struct AuthResult {
     pub account_id: Option<i32>,
     /// 邮箱地址
     pub email: String,
+    /// 显示名称
+    pub display_name: Option<String>,
     /// 认证类型
     pub auth_type: AuthType,
     /// 服务商 ID
     pub provider: String,
     /// Token 过期时间（仅 OAuth）
     pub expires_at: Option<i64>,
+    /// ID Token（仅 OAuth，包含用户信息）
+    pub id_token: Option<String>,
 }
 
 /// IMAP 认证信息
@@ -162,7 +167,7 @@ impl AuthManager {
     ///
     /// # 返回
     ///
-    /// 返回认证结果
+    /// 返回认证结果（包含用户信息和 id_token）
     ///
     /// # 示例
     ///
@@ -209,14 +214,30 @@ impl AuthManager {
             )
             .await?;
 
-        tracing::info!("OAuth 认证成功: email={}, provider={}", email, provider_id);
+        // 5. 解析用户信息（从 id_token）
+        let (user_email, display_name) = if let Some(ref id_token) = token_response.id_token {
+            self.get_user_info_from_id_token(id_token)?
+        } else {
+            // 如果没有 id_token，使用传入的 email
+            let name = email.split('@').next().unwrap_or("用户").to_string();
+            (email.to_string(), name)
+        };
+
+        tracing::info!(
+            "OAuth 认证成功: email={}, provider={}, display_name={}",
+            user_email,
+            provider_id,
+            display_name
+        );
 
         Ok(AuthResult {
             account_id: None,
-            email: email.to_string(),
+            email: user_email,
+            display_name: Some(display_name),
             auth_type: AuthType::OAuth2,
             provider: provider_id,
             expires_at,
+            id_token: token_response.id_token,
         })
     }
 
@@ -255,14 +276,19 @@ impl AuthManager {
             .store_password(temp_account_id, password)
             .await?;
 
+        // 提取显示名称（从 email 的用户名部分）
+        let display_name = email.split('@').next().map(|s| s.to_string());
+
         tracing::info!("密码认证成功: email={}, provider={}", email, provider_id);
 
         Ok(AuthResult {
             account_id: None,
             email: email.to_string(),
+            display_name,
             auth_type: AuthType::Password,
             provider: provider_id,
             expires_at: None,
+            id_token: None,
         })
     }
 
@@ -630,6 +656,92 @@ impl AuthManager {
     pub fn enterprise_auth(&self) -> &EnterpriseAuth {
         &self.enterprise_auth
     }
+
+    /// 从 JWT ID Token 中解析用户信息
+    ///
+    /// # 参数
+    ///
+    /// * `id_token` - JWT ID Token 字符串
+    ///
+    /// # 返回
+    ///
+    /// 返回 (email, display_name) 元组
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let (email, name) = manager.get_user_info_from_id_token(id_token).await?;
+    /// ```
+    pub fn get_user_info_from_id_token(&self, id_token: &str) -> Result<(String, String)> {
+        // 分割 JWT
+        let parts: Vec<&str> = id_token.split('.').collect();
+        if parts.len() != 3 {
+            return Err(MailError::Internal(format!(
+                "无效的 JWT token 格式，期望3段，实际{}段",
+                parts.len()
+            )));
+        }
+
+        // 解码 payload
+        let payload = parts.get(1).ok_or_else(|| {
+            MailError::Internal("JWT token 缺少 payload".to_string())
+        })?;
+
+        let payload_json = self.base64_url_decode(payload)?;
+
+        // 解析 JSON
+        let claims: serde_json::Value = serde_json::from_str(&payload_json)
+            .map_err(|e| MailError::Internal(format!("解析 JWT payload 失败: {}", e)))?;
+
+        // 提取 email（支持多种字段名）
+        let email = claims
+            .get("upn")      // Microsoft User Principal Name
+            .or_else(|| claims.get("email"))
+            .or_else(|| claims.get("unique_name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown@example.com")
+            .to_string();
+
+        // 提取 display name
+        let display_name = claims
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                // 如果没有 name 字段，使用 email 的用户名部分
+                email.split('@').next().unwrap_or("用户").to_string()
+            });
+
+        tracing::info!(
+            "从 ID Token 解析用户信息: email={}, display_name={}",
+            email,
+            display_name
+        );
+
+        Ok((email, display_name))
+    }
+
+    /// Base64URL 解码（辅助方法）
+    fn base64_url_decode(&self, input: &str) -> Result<String> {
+        // 添加 padding
+        let input_padded = if input.len().is_multiple_of(4) {
+            input.to_string()
+        } else {
+            let padding = "=".repeat(4 - (input.len() % 4));
+            format!("{}{}", input, padding)
+        };
+
+        // 转换为标准 base64
+        let input_standard = input_padded.replace('-', "+").replace('_', "/");
+
+        // 解码
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&input_standard)
+            .map_err(|e| MailError::Internal(format!("Base64 解码失败: {}", e)))?;
+
+        String::from_utf8(bytes)
+            .map_err(|e| MailError::Internal(format!("UTF-8 转换失败: {}", e)))
+    }
 }
 
 #[cfg(test)]
@@ -674,16 +786,20 @@ mod tests {
         let result = AuthResult {
             account_id: Some(1),
             email: "user@example.com".to_string(),
+            display_name: Some("Test User".to_string()),
             auth_type: AuthType::OAuth2,
             provider: "gmail".to_string(),
             expires_at: Some(1234567890),
+            id_token: Some("test_id_token".to_string()),
         };
 
         assert_eq!(result.account_id, Some(1));
         assert_eq!(result.email, "user@example.com");
+        assert_eq!(result.display_name, Some("Test User".to_string()));
         assert_eq!(result.auth_type, AuthType::OAuth2);
         assert_eq!(result.provider, "gmail");
         assert_eq!(result.expires_at, Some(1234567890));
+        assert_eq!(result.id_token, Some("test_id_token".to_string()));
     }
 
     #[test]
