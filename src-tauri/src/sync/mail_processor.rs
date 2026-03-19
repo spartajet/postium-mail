@@ -3,7 +3,7 @@
 //! 处理邮件的下载、解析和存储
 
 use crate::error::{MailError, Result};
-use crate::models::email;
+use crate::storage::models::email;
 use crate::sync::change_detector::EmailFlags;
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
@@ -272,7 +272,7 @@ impl MailProcessor {
         folder: &str,
         mail_data: &MailData,
     ) -> Result<bool> {
-        use crate::models::email::ActiveModel;
+        use crate::storage::models::email::ActiveModel;
 
         // 检查邮件是否已存在
         let existing = self.check_mail_exists(account_id, folder, mail_data.uid).await?;
@@ -346,7 +346,7 @@ impl MailProcessor {
         folder: &str,
         mail_data: &MailData,
     ) -> Result<()> {
-        use crate::models::email::ActiveModel;
+        use crate::storage::models::email::ActiveModel;
         use sea_orm::{QueryFilter, ColumnTrait};
 
         let mails = email::Entity::find()

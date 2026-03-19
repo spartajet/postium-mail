@@ -3,7 +3,7 @@
 //! 检测服务器端的邮件变更（新增、修改、删除）
 
 use crate::error::Result;
-use crate::models::email;
+use crate::storage::models::email;
 use sea_orm::DbConn;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -405,7 +405,7 @@ impl ChangeDetector {
     ///
     /// 从数据库查询指定文件夹的所有邮件 UID
     async fn get_local_uids(&self, account_id: i32, folder: &str) -> Result<Vec<u32>> {
-        use crate::models::email;
+        use crate::storage::models::email;
         use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
         // 查询数据库：SELECT uid FROM emails WHERE account_id = ? AND folder = ?
@@ -440,7 +440,7 @@ impl ChangeDetector {
         folder: &str,
         uid: u32,
     ) -> Result<Option<EmailFlags>> {
-        use crate::models::email;
+        use crate::storage::models::email;
         use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
         // 查询数据库
@@ -467,7 +467,7 @@ impl ChangeDetector {
         folder: &str,
         uids: &[u32],
     ) -> Result<HashMap<u32, EmailFlags>> {
-        use crate::models::email;
+        use crate::storage::models::email;
         use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
 
         // 查询数据库

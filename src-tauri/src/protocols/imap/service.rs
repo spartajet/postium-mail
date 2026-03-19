@@ -79,7 +79,7 @@ impl ImapService {
         folder: &str,
         email_data: &EmailData,
     ) -> Result<i32> {
-        use crate::models::email;
+        use crate::storage::models::email;
 
         // 解析收件人列表
         let recipients: Vec<email::EmailAddress> = email_data.to

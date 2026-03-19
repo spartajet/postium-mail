@@ -8,7 +8,7 @@ use sea_orm::{
 };
 
 use crate::error::{Result, StorageError};
-use crate::models::{attachment, email};
+use crate::storage::models::{attachment, email};
 
 /// 邮件仓库
 ///

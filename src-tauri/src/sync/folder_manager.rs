@@ -3,7 +3,7 @@
 //! 管理邮件文件夹，支持 RFC 6154 Special-Use 文件夹
 
 use crate::error::{MailError, Result};
-use crate::models::folder;
+use crate::storage::models::folder;
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
@@ -274,7 +274,7 @@ impl FolderManager {
 
     /// 创建新文件夹
     async fn create_folder(&self, account_id: i32, imap_folder: &ImapFolder) -> Result<()> {
-        use crate::models::folder::ActiveModel;
+        use crate::storage::models::folder::ActiveModel;
 
         let folder_active = ActiveModel {
             account_id: Set(account_id),
@@ -308,7 +308,7 @@ impl FolderManager {
 
     /// 更新现有文件夹
     async fn update_folder(&self, local_folder: &folder::Model, imap_folder: &ImapFolder) -> Result<()> {
-        use crate::models::folder::ActiveModel;
+        use crate::storage::models::folder::ActiveModel;
 
         let mut folder_active: ActiveModel = local_folder.clone().into();
 

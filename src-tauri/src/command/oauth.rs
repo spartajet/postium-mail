@@ -3,7 +3,7 @@
 //! 使用 AuthManager 进行 OAuth 认证
 
 use super::{AuthManagerState, DatabaseState, KeyringState};
-use crate::models;
+use crate::storage::models;
 use crate::storage;
 use crate::providers;
 

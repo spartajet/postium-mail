@@ -1,7 +1,7 @@
 //! 账号管理 Commands
 
 use super::{DatabaseState, KeyringState};
-use crate::models;
+use crate::storage::models;
 use crate::storage;
 
 #[tauri::command]
