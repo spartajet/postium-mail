@@ -216,6 +216,8 @@ export function generateAccount(overrides?: Partial<Account>): Account {
   const name =
     overrides?.name || faker.helpers.arrayElement(accountNames[provider]);
 
+  const now = new Date();
+
   return {
     id: faker.string.uuid(),
     name,
@@ -225,6 +227,8 @@ export function generateAccount(overrides?: Partial<Account>): Account {
     authType: AuthType.Password,
     color: faker.helpers.arrayElement(COLORS),
     unreadCount: faker.number.int({ min: 0, max: 50 }),
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }

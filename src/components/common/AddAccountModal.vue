@@ -3,9 +3,10 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { useUIStore, useAccountStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio, NProgress, NCard } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio, NProgress, NCard, NCollapse, NCollapseItem } from 'naive-ui'
 import OAuthLoginModal from './OAuthLoginModal.vue'
 import { extractAutoFillInfo, parseEmail, detectProviderFromEmail } from '@/utils/emailHelper'
+import { AccountType, AuthType } from '@/types'
 
 const uiStore = useUIStore()
 const accountStore = useAccountStore()
@@ -29,6 +30,8 @@ const form = ref({
   email: '',
   provider: 'gmail',
   password: '',
+  accountType: AccountType.Personal,
+  authType: AuthType.Password,
   imapHost: '',
   imapPort: 993,
   imapSsl: true,
@@ -36,7 +39,9 @@ const form = ref({
   smtpPort: 587,
   smtpSsl: true,
   color: '#7C3AED',
-  authType: 'password' as 'password' | 'oauth',
+  // 企业邮箱配置
+  enterpriseTenantId: '',
+  enterpriseDomain: '',
 })
 
 const loading = ref(false)
@@ -54,6 +59,37 @@ const showOAuthModal = ref(false)
 const oauthProvider = ref<'microsoft' | 'google'>('microsoft')
 const oauthToken = ref<{ access_token: string, refresh_token: string, expires_at: number } | null>(null)
 
+// 企业配置预览
+const enterprisePreview = ref({
+  imapHost: '',
+  smtpHost: '',
+})
+
+// 更新企业配置预览
+function updateEnterprisePreview() {
+  if (form.value.enterpriseTenantId || form.value.enterpriseDomain) {
+    // Microsoft 365 / Outlook
+    if (form.value.provider === 'outlook' || form.value.enterpriseTenantId?.includes('onmicrosoft')) {
+      enterprisePreview.value = {
+        imapHost: 'outlook.office365.com',
+        smtpHost: 'smtp.office365.com',
+      }
+    }
+    // Google Workspace / Gmail
+    else if (form.value.provider === 'gmail' || form.value.enterpriseTenantId?.includes('gmail')) {
+      enterprisePreview.value = {
+        imapHost: 'imap.gmail.com',
+        smtpHost: 'smtp.gmail.com',
+      }
+    }
+  } else {
+    enterprisePreview.value = {
+      imapHost: '',
+      smtpHost: '',
+    }
+  }
+}
+
 // 进度状态
 const syncProgress = ref({
   stage: 'idle' as 'idle' | 'authenticating' | 'validating' | 'syncing' | 'completed' | 'error',
@@ -70,6 +106,7 @@ const isCustom = computed(() => form.value.provider === 'imap')
 const canUseOAuth = computed(() => {
   return form.value.provider === 'outlook' || form.value.provider === 'hotmail' || form.value.provider === 'gmail'
 })
+const isEnterprise = computed(() => form.value.accountType === AccountType.Enterprise)
 
 // 监听 provider 变化，自动设置邮箱前缀
 watch(() => form.value.provider, (newProvider, oldProvider) => {
@@ -99,8 +136,8 @@ watch(() => form.value.provider, (newProvider, oldProvider) => {
 
     // 自动切换认证方式（Gmail/Outlook/Yahoo → oauth，其他 → password）
     const recommendedAuthType = (newProvider === 'gmail' || newProvider === 'outlook' || newProvider === 'yahoo')
-      ? 'oauth' as const
-      : 'password' as const
+      ? AuthType.OAuth2
+      : AuthType.Password
     if (form.value.authType !== recommendedAuthType) {
       form.value.authType = recommendedAuthType
     }
@@ -157,7 +194,8 @@ watch(() => form.value.email, (newEmail) => {
 
   // 自动设置认证方式（仅在用户未手动修改时）
   if (shouldUpdateAuthType && autoFillInfo.authType !== form.value.authType) {
-    form.value.authType = autoFillInfo.authType
+    // 将字符串转换为 AuthType 枚举
+    form.value.authType = autoFillInfo.authType === 'oauth' ? AuthType.OAuth2 : AuthType.Password
   }
 
   // 自动填充账号名称（仅在名称为空时）
@@ -307,7 +345,7 @@ async function handleSubmit() {
     console.log('[AddAccountModal] 基础验证通过')
 
     // OAuth 模式：检查 token，如果没有则自动触发授权
-    if (form.value.authType === 'oauth') {
+    if (form.value.authType === AuthType.OAuth2) {
       console.log('[AddAccountModal] 处理OAuth模式')
 
       if (!oauthToken.value) {
@@ -353,7 +391,7 @@ async function handleSubmit() {
     }
 
     // 密码模式：验证连接
-    if (form.value.authType === 'password') {
+    if (form.value.authType === AuthType.Password) {
       console.log('[AddAccountModal] 处理密码模式')
 
       if (!form.value.password.trim()) {
@@ -423,6 +461,8 @@ async function createAccountAndSync() {
       email: form.value.email,
       provider: form.value.provider,
       color: form.value.color,
+      accountType: form.value.accountType,
+      authType: form.value.authType,
     }
 
     console.log('[AddAccountModal] 准备账号数据:', {
@@ -431,9 +471,9 @@ async function createAccountAndSync() {
       isCustom: isCustom.value,
     })
 
-    if (form.value.authType === 'oauth' && oauthToken.value) {
+    if (form.value.authType === AuthType.OAuth2 && oauthToken.value) {
       console.log('[AddAccountModal] 使用OAuth认证')
-      accountData.auth_type = 'oauth'
+      accountData.auth_type = 'oauth2'
       accountData.oauth_provider = oauthProvider.value
       accountData.oauth_token = oauthToken.value.access_token
       accountData.oauth_refresh_token = oauthToken.value.refresh_token
@@ -451,6 +491,13 @@ async function createAccountAndSync() {
       accountData.smtp_host = form.value.smtpHost
       accountData.smtp_port = form.value.smtpPort
       accountData.smtp_ssl = form.value.smtpSsl
+    }
+
+    // 企业邮箱配置
+    if (isEnterprise.value) {
+      console.log('[AddAccountModal] 企业邮箱配置')
+      accountData.enterprise_tenant_id = form.value.enterpriseTenantId || null
+      accountData.enterprise_domain = form.value.enterpriseDomain || null
     }
 
     // 创建账号
@@ -584,6 +631,8 @@ function resetForm() {
     name: '',
     email: '',
     provider: 'gmail',
+    accountType: AccountType.Personal,
+    authType: AuthType.Password,
     password: '',
     imapHost: '',
     imapPort: 993,
@@ -592,7 +641,9 @@ function resetForm() {
     smtpPort: 587,
     smtpSsl: true,
     color: '#7C3AED',
-    authType: 'password',
+    // 企业邮箱配置
+    enterpriseTenantId: '',
+    enterpriseDomain: '',
   }
   oauthToken.value = null
   success.value = ''
@@ -670,16 +721,24 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
         />
       </NFormItem>
 
+      <!-- 账号类型 -->
+      <NFormItem label="账号类型">
+        <NRadioGroup v-model:value="form.accountType" :disabled="loading">
+          <NRadio :value="AccountType.Personal">个人邮箱</NRadio>
+          <NRadio :value="AccountType.Enterprise">企业邮箱</NRadio>
+        </NRadioGroup>
+      </NFormItem>
+
       <!-- 认证方式 -->
       <NFormItem label="认证方式" v-if="canUseOAuth">
         <NRadioGroup v-model:value="form.authType" :disabled="loading">
-          <NRadio value="password">密码登录</NRadio>
-          <NRadio value="oauth">OAuth 2.0 授权</NRadio>
+          <NRadio :value="AuthType.Password">密码登录</NRadio>
+          <NRadio :value="AuthType.OAuth2">OAuth 2.0 授权</NRadio>
         </NRadioGroup>
       </NFormItem>
 
       <!-- OAuth 登录按钮 -->
-      <template v-if="canUseOAuth && form.authType === 'oauth'">
+      <template v-if="canUseOAuth && form.authType === AuthType.OAuth2">
         <NFormItem>
           <NButton
             type="primary"
@@ -699,7 +758,7 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
 
       <!-- 密码输入 -->
       <NFormItem
-        v-if="form.authType === 'password'"
+        v-if="form.authType === AuthType.Password"
         label="密码"
         path="password"
         :show-require-mark="true"
@@ -780,6 +839,40 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
         </NFormItem>
       </template>
 
+      <!-- 企业邮箱配置 -->
+      <NCollapse v-if="isEnterprise">
+        <NCollapseItem title="企业邮箱配置" name="enterprise">
+          <NFormItem label="说明">
+            <NAlert type="info" title="企业邮箱配置说明">
+              如果您的组织使用 Microsoft 365 或 Google Workspace，请填写以下信息以获得更好的配置体验。
+            </NAlert>
+          </NFormItem>
+
+          <NFormItem label="租户 ID / 域名">
+            <NInput
+              v-model:value="form.enterpriseTenantId"
+              placeholder="例如: contoso.onmicrosoft.com 或 example.com"
+              @input="updateEnterprisePreview"
+            />
+          </NFormItem>
+
+          <NFormItem label="域名（可选）">
+            <NInput
+              v-model:value="form.enterpriseDomain"
+              placeholder="例如: example.com"
+            />
+          </NFormItem>
+
+          <!-- 配置预览 -->
+          <NFormItem v-if="enterprisePreview.imapHost" label="配置预览">
+            <div class="enterprise-preview">
+              <p><strong>IMAP 服务器:</strong> {{ enterprisePreview.imapHost }}</p>
+              <p><strong>SMTP 服务器:</strong> {{ enterprisePreview.smtpHost }}</p>
+            </div>
+          </NFormItem>
+        </NCollapseItem>
+      </NCollapse>
+
       <!-- 颜色标签 -->
       <NFormItem label="颜色标签">
         <div class="color-options">
@@ -837,7 +930,7 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
         <NButton @click="uiStore.closeAddAccountModal" :disabled="loading">
           取消
         </NButton>
-        <NButton type="primary" attr-type="submit" :loading="loading" :disabled="form.authType === 'oauth' && !oauthToken">
+        <NButton type="primary" attr-type="submit" :loading="loading" :disabled="form.authType === AuthType.OAuth2 && !oauthToken">
           添加
         </NButton>
       </div>
@@ -942,5 +1035,20 @@ function handleOAuthSuccess(token: { access_token: string, refresh_token: string
 .progress-step.active {
   background: var(--primary-bg);
   color: var(--primary-fg);
+}
+
+.enterprise-preview {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.enterprise-preview p {
+  margin: 4px 0;
+}
+
+.enterprise-preview strong {
+  color: var(--text-primary);
 }
 </style>
