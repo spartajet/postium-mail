@@ -90,9 +90,12 @@ Postium Mail 是一款基于 Tauri + Vue 3 的跨平台桌面邮件客户端，�
 ```
 src-tauri/src/
 ├── engine/                 # 引擎层 - 协调中心
+│   ├── mod.rs
 │   ├── flow_engine.rs      - 核心引擎
 │   ├── task_scheduler.rs   - 定时任务调度器
-│   └── notification_manager.rs - 通知管理器
+│   ├── notification_manager.rs - 通知管理器
+│   ├── conflict_resolver.rs - 冲突解决器 ✅
+│   └── operation_manager.rs - 操作管理器 ✅
 │
 ├── auth/                   # 认证模块
 │   ├── mod.rs
@@ -144,20 +147,32 @@ src-tauri/src/
 │       ├── sender.rs       - SMTP 发送器
 │       └── types.rs        - 类型定义
 │
-├── storage/                # 存储层
+├── storage/                # 存储层 ✅ 已整合
 │   ├── mod.rs
-│   ├── accounts.rs         - 账号存储
-│   ├── emails.rs           - 邮件存储
-│   ├── folders.rs          - 文件夹存储
-│   └── database.rs         - 数据库连接
-│
-├── services/               # 兼容服务层（保留）
-│   ├── mod.rs
-│   ├── operations/         # 操作管理
-│   ├── search_service.rs   - 邮件搜索
-│   ├── account_service.rs  - 账号 CRUD
-│   ├── email_service.rs    - 邮件操作
-│   └── folder_service.rs   - 文件夹查询
+│   ├── models/             # 数据模型 ✅ 已迁移
+│   │   ├── mod.rs
+│   │   ├── account.rs      - 账号实体模型
+│   │   ├── email.rs        - 邮件实体模型
+│   │   ├── folder.rs       - 文件夹实体模型
+│   │   ├── attachment.rs   - 附件实体模型
+│   │   ├── sync_state.rs   - 同步状态模型
+│   │   └── sync_error.rs   - 同步错误模型
+│   ├── migration/          # 数据库迁移 ✅ 已迁移
+│   │   ├── mod.rs
+│   │   ├── m001_20250314_init.rs
+│   │   ├── m002_20250314_add_oauth_fields.rs
+│   │   ├── m003_20250315_add_sync_tables.rs
+│   │   ├── m004_20250315_remove_sensitive_fields.rs
+│   │   ├── m005_20250315_add_imap_metadata.rs
+│   │   ├── m006_20250315_add_sync_operations.rs
+│   │   ├── m007_20250317_add_account_types.rs
+│   │   └── m008_20250317_add_modseq_support.rs
+│   ├── accounts.rs          - 账号存储
+│   ├── emails.rs            - 邮件存储
+│   ├── folders.rs           - 文件夹存储
+│   ├── search.rs            - 邮件搜索 ✅ 已迁移
+│   ├── cache.rs             - 缓存管理
+│   └── database.rs          - 数据库连接
 │
 ├── command/                # Tauri 命令层
 │   ├── mod.rs
@@ -168,14 +183,6 @@ src-tauri/src/
 │   ├── oauth.rs            - OAuth 命令
 │   ├── connection.rs       - 连接命令
 │   └── flow_engine.rs      - FlowEngine 命令
-│
-├── models/                 # 数据模型
-│   ├── mod.rs
-│   ├── account.rs
-│   ├── email.rs
-│   ├── folder.rs
-│   ├── sync_state.rs
-│   └── sync_error.rs
 │
 ├── error.rs                # 错误类型
 ├── lib.rs                  # 库入口
@@ -434,15 +441,21 @@ pub struct SmtpSender {
 
 ### 兼容服务层 (Services)
 
-保留的兼容服务层:
+**🎉 Services 层已完成迁移，目录已删除！**
 
-| 模块 | 职责 | 新架构对应 |
-|------|------|-----------|
-| `account_service` | 账号 CRUD | AuthManager (仅认证) |
-| `email_service` | 邮件列表/操作 | MailProcessor (同步时) |
-| `folder_service` | 文件夹查询/UTF-7解码 | FolderManager |
-| `search_service` | 邮件全文搜索 | 待迁移 |
-| `operations` | 操作管理 | 独立模块 |
+所有功能已迁移到新架构：
+
+| 原服务模块 | 迁移目标 | 状态 |
+|-----------|---------|------|
+| `search_service` | `storage::search` | ✅ 已迁移 |
+| `conflict_resolver` | `engine::conflict_resolver` | ✅ 已迁移 |
+| `operation_manager` | `engine::operation_manager` | ✅ 已迁移 |
+| `oauth_service` | `auth::AuthManager` | ✅ 已整合 |
+| `sync_manager` | `sync::SyncManager` | ✅ 已迁移 |
+| `smtp_service` | `protocols::smtp` | ✅ 已迁移 |
+| `imap/*` | `protocols::imap` | ✅ 已迁移 |
+
+**注意**: 部分 command 层仍使用 storage repositories（accounts, emails, folders）进行 CRUD 操作，这是正常的架构分层设计。
 
 ---
 
@@ -691,4 +704,5 @@ Postium Mail.app/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 1.1.0 | 2026-03-19 | 更新架构结构，记录 services 层完全迁移 |
 | 1.0.0 | 2026-03-19 | 初始版本，整合 FlowEngine 架构设计 |

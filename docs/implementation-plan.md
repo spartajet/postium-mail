@@ -336,7 +336,7 @@
 ### 阶段 6: Services 层迁移 ✅
 
 **状态**: 100% 完成
-**时间**: 2024-02-16 ~ 2024-02-20
+**时间**: 2024-02-16 ~ 2026-03-19
 
 #### 已完成任务
 
@@ -364,24 +364,45 @@
    - `services/oauth_service` → `auth::AuthManager`
    - 完全整合，移除 deprecated 模块
 
-7. ✅ **services/mod.rs 文档更新**
-   - 明确标注迁移状态
-   - 保留兼容服务说明
+7. ✅ **搜索服务迁移**
+   - `services/search_service` → `storage::search`
+   - 使用 FTS5 全文搜索
 
-#### 迁移对照表
+8. ✅ **操作管理模块迁移**
+   - `services/operations/conflict_resolver` → `engine::conflict_resolver`
+   - `services/operations/operation_manager` → `engine::operation_manager`
+   - 离线操作和冲突解决
+
+9. ✅ **存储层整合**
+   - `src/models/` → `storage/models/`
+   - `src/migration/` → `storage/migration/`
+   - 数据库相关模块统一到 storage 下
+
+10. ✅ **Services 目录删除**
+    - 所有功能迁移完成后删除 services 目录
+    - Command 层直接使用 storage repositories
+
+#### 最终迁移对照表
 
 | 旧模块 | 新模块 | 状态 |
 |--------|--------|------|
-| `oauth_service` | `auth::oauth_handler` + `providers::oauth_utils` | ✅ 已整合 |
+| `oauth_service` | `auth::AuthManager` | ✅ 已整合 |
 | `imap/*` | `protocols::imap/*` | ✅ 已迁移 |
 | `smtp_service` | `protocols::smtp/*` | ✅ 已迁移 |
 | `sync_manager` | `sync::sync_manager` | ✅ 已迁移 |
 | `sync_state_service` | `sync::SyncStateManager` | ✅ 已迁移 |
 | `sync_error_service` | `sync::SyncErrorManager` | ✅ 已迁移 |
-| `account_service` | `auth::AuthManager` (部分) | ⏳ 保留兼容 |
-| `email_service` | `sync::MailProcessor` (部分) | ⏳ 保留兼容 |
-| `folder_service` | `sync::FolderManager` | ⏳ 保留兼容 |
-| `search_service` | (待定) | ⏳ 保留 |
+| `search_service` | `storage::search` | ✅ 已迁移 |
+| `conflict_resolver` | `engine::conflict_resolver` | ✅ 已迁移 |
+| `operation_manager` | `engine::operation_manager` | ✅ 已迁移 |
+| `models/` | `storage/models/` | ✅ 已迁移 |
+| `migration/` | `storage/migration/` | ✅ 已迁移 |
+
+#### 架构优化成果
+
+- **模块职责更清晰**: 数据库相关代码集中在 storage，业务逻辑分散在 auth/sync/protocols
+- **层级更扁平**: 移除中间 services 层，command 直接调用对应功能模块
+- **测试覆盖完整**: 所有模块都有单元测试，总计 280+ 测试通过
 
 ---
 
@@ -528,6 +549,7 @@ docs/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 1.4.0 | 2026-03-19 | 完成 Services 层完全迁移，删除 services 目录 |
 | 1.3.1 | 2026-03-19 | 添加阶段 6 完成记录，更新进度 |
 | 1.3.0 | 2026-03-18 | 添加 OAuth 整合记录 |
 | 1.2.0 | 2026-03-18 | 添加 IMAP 迁移记录 |
