@@ -4,7 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::models::folder;
-use crate::services::imap::FolderInfo as ImapFolderInfo;
+use crate::protocols::imap::FolderInfo as ImapFolderInfo;
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -208,13 +208,13 @@ impl FolderManager {
                 // 转换 SpecialUse (imap::types -> folder_manager)
                 let special_use = match &info.special_use {
                     Some(use_type) => match use_type {
-                        crate::services::imap::SpecialUse::All => SpecialUse::All,
-                        crate::services::imap::SpecialUse::Archive => SpecialUse::Archive,
-                        crate::services::imap::SpecialUse::Drafts => SpecialUse::Drafts,
-                        crate::services::imap::SpecialUse::Flagged => SpecialUse::Flagged,
-                        crate::services::imap::SpecialUse::Junk => SpecialUse::Junk,
-                        crate::services::imap::SpecialUse::Sent => SpecialUse::Sent,
-                        crate::services::imap::SpecialUse::Trash => SpecialUse::Trash,
+                        crate::protocols::imap::SpecialUse::All => SpecialUse::All,
+                        crate::protocols::imap::SpecialUse::Archive => SpecialUse::Archive,
+                        crate::protocols::imap::SpecialUse::Drafts => SpecialUse::Drafts,
+                        crate::protocols::imap::SpecialUse::Flagged => SpecialUse::Flagged,
+                        crate::protocols::imap::SpecialUse::Junk => SpecialUse::Junk,
+                        crate::protocols::imap::SpecialUse::Sent => SpecialUse::Sent,
+                        crate::protocols::imap::SpecialUse::Trash => SpecialUse::Trash,
                     },
                     None => {
                         // 如果没有 special-use，根据名称推断

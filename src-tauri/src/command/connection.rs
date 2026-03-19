@@ -2,13 +2,13 @@
 
 use super::KeyringState;
 use crate::models;
-use crate::services;
+use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
 
 #[tauri::command]
 pub async fn test_account_connection(
     _keyring_state: tauri::State<'_, KeyringState>,
     account: models::account::CreateAccountRequest,
-) -> Result<services::imap::ConnectionTestResult, String> {
+) -> Result<ConnectionTestResult, String> {
     let password = account.password.clone();
 
     let host = account
@@ -23,9 +23,9 @@ pub async fn test_account_connection(
         });
 
     let port = account.imap_port.unwrap_or(993);
-    let auth = services::imap::ImapAuth::Password(password);
+    let auth = ImapAuth::Password(password);
 
-    services::imap::test_connection(&host, port as u16, &account.email, auth)
+    test_connection(&host, port as u16, &account.email, auth)
         .await
         .map_err(|e| e.to_string())
 }
@@ -52,9 +52,9 @@ pub async fn test_email_connection(
     });
 
     let port = imap_port.unwrap_or(993);
-    let auth = services::imap::ImapAuth::Password(password);
+    let auth = ImapAuth::Password(password);
 
-    services::imap::test_connection(&host, port, &email, auth)
+    test_connection(&host, port, &email, auth)
         .await
         .map_err(|e| format!("IMAP 连接失败: {}", e))?;
 

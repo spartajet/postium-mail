@@ -70,7 +70,7 @@ pub struct MailProcessor {
 /// # 返回
 ///
 /// 返回 MailData
-pub fn from_imap_email(email_data: &crate::services::imap::EmailData) -> MailData {
+pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData) -> MailData {
     use crate::sync::change_detector::EmailFlags;
 
     MailData {

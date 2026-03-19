@@ -67,12 +67,15 @@ mod tests {
 
         let mut client = ImapClient::new();
 
-        match client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await {
+        match client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await
+        {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
@@ -102,7 +105,8 @@ mod tests {
                                 info!("✅ 成功选择 &XfJT0ZAB-, 邮件数量: {}", count);
 
                                 // 获取 UID 列表
-                                let uids = client.list_uids("&XfJT0ZAB-", 10).await.unwrap_or_default();
+                                let uids =
+                                    client.list_uids("&XfJT0ZAB-", 10).await.unwrap_or_default();
                                 info!("✅ 获取到 {} 封邮件的 UID", uids.len());
                                 info!("   UID 列表: {:?}", uids);
 

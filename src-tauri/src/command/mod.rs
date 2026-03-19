@@ -58,3 +58,27 @@ impl FlowEngineState {
         Arc::clone(&self.0)
     }
 }
+
+/// AuthManager 状态
+///
+/// 管理认证管理器的全局单例
+pub struct AuthManagerState(pub Arc<crate::auth::AuthManager>);
+
+impl AuthManagerState {
+    /// 克隆 AuthManager 实例
+    pub fn clone_manager(&self) -> Arc<crate::auth::AuthManager> {
+        Arc::clone(&self.0)
+    }
+}
+
+/// ProviderPool 状态
+///
+/// 管理服务商池的全局单例
+pub struct ProviderPoolState(pub Arc<crate::providers::ProviderPool>);
+
+impl ProviderPoolState {
+    /// 克隆 ProviderPool 实例
+    pub fn clone_pool(&self) -> Arc<crate::providers::ProviderPool> {
+        Arc::clone(&self.0)
+    }
+}

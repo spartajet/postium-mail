@@ -12,6 +12,8 @@ pub mod auth;  // 公开以支持测试
 pub mod engine;
 pub mod error;
 pub mod providers;  // 公开以支持测试
+pub mod protocols;  // 协议层（IMAP/SMTP）
+pub mod storage;  // 存储层
 pub mod sync;  // 公开以支持测试
 
 // 重新导出关键类型
@@ -27,7 +29,7 @@ use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-use command::{DatabaseState, FlowEngineState, KeyringState, OAuthState};
+use command::{DatabaseState, FlowEngineState, KeyringState, OAuthState, AuthManagerState, ProviderPoolState};
 
 /// 处理 OAuth Deep Link 回调
 fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
@@ -230,12 +232,12 @@ pub fn run() {
                 // 创建 ProviderPool（与 AuthManager 使用相同的实例）
                 let provider_pool = std::sync::Arc::new(providers::ProviderPool::new());
 
-                // 创建 SyncManager
+                // 创建 SyncManager（使用 clone）
                 let sync_manager = std::sync::Arc::new(sync::SyncManager::new(
                     db_arc.clone(),
                     app.handle().clone(),
-                    auth_manager,
-                    provider_pool,
+                    auth_manager.clone(),
+                    provider_pool.clone(),
                 ));
 
                 // 创建 FlowEngine
@@ -250,6 +252,10 @@ pub fn run() {
                     flow_engine,
                 ));
                 app.manage(FlowEngineState(flow_engine_state.clone()));
+
+                // 注册 AuthManagerState 和 ProviderPoolState
+                app.manage(AuthManagerState(auth_manager));
+                app.manage(ProviderPoolState(provider_pool));
 
                 // 启动 FlowEngine
                 {
