@@ -1,6 +1,22 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
+import type { FlowEngineStatus } from '@/types'
+
+/**
+ * 同步历史记录项
+ */
+export interface SyncHistoryItem {
+  accountId: number
+  accountEmail: string
+  completedAt: Date
+  result: {
+    totalSynced: number
+    foldersSynced: number
+    errors: number
+    durationMs: number
+  }
+}
 
 /**
  * 同步进度事件
@@ -48,6 +64,8 @@ export const useSyncStore = defineStore('sync', {
     syncStatuses: new Map<number, SyncStatus>(),
     // 事件监听器清理函数（Promise）
     unlisteners: new Map<number, Promise<UnlistenFn>>(),
+    // 同步历史记录
+    syncHistory: [] as SyncHistoryItem[],
   }),
 
   getters: {
@@ -77,6 +95,15 @@ export const useSyncStore = defineStore('sync', {
      */
     allStatuses: (state) => {
       return Array.from(state.syncStatuses.values())
+    },
+
+    /**
+     * 获取最近的同步历史（按时间倒序，最多10条）
+     */
+    recentHistory: (state) => {
+      return state.syncHistory
+        .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime())
+        .slice(0, 10)
     },
   },
 
@@ -176,9 +203,68 @@ export const useSyncStore = defineStore('sync', {
     },
 
     /**
+     * 获取 FlowEngine 状态
+     */
+    async getFlowEngineStatus(): Promise<FlowEngineStatus | null> {
+      try {
+        return await invoke<FlowEngineStatus>('get_flow_engine_status')
+      } catch (error) {
+        console.error('[SyncStore] 获取 FlowEngine 状态失败:', error)
+        return null
+      }
+    },
+
+    /**
+     * 触发一次性同步（不添加到定时任务）
+     */
+    async triggerOneTimeSync(accountId: number): Promise<void> {
+      try {
+        console.log('[SyncStore] 触发一次性同步:', accountId)
+        await invoke('trigger_sync', { accountId })
+      } catch (error) {
+        console.error('[SyncStore] 触发同步失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 添加同步历史记录
+     */
+    addToHistory(accountId: number, accountEmail: string, result: { totalSynced: number; foldersSynced: number; errors: number; durationMs: number }) {
+      const historyItem: SyncHistoryItem = {
+        accountId,
+        accountEmail,
+        completedAt: new Date(),
+        result: {
+          totalSynced: result.totalSynced,
+          foldersSynced: result.foldersSynced,
+          errors: result.errors,
+          durationMs: result.durationMs,
+        },
+      }
+
+      this.syncHistory.push(historyItem)
+
+      // 限制历史记录数量为 100 条
+      if (this.syncHistory.length > 100) {
+        this.syncHistory = this.syncHistory.slice(-100)
+      }
+
+      console.log('[SyncStore] 添加同步历史:', historyItem)
+    },
+
+    /**
+     * 清除同步历史
+     */
+    clearHistory() {
+      this.syncHistory = []
+      console.log('[SyncStore] 清除同步历史')
+    },
+
+    /**
      * 同步指定账号
      */
-    async syncAccount(accountId: number | string): Promise<SyncResult | null> {
+    async syncAccount(accountId: number | string, accountEmail?: string): Promise<SyncResult | null> {
       // 确保 accountId 是数字类型
       const numericAccountId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId
 
@@ -197,12 +283,24 @@ export const useSyncStore = defineStore('sync', {
         // 获取最终状态
         const status = this.syncStatuses.get(numericAccountId)
         if (status?.stage === 'completed') {
-          return {
+          const result = {
             total_synced: status.progress || 0,
             folders_synced: 0,
             errors: 0,
             duration_ms: 0,
           }
+
+          // 记录同步历史
+          if (accountEmail) {
+            this.addToHistory(numericAccountId, accountEmail, {
+              totalSynced: result.total_synced,
+              foldersSynced: result.folders_synced,
+              errors: result.errors,
+              durationMs: result.duration_ms,
+            })
+          }
+
+          return result
         }
 
         return null

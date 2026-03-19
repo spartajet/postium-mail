@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import type { Email, EmailFolder } from '@/types'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useAccountStore } from './account'
 
 // 后端 DTO 类型定义
@@ -185,6 +186,9 @@ export const useEmailStore = defineStore('email', () => {
     unread_count: number
   }
   const folderStats = ref<Record<string, FolderStat>>({})
+
+  // 新邮件监听器清理函数
+  let newMailUnlisten: (() => void) | null = null
 
   // ========================================
   // Getters
@@ -526,6 +530,97 @@ export const useEmailStore = defineStore('email', () => {
     console.log('[emailStore] ========== Email Store 初始化完成 ==========')
   }
 
+  /**
+   * 初始化：监听新邮件事件
+   * 当收到新邮件时，自动插入列表并更新未读数
+   */
+  async function initNewMailListener() {
+    console.log('[EmailStore] 开始监听新邮件事件')
+
+    // 如果已经监听，先清理
+    if (newMailUnlisten) {
+      newMailUnlisten()
+      newMailUnlisten = null
+    }
+
+    try {
+      const accountStore = useAccountStore()
+
+      newMailUnlisten = await listen('new-mail', (event: any) => {
+        const { accountId, folder, email } = event.payload
+
+        console.log('[EmailStore] 收到新邮件事件:', { accountId, folder, email })
+
+        // 检查是否是当前查看的账号和文件夹
+        const currentAccountId = accountStore.currentAccount?.id
+        const isCurrentAccount = currentAccountId === accountId.toString()
+        const isCurrentFolder = currentFolder.value === folder
+
+        // 如果是当前查看的账号和文件夹，直接插入到列表开头
+        if (isCurrentAccount && isCurrentFolder) {
+          const newEmail: Email = {
+            id: email.id.toString(),
+            subject: email.subject || '无主题',
+            sender: email.senderName || email.senderEmail,
+            senderEmail: email.senderEmail,
+            recipient: email.senderEmail,
+            preview: email.snippet || '',
+            body: email.bodyText || email.bodyHtml || '',
+            date: new Date(email.receivedAt * 1000),
+            unread: !email.isRead,
+            starred: email.isStarred,
+            labels: [],
+            attachments: [],
+            folder: folder as EmailFolder,
+            accountId: accountId.toString(),
+          }
+
+          // 插入到列表开头
+          emails.value.unshift(newEmail)
+
+          // 限制列表长度，防止内存溢出
+          if (emails.value.length > 200) {
+            emails.value = emails.value.slice(0, 200)
+          }
+
+          console.log('[EmailStore] 新邮件已添加到列表:', newEmail.subject)
+        }
+
+        // 更新账号的未读数
+        if (!email.isRead) {
+          accountStore.incrementUnreadCount(accountId.toString())
+        }
+
+        // TODO: 显示桌面通知
+        // 可以在这里添加通知代码
+      })
+
+      // 组件卸载时清理监听器
+      onUnmounted(() => {
+        if (newMailUnlisten) {
+          newMailUnlisten()
+          newMailUnlisten = null
+          console.log('[EmailStore] 新邮件监听器已清理')
+        }
+      })
+
+      console.log('[EmailStore] 新邮件监听器已启动')
+    } catch (error) {
+      console.error('[EmailStore] 初始化新邮件监听器失败:', error)
+    }
+  }
+
+  /**
+   * 停止监听新邮件事件
+   */
+  function stopNewMailListener() {
+    if (newMailUnlisten) {
+      newMailUnlisten()
+      newMailUnlisten = null
+      console.log('[EmailStore] 新邮件监听器已停止')
+    }
+  }
+
   // 搜索邮件
   function setSearchQuery(query: string) {
     searchQuery.value = query
@@ -861,6 +956,8 @@ export const useEmailStore = defineStore('email', () => {
     fetchEmailDetail,
     fetchFolderStats,
     initialize,
+    initNewMailListener,
+    stopNewMailListener,
     syncAccount,
     selectEmail,
     setFolder,
