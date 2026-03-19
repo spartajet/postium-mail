@@ -28,6 +28,91 @@
 
 ## 最近更新
 
+### 2026-03-19：OAuth 功能完全整合到 AuthManager ✅
+
+**状态**：✅ 完成
+
+**背景**：
+将 `oauth_service` 的功能完全整合到 `AuthManager`，移除 deprecated 模块。
+
+**已完成内容**：
+
+1. **AuthManager 增强**：
+   - ✅ 添加 `id_token` 字段到 `AuthResult`
+   - ✅ 添加 `display_name` 字段到 `AuthResult`
+   - ✅ 添加 `get_user_info_from_id_token()` 方法解析 JWT ID Token
+   - ✅ 添加 `base64_url_decode()` 辅助方法
+
+2. **TokenManager 增强**：
+   - ✅ 添加 `migrate_token_account()` 方法支持从临时 ID 迁移到实际 ID
+
+3. **command/oauth.rs 更新**：
+   - ✅ 使用 `AuthManagerState` 替代 `OAuthState`
+   - ✅ `get_oauth_auth_url` 使用 `AuthManager::get_oauth_url()`
+   - ✅ `exchange_oauth_code` 使用 `AuthManager::authenticate_oauth()`
+   - ✅ `refresh_oauth_token` 使用 `AuthManager::refresh_token()`
+
+4. **清理工作**：
+   - ✅ 删除 `services/oauth_service.rs` 文件
+   - ✅ 从 `services/mod.rs` 移除 `oauth_service` 导出
+   - ✅ 从 `command/mod.rs` 删除 `OAuthState`
+   - ✅ 从 `lib.rs` 删除 `OAuthState` 注册和导入
+
+**测试结果**：
+- ✅ 编译通过（只有预存警告，与迁移无关）
+- ✅ auth 模块测试 84 个全部通过
+
+**迁移完成度**：
+- OAuth 功能整合：100%（完全整合到 AuthManager）
+- 代码清理：100%（删除所有 deprecated 代码）
+
+---
+
+### 2026-03-19：Services 层迁移完成（方案A）✅
+
+**状态**：✅ 文档更新完成
+
+**背景**：
+基于代码库探索发现，新架构（`engine/`, `providers/`, `auth/`, `sync/`, `protocols/`）已基本实现完成，但 `services/` 层中的部分模块仍在被使用。方案A明确保留兼容的服务层，并更新迁移状态文档。
+
+**已完成内容**：
+
+1. **services/mod.rs 文档更新**：
+   - ✅ 更新迁移状态对照表
+   - ✅ 明确标注保留兼容的服务
+   - ✅ 添加详细的功能说明
+
+2. **迁移策略确定**：
+   - ✅ 保留 `account_service` - 账号 CRUD（AuthManager 只处理认证流程）
+   - ✅ 保留 `email_service` - 邮件列表和操作（MailProcessor 只处理同步时邮件处理）
+   - ✅ 保留 `folder_service` - 文件夹查询（包含 UTF-7 解码等特殊逻辑）
+   - ✅ 保留 `search_service` - 邮件全文搜索
+   - ✅ 保留 `oauth_service` - 标记 deprecated，功能正常
+
+3. **已完成迁移的模块**：
+   - ✅ `services/smtp_service` → `protocols::smtp`
+   - ✅ `services/sync_manager` → `sync::sync_manager`
+   - ✅ `services/imap` → `protocols::imap`
+
+4. **新架构已集成**：
+   - ✅ FlowEngine 在 `lib.rs` 中初始化并启动
+   - ✅ AuthManagerState 和 ProviderPoolState 已注册
+   - ✅ command/sync.rs 已更新使用 SyncManager
+   - ✅ command/connection.rs 使用 protocols::imap
+   - ✅ command/flow_engine.rs 使用新架构
+
+**迁移完成度**：
+- 核心迁移：100%（IMAP/SMTP 客户端、SyncManager、FlowEngine）
+- services 层：保留兼容层，功能完整
+- 编译状态：通过（1 个预存警告，与迁移无关）
+- 文档状态：完整
+
+**可选的后续工作**：
+- 整合 ProviderPool 到 account_service（服务商自动检测）
+- 整合 OAuth 认证到 AuthManager
+
+---
+
 ### 2026-03-19：IMAP 协议层迁移完成 ✅
 
 **状态**：✅ 全部完成

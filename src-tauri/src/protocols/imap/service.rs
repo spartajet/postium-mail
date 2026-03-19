@@ -1,6 +1,7 @@
 use super::{AsyncImapClient, EmailData, FolderInfo, FolderMetadata, ImapAuth};
 use anyhow::{anyhow, Result};
 use sea_orm::DbConn;
+use crate::storage;
 
 /// IMAP 服务
 pub struct ImapService {
@@ -76,11 +77,49 @@ impl ImapService {
         db: &DbConn,
         account_id: i32,
         folder: &str,
-        _uid: u32, // UID 已包含在 email_data 中
         email_data: &EmailData,
     ) -> Result<i32> {
-        crate::services::email_service::save_email_from_imap(db, account_id, email_data, folder)
-            .await
+        use crate::models::email;
+
+        // 解析收件人列表
+        let recipients: Vec<email::EmailAddress> = email_data.to
+            .split(',')
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(email::EmailAddress {
+                        name: None,
+                        email: s.to_string(),
+                    })
+                }
+            })
+            .collect();
+
+        let recipient_emails = serde_json::to_string(&recipients)
+            .unwrap_or_default();
+
+        // 解析发件人
+        let sender_name = None;
+        let sender_email = email_data.from.clone();
+
+        // 时间戳转换
+        let timestamp = email_data.date.timestamp();
+
+        storage::EmailRepository::save_email_from_imap(
+            db, account_id, folder, email_data.uid as i32,
+            Some(email_data.subject.clone()),
+            sender_name,
+            sender_email,
+            recipient_emails,
+            Some(email_data.body_text.clone()),
+            Some(email_data.body_html.clone()),
+            timestamp,
+            timestamp,
+        )
+        .await
+        .map_err(|e| anyhow!("保存邮件失败: {}", e))
     }
 
     /// 检查邮件是否已存在（通过 UID）
@@ -91,7 +130,9 @@ impl ImapService {
         uid: i32,
         folder: &str,
     ) -> bool {
-        crate::services::email_service::email_exists_by_uid(db, account_id, uid, folder).await
+        storage::EmailRepository::email_exists_by_uid(db, account_id, folder, uid)
+            .await
+            .unwrap_or(false)
     }
 
     /// 标记邮件为已读/未读

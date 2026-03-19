@@ -539,6 +539,59 @@ impl TokenManager {
 
         Ok(new_token)
     }
+
+    /// 迁移 Token 到新的 account_id
+    ///
+    /// 当使用临时 account_id (0) 存储 token 后，账号创建完成时需要迁移到真实 ID
+    ///
+    /// # 参数
+    ///
+    /// * `temp_account_id` - 临时账号 ID（通常为 0）
+    /// * `new_account_id` - 新的账号 ID
+    pub async fn migrate_token_account(&self, temp_account_id: i32, new_account_id: i32) -> Result<()> {
+        // 1. 从临时 ID 读取 token
+        let temp_username = oauth_username(temp_account_id);
+        let keyring = self.app_handle.keyring();
+        let token_json = keyring
+            .get_password(KEYRING_SERVICE, &temp_username)
+            .map_err(|e| MailError::Storage(StorageError::Keyring(e.to_string())))?
+            .ok_or_else(|| {
+                MailError::Storage(StorageError::NotFound(format!(
+                    "临时账号 {} 的 OAuth Token 不存在",
+                    temp_account_id
+                )))
+            })?;
+
+        // 2. 解析 token
+        let token: OAuthToken = serde_json::from_str(&token_json).map_err(|e| {
+            MailError::Internal(format!("反序列化 token 失败: {}", e))
+        })?;
+
+        // 3. 获取 provider（从缓存）
+        let provider = self.cache.read().await.get(&temp_account_id)
+            .map(|m| m.provider.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // 4. 存储到新 ID
+        self.store_oauth_token(new_account_id, &provider, &token.refresh_token, token.expires_at)
+            .await?;
+
+        // 5. 删除临时 token
+        keyring
+            .delete_password(KEYRING_SERVICE, &temp_username)
+            .map_err(|e| MailError::Storage(StorageError::Keyring(e.to_string())))?;
+
+        // 6. 更新缓存
+        self.cache.write().await.remove(&temp_account_id);
+
+        tracing::info!(
+            "迁移 OAuth token 成功: {} -> {}",
+            temp_account_id,
+            new_account_id
+        );
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

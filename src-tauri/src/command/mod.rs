@@ -24,8 +24,6 @@ use sea_orm::DbConn;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
-use crate::services;
-
 /// 全局数据库连接状态
 pub struct DatabaseState(pub Arc<StdMutex<DbConn>>);
 
@@ -43,9 +41,6 @@ impl DatabaseState {
 pub struct KeyringState {
     pub app_handle: tauri::AppHandle,
 }
-
-/// OAuth 服务状态
-pub struct OAuthState(pub services::oauth_service::OAuthService);
 
 /// FlowEngine 状态
 ///

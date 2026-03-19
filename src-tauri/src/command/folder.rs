@@ -2,7 +2,7 @@
 
 use super::DatabaseState;
 use crate::models;
-use crate::services;
+use crate::storage;
 
 #[tauri::command]
 pub async fn get_folder_stats(
@@ -10,7 +10,7 @@ pub async fn get_folder_stats(
     account_id: i32,
 ) -> Result<Vec<models::folder::FolderDto>, String> {
     let db = state.clone_conn();
-    let folders = services::folder_service::get_by_account(&db, account_id)
+    let folders = storage::FolderRepository::get_by_account(&db, account_id)
         .await
         .map_err(|e| e.to_string())?;
     Ok(folders.into_iter().map(|f| f.into()).collect())

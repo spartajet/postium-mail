@@ -3,6 +3,7 @@
 //! 管理邮件同步流程，协调所有同步组件
 
 use crate::error::{MailError, Result};
+use crate::storage;
 use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector, sync_state::SyncStateManager};
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::providers::{ProviderPool, AuthType};
@@ -110,7 +111,7 @@ impl SyncManager {
         );
 
         // 1. 获取账号信息
-        let account = crate::services::account_service::get_by_id(&self.db, account_id)
+        let account = storage::AccountRepository::get_by_id(&self.db, account_id)
             .await
             .map_err(|e| MailError::Internal(format!("获取账号信息失败: {}", e)))?
             .ok_or_else(|| MailError::Internal(format!("账号 {} 不存在", account_id)))?;

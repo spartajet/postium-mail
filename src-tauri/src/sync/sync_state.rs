@@ -4,7 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::models::sync_state;
-use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set};
+use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, sea_query::Expr, ExprTrait};
 use std::sync::Arc;
 use chrono::Utc;
 
@@ -14,6 +14,8 @@ use chrono::Utc;
 /// - highest_modseq: CONDSTORE 最高修改序列号
 /// - last_sync_uid: 上次同步的最高 UID
 /// - last_sync_at: 上次同步时间
+/// - sync_count: 同步邮件数量
+/// - error_count: 错误计数
 pub struct SyncStateManager {
     db: Arc<DbConn>,
 }
@@ -22,6 +24,20 @@ impl SyncStateManager {
     /// 创建新的同步状态管理器
     pub fn new(db: Arc<DbConn>) -> Self {
         Self { db }
+    }
+
+    /// 获取账号的所有同步状态
+    pub async fn get_all_by_account(
+        &self,
+        account_id: i32,
+    ) -> Result<Vec<sync_state::Model>> {
+        let states = sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .all(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("获取同步状态列表失败: {}", e)))?;
+
+        Ok(states)
     }
 
     /// 获取文件夹的同步状态
@@ -87,6 +103,179 @@ impl SyncStateManager {
             .ok_or_else(|| MailError::Internal("创建同步状态后无法查询".to_string()))
     }
 
+    /// 创建或更新同步状态（完整版本）
+    ///
+    /// 整合自 services::sync_state_service::upsert
+    pub async fn upsert(
+        &self,
+        account_id: i32,
+        folder: &str,
+        last_sync_uid: Option<i32>,
+        highest_uid: Option<i32>,
+        sync_count: i32,
+        is_first_sync: bool,
+    ) -> Result<sync_state::Model> {
+        let now = Utc::now().timestamp();
+
+        // 尝试查找现有记录
+        if let Some(existing) = self.get_state(account_id, folder).await? {
+            // 保存需要的值，避免 move 后使用
+            let existing_is_first = existing.is_first_sync;
+            let existing_highest = existing.highest_uid.unwrap_or(0);
+            let existing_sync_count = existing.sync_count;
+
+            // 更新现有记录
+            let mut active: sync_state::ActiveModel = existing.into();
+            active.last_sync_uid = Set(last_sync_uid);
+            active.highest_uid = Set(Some(highest_uid.unwrap_or(existing_highest)));
+            active.sync_count = Set(existing_sync_count + sync_count);
+            active.is_first_sync = Set(is_first_sync && existing_is_first);
+            active.error_count = Set(0); // 成功同步，清除错误计数
+            active.last_error = Set(None);
+            active.updated_at = Set(now);
+
+            Ok(active.update(self.db.as_ref()).await.map_err(|e| {
+                MailError::Internal(format!("更新同步状态失败: {}", e))
+            })?)
+        } else {
+            // 创建新记录
+            let new_state = sync_state::ActiveModel {
+                account_id: Set(account_id),
+                folder: Set(folder.to_string()),
+                last_sync_uid: Set(last_sync_uid),
+                last_sync_at: Set(Some(now)),
+                highest_uid: Set(highest_uid),
+                total_emails: Set(None), // 稍后更新
+                sync_count: Set(sync_count),
+                is_first_sync: Set(is_first_sync),
+                error_count: Set(0),
+                last_error: Set(None),
+                updated_at: Set(now),
+                ..Default::default()
+            };
+
+            Ok(new_state.insert(self.db.as_ref()).await.map_err(|e| {
+                MailError::Internal(format!("创建同步状态失败: {}", e))
+            })?)
+        }
+    }
+
+    /// 更新同步进度（在同步过程中调用）
+    ///
+    /// 整合自 services::sync_state_service::update_progress
+    pub async fn update_progress(
+        &self,
+        account_id: i32,
+        folder: &str,
+        synced_count: i32,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        sync_state::Entity::update_many()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(folder))
+            .col_expr(
+                sync_state::Column::SyncCount,
+                Expr::val(synced_count),
+            )
+            .col_expr(
+                sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("更新同步进度失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 记录同步错误
+    ///
+    /// 整合自 services::sync_state_service::record_error
+    pub async fn record_error(
+        &self,
+        account_id: i32,
+        folder: &str,
+        error_message: &str,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        // 增加错误计数
+        sync_state::Entity::update_many()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(folder))
+            .col_expr(
+                sync_state::Column::ErrorCount,
+                Expr::col(sync_state::Column::ErrorCount).add(1),
+            )
+            .col_expr(
+                sync_state::Column::LastError,
+                Expr::val(error_message),
+            )
+            .col_expr(
+                sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("记录同步错误失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 清除错误计数
+    ///
+    /// 整合自 services::sync_state_service::clear_errors
+    pub async fn clear_errors(
+        &self,
+        account_id: i32,
+        folder: &str,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        sync_state::Entity::update_many()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(folder))
+            .col_expr(
+                sync_state::Column::ErrorCount,
+                Expr::val(0),
+            )
+            .col_expr(
+                sync_state::Column::LastError,
+                Expr::val(Option::<String>::None),
+            )
+            .col_expr(
+                sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("清除错误计数失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 删除同步状态
+    pub async fn delete(&self, id: i32) -> Result<()> {
+        sync_state::Entity::delete_by_id(id)
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("删除同步状态失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 检查是否需要首次同步
+    ///
+    /// 整合自 services::sync_state_service::needs_first_sync
+    pub async fn needs_first_sync(&self, account_id: i32, folder: &str) -> Result<bool> {
+        if let Some(state) = self.get_state(account_id, folder).await? {
+            Ok(state.is_first_sync)
+        } else {
+            Ok(true)
+        }
+    }
+
     /// 更新 highest_modseq
     ///
     /// # 参数
@@ -100,8 +289,6 @@ impl SyncStateManager {
         folder: &str,
         highest_modseq: i64,
     ) -> Result<()> {
-        use sea_orm::ActiveModelTrait;
-
         let state = self.get_or_create_state(account_id, folder).await?;
 
         let mut active_model: sync_state::ActiveModel = state.into();
@@ -136,8 +323,6 @@ impl SyncStateManager {
         folder: &str,
         last_sync_uid: i32,
     ) -> Result<()> {
-        use sea_orm::ActiveModelTrait;
-
         let state = self.get_or_create_state(account_id, folder).await?;
 
         let mut active_model: sync_state::ActiveModel = state.into();
@@ -172,8 +357,6 @@ impl SyncStateManager {
         folder: &str,
         sync_count: i32,
     ) -> Result<()> {
-        use sea_orm::ActiveModelTrait;
-
         let state = self.get_or_create_state(account_id, folder).await?;
 
         // 在 move 之前保存需要的值
@@ -216,8 +399,6 @@ impl SyncStateManager {
         folder: &str,
         error: String,
     ) -> Result<()> {
-        use sea_orm::ActiveModelTrait;
-
         let state = self.get_or_create_state(account_id, folder).await?;
 
         // 在 move 之前保存需要的值

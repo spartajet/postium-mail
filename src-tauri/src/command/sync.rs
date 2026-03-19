@@ -3,11 +3,11 @@
 use std::sync::Arc;
 use tauri_plugin_keyring::KeyringExt;
 
-use super::{DatabaseState, KeyringState, AuthManagerState, ProviderPoolState};
+use super::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
 use crate::crypto;
 use crate::models;
 use crate::protocols::smtp;
-use crate::services;
+use crate::storage;
 use crate::sync;
 
 #[tauri::command]
@@ -73,7 +73,7 @@ pub async fn send_email(
 ) -> Result<String, String> {
     let db = db_state.clone_conn();
 
-    let account = services::account_service::get_by_id(&db, request.account_id)
+    let account = storage::AccountRepository::get_by_id(&db, request.account_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
