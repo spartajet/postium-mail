@@ -83,6 +83,9 @@ function dtoToAccount(dto: AccountDto): Account {
     // 企业配置
     enterpriseTenantId: dto.enterprise_tenant_id || undefined,
     enterpriseDomain: dto.enterprise_domain || undefined,
+    // 时间戳
+    createdAt: new Date(dto.created_at),
+    updatedAt: new Date(dto.updated_at),
   }
 }
 

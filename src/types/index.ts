@@ -122,6 +122,10 @@ export interface Account {
   // 企业邮箱配置
   enterpriseTenantId?: string;
   enterpriseDomain?: string;
+
+  // 时间戳
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type EmailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "imap";
