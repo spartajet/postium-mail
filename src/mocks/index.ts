@@ -8,6 +8,7 @@ import type {
   EmailProvider,
   RepeatType,
 } from "@/types";
+import { AccountType, AuthType } from "@/types";
 
 // 配置 faker 种子以保持数据一致性（可选）
 // faker.seed(123)
@@ -220,6 +221,8 @@ export function generateAccount(overrides?: Partial<Account>): Account {
     name,
     email: faker.internet.email(),
     provider,
+    accountType: AccountType.Personal,
+    authType: AuthType.Password,
     color: faker.helpers.arrayElement(COLORS),
     unreadCount: faker.number.int({ min: 0, max: 50 }),
     ...overrides,

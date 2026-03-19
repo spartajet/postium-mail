@@ -1,4 +1,60 @@
+// ============================================================
+// 枚举类型定义
+// ============================================================
+
+/**
+ * 账号类型枚举
+ */
+export enum AccountType {
+  Personal = 'personal',
+  Enterprise = 'enterprise',
+}
+
+/**
+ * 认证类型枚举
+ */
+export enum AuthType {
+  Password = 'password',
+  OAuth2 = 'oauth2',
+  AppPassword = 'app_password',
+  DomainAuth = 'domain_auth',
+  SamlSso = 'saml_sso',
+}
+
+/**
+ * SSL 模式枚举
+ */
+export enum SslMode {
+  None = 'none',
+  StartTls = 'start_tls',
+  Implicit = 'implicit',
+}
+
+/**
+ * 同步阶段枚举
+ */
+export enum SyncStage {
+  Connecting = 'connecting',
+  SyncingFolders = 'syncing_folders',
+  SyncingEmails = 'syncing_emails',
+  Completed = 'completed',
+  Error = 'error',
+}
+
+/**
+ * 错误严重程度枚举
+ */
+export enum ErrorSeverity {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+  Critical = 'critical',
+}
+
+// ============================================================
 // 邮件相关类型
+// ============================================================
+
 export interface Email {
   id: string;
   sender: string;
@@ -31,7 +87,10 @@ export interface Attachment {
   path?: string;
 }
 
+// ============================================================
 // 账号相关类型
+// ============================================================
+
 export interface Account {
   id: string;
   name: string;
@@ -39,21 +98,117 @@ export interface Account {
   provider: EmailProvider;
   color: string;
   unreadCount: number;
+
+  // 账号类型和认证类型
+  accountType: AccountType;
+  authType: AuthType;
+
+  // IMAP/SMTP 配置
   imapHost?: string;
   imapPort?: number;
   imapSsl?: boolean;
   smtpHost?: string;
   smtpPort?: number;
   smtpSsl?: boolean;
+
+  // 同步配置
   syncEnabled?: boolean;
   lastSyncAt?: Date;
-  authType?: string;
+
+  // OAuth 相关
   oauthProvider?: string;
+  oauthTokenExpiry?: Date;
+
+  // 企业邮箱配置
+  enterpriseTenantId?: string;
+  enterpriseDomain?: string;
 }
 
 export type EmailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "imap";
 
+// ============================================================
+// 同步相关类型
+// ============================================================
+
+/**
+ * 同步进度接口
+ */
+export interface SyncProgress {
+  accountId: number;
+  stage: SyncStage;
+  folder?: string;
+  current: number;
+  total: number;
+  message: string;
+  startedAt: Date;
+}
+
+/**
+ * 同步状态接口
+ */
+export interface SyncStatus {
+  accountId: number;
+  stage: 'idle' | 'syncing' | 'completed' | 'error';
+  progress: number;
+  message: string;
+  currentFolder?: string;
+  result?: SyncResult;
+  error?: string;
+}
+
+/**
+ * 同步结果接口
+ */
+export interface SyncResult {
+  totalSynced: number;
+  foldersSynced: number;
+  errors: number;
+  durationMs: number;
+}
+
+/**
+ * 同步历史记录项
+ */
+export interface SyncHistoryItem {
+  accountId: number;
+  completedAt: Date;
+  result: SyncResult;
+}
+
+// ============================================================
+// 错误处理类型
+// ============================================================
+
+/**
+ * 邮件错误接口
+ */
+export interface MailError {
+  code: string;
+  message: string;
+  severity: ErrorSeverity;
+  retryable: boolean;
+  retryAfter?: number;
+  details?: Record<string, unknown>;
+}
+
+// ============================================================
+// FlowEngine 相关类型
+// ============================================================
+
+/**
+ * FlowEngine 状态接口
+ */
+export interface FlowEngineStatus {
+  isRunning: boolean;
+  activeTasks: number;
+  queuedTasks: number;
+  completedTasks: number;
+  failedTasks: number;
+}
+
+// ============================================================
 // 日历相关类型
+// ============================================================
 export interface CalendarEvent {
   id: string;
   title: string;
