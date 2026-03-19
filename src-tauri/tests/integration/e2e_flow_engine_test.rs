@@ -2,11 +2,14 @@
 //!
 //! 测试 FlowEngine 的完整工作流程
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 /// 测试引擎状态转换
 #[tokio::test]
 #[ignore]
 async fn test_engine_state_transitions() {
-    println!("🔄 测试引擎状态转换...");
+    test_progress!("测试引擎状态转换");
 
     use postium_mail_lib::engine::{EngineState, FlowEngineConfig};
 
@@ -18,25 +21,25 @@ async fn test_engine_state_transitions() {
         EngineState::Stopping,
     ];
 
-    println!("  - 状态列表:");
+    test_info!("状态列表:");
     for state in &states {
         let json = serde_json::to_string(state).unwrap();
-        println!("    - {:?} -> {}", state, json);
+        test_info!("  - {:?} -> {}", state, json);
     }
 
     // 测试配置
     let config = FlowEngineConfig::default();
-    println!("  - 配置验证:");
-    println!("    - enable_task_scheduler: {}", config.enable_task_scheduler);
-    println!("    - default_sync_interval_minutes: {}", config.default_sync_interval_minutes);
+    test_info!("配置验证:");
+    test_info!("  - enable_task_scheduler: {}", config.enable_task_scheduler);
+    test_info!("  - default_sync_interval_minutes: {}", config.default_sync_interval_minutes);
 
-    println!("✅ 状态转换测试通过");
+    test_success!("状态转换测试通过");
 }
 
 /// 测试任务管理数据结构
 #[tokio::test]
 async fn test_task_data_structures() {
-    println!("📊 测试任务管理数据结构...");
+    test_progress!("测试任务管理数据结构");
 
     use postium_mail_lib::engine::{EngineState, EngineStatusReport};
 
@@ -60,7 +63,7 @@ async fn test_task_data_structures() {
 
     for report in &reports {
         let json = serde_json::to_string(report).unwrap();
-        println!("  - {:?} -> {}", report.state, json);
+        test_info!("  - {:?} -> {}", report.state, json);
 
         // 验证反序列化
         let deserialized: EngineStatusReport = serde_json::from_str(&json).unwrap();
@@ -68,13 +71,13 @@ async fn test_task_data_structures() {
         assert_eq!(deserialized.running_tasks, report.running_tasks);
     }
 
-    println!("✅ 任务管理数据结构测试通过");
+    test_success!("任务管理数据结构测试通过");
 }
 
 /// 测试并发操作的数据结构
 #[tokio::test]
 async fn test_concurrent_operations_structures() {
-    println!("⚡ 测试并发操作的数据结构...");
+    test_progress!("测试并发操作的数据结构");
 
     use std::sync::Arc;
 
@@ -86,6 +89,6 @@ async fn test_concurrent_operations_structures() {
     state.store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(state.load(std::sync::atomic::Ordering::Relaxed));
 
-    println!("  - 原子操作正常");
-    println!("✅ 并发操作数据结构测试通过");
+    test_info!("原子操作正常");
+    test_success!("并发操作数据结构测试通过");
 }

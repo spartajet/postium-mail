@@ -2,11 +2,14 @@
 //
 // 测试 SyncManager 的类型、枚举和序列化
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 /// 测试同步阶段枚举
 #[tokio::test]
 #[ignore]
 async fn test_sync_stages() {
-    println!("📍 测试同步阶段枚举...");
+    test_progress!("测试同步阶段枚举...");
 
     use postium_mail_lib::sync::{SyncStage, SyncProgress};
 
@@ -19,7 +22,7 @@ async fn test_sync_stages() {
     ];
 
     for stage in &stages {
-        println!("  - {:?}", stage);
+        test_info!("  - {:?}", stage);
     }
 
     assert_eq!(stages.len(), 5);
@@ -37,14 +40,14 @@ async fn test_sync_stages() {
     assert_eq!(progress.total, 100);
     assert!(matches!(progress.stage, SyncStage::SyncingEmails));
 
-    println!("✅ 同步阶段枚举测试通过");
+    test_success!(同步阶段枚举测试通过");
 }
 
 /// 测试同步结果结构
 #[tokio::test]
 #[ignore]
 async fn test_sync_result() {
-    println!("📊 测试同步结果结构...");
+    test_info!(测试同步结果结构...");
 
     use postium_mail_lib::sync::SyncResult;
 
@@ -55,23 +58,23 @@ async fn test_sync_result() {
         duration_ms: 1500,
     };
 
-    println!("同步结果:");
-    println!("  - 总同步: {}", result.total_synced);
-    println!("  - 文件夹: {}", result.folders_synced);
-    println!("  - 错误: {}", result.errors);
-    println!("  - 耗时: {} ms", result.duration_ms);
+    test_info!("同步结果:");
+    test_info!("  - 总同步: {}", result.total_synced);
+    test_info!("  - 文件夹: {}", result.folders_synced);
+    test_info!("  - 错误: {}", result.errors);
+    test_info!("  - 耗时: {} ms", result.duration_ms);
 
     assert_eq!(result.total_synced, 100);
     assert_eq!(result.errors, 0);
 
-    println!("✅ 同步结果结构测试通过");
+    test_success!(同步结果结构测试通过");
 }
 
 /// 测试 SyncStage 序列化和反序列化
 #[tokio::test]
 #[ignore]
 async fn test_sync_stage_serialization() {
-    println!("🔤 测试 SyncStage 序列化...");
+    test_progress!("测试 SyncStage 序列化...");
 
     use postium_mail_lib::sync::SyncStage;
 
@@ -79,20 +82,20 @@ async fn test_sync_stage_serialization() {
 
     // 测试序列化
     let json = serde_json::to_string(&stage).unwrap();
-    println!("  序列化: {}", json);
+    test_info!("  序列化: {}", json);
 
     // 测试反序列化
     let deserialized: SyncStage = serde_json::from_str(&json).unwrap();
     assert_eq!(stage, deserialized);
 
-    println!("✅ SyncStage 序列化测试通过");
+    test_success!(SyncStage 序列化测试通过");
 }
 
 /// 测试 SyncProgress 序列化和反序列化
 #[tokio::test]
 #[ignore]
 async fn test_sync_progress_serialization() {
-    println!("📦 测试 SyncProgress 序列化...");
+    test_progress!("测试 SyncProgress 序列化...");
 
     use postium_mail_lib::sync::{SyncProgress, SyncStage};
 
@@ -106,7 +109,7 @@ async fn test_sync_progress_serialization() {
 
     // 测试序列化
     let json = serde_json::to_string(&progress).unwrap();
-    println!("  序列化: {}", json);
+    test_info!("  序列化: {}", json);
 
     // 测试反序列化
     let deserialized: SyncProgress = serde_json::from_str(&json).unwrap();
@@ -114,14 +117,14 @@ async fn test_sync_progress_serialization() {
     assert_eq!(progress.total, deserialized.total);
     assert_eq!(progress.folder, deserialized.folder);
 
-    println!("✅ SyncProgress 序列化测试通过");
+    test_success!(SyncProgress 序列化测试通过");
 }
 
 /// 测试 SyncResult 序列化和反序列化
 #[tokio::test]
 #[ignore]
 async fn test_sync_result_serialization() {
-    println!("📋 测试 SyncResult 序列化...");
+    test_info!(测试 SyncResult 序列化...");
 
     use postium_mail_lib::sync::SyncResult;
 
@@ -134,21 +137,21 @@ async fn test_sync_result_serialization() {
 
     // 测试序列化
     let json = serde_json::to_string(&result).unwrap();
-    println!("  序列化: {}", json);
+    test_info!("  序列化: {}", json);
 
     // 测试反序列化
     let deserialized: SyncResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result.total_synced, deserialized.total_synced);
     assert_eq!(result.errors, deserialized.errors);
 
-    println!("✅ SyncResult 序列化测试通过");
+    test_success!(SyncResult 序列化测试通过");
 }
 
 /// 测试所有同步阶段的枚举值
 #[tokio::test]
 #[ignore]
 async fn test_all_sync_stages() {
-    println!("🎯 测试所有同步阶段...");
+    test_progress!("测试所有同步阶段...");
 
     use postium_mail_lib::sync::SyncStage;
 
@@ -163,20 +166,20 @@ async fn test_all_sync_stages() {
 
     for (stage, name) in stages {
         let json = serde_json::to_string(&stage).unwrap();
-        println!("  {:?} -> {}", stage, json);
+        test_info!("  {:?} -> {}", stage, json);
 
         // 验证序列化结果包含名称
         assert!(json.contains(name));
     }
 
-    println!("✅ 所有同步阶段测试通过");
+    test_success!(所有同步阶段测试通过");
 }
 
 /// 测试 SyncProgress 字段完整性
 #[tokio::test]
 #[ignore]
 async fn test_sync_progress_fields() {
-    println!("🔍 测试 SyncProgress 字段完整性...");
+    test_progress!(测试 SyncProgress 字段完整性...");
 
     use postium_mail_lib::sync::{SyncProgress, SyncStage};
 
@@ -201,5 +204,5 @@ async fn test_sync_progress_fields() {
     let percentage = (progress.current as f64 / progress.total as f64 * 100.0) as usize;
     assert_eq!(percentage, 50);
 
-    println!("✅ SyncProgress 字段完整性测试通过");
+    test_success!(SyncProgress 字段完整性测试通过");
 }

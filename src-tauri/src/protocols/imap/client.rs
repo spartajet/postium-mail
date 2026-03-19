@@ -10,6 +10,7 @@ use chrono::Datelike;
 use futures::TryStreamExt;
 use std::time::Instant;
 use tokio::net::TcpStream;
+use tracing::instrument;
 
 /// 异步 IMAP 客户端会话
 pub struct AsyncImapClient {
@@ -22,6 +23,14 @@ impl AsyncImapClient {
     }
 
     /// 异步连接到 IMAP服务器并登录
+    ///
+    /// # 参数
+    ///
+    /// * `host` - IMAP 服务器地址
+    /// * `port` - IMAP 服务器端口
+    /// * `email` - 邮箱地址
+    /// * `auth` - 认证信息
+    #[instrument(skip(self), fields(host, port, email))]
     pub async fn connect(
         &mut self,
         host: &str,
@@ -161,6 +170,7 @@ impl AsyncImapClient {
     }
 
     /// 异步列出服务器上的所有文件夹及其属性（RFC 6154）
+    #[instrument(skip(self))]
     pub async fn list_folders_with_attributes(&mut self) -> Result<Vec<FolderInfo>> {
         let session = self
             .session
@@ -197,6 +207,7 @@ impl AsyncImapClient {
     }
 
     /// 异步列出服务器上的所有文件夹（仅返回名称）
+    #[instrument(skip(self))]
     pub async fn list_folders(&mut self) -> Result<Vec<String>> {
         let session = self
             .session

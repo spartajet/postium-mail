@@ -5,6 +5,9 @@
 use sea_orm::{Database, DbConn};
 use std::sync::Arc;
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 /// 创建测试数据库
 pub async fn create_test_db() -> Arc<DbConn> {
     let db: DbConn = Database::connect("sqlite::memory:").await.unwrap();
@@ -75,7 +78,7 @@ mod tests {
         init_test_db(&db).await;
 
         // 验证数据库初始化没有panic
-        println!("✅ 测试数据库初始化成功");
+        test_success!("测试数据库初始化成功");
     }
 
     #[test]

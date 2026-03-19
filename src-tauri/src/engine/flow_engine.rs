@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tauri::AppHandle;
+use tracing::instrument;
 
 /// 流程引擎
 ///
@@ -165,6 +166,7 @@ impl FlowEngine {
     /// 启动引擎
     ///
     /// 启动所有子组件：任务调度器、通知管理器、IDLE 监听
+    #[instrument(skip(self))]
     pub async fn start(&self) -> Result<()> {
         if self.running.load(Ordering::Relaxed) {
             return Err(MailError::Internal("引擎已在运行".to_string()));
@@ -194,6 +196,7 @@ impl FlowEngine {
     /// 停止引擎
     ///
     /// 优雅关闭所有子组件
+    #[instrument(skip(self))]
     pub async fn stop(&self) -> Result<()> {
         if !self.running.load(Ordering::Relaxed) {
             return Ok(());

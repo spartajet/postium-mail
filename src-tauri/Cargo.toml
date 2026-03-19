@@ -84,6 +84,8 @@ url = "2"
 # libsqlite3-sys = "0.37.0"
 
 [dev-dependencies]
+# 全局测试设置
+ctor = "0.2"  # 用于在所有测试前初始化 tracing
 
 # 集成测试
 [[test]]

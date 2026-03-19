@@ -12,6 +12,10 @@
 
 use std::env;
 
+// 引入测试辅助模块
+mod test_tracing;
+mod test_macros;
+
 /// 全局 GreenMail 配置
 #[derive(Debug, Clone)]
 pub struct GreenMailConfig {
@@ -64,22 +68,25 @@ impl Default for GreenMailConfig {
 }
 
 fn main() {
-    println!("Postium Mail 集成测试");
-    println!();
-    println!("GreenMail 配置:");
+    // 初始化测试环境 tracing
+    test_tracing::init_test_tracing();
+
+    test_section!("Postium Mail 集成测试");
+    tracing::info!("");
+    test_section!("GreenMail 配置");
     let config = GreenMailConfig::default();
-    println!("  主机: {}", config.host);
-    println!("  IMAP 端口: {}", config.imap_port);
-    println!("  SMTP 端口: {}", config.smtp_port);
-    println!("  用户名: {}", config.username);
-    println!();
-    println!("环境变量:");
-    println!("  GREENMAIL_HOST: 覆盖默认主机地址");
-    println!("  GREENMAIL_PORT: 覆盖默认 IMAP 端口");
-    println!();
-    println!("运行特定测试:");
-    println!("  cargo test --test integration test_greenmail_config");
-    println!("  cargo test --test integration test_create_test_db");
+    tracing::info!("  主机: {}", config.host);
+    tracing::info!("  IMAP 端口: {}", config.imap_port);
+    tracing::info!("  SMTP 端口: {}", config.smtp_port);
+    tracing::info!("  用户名: {}", config.username);
+    tracing::info!("");
+    test_section!("环境变量");
+    tracing::info!("  GREENMAIL_HOST: 覆盖默认主机地址");
+    tracing::info!("  GREENMAIL_PORT: 覆盖默认 IMAP 端口");
+    tracing::info!("");
+    test_section!("运行特定测试");
+    tracing::info!("  cargo test --test integration test_greenmail_config");
+    tracing::info!("  cargo test --test integration test_create_test_db");
 }
 
 // ========== 测试模块 ==========

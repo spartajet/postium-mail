@@ -11,6 +11,9 @@
 
 use tokio::net::TcpStream;
 
+// 引入测试辅助宏
+use crate::test_macros::*;
+
 // GreenMail 配置常量
 const GREENMAIL_HOST: &str = "139.59.228.56";
 const GREENMAIL_IMAP_PORT: u16 = 3143;
@@ -30,30 +33,30 @@ async fn check_greenmail_running() -> bool {
 async fn test_greenmail_running() {
     // 检查 GreenMail 是否正在运行
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
-        println!("   启动命令: docker-compose -f docker-compose.test.yml up -d");
-        println!("   或使用脚本: bash scripts/run-integration-tests.sh");
+        test_warn!("GreenMail 未运行，跳过测试");
+        test_info!("启动命令: docker-compose -f docker-compose.test.yml up -d");
+        test_info!("或使用脚本: bash scripts/run-integration-tests.sh");
         return;
     }
 
     assert!(check_greenmail_running().await, "GreenMail 应该正在运行");
-    println!("✅ GreenMail 正在运行");
+    test_success!("GreenMail 正在运行");
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_greenmail_connection() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
-        println!("   启动命令: docker-compose -f docker-compose.test.yml up -d");
+        test_warn!("GreenMail 未运行，跳过测试");
+        test_info!("启动命令: docker-compose -f docker-compose.test.yml up -d");
         return;
     }
 
-    println!("🔗 测试 IMAP 连接...");
+    test_progress!("测试 IMAP 连接");
 
     // 这里需要使用项目的实际类型
     // 由于 AsyncImapClient 在 services::imap 模块中，我们需要确保测试可以访问它
-    println!("✅ 测试通过 - GreenMail 正在运行");
+    test_success!("测试通过 - GreenMail 正在运行");
 }
 
 #[tokio::test]
@@ -71,7 +74,7 @@ async fn test_docker_compose_file() {
     assert!(content.contains("3143:143"), "应该映射 IMAP 端口");
     assert!(content.contains("8080:8080"), "应该映射 Web UI 端口");
 
-    println!("✅ docker-compose.test.yml 配置正确");
+    test_success!("docker-compose.test.yml 配置正确");
 }
 
 #[tokio::test]
@@ -90,7 +93,7 @@ async fn test_integration_test_structure() {
         assert!(path.exists(), "集成测试文件应该存在: {}", file);
     }
 
-    println!("✅ 集成测试文件结构完整");
+    test_success!("集成测试文件结构完整");
 }
 
 // 简单的连接测试
@@ -98,7 +101,7 @@ async fn test_integration_test_structure() {
 #[ignore]
 async fn test_tcp_connection_to_greenmail() {
     if !check_greenmail_running().await {
-        println!("⚠️  GreenMail 未运行，跳过测试");
+        test_warn!("GreenMail 未运行，跳过测试");
         return;
     }
 
@@ -113,19 +116,19 @@ async fn test_tcp_connection_to_greenmail() {
             match stream.read(&mut buffer).await {
                 Ok(n) => {
                     let response = String::from_utf8_lossy(&buffer[..n]);
-                    println!("📩 GreenMail 响应: {}", response);
+                    test_info!("GreenMail 响应: {}", response.trim());
                     assert!(response.contains("* OK") || response.contains("OK"),
                         "服务器应该返回 OK 响应");
                 }
                 Err(e) => {
-                    println!("⚠️  无法读取服务器响应: {}", e);
+                    test_warn!("无法读取服务器响应: {}", e);
                 }
             }
 
             // 尝试发送 LOGIN 命令
             let cmd = format!("A001 LOGIN {} {}\r\n", GREENMAIL_USER, GREENMAIL_PASS);
             if let Err(e) = stream.write_all(cmd.as_bytes()).await {
-                println!("⚠️  发送 LOGIN 命令失败: {}", e);
+                test_warn!("发送 LOGIN 命令失败: {}", e);
                 return;
             }
 
@@ -134,19 +137,19 @@ async fn test_tcp_connection_to_greenmail() {
             match stream.read(&mut buffer).await {
                 Ok(n) => {
                     let response = String::from_utf8_lossy(&buffer[..n]);
-                    println!("📩 LOGIN 响应: {}", response);
+                    test_info!("LOGIN 响应: {}", response.trim());
                     assert!(response.contains("A001 OK") || response.contains("OK"),
                         "登录应该成功");
                 }
                 Err(e) => {
-                    println!("⚠️  无法读取登录响应: {}", e);
+                    test_warn!("无法读取登录响应: {}", e);
                 }
             }
 
-            println!("✅ TCP 连接和认证成功");
+            test_success!("TCP 连接和认证成功");
         }
         Err(e) => {
-            panic!("❌ 无法连接到 GreenMail: {}", e);
+            panic!("无法连接到 GreenMail: {}", e);
         }
     }
 }
@@ -165,5 +168,5 @@ async fn test_documentation_files() {
         assert!(path.exists(), "文档文件应该存在: {}", file);
     }
 
-    println!("✅ 集成测试文档完整");
+    test_success!("集成测试文档完整");
 }
