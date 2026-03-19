@@ -1,9 +1,49 @@
 //! 邮件操作 Commands
+//!
+//! 提供邮件的增删改查功能，包括：
+//! - 分页获取邮件列表
+//! - 获取邮件详情
+//! - 全文搜索邮件
+//! - 标记已读/未读
+//! - 星标管理
+//! - 批量删除
+//! - 移动到文件夹
+//!
+//! # 分页说明
+//!
+//! 邮件列表采用分页加载，避免一次性加载大量邮件导致性能问题。
+//! - `page`: 页码，从 0 开始
+//! - `limit`: 每页数量，建议 20-50
 
 use super::DatabaseState;
 use crate::storage::models;
 use crate::storage;
 
+/// 分页获取邮件列表
+///
+/// 从指定账号的文件夹中获取邮件列表，支持分页。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `account_id` - 账号 ID
+/// * `folder` - 文件夹名称（如 "INBOX", "Sent", "Drafts"）
+/// * `page` - 页码，从 0 开始
+/// * `limit` - 每页邮件数量
+///
+/// # 返回
+/// 成功时返回邮件列表响应（EmailListResponse），包含：
+/// - `items`: 邮件列表
+/// - `total`: 总邮件数
+/// - `page`: 当前页码
+/// - `page_count`: 总页数
+///
+/// 失败时返回错误信息字符串
+///
+/// # 示例
+/// ```rust
+/// // 获取 INBOX 的第一页，每页 20 封
+/// let result = list_emails(state, 1, "INBOX".to_string(), 0, 20).await?;
+/// ```
 #[tauri::command]
 pub async fn list_emails(
     state: tauri::State<'_, DatabaseState>,
@@ -45,6 +85,24 @@ pub async fn list_emails(
     Ok(result)
 }
 
+/// 获取邮件详情
+///
+/// 根据邮件 ID 获取完整的邮件详情，包括正文、附件等信息。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `id` - 邮件 ID
+///
+/// # 返回
+/// - 成功且邮件存在时：返回邮件详情（EmailDetail）
+/// - 成功但邮件不存在时：返回错误
+/// - 失败时：返回错误信息字符串
+///
+/// # EmailDetail 包含
+/// - 邮件基本信息（发件人、收件人、主题、日期）
+/// - 邮件正文（HTML 和纯文本）
+/// - 附件列表
+/// - 邮件标志（已读、星标等）
 #[tauri::command]
 pub async fn get_email(
     state: tauri::State<'_, DatabaseState>,
@@ -56,6 +114,37 @@ pub async fn get_email(
         .map_err(|e| e.to_string())
 }
 
+/// 全文搜索邮件
+///
+/// 使用 FTS（Full-Text Search）在邮件内容中搜索关键字。
+/// 支持搜索发件人、收件人、主题、邮件正文等字段。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `query` - 搜索查询字符串（支持简单的关键词搜索）
+/// * `account_id` - 可选，限定搜索范围到指定账号
+/// * `limit` - 可选，限制返回结果数量
+///
+/// # 返回
+/// 成功时返回搜索结果列表（SearchResult），每项包含：
+/// - 邮件 ID
+/// - 匹配的文本片段
+/// - 相关性评分
+///
+/// 失败时返回错误信息字符串
+///
+/// # 搜索范围
+/// - 不指定 `account_id`: 搜索所有账号的邮件
+/// - 指定 `account_id`: 仅搜索该账号的邮件
+///
+/// # 示例
+/// ```rust
+/// // 搜索所有账号中包含 "重要" 的邮件
+/// let results = search_emails_fts(state, "重要".to_string(), None, Some(20)).await?;
+///
+/// // 搜索特定账号
+/// let results = search_emails_fts(state, "项目".to_string(), Some(1), Some(10)).await?;
+/// ```
 #[tauri::command]
 pub async fn search_emails_fts(
     state: tauri::State<'_, DatabaseState>,
@@ -69,6 +158,21 @@ pub async fn search_emails_fts(
         .map_err(|e| e.to_string())
 }
 
+/// 标记邮件已读/未读状态
+///
+/// 更新指定邮件的已读状态。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `email_id` - 邮件 ID
+/// * `is_read` - true 设为已读，false 设为未读
+///
+/// # 返回
+/// 成功时返回空值，失败时返回错误信息字符串
+///
+/// # 注意
+/// - 此操作会更新数据库中的邮件状态
+/// - 如果启用了 IMAP 同步，状态变更可能会同步到服务器
 #[tauri::command]
 pub async fn mark_as_read(
     state: tauri::State<'_, DatabaseState>,
@@ -81,6 +185,24 @@ pub async fn mark_as_read(
         .map_err(|e| e.to_string())
 }
 
+/// 切换邮件星标状态
+///
+/// 切换指定邮件的星标（标记/取消标记）。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `email_id` - 邮件 ID
+///
+/// # 返回
+/// 成功时返回操作后的星标状态：
+/// - `true`: 邮件已加星标
+/// - `false`: 邮件未加星标
+///
+/// 失败时返回错误信息字符串
+///
+/// # 注意
+/// - 此操作会切换当前状态，如果已星标则取消，否则添加星标
+/// - 如果启用了 IMAP 同步，状态变更可能会同步到服务器的 FLAGGED 标志
 #[tauri::command]
 pub async fn toggle_star(
     state: tauri::State<'_, DatabaseState>,
@@ -92,6 +214,25 @@ pub async fn toggle_star(
         .map_err(|e| e.to_string())
 }
 
+/// 批量删除邮件
+///
+/// 批量删除指定的邮件。删除操作会将邮件移动到废纸篓，
+/// 如果邮件已在废纸篓中则永久删除。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `email_ids` - 要删除的邮件 ID 列表
+///
+/// # 返回
+/// 成功时返回删除的邮件数量，失败时返回错误信息字符串
+///
+/// # 删除逻辑
+/// - 如果邮件不在废纸篓文件夹：移动到废纸篓
+/// - 如果邮件已在废纸篓文件夹：永久删除
+///
+/// # 注意
+/// - 永久删除的邮件无法恢复
+/// - 如果启用了 IMAP 同步，删除操作可能会同步到服务器
 #[tauri::command]
 pub async fn delete_emails(
     state: tauri::State<'_, DatabaseState>,
@@ -103,6 +244,29 @@ pub async fn delete_emails(
         .map_err(|e| e.to_string())
 }
 
+/// 移动邮件到文件夹
+///
+/// 将指定邮件移动到目标文件夹。
+///
+/// # 参数
+/// * `state` - 数据库连接状态
+/// * `email_id` - 邮件 ID
+/// * `folder` - 目标文件夹名称（如 "INBOX", "Archive", "Spam"）
+///
+/// # 返回
+/// 成功时返回空值，失败时返回错误信息字符串
+///
+/// # 常见文件夹
+/// - `INBOX`: 收件箱
+/// - `Archive`: 归档
+/// - `Spam`: 垃圾邮件
+/// - `Trash`: 废纸篓
+/// - `Drafts`: 草稿箱
+/// - `Sent`: 已发送
+///
+/// # 注意
+/// - 如果启用了 IMAP 同步，移动操作可能会同步到服务器
+/// - 目标文件夹必须存在于账号中
 #[tauri::command]
 pub async fn move_email_to_folder(
     state: tauri::State<'_, DatabaseState>,

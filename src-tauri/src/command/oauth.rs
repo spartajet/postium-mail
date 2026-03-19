@@ -1,12 +1,57 @@
 //! OAuth 认证 Commands
 //!
-//! 使用 AuthManager 进行 OAuth 认证
+//! 提供基于 OAuth 2.0 的邮件账号认证功能，包括：
+//! - 生成 OAuth 授权 URL
+//! - 交换授权码获取访问令牌
+//! - 刷新访问令牌
+//! - 验证令牌有效性
+//!
+//! # 支持的服务商
+//!
+//! - Google (Gmail)
+//! - Microsoft (Outlook, Hotmail, Office 365)
+//!
+//! # OAuth 认证流程
+//!
+//! 1. 调用 `get_oauth_auth_url` 获取授权 URL 和 state
+//! 2. 在浏览器中打开授权 URL
+//! 3. 用户授权后，收到回调（包含 code 和 state）
+//! 4. 调用 `exchange_oauth_code` 交换授权码，创建账号
+//! 5. 后续可使用 `refresh_oauth_token` 刷新令牌
 
 use super::{AuthManagerState, DatabaseState, KeyringState};
 use crate::storage::models;
 use crate::storage;
 use crate::providers;
 
+/// 验证 OAuth 令牌的有效性
+///
+/// 通过调用服务商的用户信息 API 验证访问令牌是否仍然有效。
+///
+/// # 参数
+/// * `provider` - OAuth 提供商标识（"google" 或 "microsoft"）
+/// * `token` - OAuth 访问令牌
+///
+/// # 返回
+/// - `Ok(true)`: 令牌有效
+/// - `Ok(false)`: 令牌无效或已过期
+/// - `Err(String)`: 验证过程出错（如网络错误、不支持的服务商）
+///
+/// # 验证方式
+///
+/// 根据不同的服务商使用不同的 API：
+/// - **Google**: 调用 `https://www.googleapis.com/oauth2/v3/userinfo`
+/// - **Microsoft**: 调用 `https://graph.microsoft.com/v1.0/me`
+///
+/// # 示例
+/// ```rust
+/// let is_valid = validate_oauth_token("google".to_string(), "ya29.a0Af...".to_string()).await?;
+/// if is_valid {
+///     println!("令牌有效");
+/// } else {
+///     println!("令牌无效或已过期");
+/// }
+/// ```
 #[tauri::command]
 pub async fn validate_oauth_token(
     provider: String,
@@ -37,6 +82,43 @@ pub async fn validate_oauth_token(
     }
 }
 
+/// 获取 OAuth 授权 URL
+///
+/// 为指定的邮箱地址生成 OAuth 授权 URL 和用于防止 CSRF 攻击的 state 参数。
+///
+/// # 参数
+/// * `auth_manager_state` - AuthManager 状态，用于生成授权 URL
+/// * `email` - 用户邮箱地址，用于自动检测邮件服务商
+///
+/// # 返回
+/// 成功时返回元组 `(auth_url, state)`：
+/// - `auth_url`: OAuth 授权 URL，用户需要在浏览器中打开
+/// - `state`: 用于防止 CSRF 攻击的随机字符串，回调时需要验证
+///
+/// 失败时返回错误信息字符串
+///
+/// # 授权 URL 使用流程
+///
+/// 1. 调用此命令获取授权 URL 和 state
+/// 2. 在浏览器中打开 `auth_url`
+/// 3. 用户登录并授权应用访问邮件
+/// 4. 服务商重定向到回调 URL，附带 `code` 和 `state`
+/// 5. 使用收到的 `code` 和 `state` 调用 `exchange_oauth_code`
+///
+/// # 自动检测服务商
+///
+/// 根据 `email` 的域名自动检测服务商：
+/// - `@gmail.com` → Google
+/// - `@outlook.com`, `@hotmail.com` → Microsoft
+/// - 其他域名 → 尝试通过 MX 记录检测
+///
+/// # 示例
+/// ```rust
+/// let (auth_url, state) = get_oauth_auth_url(auth_manager_state, "user@gmail.com".to_string()).await?;
+/// // 在浏览器中打开 auth_url
+/// open::that(auth_url)?;
+/// // 保存 state，用于后续回调验证
+/// ```
 #[tauri::command]
 pub async fn get_oauth_auth_url(
     auth_manager_state: tauri::State<'_, AuthManagerState>,
@@ -53,6 +135,55 @@ pub async fn get_oauth_auth_url(
     Ok((context.auth_url, context.state))
 }
 
+/// 交换 OAuth 授权码并创建账号
+///
+/// 使用 OAuth 授权码交换访问令牌，并自动创建邮件账号。
+///
+/// # 参数
+/// * `db_state` - 数据库连接状态
+/// * `keyring_state` - 密钥链状态，用于存储令牌
+/// * `auth_manager_state` - AuthManager 状态，用于处理 OAuth 认证
+/// * `email` - 用户邮箱地址
+/// * `code` - OAuth 授权码（从回调中获取）
+/// * `state` - OAuth state 参数（从回调中获取，用于验证）
+///
+/// # 返回
+/// 成功时返回创建的账号对象（AccountDto），包含：
+/// - 账号基本信息（ID、名称、邮箱等）
+/// - 服务器配置
+/// - OAuth 令牌信息
+///
+/// 失败时返回错误信息字符串
+///
+/// # 处理流程
+///
+/// 1. 使用 `code` 和 `state` 通过 AuthManager 进行 OAuth 认证
+/// 2. 检测邮件服务商并获取默认服务器配置
+/// 3. 构建账号创建请求
+/// 4. 在数据库中创建账号
+/// 5. 将 OAuth 令牌从临时账户迁移到实际账户
+///
+/// # 自动配置
+///
+/// - 名称：优先使用 OAuth 返回的显示名称，否则使用邮箱用户名部分
+/// - 服务器配置：根据服务商自动填充 IMAP/SMTP 配置
+/// - 颜色：默认使用蓝色 (#0078D4)
+/// - 认证类型：设置为 OAuth2
+///
+/// # 示例
+/// ```rust
+/// // 收到 OAuth 回调后
+/// let account = exchange_oauth_code(
+///     db_state,
+///     keyring_state,
+///     auth_manager_state,
+///     "user@gmail.com".to_string(),
+///     "4/0Aa...".to_string(),  // 授权码
+///     "abc123...".to_string(), // state
+/// ).await?;
+///
+/// println!("成功创建账号: {}", account.email);
+/// ```
 #[tauri::command]
 pub async fn exchange_oauth_code(
     db_state: tauri::State<'_, DatabaseState>,
@@ -131,6 +262,43 @@ pub async fn exchange_oauth_code(
     Ok(account.into())
 }
 
+/// 刷新 OAuth 访问令牌
+///
+/// 使用刷新令牌获取新的访问令牌。
+///
+/// # 参数
+/// * `auth_manager_state` - AuthManager 状态
+/// * `email` - 用户邮箱地址（用于识别服务商）
+/// * `account_id` - 账号 ID（用于查找存储的刷新令牌）
+///
+/// # 返回
+/// 成功时返回新的 OAuth 令牌信息（OAuthToken），包含：
+/// - `access_token`: 新的访问令牌
+/// - `expires_in`: 过期时间（秒）
+/// - `refresh_token`: 刷新令牌（可能已更新）
+/// - `id_token`: ID 令牌（可选）
+///
+/// 失败时返回错误信息字符串
+///
+/// # 刷新流程
+///
+/// 1. 从 TokenManager 中获取存储的刷新令牌
+/// 2. 向服务商的令牌端点发送刷新请求
+/// 3. 保存新获取的令牌
+/// 4. 返回新的令牌信息
+///
+/// # 何时需要刷新
+///
+/// - 当 API 调用返回 401 未授权错误时
+/// - 在访问令牌即将过期前主动刷新（建议提前 5 分钟）
+///
+/// # 示例
+/// ```rust
+/// match refresh_oauth_token(auth_manager_state, "user@gmail.com".to_string(), 1).await {
+///     Ok(token) => println!("令牌已刷新: {}", token.access_token),
+///     Err(e) => println!("刷新失败: {}", e),
+/// }
+/// ```
 #[tauri::command]
 pub async fn refresh_oauth_token(
     auth_manager_state: tauri::State<'_, AuthManagerState>,
