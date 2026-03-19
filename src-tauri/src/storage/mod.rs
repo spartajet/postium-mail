@@ -7,6 +7,7 @@ pub mod cache;
 pub mod database;
 pub mod emails;
 pub mod folders;
+pub mod migration;
 pub mod search;
 
 // 重新导出常用类型

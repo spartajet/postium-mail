@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn test_migration_sql() {
         // 验证 SQL 语法
-        let sql = std::fs::read_to_string("src/migration/m008_20250317_add_modseq_support.rs")
+        let sql = std::fs::read_to_string("src/storage/migration/m008_20250317_add_modseq_support.rs")
             .expect("文件存在");
         assert!(sql.contains("ALTER TABLE sync_states"));
         assert!(sql.contains("ADD COLUMN highest_modseq"));
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn test_field_names() {
         // 验证字段名与模型一致
-        let sql = std::fs::read_to_string("src/migration/m008_20250317_add_modseq_support.rs")
+        let sql = std::fs::read_to_string("src/storage/migration/m008_20250317_add_modseq_support.rs")
             .expect("文件存在");
         assert!(sql.contains("highest_modseq"));
         assert!(sql.contains("modseq"));
