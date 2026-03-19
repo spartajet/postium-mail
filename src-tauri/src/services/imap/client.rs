@@ -4,7 +4,7 @@ use super::{
     types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
     ImapAuth,
 };
-use crate::services::oauth_service::OAuthService;
+use crate::providers::generate_xoauth2_string;
 use anyhow::{anyhow, Result};
 use chrono::Datelike;
 use futures::TryStreamExt;
@@ -69,8 +69,7 @@ impl AsyncImapClient {
                 tracing::info!("使用OAuth2认证IMAP: {}", oauth_email);
 
                 // 生成XOAUTH2字符串
-                let oauth_service = OAuthService::default();
-                let xoauth2_str = oauth_service.generate_xoauth2_string(oauth_email, access_token);
+                let xoauth2_str = generate_xoauth2_string(oauth_email, access_token);
 
                 // 使用authenticate命令进行OAuth2认证
                 // 注意：async-imap可能不直接支持authenticate，需要使用原始命令
