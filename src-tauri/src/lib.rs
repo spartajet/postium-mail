@@ -3,7 +3,6 @@ mod command;
 pub mod config;
 mod crypto;
 mod database;
-mod migration;
 mod models;
 
 // 新增模块

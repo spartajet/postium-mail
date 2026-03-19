@@ -26,28 +26,28 @@ pub async fn establish_connection() -> DatabaseResult {
 /// 运行所有迁移脚本
 pub async fn init_database(db: &DbConn) -> Result<()> {
     // 先运行初始化脚本
-    crate::migration::m001_20250314_init::initialize(db).await?;
+    crate::storage::migration::m001_20250314_init::initialize(db).await?;
 
     // 然后运行迁移（为现有数据库添加新字段）
-    crate::migration::m002_20250314_add_oauth_fields::run_migrations(db).await?;
+    crate::storage::migration::m002_20250314_add_oauth_fields::run_migrations(db).await?;
 
     // 添加同步相关表
-    crate::migration::m003_20250315_add_sync_tables::add_sync_tables(db).await?;
+    crate::storage::migration::m003_20250315_add_sync_tables::add_sync_tables(db).await?;
 
     // 删除敏感字段（密码和 token 迁移到 Stronghold）
-    crate::migration::m004_20250315_remove_sensitive_fields::run_migrations(db).await?;
+    crate::storage::migration::m004_20250315_remove_sensitive_fields::run_migrations(db).await?;
 
     // 添加 IMAP 元数据字段
-    crate::migration::m005_20250315_add_imap_metadata::add_imap_metadata(db).await?;
+    crate::storage::migration::m005_20250315_add_imap_metadata::add_imap_metadata(db).await?;
 
     // 添加离线操作和同步元数据表
-    crate::migration::m006_20250315_add_sync_operations::add_sync_operations(db).await?;
+    crate::storage::migration::m006_20250315_add_sync_operations::add_sync_operations(db).await?;
 
     // 添加账号类型支持（个人/企业）
-    crate::migration::m007_20250317_add_account_types::migrate(db).await?;
+    crate::storage::migration::m007_20250317_add_account_types::migrate(db).await?;
 
     // 添加 MODSEQ 支持（CONDSTORE 扩展）
-    crate::migration::m008_20250317_add_modseq_support::migrate(db).await?;
+    crate::storage::migration::m008_20250317_add_modseq_support::migrate(db).await?;
 
     Ok(())
 }

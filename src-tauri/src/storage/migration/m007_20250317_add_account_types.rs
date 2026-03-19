@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn test_migration_sql() {
         // 验证 SQL 语法
-        let sql = std::fs::read_to_string("src/migration/m007_20250317_add_account_types.rs")
+        let sql = std::fs::read_to_string("src/storage/migration/m007_20250317_add_account_types.rs")
             .expect("文件存在");
         assert!(sql.contains("ALTER TABLE accounts"));
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS enterprise_configs"));
