@@ -2,14 +2,14 @@
 //!
 //! 提供账号的数据库 CRUD 操作和 Keyring 密码管理
 
-use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter, DbConn, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbConn, EntityTrait, QueryFilter, Set};
 use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 
 use crate::crypto::{self, OAuthToken, KEYRING_SERVICE};
 use crate::error::{Result, StorageError};
-use crate::storage::models::account;
 use crate::providers::ProviderPool;
+use crate::storage::models::account;
 
 /// 账号仓库
 ///
@@ -147,10 +147,9 @@ impl AccountRepository {
         match auth_type.as_str() {
             "oauth2" => {
                 // 保存 OAuth Token
-                if let (Some(refresh_token), Some(expires_at)) = (
-                    req.oauth_refresh_token,
-                    req.oauth_expires_at,
-                ) {
+                if let (Some(refresh_token), Some(expires_at)) =
+                    (req.oauth_refresh_token, req.oauth_expires_at)
+                {
                     let token = OAuthToken {
                         refresh_token,
                         expires_at,
@@ -183,11 +182,7 @@ impl AccountRepository {
     }
 
     /// 更新账号
-    pub async fn update(
-        db: &DbConn,
-        id: i32,
-        req: UpdateAccountRequest,
-    ) -> Result<account::Model> {
+    pub async fn update(db: &DbConn, id: i32, req: UpdateAccountRequest) -> Result<account::Model> {
         let existing = Self::get_by_id(db, id)
             .await?
             .ok_or_else(|| StorageError::NotFound("账号不存在".to_string()))?;
@@ -250,16 +245,10 @@ impl AccountRepository {
         let keyring = app_handle.keyring();
 
         // 删除密码
-        let _ = keyring.delete_password(
-            KEYRING_SERVICE,
-            &crypto::password_username(id),
-        );
+        let _ = keyring.delete_password(KEYRING_SERVICE, &crypto::password_username(id));
 
         // 删除 OAuth Token
-        let _ = keyring.delete_password(
-            KEYRING_SERVICE,
-            &crypto::oauth_username(id),
-        );
+        let _ = keyring.delete_password(KEYRING_SERVICE, &crypto::oauth_username(id));
 
         // 删除数据库记录
         account::Entity::delete_by_id(id)
