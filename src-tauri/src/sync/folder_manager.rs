@@ -4,7 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::models::folder;
-use crate::services::imap::{FolderInfo, FolderInfo as ImapFolderInfo};
+use crate::services::imap::FolderInfo as ImapFolderInfo;
 use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
 use std::sync::Arc;
 use std::collections::HashMap;

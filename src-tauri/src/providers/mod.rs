@@ -2,7 +2,7 @@
 //!
 //! 提供不同邮件服务商的抽象接口和实现
 
-#[allow(unused_imports)]
+#[allow(unused_imports, deprecated)]
 mod account_type;
 mod config;
 mod oauth_utils;

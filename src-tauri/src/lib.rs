@@ -1,4 +1,4 @@
-#![allow(dead_code, ambiguous_glob_reexports, unused_variables)]
+#![allow(dead_code, ambiguous_glob_reexports, unused_variables, deprecated)]
 mod command;
 pub mod config;
 mod crypto;

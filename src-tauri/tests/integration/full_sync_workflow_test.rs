@@ -93,7 +93,7 @@ async fn test_full_sync_workflow() {
 async fn test_incremental_sync_workflow() {
     println!("🔄 测试增量同步工作流...");
 
-    let db = create_test_db().await;
+    let _db = create_test_db().await;
 
     // 首次同步
     println!("  → 首次同步...");

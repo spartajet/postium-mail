@@ -189,8 +189,6 @@ impl PasswordAuth {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_password_auth_new() {
         // 注意：测试需要 Tauri AppHandle，这里只测试结构

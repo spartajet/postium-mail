@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use tauri::AppHandle;
 
-use crate::providers::{
-    MailProvider, ProviderPool, AuthType,
-};
+use crate::providers::{ProviderPool, AuthType};
 use crate::error::{MailError, Result};
 use crate::auth::oauth_handler::{OAuthHandler, AuthorizationContext};
 use crate::auth::token_manager::TokenManager;

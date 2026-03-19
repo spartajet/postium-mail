@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use super::{
     types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
     ImapAuth,

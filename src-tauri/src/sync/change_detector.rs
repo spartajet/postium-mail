@@ -2,9 +2,9 @@
 //!
 //! 检测服务器端的邮件变更（新增、修改、删除）
 
-use crate::error::{MailError, Result};
+use crate::error::Result;
 use crate::models::email;
-use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::DbConn;
 use std::collections::HashMap;
 use std::sync::Arc;
 

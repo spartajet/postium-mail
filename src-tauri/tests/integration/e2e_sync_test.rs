@@ -95,8 +95,8 @@ async fn test_incremental_sync_strategies() {
 async fn test_sync_state_management() {
     println!("💾 测试同步状态管理...");
 
-    let db = create_test_db().await;
-    let state_manager = postium_mail_lib::sync::SyncStateManager::new(db.clone());
+    let _db = create_test_db().await;
+    let _state_manager = postium_mail_lib::sync::SyncStateManager::new(_db.clone());
 
     println!("  状态管理器已创建");
     println!("  CONDSTORE 状态字段:");

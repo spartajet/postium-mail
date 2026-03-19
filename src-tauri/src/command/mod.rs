@@ -2,6 +2,8 @@
 //!
 //! 包含所有 Tauri IPC 命令的定义
 
+#![allow(deprecated)]
+
 mod account;
 mod connection;
 mod email;

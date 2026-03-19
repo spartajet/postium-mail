@@ -2,8 +2,8 @@
 //!
 //! 实现高效的增量同步，支持 IMAP CONDSTORE 扩展
 
-use crate::error::{MailError, Result};
-use crate::sync::change_detector::{ChangeDetector, ChangeDetectionResult};
+use crate::error::Result;
+use crate::sync::change_detector::ChangeDetector;
 use sea_orm::DbConn;
 use std::sync::Arc;
 
