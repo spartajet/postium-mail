@@ -79,8 +79,8 @@ fn load_test_account() -> TestAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postium_mail_lib::services::imap::{ImapAuth, ImapClient};
-    use postium_mail_lib::services::smtp_service::{SmtpAuth, SmtpClient};
+    use postium_mail_lib::protocols::imap::{ImapAuth, ImapClient};
+    use postium_mail_lib::protocols::smtp::{SendEmailRequest, SmtpAuth, SmtpClient};
     use std::time::Instant;
 
     // 初始化 tracing 日志（仅测试时）
@@ -177,7 +177,7 @@ mod tests {
 
         let start = Instant::now();
 
-        let mut client = SmtpClient::new();
+        let client = SmtpClient::new();
 
         // 连接
         let result = client.connect(
@@ -185,7 +185,7 @@ mod tests {
             account.smtp_port,
             &account.account,
             SmtpAuth::Password(account.password.clone()),
-        );
+        ).await;
 
         let connect_time = start.elapsed();
 
@@ -234,14 +234,21 @@ mod tests {
 
         info!("发送测试邮件到 {}...", account.account);
 
-        let message_id = client
-            .send_email(
-                vec![account.account.clone()],
-                &test_subject,
-                &test_body,
-                Some("Postium Mail 集成测试 - 纯文本备用"),
-            )
-            .expect("邮件发送失败");
+        let request = SendEmailRequest {
+            from: account.account.clone(),
+            to: vec![account.account.clone()],
+            cc: None,
+            bcc: None,
+            subject: test_subject.clone(),
+            html_body: test_body.clone(),
+            text_body: Some("Postium Mail 集成测试 - 纯文本备用".to_string()),
+            attachments: vec![],
+        };
+
+        let result = client.send_email(request).await;
+
+        assert!(result.is_ok(), "邮件发送失败: {:?}", result.unwrap_err());
+        let message_id = result.unwrap().message_id;
 
         info!("✅ 邮件发送成功!");
         info!("   Message-ID: {}", message_id);
@@ -321,14 +328,14 @@ mod tests {
         // 测试 SMTP
         if has_network {
             info!("▶️  测试 SMTP 功能...");
-            let mut smtp_client = SmtpClient::new();
+            let smtp_client = SmtpClient::new();
 
             match smtp_client.connect(
                 &account.smtp_server,
                 account.smtp_port,
                 &account.account,
                 SmtpAuth::Password(account.password.clone()),
-            ) {
+            ).await {
                 Ok(_) => {
                     info!("   ✅ SMTP 连接成功");
 
@@ -342,12 +349,18 @@ mod tests {
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
                     );
 
-                    match smtp_client.send_email(
-                        vec![account.account.clone()],
-                        &test_subject,
-                        &test_body,
-                        Some("纯文本备用"),
-                    ) {
+                    let request = SendEmailRequest {
+                        from: account.account.clone(),
+                        to: vec![account.account.clone()],
+                        cc: None,
+                        bcc: None,
+                        subject: test_subject,
+                        html_body: test_body,
+                        text_body: Some("纯文本备用".to_string()),
+                        attachments: vec![],
+                    };
+
+                    match smtp_client.send_email(request).await {
                         Ok(_) => info!("   ✅ 邮件发送成功"),
                         Err(e) => error!("   ❌ 发送失败: {}", e),
                     }

@@ -36,8 +36,18 @@
 pub mod config;
 pub mod helpers;
 
-pub mod personal;
-pub mod enterprise;
+// 服务商兼容性测试
+pub mod smtp;           // SMTP 发送测试
+pub mod folder_sync;    // 文件夹同步诊断
+pub mod folder_attrs;   // 文件夹属性测试
+pub mod rfc6154;        // RFC 6154 特殊文件夹测试
+pub mod uid_tests;      // UID 相关测试
+pub mod sync_features;  // 同步功能测试
+pub mod email_parsing;  // 邮件解析测试
+
+pub mod encoding;       // 编码问题测试
+pub mod personal;       // 个人邮箱服务商（Gmail, Outlook, 163等）
+pub mod enterprise;     // 企业邮箱服务商（Microsoft 365, Google Workspace）
 
 /// 测试账号配置
 #[derive(Debug, Clone)]

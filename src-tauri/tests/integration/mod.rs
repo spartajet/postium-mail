@@ -33,6 +33,10 @@ pub mod sync;
 pub mod engine;
 pub mod e2e;
 
+// 编码和协议测试
+pub mod encoding;    // 编码测试（主题解码、IMAP UTF-7等）
+pub mod config_tests; // 配置测试
+
 /// 全局 GreenMail 配置
 #[derive(Debug, Clone)]
 pub struct GreenMailConfig {

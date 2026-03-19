@@ -53,7 +53,7 @@ fn load_test_account() -> TestAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postium_mail_lib::services::imap::{AsyncImapClient, ImapAuth};
+    use postium_mail_lib::protocols::imap::{AsyncImapClient, ImapAuth};
     use tracing::info;
 
     #[tokio::test]
@@ -107,7 +107,8 @@ mod tests {
 
                                     // 检测乱码
                                     let has_replacement_chars = email.subject.contains('�');
-                                    let has_invalid_utf8 = email.subject.bytes().any(|b| b == 0xFF || b == 0xFE);
+                                    let has_invalid_utf8 =
+                                        email.subject.bytes().any(|b| b == 0xFF || b == 0xFE);
 
                                     if has_replacement_chars || has_invalid_utf8 {
                                         info!("⚠️  仍然检测到乱码!");
@@ -137,7 +138,8 @@ mod tests {
 
                                     // 检测乱码
                                     let has_replacement_chars = email.subject.contains('�');
-                                    let has_invalid_utf8 = email.subject.bytes().any(|b| b == 0xFF || b == 0xFE);
+                                    let has_invalid_utf8 =
+                                        email.subject.bytes().any(|b| b == 0xFF || b == 0xFE);
 
                                     if has_replacement_chars || has_invalid_utf8 {
                                         info!("⚠️  检测到可能的乱码!");
