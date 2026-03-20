@@ -81,7 +81,10 @@ impl DeltaSync {
     /// 创建新的增量同步器
     pub fn new(db: Arc<DbConn>) -> Self {
         let change_detector = ChangeDetector::new(db.clone());
-        Self { db, change_detector }
+        Self {
+            db,
+            change_detector,
+        }
     }
 
     /// 检查是否支持 CONDSTORE
@@ -332,11 +335,7 @@ impl DeltaSync {
     /// 完整同步
     ///
     /// 同步所有邮件，不使用任何增量优化
-    pub async fn sync_full(
-        &self,
-        _account_id: i32,
-        _folder: &str,
-    ) -> Result<DeltaSyncResult> {
+    pub async fn sync_full(&self, _account_id: i32, _folder: &str) -> Result<DeltaSyncResult> {
         // TODO: 实现完整同步逻辑
         // 1. 获取服务器所有邮件 UID
         // 2. 获取本地所有邮件 UID
@@ -348,6 +347,23 @@ impl DeltaSync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_test_writer()
+                .with_target(false)
+                .with_ansi(true)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init()
+                .ok();
+        });
+    }
 
     #[test]
     fn test_sync_strategy_equality() {

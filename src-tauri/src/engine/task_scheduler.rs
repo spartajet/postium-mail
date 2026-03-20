@@ -396,6 +396,23 @@ impl Default for TaskScheduler {
 mod tests {
     use super::*;
     use sea_orm::Database;
+    use std::sync::Once;
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_test_writer()
+                .with_target(false)
+                .with_ansi(true)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init()
+                .ok();
+        });
+    }
 
     // 创建测试用的数据库连接
     async fn create_test_db() -> Arc<DbConn> {

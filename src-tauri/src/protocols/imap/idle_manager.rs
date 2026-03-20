@@ -300,17 +300,32 @@ impl ImapIdleManager {
 
     /// 计算重连延迟（指数退避）
     fn calculate_reconnect_delay(attempt: u32, config: &ReconnectConfig) -> u64 {
-        
-        (config.initial_delay_secs as f64
-            * config.backoff_multiplier.powi(attempt as i32 - 1))
-        .min(config.max_delay_secs as f64) as u64
+        (config.initial_delay_secs as f64 * config.backoff_multiplier.powi(attempt as i32 - 1))
+            .min(config.max_delay_secs as f64) as u64
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
     use tokio::sync::mpsc;
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_test_writer()
+                .with_target(false)
+                .with_ansi(true)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init()
+                .ok();
+        });
+    }
 
     #[test]
     fn test_idle_event_creation() {

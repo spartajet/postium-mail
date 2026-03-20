@@ -747,6 +747,23 @@ impl AuthManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_test_writer()
+                .with_target(false)
+                .with_ansi(true)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init()
+                .ok();
+        });
+    }
 
     #[test]
     fn test_auth_manager_new() {
