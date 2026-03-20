@@ -108,10 +108,15 @@ function parseAuthType(type?: string): AuthType {
 
 // 前端 Account 转换为后端请求类型
 function accountToRequest(account: Partial<Account> & { password?: string }): CreateAccountRequest {
+  // 如果用户没有指定 provider，使用 'auto' 让后端自动检测
+  // 只有当用户明确指定了 imapHost/smtpHost 时，才使用 'imap'
+  const hasCustomServer = account.imapHost || account.smtpHost
+  const defaultProvider = hasCustomServer ? 'imap' : 'auto'
+
   return {
     name: account.name || '',
     email: account.email || '',
-    provider: account.provider || 'imap',
+    provider: account.provider || defaultProvider,
     password: account.password || '',
     imap_host: account.imapHost,
     imap_port: account.imapPort,
