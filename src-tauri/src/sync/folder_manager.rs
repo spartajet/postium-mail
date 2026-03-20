@@ -232,7 +232,6 @@ impl FolderManager {
                             "spam" | "junk" => SpecialUse::Junk,
                             "trash" => SpecialUse::Trash,
                             "archive" => SpecialUse::Archive,
-                            "starred" | "flagged" => SpecialUse::Flagged,
                             _ => Self::infer_special_use_from_name(&info.name),
                         }
                     }
@@ -275,13 +274,8 @@ impl FolderManager {
             SpecialUse::Junk
         } else if name_lower.contains("archive") || name_lower.contains("归档") {
             SpecialUse::Archive
-        } else if name_lower.contains("flagged")
-            || name_lower.contains("star")
-            || name_lower.contains("标记")
-        {
-            SpecialUse::Flagged
         } else {
-            SpecialUse::Inbox // 默认为收件箱
+            SpecialUse::Normal
         }
     }
 

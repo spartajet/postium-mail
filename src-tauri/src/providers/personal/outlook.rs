@@ -145,7 +145,6 @@ impl MailProvider for OutlookProvider {
             spam: vec!["垃圾邮件".to_string(), "Junk".to_string(), "Junk Email".to_string()],
             trash: vec!["已删除邮件".to_string(), "Deleted".to_string(), "Deleted Items".to_string(), "Trash".to_string()],
             archive: vec!["归档".to_string(), "Archive".to_string()],
-            starred: vec![],
         }
     }
 

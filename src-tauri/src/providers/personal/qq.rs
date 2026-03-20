@@ -88,7 +88,6 @@ impl MailProvider for QqMailProvider {
             spam: vec!["Spam".to_string(), "Junk".to_string(), "垃圾邮件".to_string()],
             trash: vec!["Trash".to_string(), "Deleted".to_string(), "已删除".to_string()],
             archive: vec!["Archive".to_string(), "归档".to_string()],
-            starred: vec![],
         }
     }
 

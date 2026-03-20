@@ -147,7 +147,6 @@ impl MailProvider for GmailProvider {
                 "[Gmail]/Trash".to_string(),
             ],
             archive: vec!["[Gmail]/All Mail".to_string()],
-            starred: vec!["Starred".to_string()],
         }
     }
 

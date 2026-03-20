@@ -96,7 +96,6 @@ impl MailProvider for Mail163Provider {
             ],
             trash: vec!["&XfJSIJZk-".to_string()],
             archive: vec!["Archive".to_string(), "&W1hoYw-".to_string()],
-            starred: vec![],
         }
     }
 

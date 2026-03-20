@@ -341,8 +341,14 @@ impl Default for ProviderCapabilities {
 
 /// 标准文件夹映射
 ///
-/// 定义了7个标准邮箱文件夹，每个文件夹对应一个或多个 IMAP 文件夹名称
+/// 定义了6个标准邮箱文件夹，每个文件夹对应一个或多个 IMAP 文件夹名称
 /// 不同邮件服务商对标准文件夹使用不同的命名，此结构体提供映射关系
+///
+/// # 注意
+///
+/// 此结构体仅包含**真实的 IMAP 文件夹**，不包含虚拟文件夹。
+/// - 星标邮件：通过邮件的 `\Flagged` 标志识别，不是文件夹
+/// - 重要邮件：通过邮件的 `\Important` 或 `\Flagged` 标志识别
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StandardFolder {
     /// 收件箱对应的 IMAP 文件夹名称列表
@@ -357,8 +363,6 @@ pub struct StandardFolder {
     pub trash: Vec<String>,
     /// 归档对应的 IMAP 文件夹名称列表
     pub archive: Vec<String>,
-    /// 星标邮件对应的 IMAP 文件夹名称列表
-    pub starred: Vec<String>,
 }
 
 impl StandardFolder {
@@ -373,14 +377,13 @@ impl StandardFolder {
             spam: vec!["Spam".to_string(), "Junk".to_string()],
             trash: vec!["Trash".to_string(), "Deleted".to_string()],
             archive: vec!["Archive".to_string()],
-            starred: vec!["Starred".to_string(), "Flagged".to_string()],
         }
     }
 
     /// 从 IMAP 文件夹名称查找对应的标准文件夹类型
     ///
     /// 先进行精确匹配，然后进行包含匹配（处理前缀/后缀情况）
-    /// 返回 "inbox", "sent", "drafts", "spam", "trash", "archive", "starred" 或 "other"
+    /// 返回 "inbox", "sent", "drafts", "spam", "trash", "archive" 或 "other"
     pub fn find_standard_type(&self, imap_name: &str) -> &str {
         // 优先完全匹配
         if self.inbox.iter().any(|n| n == imap_name) {
@@ -401,9 +404,6 @@ impl StandardFolder {
         if self.archive.iter().any(|n| n == imap_name) {
             return "archive";
         }
-        if self.starred.iter().any(|n| n == imap_name) {
-            return "starred";
-        }
 
         // 其次包含匹配（处理前缀/后缀、嵌套文件夹等情况）
         let imap_lower = imap_name.to_lowercase();
@@ -414,7 +414,6 @@ impl StandardFolder {
             ("spam", &self.spam),
             ("trash", &self.trash),
             ("archive", &self.archive),
-            ("starred", &self.starred),
         ] {
             // 双向包含匹配：imap_name 包含某个标准名，或某个标准名包含 imap_name
             if folders.iter().any(|n| {
