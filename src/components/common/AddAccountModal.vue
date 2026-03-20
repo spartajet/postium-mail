@@ -519,6 +519,9 @@ async function createAccountAndSync() {
     // 3.1 切换到新创建的账号
     accountStore.selectAccountById(String(accountId))
 
+    // 3.2 重置加载状态
+    loading.value = false
+
     // 4. 立即关闭对话框并返回成功
     syncProgress.value = {
       stage: 'idle',
