@@ -301,6 +301,23 @@ mod tests {
     use super::super::{ImapServerConfig, SmtpServerConfig};
     use super::*;
     use async_trait::async_trait;
+    use std::sync::Once;
+
+    static TRACING_INIT: Once = Once::new();
+
+    fn init_tracing() {
+        TRACING_INIT.call_once(|| {
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_test_writer()
+                .with_target(false)
+                .with_ansi(true)
+                .with_line_number(true)
+                .with_file(true)
+                .try_init()
+                .ok();
+        });
+    }
 
     struct MockProvider {
         id: &'static str,
@@ -348,6 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_pool_detection() {
+        init_tracing();
         let mut pool = ProviderPool::new();
 
         let provider = Box::new(MockProvider {
@@ -369,6 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_default() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         // 应该包含所有默认服务商
@@ -390,6 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_providers_by_type() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         let personal = pool.get_providers_by_type(AccountType::Personal);
@@ -401,6 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_gmail() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         let provider = pool.detect_provider("user@gmail.com").await.unwrap();
@@ -409,6 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_outlook() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         let provider = pool.detect_provider("user@outlook.com").await.unwrap();
@@ -417,6 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_mail163() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         // 测试 163.com
@@ -434,6 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_qqmail() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         // 测试 qq.com
@@ -447,6 +471,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_icloud() {
+        init_tracing();
         let pool = ProviderPool::default();
 
         // 测试 icloud.com
