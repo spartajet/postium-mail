@@ -7,8 +7,11 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::RwLock;
+
+/// 通知历史类型别名
+type NotificationHistory = HashMap<String, (DateTime<Utc>, Notification)>;
 
 /// 通知管理器
 ///
@@ -23,7 +26,7 @@ pub struct NotificationManager {
 
     /// 通知历史: notification_id -> (timestamp, notification)
     /// 用于去重和合并逻辑
-    history: Arc<RwLock<HashMap<String, (DateTime<Utc>, Notification)>>>,
+    history: Arc<RwLock<NotificationHistory>>,
 
     /// 通知配置
     config: NotificationConfig,
@@ -54,11 +57,11 @@ pub struct NotificationConfig {
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
-            dedupe_window_secs: 5,    // 5秒去重窗口
-            merge_window_secs: 10,    // 10秒合并窗口
+            dedupe_window_secs: 5, // 5秒去重窗口
+            merge_window_secs: 10, // 10秒合并窗口
             enable_desktop_notification: true,
-            enable_sound: false,      // 默认关闭声音
-            max_history_size: 1000,   // 最多保留1000条历史
+            enable_sound: false,    // 默认关闭声音
+            max_history_size: 1000, // 最多保留1000条历史
         }
     }
 }
@@ -190,7 +193,11 @@ impl NotificationManager {
         synced_count: usize,
     ) -> Result<()> {
         let notification = Notification {
-            id: format!("sync_complete:{}:{}", account_id, chrono::Utc::now().timestamp()),
+            id: format!(
+                "sync_complete:{}:{}",
+                account_id,
+                chrono::Utc::now().timestamp()
+            ),
             title: format!("同步完成 - {}", account_name),
             body: format!("同步了 {} 封邮件", synced_count),
             notification_type: NotificationType::SyncComplete,
@@ -210,7 +217,11 @@ impl NotificationManager {
         error: &str,
     ) -> Result<()> {
         let notification = Notification {
-            id: format!("sync_error:{}:{}", account_id, chrono::Utc::now().timestamp()),
+            id: format!(
+                "sync_error:{}:{}",
+                account_id,
+                chrono::Utc::now().timestamp()
+            ),
             title: format!("同步失败 - {}", account_name),
             body: format!("错误: {}", error),
             notification_type: NotificationType::SyncError,
@@ -236,7 +247,11 @@ impl NotificationManager {
         error: &str,
     ) -> Result<()> {
         let notification = Notification {
-            id: format!("auth_error:{}:{}", account_id, chrono::Utc::now().timestamp()),
+            id: format!(
+                "auth_error:{}:{}",
+                account_id,
+                chrono::Utc::now().timestamp()
+            ),
             title: format!("认证失败 - {}", account_name),
             body: format!("请检查账号凭据: {}", error),
             notification_type: NotificationType::AuthError,
@@ -251,7 +266,11 @@ impl NotificationManager {
     /// 发送网络错误通知
     pub async fn notify_network_error(&self, account_id: i32, error: &str) -> Result<()> {
         let notification = Notification {
-            id: format!("network_error:{}:{}", account_id, chrono::Utc::now().timestamp()),
+            id: format!(
+                "network_error:{}:{}",
+                account_id,
+                chrono::Utc::now().timestamp()
+            ),
             title: "网络错误".to_string(),
             body: format!("连接失败: {}", error),
             notification_type: NotificationType::NetworkError,
@@ -317,10 +336,7 @@ impl NotificationManager {
         drop(history);
 
         // 发射 Tauri 事件
-        if let Err(e) = self
-            .app_handle
-            .emit("notification://new", &notification)
-        {
+        if let Err(e) = self.app_handle.emit("notification://new", &notification) {
             tracing::error!("发送 Tauri 通知事件失败: {}", e);
         }
 
@@ -333,7 +349,11 @@ impl NotificationManager {
         let mut stats = self.stats.write().await;
         stats.total_sent += 1;
 
-        tracing::info!("📢 通知已发送: {} - {}", notification.title, notification.body);
+        tracing::info!(
+            "📢 通知已发送: {} - {}",
+            notification.title,
+            notification.body
+        );
 
         Ok(())
     }
@@ -385,11 +405,7 @@ impl NotificationManager {
     async fn send_desktop_notification(&self, notification: &Notification) -> Result<()> {
         // 使用 Tauri 的通知插件
         // 这里先记录日志，实际集成需要 tauri-plugin-notification
-        tracing::info!(
-            "桌面通知: {} - {}",
-            notification.title,
-            notification.body
-        );
+        tracing::info!("桌面通知: {} - {}", notification.title, notification.body);
 
         // TODO: 集成 tauri-plugin-notification
         // let _ = self.app_handle.notification()
@@ -529,13 +545,19 @@ mod tests {
         assert_eq!(deserialized.id, notification.id);
         assert_eq!(deserialized.title, notification.title);
         assert_eq!(deserialized.body, notification.body);
-        assert_eq!(deserialized.notification_type, notification.notification_type);
+        assert_eq!(
+            deserialized.notification_type,
+            notification.notification_type
+        );
     }
 
     #[test]
     fn test_notification_type_equality() {
         assert_eq!(NotificationType::NewEmail, NotificationType::NewEmail);
-        assert_eq!(NotificationType::SyncComplete, NotificationType::SyncComplete);
+        assert_eq!(
+            NotificationType::SyncComplete,
+            NotificationType::SyncComplete
+        );
         assert_ne!(NotificationType::NewEmail, NotificationType::SyncError);
     }
 

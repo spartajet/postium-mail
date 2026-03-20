@@ -84,21 +84,21 @@
 //!
 //! ## 主要解析函数
 //!
-//! - [`parse_email_with_mail_parser()`]: 解析完整邮件，包含正文和附件
-//! - [`parse_email_header_only()`]: 仅解析邮件头，用于骨架同步
+//! - [`parse_email_with_mail_parser()`][]: 解析完整邮件，包含正文和附件
+//! - [`parse_email_header_only()`][]: 仅解析邮件头，用于骨架同步
 //!
 //! ## 编码处理函数
 //!
-//! - [`decode_rfc2047()`]: 解码 RFC 2047 编码字符串
-//! - [`is_garbled()`]: 检测字符串是否乱码
-//! - [`fix_encoding_issue()`]: 修复编码问题
-//! - [`extract_and_decode_subject()`]: 从原始邮件头提取并解码主题
+//! - [`decode_rfc2047()`][]: 解码 RFC 2047 编码字符串
+//! - [`is_garbled()`][]: 检测字符串是否乱码
+//! - [`fix_encoding_issue()`][]: 修复编码问题
+//! - [`extract_and_decode_subject()`][]: 从原始邮件头提取并解码主题
 //!
 //! ## 辅助函数
 //!
-//! - [`decode_quoted_printable_utf8()`]: 解码 QP 编码的 UTF-8
-//! - [`decode_quoted_printable_gbk()`]: 解码 QP 编码的 GBK
-//! - [`extract_attachments()`]: 提取附件信息
+//! - [`decode_quoted_printable_utf8()`][]: 解码 QP 编码的 UTF-8
+//! - [`decode_quoted_printable_gbk()`][]: 解码 QP 编码的 GBK
+//! - [`extract_attachments()`][]: 提取附件信息
 //!
 //! # 使用示例
 //!

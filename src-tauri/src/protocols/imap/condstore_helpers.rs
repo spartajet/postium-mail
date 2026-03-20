@@ -150,7 +150,7 @@ impl CondstoreCommands {
             if line.contains("* SEARCH") {
                 // 提取 "* SEARCH ..." 后面的 UID 列表
                 if let Some(rest) = line.strip_prefix("* SEARCH") {
-                    let parts: Vec<&str> = rest.trim().split_whitespace().collect();
+                    let parts: Vec<&str> = rest.split_whitespace().collect();
                     for part in parts {
                         if let Ok(uid) = part.parse::<u32>() {
                             uids.push(uid);

@@ -408,7 +408,7 @@ impl SmtpClient {
             .lock()
             .await
             .as_ref()
-            .ok_or_else(|| SmtpError::NotConnected)?
+            .ok_or(SmtpError::NotConnected)?
             .clone();
 
         // 在 spawn_blocking 中执行同步的 lettre 操作
@@ -438,7 +438,7 @@ impl SmtpClient {
             .lock()
             .await
             .as_ref()
-            .ok_or_else(|| SmtpError::NotConnected)?
+            .ok_or(SmtpError::NotConnected)?
             .clone();
 
         // 在 spawn_blocking 中执行同步的 lettre 操作

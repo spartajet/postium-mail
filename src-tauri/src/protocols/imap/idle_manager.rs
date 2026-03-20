@@ -300,10 +300,10 @@ impl ImapIdleManager {
 
     /// 计算重连延迟（指数退避）
     fn calculate_reconnect_delay(attempt: u32, config: &ReconnectConfig) -> u64 {
-        let delay = (config.initial_delay_secs as f64
+        
+        (config.initial_delay_secs as f64
             * config.backoff_multiplier.powi(attempt as i32 - 1))
-        .min(config.max_delay_secs as f64) as u64;
-        delay
+        .min(config.max_delay_secs as f64) as u64
     }
 }
 

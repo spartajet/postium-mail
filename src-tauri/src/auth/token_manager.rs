@@ -750,7 +750,7 @@ mod tests {
         let cache: HashMap<i32, TokenMetadata> = HashMap::new();
 
         // 测试查找不存在的账号
-        assert!(cache.get(&999).is_none());
+        assert!(!cache.contains_key(&999));
     }
 
     #[tokio::test]

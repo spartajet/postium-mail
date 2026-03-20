@@ -193,12 +193,14 @@ mod tests {
     fn test_password_auth_new() {
         // 注意：测试需要 Tauri AppHandle，这里只测试结构
         // 实际测试需要集成测试环境
-        assert!(true);
+        // TODO: 实现实际的集成测试
     }
 
     #[test]
     fn test_password_auth_default() {
-        assert!(true);
+        // 注意：测试需要 Tauri AppHandle，这里只测试结构
+        // 实际测试需要集成测试环境
+        // TODO: 实现实际的集成测试
     }
 
     #[test]

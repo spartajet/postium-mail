@@ -94,7 +94,7 @@ impl ErrorType {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_error_code(s: &str) -> Self {
         match s {
             "connection" => ErrorType::Connection,
             "auth" => ErrorType::Auth,
