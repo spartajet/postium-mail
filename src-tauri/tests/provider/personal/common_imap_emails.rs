@@ -150,7 +150,7 @@ mod tests {
             .try_init();
 
         // 从环境变量获取要测试的账号 key，默认为 "163"
-        let account_key = env::var("TEST_ACCOUNT").unwrap_or_else(|_| "163".to_string());
+        let account_key = env::var("TEST_ACCOUNT").unwrap_or_else(|_| "139".to_string());
 
         info!("========================================");
         info!("通用 IMAP 功能测试");

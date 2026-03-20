@@ -131,7 +131,7 @@ mod tests {
     fn test_mail163_provider_info() {
         let provider = Mail163Provider;
 
-        assert_eq!(provider.provider_id(), "163");
+        assert_eq!(provider.provider_id(), "yi");
         assert_eq!(provider.provider_name(), "网易邮箱");
         assert_eq!(provider.account_type(), AccountType::Personal);
         assert_eq!(provider.auth_types(), vec![AuthType::Password]);
@@ -159,6 +159,6 @@ mod tests {
         let provider = Mail163Provider;
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "163");
+        assert_eq!(cloned.provider_id(), "yi");
     }
 }
