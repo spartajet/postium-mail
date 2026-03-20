@@ -29,7 +29,11 @@ use crate::storage;
 /// - 如果数据库操作失败，返回数据库错误
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::account::add_account;
+/// use crate::models::account::CreateAccountRequest;
+/// use std::default::Default;
+///
 /// let account = CreateAccountRequest {
 ///     name: "我的邮箱".to_string(),
 ///     email: "user@example.com".to_string(),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useUIStore, useAccountStore } from '@/stores'
+import { useUIStore, useAccountStore, useEmailStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSwitch, NAlert, NRadioGroup, NRadio, NProgress, NCard, NCollapse, NCollapseItem } from 'naive-ui'
@@ -10,6 +10,7 @@ import { AccountType, AuthType } from '@/types'
 
 const uiStore = useUIStore()
 const accountStore = useAccountStore()
+const emailStore = useEmailStore()
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
@@ -542,8 +543,13 @@ async function createAccountAndSync() {
     // 7. 触发后台同步（不等待完成）
     console.log('[AddAccountModal] 触发后台同步, accountId:', accountId)
     invoke('sync_account_with_progress', { accountId })
-      .then(() => {
+      .then(async () => {
         console.log('[AddAccountModal] 后台同步完成')
+        // 确保当前账号是正确的
+        console.log('[AddAccountModal] 当前账号:', accountStore.currentAccount?.email, accountStore.currentAccount?.id)
+        // 刷新邮件列表
+        await emailStore.fetchEmails()
+        console.log('[AddAccountModal] 邮件列表已刷新, 邮件数量:', emailStore.emails.length)
       })
       .catch((error) => {
         console.error('[AddAccountModal] 后台同步失败:', error)
@@ -618,7 +624,10 @@ async function listenToSyncProgress(accountId: number) {
       syncProgress.value.message = '同步完成！'
 
       setTimeout(async () => {
+        // 刷新账号列表
         await accountStore.fetchAccounts()
+        // 刷新邮件列表
+        await emailStore.fetchEmails()
         emit('success')
         uiStore.closeAddAccountModal()
         resetForm()

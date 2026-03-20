@@ -4,6 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::storage;
+use chrono::Datelike; // 添加 Datelike trait来访问日期方法
 use crate::sync::{delta_sync::DeltaSync, folder_manager::FolderManager, mail_processor::MailProcessor, change_detector::ChangeDetector, sync_state::SyncStateManager};
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::providers::{ProviderPool, AuthType};
@@ -335,8 +336,10 @@ impl SyncManager {
 
         // 2. 获取服务器 UID 列表（默认只同步最近3个月的邮件）
         // 计算3个月前的日期
+        // 注意：IMAP SINCE 命令需要英文月份缩写（RFC 3501）
+        // 格式：dd-MMM-yyyy（如 20-Dec-2025）
         let three_months_ago = chrono::Utc::now() - chrono::Duration::days(90);
-        let date_since = three_months_ago.format("%d-%b-%Y").to_string(); // IMAP 日期格式：01-Jan-2025
+        let date_since = format_imap_date(three_months_ago);
 
         tracing::info!(
             "使用 SINCE 命令获取最近3个月的邮件: folder={}, since={}",
@@ -513,7 +516,7 @@ impl SyncManager {
                 match client.fetch_email(folder, uid).await {
                     Ok(email_data) => {
                         // 转换 EmailData → MailData
-                        let mail_data = crate::sync::mail_processor::from_imap_email(&email_data);
+                        let mail_data = crate::sync::mail_processor::from_imap_email(&email_data, folder);
                         mail_data_list.push(mail_data);
                     }
                     Err(e) => {
@@ -624,6 +627,26 @@ impl SyncManager {
     pub fn change_detector(&self) -> &Arc<ChangeDetector> {
         &self.change_detector
     }
+}
+
+/// 格式化日期为 IMAP SINCE 命令所需的格式
+///
+/// IMAP SINCE 命令需要英文月份缩写（RFC 3501）：
+/// 格式：dd-MMM-yyyy（如 20-Dec-2025）
+///
+/// 注意：不能使用 chrono 的 %b 格式化，因为它会根据系统语言环境
+/// 生成不同的月份名称（如中文系统会生成 "12月"）
+fn format_imap_date(datetime: chrono::DateTime<chrono::Utc>) -> String {
+    const MONTH_NAMES: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+
+    let day = datetime.day();
+    let month = MONTH_NAMES[datetime.month() as usize - 1];
+    let year = datetime.year();
+
+    format!("{:02}-{}-{}", day, month, year)
 }
 
 #[cfg(test)]

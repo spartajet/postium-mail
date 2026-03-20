@@ -92,10 +92,10 @@
 //! ## 创建 AuthManager
 //!
 //! ```rust,no_run
-//! # use crate::auth::AuthManager;
+//! # use postium_mail_lib::auth::AuthManager;
 //! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! # let app_handle = todo!();
+//! # let db: sea_orm::DbConn = unsafe { std::mem::zeroed() };
+//! # let app_handle = tauri::AppHandle::default();
 //! let manager = AuthManager::new(&db, &app_handle)?;
 //!
 //! // 获取 IMAP 认证信息
@@ -107,9 +107,11 @@
 //! ## OAuth2 流程
 //!
 //! ```rust,no_run
-//! # use crate::auth::AuthManager;
+//! # use postium_mail_lib::auth::AuthManager;
 //! # async fn example() -> anyhow::Result<()> {
-//! # let manager = todo!();
+//! # let db: sea_orm::DbConn = unsafe { std::mem::zeroed() };
+//! # let app_handle = tauri::AppHandle::default();
+//! # let manager: AuthManager = AuthManager::new(&db, &app_handle)?;
 //! // 1. 生成授权 URL
 //! let auth_url = manager.get_oauth_auth_url("gmail", "state").await?;
 //!
@@ -124,9 +126,11 @@
 //! ## 刷新 Token
 //!
 //! ```rust,no_run
-//! # use crate::auth::AuthManager;
+//! # use postium_mail_lib::auth::AuthManager;
 //! # async fn example() -> anyhow::Result<()> {
-//! # let manager = todo!();
+//! # let db: sea_orm::DbConn = unsafe { std::mem::zeroed() };
+//! # let app_handle = tauri::AppHandle::default();
+//! # let manager: AuthManager = AuthManager::new(&db, &app_handle)?;
 //! // 检查并刷新过期的 Token
 //! manager.refresh_oauth_token(1).await?;
 //! # Ok(())

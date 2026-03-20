@@ -19,7 +19,10 @@
 //!
 //! # 使用示例
 //!
-//! ```rust
+//! ```rust,no_run
+//! use postium_mail_lib::protocols::imap::service::ImapService;
+//! use postium_mail_lib::protocols::imap::ImapAuth;
+//!
 //! let mut service = ImapService::new();
 //!
 //! // 连接
@@ -53,7 +56,9 @@ use crate::storage;
 ///
 /// # 使用模式
 ///
-/// ```rust
+/// ```rust,no_run
+/// use postium_mail_lib::protocols::imap::service::ImapService;
+///
 /// let mut service = ImapService::new();
 ///
 /// // 1. 连接
@@ -86,7 +91,9 @@ impl ImapService {
     ///
     /// # 示例
     ///
-    /// ```rust
+    /// ```rust,no_run
+    /// use postium_mail_lib::protocols::imap::service::ImapService;
+    ///
     /// let service = ImapService::new();
     /// service.connect(...).await?;
     /// ```
@@ -117,7 +124,10 @@ impl ImapService {
     ///
     /// # 示例
     ///
-    /// ```rust
+    /// ```rust,no_run
+    /// use postium_mail_lib::protocols::imap::service::ImapService;
+    /// use postium_mail_lib::protocols::imap::ImapAuth;
+    ///
     /// let auth = ImapAuth::Password("app_password".to_string());
     /// service.connect("imap.gmail.com", 993, "user@gmail.com", auth).await?;
     /// ```
@@ -147,7 +157,9 @@ impl ImapService {
     ///
     /// # 示例
     ///
-    /// ```rust
+    /// ```rust,no_run
+    /// use postium_mail_lib::protocols::imap::service::ImapService;
+    ///
     /// let folders = service.list_folders_with_attributes().await?;
     /// for folder in folders {
     ///     println!("{}: {}", folder.name, folder.standard_name);
