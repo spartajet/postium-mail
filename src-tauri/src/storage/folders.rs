@@ -1,6 +1,112 @@
-//! 文件夹存储层
+//! 文件夹数据访问层
 //!
-//! 提供文件夹的数据库查询操作和 UTF-7 解码功能
+//! 提供文件夹的 CRUD 操作和 IMAP UTF-7 编码/解码功能。
+//!
+//! # 核心功能
+//!
+//! - **文件夹查询**: 按账号、名称、IMAP 名称查询
+//! - **CRUD 操作**: 创建、更新、删除文件夹
+//! - **UTF-7 解码**: 解码 IMAP Modified UTF-7 编码的文件夹名
+//! - **名称映射**: 将 IMAP 文件夹名映射到标准名称
+//! - **统计管理**: 更新邮件数和未读数
+//!
+//! # 数据模型
+//!
+//! ## Folder 表结构
+//!
+//! | 字段 | 类型 | 说明 |
+//! |------|------|------|
+//! | id | INTEGER | 主键 |
+//! | account_id | INTEGER | 所属账号 ID |
+//! | name | TEXT | 标准化名称（英文小写） |
+//! | imap_name | TEXT | IMAP 原始名称（可能含 UTF-7 编码） |
+//! | attributes | TEXT | IMAP 文件夹属性（JSON） |
+//! | email_count | INTEGER | 邮件总数 |
+//! | unread_count | INTEGER | 未读邮件数 |
+//! | uidvalidity | INTEGER | IMAP UIDVALIDITY |
+//! | synced_at | TIMESTAMP | 最后同步时间 |
+//!
+//! # IMAP UTF-7 编码
+//!
+//! IMAP 使用 Modified UTF-7 (RFC 3501) 编码非 ASCII 文件夹名：
+//!
+//! ```text
+//! 原始字符 → UTF-7 编码
+//! ────────────────────────
+//! 收件箱   → &XfJSIJZk-
+//! 已发送   → &XfJT0ZAB-
+//! 垃圾邮件 → &V4NXPpCuTvY-
+//! 已删除   → &Xn9USpCuTvY-
+//! ```
+//!
+//! ## UTF-7 编码规则
+//!
+//! 1. 可打印 ASCII 字符（除 `&`）直接输出
+//! 2. `&` 字符用 `&-` 表示
+//! 3. 其他字符用 Base64 编码，包裹在 `&...-` 中
+//! 4. Base64 字母表使用 `,` 代替 `/`
+//!
+//! # 文件夹名称映射
+//!
+//! ## 标准文件夹映射
+//!
+//! | IMAP 名称 | 标准名称 | 说明 |
+//! |-----------|----------|------|
+//! | INBOX | inbox | 收件箱 |
+//! | Sent / Sent Items / 已发送 | sent | 已发送 |
+//! | Drafts / 草稿箱 | drafts | 草稿 |
+//! | Junk / Spam / 垃圾邮件 | spam | 垃圾邮件 |
+//! | Trash / Deleted / 已删除 | trash | 已删除 |
+//! | Archive / 归档 | archive | 归档 |
+//!
+//! # 使用示例
+//!
+//! ## 查找或创建文件夹
+//!
+//! ```rust,no_run
+//! # use crate::storage::FolderRepository;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! // 自动处理 UTF-7 解码和名称映射
+//! let folder = FolderRepository::find_or_create(
+//!     &db,
+//!     account_id,
+//!     "&XfJSIJZk-",  // UTF-7 编码的 "收件箱"
+//! ).await?;
+//!
+//! println!("文件夹: {}", folder.name); // "inbox"
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 解码 UTF-7 文件夹名
+//!
+//! ```rust,no_run
+//! # use crate::storage::FolderRepository;
+//! # fn example() -> anyhow::Result<()> {
+//! let decoded = FolderRepository::decode_imap_utf7("&XfJSIJZk-")?;
+//! assert_eq!(decoded, "收件箱");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 映射文件夹名
+//!
+//! ```rust,no_run
+//! # use crate::storage::FolderRepository;
+//! # fn example() {
+//! assert_eq!(FolderRepository::map_folder_name("INBOX"), "inbox");
+//! assert_eq!(FolderRepository::map_folder_name("已发送"), "sent");
+//! assert_eq!(FolderRepository::map_folder_name("Sent Items"), "sent");
+//! # }
+//! ```
+//!
+//! # 同步注意事项
+//!
+//! - UIDVALIDITY 变化表示文件夹内容已重置
+//! - 同步时应检查并更新 UIDVALIDITY
+//! - 文件夹统计（邮件数、未读数）应定期更新
+//! - 删除文件夹前应先删除关联的所有邮件
 
 use sea_orm::{EntityTrait, QueryOrder, ColumnTrait, QueryFilter, DbConn, Condition, Set};
 use sea_orm::ActiveModelTrait;

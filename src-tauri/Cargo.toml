@@ -75,7 +75,7 @@ tokio-native-tls = "0.3"  # Tokio TLS 支持
 tokio-util = { version = "0.7", features = ["compat"] }
 # 日志
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 
 # sqlx = "=0.8.6"

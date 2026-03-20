@@ -1,5 +1,182 @@
 #![allow(deprecated)]
 
+//! 异步 IMAP 客户端实现
+//!
+//! 提供基于 `async-imap` 的异步 IMAP 客户端，支持常见的邮件操作。
+//!
+//! # 核心功能
+//!
+//! - **连接管理**: TLS 加密连接、密码和 OAuth2 认证
+//! - **文件夹操作**: 列出文件夹、获取文件夹元数据、RFC 6154 特殊用途支持
+//! - **邮件操作**: 获取邮件、搜索、标志管理、删除
+//! - **增量同步**: CONDSTORE 支持（RFC 4551）用于高效的变更检测
+//! - **实时推送**: IDLE 支持（RFC 2177）用于新邮件通知
+//!
+//! # 与 `ImapService` 的区别
+//!
+//! `AsyncImapClient` 是底层协议客户端，`ImapService` 是高层封装：
+//!
+//! | 特性 | AsyncImapClient | ImapService |
+//! |------|-----------------|-------------|
+//! | 抽象级别 | 协议层 | 服务层 |
+//! | 数据库操作 | 无 | 集成 |
+//! | API 复杂度 | 较低 | 简化 |
+//! | 推荐场景 | 直接控制 IMAP | 常规应用开发 |
+//!
+//! # 使用示例
+//!
+//! ## 基本连接和认证
+//!
+//! ```rust,no_run
+//! use crate::protocols::imap::{AsyncImapClient, ImapAuth};
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut client = AsyncImapClient::new();
+//!
+//! // 密码认证
+//! let auth = ImapAuth::Password("app_password".to_string());
+//! client.connect("imap.gmail.com", 993, "user@gmail.com", auth).await?;
+//!
+//! // OAuth2 认证
+//! let auth = ImapAuth::OAuth2 {
+//!     email: "user@gmail.com".to_string(),
+//!     access_token: "ya29.a0AfH6...".to_string(),
+//! };
+//! client.connect("imap.gmail.com", 993, "user@gmail.com", auth).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 文件夹操作
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = AsyncImapClient::new();
+//! // 列出文件夹（带特殊用途属性）
+//! let folders = client.list_folders_with_attributes().await?;
+//! for folder in folders {
+//!     println!("{}: {:?}", folder.name, folder.special_use);
+//! }
+//!
+//! // 获取文件夹元数据
+//! let metadata = client.fetch_folder_metadata("INBOX").await?;
+//! println!("UIDVALIDITY: {}", metadata.uidvalidity);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 邮件操作
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = AsyncImapClient::new();
+//! // 获取 UID 列表
+//! let uids = client.list_uids("INBOX", 50).await?;
+//!
+//! // 获取完整邮件
+//! if let Some(&uid) = uids.first() {
+//!     let email = client.fetch_email("INBOX", uid).await?;
+//!     println!("主题: {}", email.subject);
+//! }
+//!
+//! // 标记已读
+//! client.mark_as_read("INBOX", uid, true).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## CONDSTORE 增量同步
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = AsyncImapClient::new();
+//! // 检查 CONDSTORE 支持
+//! let supported = client.check_condstore_support().await?;
+//!
+//! if supported {
+//!     // 使用 CONDSTORE 选择文件夹
+//!     let (count, highest_modseq) = client.select_with_condstore("INBOX", None).await?;
+//!     println!("HIGHESTMODSEQ: {:?}", highest_modseq);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # CONDSTORE 支持 (RFC 4551)
+//!
+//! CONDSTORE 扩展允许使用 MODSEQ（修改序列号）进行增量同步。
+//!
+//! ## 支持的服务商
+//!
+//! - ✅ Gmail (imap.gmail.com)
+//! - ✅ iCloud (imap.mail.me.com)
+//! - ❌ Outlook/Office365 (outlook.office365.com) - 不支持
+//! - ❌ Yahoo (imap.mail.yahoo.com) - 不支持
+//!
+//! ## 限制说明
+//!
+//! 由于 `async-imap` 0.11 的限制：
+//! - `search_modified_since()` 尚未完全实现，建议使用 UID SEARCH 降级策略
+//! - `fetch_with_modseq()` 无法获取 MODSEQ 值，返回 None
+//! - `select_with_condstore()` 只能启用 CONDSTORE 模式，不支持 UNCHANGEDSINCE 参数
+//!
+//! # IDLE 支持 (RFC 2177)
+//!
+//! IDLE 允许服务器推送新邮件通知，无需客户端轮询。
+//!
+//! ## 检查支持
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = AsyncImapClient::new();
+//! let has_idle = client.check_idle_support().await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 轮询降级策略
+//!
+//! 如果服务器不支持 IDLE，可以使用轮询：
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = AsyncImapClient::new();
+//! // 检查新邮件（轻量级）
+//! let (current_count, has_new) = client.check_new_emails("INBOX", 100).await?;
+//!
+//! // 轮询新邮件
+//! let new_uids = client.polling_fallback("INBOX", last_uid).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # 邮件体解码
+//!
+//! `decode_email_body()` 函数自动检测常见编码：
+//! - UTF-8（默认）
+//! - GBK/GB18030（简体中文）
+//! - Big5（繁体中文）
+//! - Shift_JIS（日文）
+//! - Windows-1252（西欧语言）
+//!
+//! # 中支持
+//!
+//! - 自动解码 IMAP UTF-7 编码的文件夹名称（163、QQ 邮箱等）
+//! - 常见中文文件夹名称映射（收件箱、已发送、垃圾邮件等）
+//!
+//! # 性能优化
+//!
+//! - 使用 `BODY.PEEK[]` 避免自动设置已读标志
+//! - 使用 `BODY.PEEK[HEADER]` 仅获取邮件头（骨架同步）
+//! - 使用 `UID SEARCH SINCE` 获取指定日期后的邮件
+//!
+//! # 注意事项
+//!
+//! - 每个实例只能保持一个连接
+//! - 使用完毕后应调用 `logout()` 清理资源
+//! - 连接会在 Drop 时自动关闭
+//! - OAuth2 认证需要进一步实现（当前返回错误）
+
 use super::{
     types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
 };

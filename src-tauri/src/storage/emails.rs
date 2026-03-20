@@ -1,6 +1,125 @@
-//! 邮件存储层
+//! 邮件数据访问层
 //!
-//! 提供邮件的数据库查询操作
+//! 提供邮件的 CRUD 操作和邮件列表查询功能。
+//!
+//! # 核心功能
+//!
+//! - **邮件查询**: 分页列表、详情获取、搜索过滤
+//! - **状态管理**: 已读/未读、星标标记
+//! - **批量操作**: 批量删除、移动到文件夹
+//! - **统计功能**: 按文件夹统计邮件数量和未读数
+//! - **同步支持**: 从 IMAP 同步邮件数据的辅助方法
+//!
+//! # 数据模型
+//!
+//! ## Email 表结构
+//!
+//! | 字段 | 类型 | 说明 |
+//! |------|------|------|
+//! | id | INTEGER | 主键 |
+//! | account_id | INTEGER | 所属账号 ID |
+//! | folder | TEXT | 文件夹名称 |
+//! | uid | INTEGER | IMAP UID |
+//! | subject | TEXT | 邮件主题 |
+//! | sender_name | TEXT | 发件人名称 |
+//! | sender_email | TEXT | 发件人邮箱 |
+//! | body_text | TEXT | 纯文本正文 |
+//! | body_html | TEXT | HTML 正文 |
+//! | is_read | BOOLEAN | 是否已读 |
+//! | is_starred | BOOLEAN | 是否星标 |
+//! | is_draft | BOOLEAN | 是否草稿 |
+//! | sent_at | TIMESTAMP | 发送时间 |
+//! | received_at | TIMESTAMP | 接收时间 |
+//!
+//! # 分页查询
+//!
+//! 邮件列表支持分页查询：
+//!
+//! ```text
+//! page: 页码（从 0 开始）
+//! page_size: 每页数量（默认 50）
+//! total: 总邮件数
+//! total_pages: 总页数
+//! ```
+//!
+//! # 特殊文件夹
+//!
+//! ## 星标文件夹
+//!
+//! `folder = "starred"` 是虚拟文件夹，查询所有 `is_starred = true` 的邮件：
+//!
+//! ```rust,no_run
+//! # use crate::storage::EmailRepository;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! // 获取星标邮件
+//! let response = EmailRepository::list(&db, account_id, "starred", 0, 50).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # 同步辅助方法
+//!
+//! 这些方法专用于 IMAP 同步：
+//!
+//! - `save_email_from_imap`: 保存从 IMAP 获取的邮件
+//! - `email_exists_by_uid`: 检查 UID 是否已存在
+//! - `update_email_status`: 更新从 IMAP 同步的邮件状态
+//! - `delete_all_by_folder`: 清空文件夹所有邮件
+//!
+//! # 使用示例
+//!
+//! ## 获取邮件列表
+//!
+//! ```rust,no_run
+//! # use crate::storage::EmailRepository;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! let response = EmailRepository::list(
+//!     &db,
+//!     account_id,
+//!     "inbox",    // 文件夹
+//!     0,          // 页码
+//!     50,         // 每页数量
+//! ).await?;
+//!
+//! println!("邮件总数: {}", response.total);
+//! println!("总页数: {}", response.total_pages);
+//! for email in response.items {
+//!     println!("{}: {}", email.subject, email.sender_email);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 更新已读状态
+//!
+//! ```rust,no_run
+//! # use crate::storage::EmailRepository;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! EmailRepository::update_read_status(&db, email_id, true).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 切换星标
+//!
+//! ```rust,no_run
+//! # use crate::storage::EmailRepository;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! let is_starred = EmailRepository::toggle_star(&db, email_id).await?;
+//! println!("星标状态: {}", is_starred);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # 性能优化
+//!
+//! - 使用索引加速查询（account_id, folder, is_read, is_starred）
+//! - 分页查询避免一次加载大量数据
+//! - 附件数量通过批量查询获取，减少数据库往返
 
 use sea_orm::ActiveModelTrait;
 use sea_orm::{

@@ -1,3 +1,66 @@
+//! 邮件实体模型
+//!
+//! 定义邮件的数据库实体和相关 DTO。
+//!
+//! # 实体字段
+//!
+//! | 字段 | 类型 | 说明 | 默认值 |
+//! |------|------|------|--------|
+//! | id | i32 | 主键 | 自动生成 |
+//! | account_id | i32 | 所属账号 ID | - |
+//! | folder | String | 文件夹名称 | - |
+//! | uid | Option\<i32\> | IMAP UID | - |
+//! | message_id | Option\<String\> | RFC 5322 Message-ID | - |
+//! | subject | Option\<String\> | 邮件主题 | - |
+//! | sender_name | Option\<String\> | 发件人名称 | - |
+//! | sender_email | String | 发件人邮箱 | - |
+//! | recipient_emails | String | 收件人列表（JSON） | - |
+//! | cc_emails | Option\<String\> | 抄送列表（JSON） | - |
+//! | bcc_emails | Option\<String\> | 密送列表（JSON） | - |
+//! | body_text | Option\<String\> | 纯文本正文 | - |
+//! | body_html | Option\<String\> | HTML 正文 | - |
+//! | is_read | bool | 是否已读 | false |
+//! | is_starred | bool | 是否星标 | false |
+//! | is_draft | bool | 是否草稿 | false |
+//! | sent_at | i64 | 发送时间 | - |
+//! | received_at | i64 | 接收时间 | - |
+//!
+//! # 关联关系
+//!
+//! ```text
+//! Email
+//!   ├─ N:1 ─ Account (所属账号)
+//!   ├─ N:1 ─ Folder (所属文件夹，级联删除)
+//!   └─ 1:N ─ Attachment (附件列表)
+//! ```
+//!
+//! # 数据传输对象
+//!
+//! ## EmailDetail
+//!
+//! 完整的邮件详情，包含：
+//! - 邮件基本字段
+//! - 收件人、抄送、密送列表
+//! - 正文内容
+//! - 附件列表
+//!
+//! ## EmailListItem
+//!
+//! 邮件列表项，用于列表显示：
+//! - 不包含完整正文
+//! - 包含 snippet（摘要）
+//! - 包含附件数量
+//!
+//! ## EmailAddress
+//!
+//! 邮件地址结构：
+//! ```rust
+//! pub struct EmailAddress {
+//!     pub email: String,    // 邮箱地址
+//!     pub name: Option<String>,  // 显示名称
+//! }
+//! ```
+
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 use serde::{Deserialize, Serialize};

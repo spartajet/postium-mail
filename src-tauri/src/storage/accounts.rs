@@ -1,6 +1,103 @@
-//! 账号存储层
+//! 账号数据访问层
 //!
-//! 提供账号的数据库 CRUD 操作和 Keyring 密码管理
+//! 提供账号的 CRUD 操作和 Keyring 凭证管理。
+//!
+//! # 核心功能
+//!
+//! - **CRUD 操作**: 创建、读取、更新、删除账号
+//! - **凭证管理**: 使用系统 Keyring 安全存储密码和 OAuth Token
+//! - **服务商检测**: 自动检测邮箱服务商
+//! - **配置管理**: IMAP/SMTP 服务器配置管理
+//!
+//! # 数据模型
+//!
+//! ## Account 表结构
+//!
+//! | 字段 | 类型 | 说明 |
+//! |------|------|------|
+//! | id | INTEGER | 主键 |
+//! | name | TEXT | 账号显示名称 |
+//! | email | TEXT | 邮箱地址（唯一） |
+//! | provider | TEXT | 服务商 ID |
+//! | imap_host | TEXT | IMAP 服务器地址 |
+//! | imap_port | INTEGER | IMAP 端口 |
+//! | imap_ssl | BOOLEAN | 是否使用 SSL |
+//! | smtp_host | TEXT | SMTP 服务器地址 |
+//! | smtp_port | INTEGER | SMTP 端口 |
+//! | smtp_ssl | BOOLEAN | 是否使用 SSL |
+//! | auth_type | TEXT | 认证类型 |
+//!
+//! # Keyring 凭证管理
+//!
+//! 密码和 OAuth Token 不存储在数据库中，而是使用系统 Keyring：
+//!
+//! ```text
+//! Keyring Entry 结构:
+//! ┌────────────────────────────────────┐
+//! │ Service: "com.postium.mail"       │
+//! │ Username: "password:<account_id>" │
+//! │ Password: "<encrypted_password>"   │
+//! └────────────────────────────────────┘
+//!
+//! OAuth Token Entry:
+//! ┌────────────────────────────────────┐
+//! │ Service: "com.postium.mail"       │
+//! │ Username: "oauth:<account_id>"    │
+//! │ Password: "<json_token>"          │
+//! └────────────────────────────────────┘
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 创建账号
+//!
+//! ```rust,no_run
+//! # use crate::storage::{AccountRepository, CreateAccountRequest};
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! # let app_handle = todo!();
+//! let request = CreateAccountRequest {
+//!     name: "我的邮箱".to_string(),
+//!     email: "user@example.com".to_string(),
+//!     provider: "gmail".to_string(),
+//!     password: "app_password".to_string(),
+//!     ..Default::default()
+//! };
+//!
+//! let account = AccountRepository::create(&db, &app_handle, request).await?;
+//! println!("账号创建成功: ID {}", account.id);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 获取密码
+//!
+//! ```rust,no_run
+//! # use crate::storage::AccountRepository;
+//! # fn example(app_handle: &tauri::AppHandle) -> anyhow::Result<()> {
+//! let password = AccountRepository::get_password(app_handle, 1)?;
+//! println!("密码已获取");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 服务商自动检测
+//!
+//! ```text
+//! user@gmail.com     → gmail
+//! user@outlook.com   → outlook
+//! user@qq.com        → qqmail
+//! user@163.com       → mail163
+//! user@icloud.com    → icloud
+//! user@example.com   → native (自定义)
+//! ```
+//!
+//! # 安全注意事项
+//!
+//! - 密码永远不存储在数据库中
+//! - OAuth Token 包含敏感信息，使用 Keyring 加密存储
+//! - 删除账号时同步清理 Keyring 中的凭证
+//! - 生产环境应考虑额外的加密层
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DbConn, EntityTrait, QueryFilter, Set};
 use tauri::AppHandle;
