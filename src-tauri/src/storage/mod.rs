@@ -208,5 +208,5 @@ pub use cache::{
 pub use database::{DatabaseConnection, Repository};
 pub use emails::{EmailListResponse, EmailRepository};
 pub use folders::FolderRepository;
-pub use models::{account, attachment, email, folder, sync_error, sync_state};
+pub use models::{account, attachment, email, folder, folder_sync_state, sync_error, sync_state};
 pub use search::{SearchResult, SearchService};

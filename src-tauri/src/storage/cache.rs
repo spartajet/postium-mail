@@ -254,7 +254,7 @@ where
 }
 
 /// 邮箱列表缓存
-pub type FolderListCache = MemoryCache<i32, Vec<crate::sync::ImapFolder>>;
+pub type FolderListCache = MemoryCache<i32, Vec<crate::protocols::imap::FolderInfo>>;
 
 /// 邮件内容缓存
 pub type EmailContentCache = MemoryCache<String, String>;

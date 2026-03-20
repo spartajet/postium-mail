@@ -153,16 +153,15 @@ impl SyncManager {
 
         tracing::info!("获取到 {} 个文件夹", folder_infos.len());
 
-        // 7. 使用 FolderManager 同步文件夹到数据库（传入 provider 以获取文件夹映射）
-        let folder_sync_result = self
+        // 7. 更新文件夹同步状态（不再同步文件夹，只更新状态）
+        let sync_state_result = self
             .folder_manager
-            .sync_folders_from_info(account_id, &folder_infos, provider.as_ref())
+            .update_sync_states(account_id, &folder_infos)
             .await?;
 
         tracing::info!(
-            "文件夹同步完成: created={}, updated={}",
-            folder_sync_result.new_folders,
-            folder_sync_result.updated_folders
+            "文件夹同步状态更新完成: updated={}",
+            sync_state_result.updated
         );
 
         // 8. 对每个文件夹执行增量同步
@@ -322,7 +321,38 @@ impl SyncManager {
             folder
         );
 
-        // 1. 检查 CONDSTORE 支持
+        // 1. 获取并更新文件夹 IMAP 元数据（uidvalidity, uidnext, highest_modseq）
+        let metadata = imap_client.fetch_folder_metadata(folder).await.map_err(|e| {
+            tracing::warn!("获取文件夹元数据失败: {}, 跳过元数据更新", e);
+            // 元数据获取失败不应阻断同步流程
+            crate::error::MailError::Internal(format!("获取文件夹元数据失败: {}", e))
+        });
+
+        if let Ok(meta) = metadata {
+            self.folder_manager
+                .update_folder_metadata(
+                    account_id,
+                    folder,
+                    Some(meta.uidvalidity),
+                    Some(meta.uidnext),
+                    meta.highest_modseq,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::warn!("更新文件夹元数据失败: {}", e);
+                    // 元数据更新失败不应阻断同步流程
+                    e
+                })?;
+
+            tracing::debug!(
+                "文件夹元数据已更新: uidvalidity={}, uidnext={}, highest_modseq={:?}",
+                meta.uidvalidity,
+                meta.uidnext,
+                meta.highest_modseq
+            );
+        }
+
+        // 2. 检查 CONDSTORE 支持
         let supports_condstore = imap_client
             .check_condstore_support()
             .await
@@ -334,7 +364,7 @@ impl SyncManager {
             supports_condstore
         );
 
-        // 2. 获取服务器 UID 列表（默认只同步最近3个月的邮件）
+        // 3. 获取服务器 UID 列表（默认只同步最近3个月的邮件）
         // 计算3个月前的日期
         // 注意：IMAP SINCE 命令需要英文月份缩写（RFC 3501）
         // 格式：dd-MMM-yyyy（如 20-Dec-2025）
@@ -357,7 +387,7 @@ impl SyncManager {
             server_uids.len()
         );
 
-        // 3. CONDSTORE 增量同步（如果支持）
+        // 4. CONDSTORE 增量同步（如果支持）
         let (condstore_modified_uids, highest_modseq) = if supports_condstore && !server_uids.is_empty() {
             // TODO: 从 SyncState 获取上一次同步的 highest_modseq
             // 临时实现：使用 0 表示获取所有变更
@@ -385,7 +415,7 @@ impl SyncManager {
             (None, None)
         };
 
-        // 4. 获取服务器标志（用于 UID 搜索降级）
+        // 5. 获取服务器标志（用于 UID 搜索降级）
         let server_uids_with_flags: Vec<(u32, Vec<String>)> = if condstore_modified_uids.is_none() && !server_uids.is_empty() {
             // 不支持 CONDSTORE 或 CONDSTORE 失败，使用 UID 搜索模式
             if let Ok(uids_modseq) = imap_client.fetch_modseqs(&server_uids).await {
@@ -408,7 +438,7 @@ impl SyncManager {
             vec![]
         };
 
-        // 5. 调用 sync_folder 进行增量同步（传递 IMAP 客户端和 CONDSTORE 数据）
+        // 6. 调用 sync_folder 进行增量同步（传递 IMAP 客户端和 CONDSTORE 数据）
         let result = self
             .sync_folder(
                 account_id,

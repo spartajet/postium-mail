@@ -14,6 +14,7 @@
 //! | m006 | 2025-03-15 | 添加同步操作表 |
 //! | m007 | 2025-03-17 | 添加账号类型字段（个人/企业） |
 //! | m008 | 2025-03-17 | 添加 MODSEQ 支持（CONDSTORE） |
+//! | m009 | 2025-03-21 | 创建 folder_sync_states 表（分离同步状态） |
 //!
 //! # 迁移顺序
 //!
@@ -93,4 +94,5 @@ pub mod m005_20250315_add_imap_metadata;
 pub mod m006_20250315_add_sync_operations;
 pub mod m007_20250317_add_account_types;
 pub mod m008_20250317_add_modseq_support;
+pub mod m009_20250321_create_folder_sync_states;
 
