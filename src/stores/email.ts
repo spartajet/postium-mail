@@ -343,11 +343,13 @@ export const useEmailStore = defineStore('email', () => {
         total: response.total,
         page: response.page,
         pageSize: response.page_size,
-        emailCount: response.emails.length
+        emailCount: response.emails?.length ?? 0
       })
 
-      if (response.emails.length > 0) {
-        console.log('[fetchEmails] 前3封邮件:', response.emails.slice(0, 3).map(e => ({
+      // 防御性检查：确保 emails 存在
+      const emailList = response.emails ?? []
+      if (emailList.length > 0) {
+        console.log('[fetchEmails] 前3封邮件:', emailList.slice(0, 3).map(e => ({
           id: e.id,
           subject: e.subject,
           folder: e.folder,
@@ -355,7 +357,7 @@ export const useEmailStore = defineStore('email', () => {
         })))
       }
 
-      const newEmails = response.emails.map(dtoToEmail)
+      const newEmails = emailList.map(dtoToEmail)
 
       if (append) {
         // 追加模式：添加到现有列表

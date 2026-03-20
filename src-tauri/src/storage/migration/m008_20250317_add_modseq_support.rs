@@ -3,25 +3,59 @@
 //! 实现 IMAP CONDSTORE (RFC 4551) 扩展支持
 //! 用于高效的增量同步
 
-use sea_orm::{ConnectionTrait, DbConn};
+use sea_orm::{ConnectionTrait, DbConn, Statement, DbBackend};
 
 /// 执行迁移
 pub async fn migrate(db: &DbConn) -> Result<(), sea_orm::DbErr> {
     // 1. 添加 highest_modseq 字段到 sync_states 表
-    let alter_sync_states_sql = r#"
-        ALTER TABLE sync_states
-        ADD COLUMN highest_modseq INTEGER;
+    let check_sync_states_sql = r#"
+        SELECT COUNT(*) as count FROM pragma_table_info('sync_states') WHERE name='highest_modseq'
     "#;
 
-    db.execute_unprepared(alter_sync_states_sql).await?;
+    let sync_states_result = db
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_sync_states_sql))
+        .await?;
+
+    if let Some(row) = sync_states_result {
+        let count: i64 = row.try_get_by::<i64, _>("count").unwrap_or(0);
+
+        if count == 0 {
+            let alter_sync_states_sql = r#"
+                ALTER TABLE sync_states
+                ADD COLUMN highest_modseq INTEGER;
+            "#;
+
+            db.execute_unprepared(alter_sync_states_sql).await?;
+            tracing::info!("已添加 highest_modseq 列到 sync_states 表");
+        } else {
+            tracing::info!("highest_modseq 列已存在于 sync_states 表，跳过添加");
+        }
+    }
 
     // 2. 添加 modseq 字段到 emails 表
-    let alter_emails_sql = r#"
-        ALTER TABLE emails
-        ADD COLUMN modseq INTEGER;
+    let check_emails_sql = r#"
+        SELECT COUNT(*) as count FROM pragma_table_info('emails') WHERE name='modseq'
     "#;
 
-    db.execute_unprepared(alter_emails_sql).await?;
+    let emails_result = db
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_emails_sql))
+        .await?;
+
+    if let Some(row) = emails_result {
+        let count: i64 = row.try_get_by::<i64, _>("count").unwrap_or(0);
+
+        if count == 0 {
+            let alter_emails_sql = r#"
+                ALTER TABLE emails
+                ADD COLUMN modseq INTEGER;
+            "#;
+
+            db.execute_unprepared(alter_emails_sql).await?;
+            tracing::info!("已添加 modseq 列到 emails 表");
+        } else {
+            tracing::info!("modseq 列已存在于 emails 表，跳过添加");
+        }
+    }
 
     // 3. 创建索引
     let index_sql = r#"

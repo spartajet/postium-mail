@@ -593,9 +593,16 @@ impl EmailRepository {
 /// 邮件列表响应
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EmailListResponse {
+    /// 邮件列表（重命名为 emails 以匹配前端期望）
+    #[serde(rename = "emails")]
     pub items: Vec<email::EmailListItem>,
+    /// 总邮件数
     pub total: u64,
+    /// 总页数
     pub total_pages: u64,
+    /// 当前页码
     pub page: u64,
+    /// 每页大小（重命名为 page_size 以匹配前端期望）
+    #[serde(rename = "page_size")]
     pub page_size: u64,
 }

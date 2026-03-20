@@ -2,18 +2,39 @@
 //!
 //! 添加个人/企业邮箱的区分机制
 
-use sea_orm::{ConnectionTrait, DbConn};
+use sea_orm::{ConnectionTrait, DbBackend, DbConn, Statement};
 
 /// 执行迁移
 pub async fn migrate(db: &DbConn) -> Result<(), sea_orm::DbErr> {
     // 1. 添加 account_type 字段到 accounts 表
-    let alter_sql = r#"
-        ALTER TABLE accounts
-        ADD COLUMN account_type TEXT DEFAULT 'personal'
-        NOT NULL CHECK(account_type IN ('personal', 'enterprise'));
+    // 检查列是否已存在
+    let check_sql = r#"
+        SELECT COUNT(*) as count FROM pragma_table_info('accounts') WHERE name='account_type'
     "#;
 
-    db.execute_unprepared(alter_sql).await?;
+    let result = db
+        .query_one_raw(Statement::from_string(DbBackend::Sqlite, check_sql))
+        .await?;
+
+    // 如果列不存在，则添加
+    if let Some(row) = result {
+        let count: i64 = row.try_get_by::<i64, _>("count").unwrap_or(0);
+
+        if count == 0 {
+            tracing::info!("检测到旧版本数据库，添加 account_type 字段...");
+
+            let alter_sql = r#"
+                ALTER TABLE accounts
+                ADD COLUMN account_type TEXT DEFAULT 'personal'
+                NOT NULL CHECK(account_type IN ('personal', 'enterprise'));
+            "#;
+
+            db.execute_unprepared(alter_sql).await?;
+            tracing::info!("已添加 account_type 列到 accounts 表");
+        } else {
+            tracing::info!("account_type 列已存在，跳过添加");
+        }
+    }
 
     // 2. 创建 enterprise_configs 表
     let create_table_sql = r#"
@@ -70,8 +91,9 @@ mod tests {
     #[test]
     fn test_migration_sql() {
         // 验证 SQL 语法
-        let sql = std::fs::read_to_string("src/storage/migration/m007_20250317_add_account_types.rs")
-            .expect("文件存在");
+        let sql =
+            std::fs::read_to_string("src/storage/migration/m007_20250317_add_account_types.rs")
+                .expect("文件存在");
         assert!(sql.contains("ALTER TABLE accounts"));
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS enterprise_configs"));
     }
