@@ -63,16 +63,16 @@ impl MailProvider for Mail163Provider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supports_idle: false,
-            supports_condstore: false,
-            supports_push: false,
-            supports_oauth: false,
+            supports_idle: false,          // 不支持 IDLE 扩展
+            supports_condstore: false,      // 不支持 CONDSTORE 扩展
+            supports_push: false,          // 不支持标准推送（虽有 XAPPLEPUSHSERVICE）
+            supports_oauth: true,           // 支持 XOAUTH2 认证
             supports_enterprise: false,
             supports_labels: false,
-            supports_folders: true,
+            supports_folders: true,         // 支持文件夹管理
             supports_threads: false,
-            supports_search: true,
-            max_message_size: Some(50 * 1024 * 1024), // 50MB
+            supports_search: true,          // 支持搜索
+            max_message_size: Some(71680000), // APPENDLIMIT=71680000 (约68MB)
         }
     }
 
@@ -176,13 +176,13 @@ mod tests {
         assert!(!caps.supports_idle);
         assert!(!caps.supports_condstore);
         assert!(!caps.supports_push);
-        assert!(!caps.supports_oauth);
+        assert!(caps.supports_oauth);          // 支持 XOAUTH2 认证
         assert!(!caps.supports_enterprise);
         assert!(!caps.supports_labels);
         assert!(caps.supports_folders);
         assert!(!caps.supports_threads);
         assert!(caps.supports_search);
-        assert_eq!(caps.max_message_size, Some(50 * 1024 * 1024));
+        assert_eq!(caps.max_message_size, Some(71680000)); // APPENDLIMIT=71680000
     }
 
     #[test]
