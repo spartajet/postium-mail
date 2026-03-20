@@ -513,14 +513,11 @@ async function createAccountAndSync() {
 
     console.log('[AddAccountModal] 账号创建成功, ID:', accountId)
 
-    // 3. 立即添加到本地账号列表
-    const newAccount = await accountStore.addAccount({
-      ...accountData,
-      id: String(accountId),
-      syncEnabled: true,
-      lastSyncAt: new Date(),
-      unreadCount: 0,
-    } as Account)
+    // 3. 刷新账号列表（从后端获取最新数据，避免重复添加）
+    await accountStore.fetchAccounts()
+
+    // 3.1 切换到新创建的账号
+    accountStore.selectAccountById(String(accountId))
 
     // 4. 立即关闭对话框并返回成功
     syncProgress.value = {
