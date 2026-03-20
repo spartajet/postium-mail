@@ -94,11 +94,11 @@
    └─ imap_client.connect()
    │
    ▼
-4. 同步文件夹列表
+4. 更新文件夹同步状态
    │
    ├─ imap_client.list_folders_with_attributes()
-   ├─ folder_manager.sync_folders_from_info()
-   │  └─ 创建/更新文件夹记录
+   ├─ folder_manager.update_sync_states()
+   │  └─ 更新 uidvalidity, uidnext, highest_modseq
    │
    ▼
 5. 对每个文件夹执行增量同步
@@ -183,9 +183,9 @@ sync/sync_manager.rs::sync_account()
      → auth_manager.get_imap_auth(account_id, email, &auth_type)
      → AsyncImapClient::connect(host, port, email, imap_auth)
 
-  → // 4. 同步文件夹
+  → // 4. 更新文件夹同步状态
   → imap_client.list_folders_with_attributes()
-  → folder_manager.sync_folders_from_info(account_id, &folder_infos)
+  → folder_manager.update_sync_states(account_id, &folder_infos)
 
   → // 5. 同步每个文件夹
   → for folder_info in folder_infos:
@@ -320,6 +320,33 @@ let deleted_emails = local_set.difference(&server_set)
 
 ## 文件夹管理
 
+> **架构变更** (2026-03-21):
+> - `folders` 表已删除，不再存储文件夹配置
+> - 文件夹配置由 `provider.folder_mapping()` 动态提供
+> - `folder_sync_states` 表只存储 IMAP 同步元数据
+
+### StandardFolder 结构
+
+```rust
+/// 标准文件夹映射 - 由各服务商实现
+pub struct StandardFolder {
+    pub inbox: Vec<String>,      // 收件箱 IMAP 名称
+    pub sent: Vec<String>,       // 已发送 IMAP 名称
+    pub drafts: Vec<String>,     // 草稿箱 IMAP 名称
+    pub spam: Vec<String>,       // 垃圾邮件 IMAP 名称
+    pub trash: Vec<String>,      // 已删除 IMAP 名称
+    pub archive: Vec<String>,    // 归档 IMAP 名称
+    pub starred: Vec<String>,    // 星标邮件 IMAP 名称
+}
+
+impl StandardFolder {
+    /// 从 IMAP 文件夹名称查找标准类型
+    pub fn find_standard_type(&self, imap_name: &str) -> &str {
+        // 返回 "inbox", "sent", "drafts", "spam", "trash", "archive", "starred" 或 "other"
+    }
+}
+```
+
 ### Special-Use 文件夹类型
 
 ```rust
@@ -337,40 +364,78 @@ pub enum SpecialUse {
 }
 ```
 
-### 文件夹同步流程
+### 文件夹同步状态更新
 
 ```
-sync_folders_from_info(account_id, folder_infos)
+update_sync_states(account_id, folder_infos)
   │
-  ├─ 1. 转换 FolderInfo → ImapFolder
-  │  ├─ 解析 Special-Use 标志
-  │  └─ 推断文件夹类型
+  ├─ 1. 遍历服务器文件夹列表
   │
-  ├─ 2. 获取本地文件夹列表
-  │  └─ folder::Entity::find().all()
+  ├─ 2. 对每个文件夹执行 upsert
+  │  ├─ 如果 folder_sync_states 已存在该记录:
+  │  │  └─ 更新 uidvalidity, uidnext, highest_modseq, synced_at
+  │  └─ 如果不存在:
+  │     └─ 插入新记录 (account_id, imap_name, ...)
   │
-  ├─ 3. 同步每个文件夹
-  │  ├─ 如果本地存在: update_folder()
-  │  │  └─ 更新 uidvalidity, uidnext, highest_modseq
-  │  └─ 如果本地不存在: create_folder()
-  │     └─ 插入新记录
-  │
-  └─ 4. 返回同步结果
-     └─ FolderSyncResult { new_folders, updated_folders, total_folders }
+  └─ 3. 返回更新结果
+     └─ SyncStateUpdateResult { updated }
 ```
 
-### 文件夹名称推断
+### 服务商文件夹映射示例
 
+**Gmail**:
 ```rust
-infer_special_use_from_name(name: &str) -> SpecialUse
-  → "inbox" / "INBOX" → Inbox
-  → contains("sent") / "已发送" → Sent
-  → contains("draft") / "草稿" → Drafts
-  → contains("trash") / "已删除" → Trash
-  → contains("junk") / "spam" / "垃圾邮件" → Junk
-  → contains("archive") / "归档" → Archive
-  → 其他 → Normal (默认为 Inbox)
+fn folder_mapping(&self) -> StandardFolder {
+    StandardFolder {
+        inbox: vec!["INBOX"],
+        sent: vec!["Sent", "[Gmail]/Sent Mail"],
+        drafts: vec!["Drafts", "[Gmail]/Drafts"],
+        spam: vec!["Spam", "[Gmail]/Spam"],
+        trash: vec!["Trash", "[Gmail]/Trash"],
+        archive: vec!["[Gmail]/All Mail"],  // Gmail 特有
+        starred: vec!["Starred"],
+    }
+}
 ```
+
+**Outlook**:
+```rust
+fn folder_mapping(&self) -> StandardFolder {
+    StandardFolder {
+        inbox: vec!["收件箱", "INBOX"],  // 中英文混合
+        sent: vec!["已发送", "Sent"],
+        drafts: vec!["草稿", "Drafts"],
+        spam: vec!["垃圾邮件", "Junk"],
+        trash: vec!["已删除邮件", "Deleted Items"],
+        archive: vec!["归档", "Archive"],
+        starred: vec![],
+    }
+}
+```
+
+### FolderSyncState 表结构
+
+```sql
+CREATE TABLE folder_sync_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    imap_name TEXT NOT NULL,          -- IMAP 文件夹原始名称
+    uidvalidity INTEGER,              -- IMAP UIDVALIDITY
+    uidnext INTEGER,                  -- IMAP UIDNEXT
+    highest_modseq INTEGER,           -- CONDSTORE HIGHESTMODSEQ
+    synced_at INTEGER,                -- 最后同步时间
+    created_at INTEGER,
+    updated_at INTEGER,
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    UNIQUE(account_id, imap_name)     -- 每个账号的文件夹名称唯一
+);
+```
+
+**字段说明**：
+- `imap_name`: IMAP 服务器的文件夹名称（如 `[Gmail]/Sent Mail`、`收件箱`）
+- 不存储标准化名称，通过 `folder_mapping().find_standard_type(imap_name)` 动态获取
+- 不存储邮件数量，从 `emails` 表统计
+- 不存储属性，使用 RFC 6154 Special-Use 或名称推断
 
 ---
 
@@ -622,17 +687,49 @@ pub struct ChangeDetectionResult {
 }
 ```
 
-### FolderSyncResult (后端)
+### SyncStateUpdateResult (后端)
+
+> **新增**: 替代旧的 `FolderSyncResult`
+>
+> 只返回更新的同步状态数量，不再创建文件夹记录
 
 ```rust
-pub struct FolderSyncResult {
-    pub new_folders: usize,
-    pub updated_folders: usize,
-    pub deleted_folders: usize,
-    pub total_folders: usize,
+pub struct SyncStateUpdateResult {
+    pub updated: usize,  // 更新的同步状态数量
+}
+```
+
+### FolderSyncStateDto (服务层)
+
+```rust
+/// 文件夹同步状态传输对象
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderSyncStateDto {
+    pub id: i32,
+    pub account_id: i32,
+    pub imap_name: String,
+    pub uidvalidity: Option<i64>,
+    pub uidnext: Option<i64>,
+    pub highest_modseq: Option<i64>,
+    pub synced_at: Option<i64>,
+}
+```
+
+### StandardFolder 枚举 (服务层)
+
+```rust
+/// 标准文件夹类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StandardFolder {
+    Inbox,   // 收件箱
+    Sent,    // 已发送
+    Drafts,  // 草稿箱
+    Spam,    // 垃圾邮件
+    Trash,   // 已删除
+    Archive, // 归档
 }
 ```
 
 ---
 
-*最后更新: 2026-03-20*
+*最后更新: 2026-03-21*

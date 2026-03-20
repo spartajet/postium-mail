@@ -715,25 +715,55 @@ CREATE TABLE email (
 );
 ```
 
-### Folder 表
+### FolderSyncState 表
+
+> **注意**: 旧的 `folders` 表已被删除（m010 迁移）
+>
+> 文件夹配置现在由 `provider.folder_mapping()` 动态提供，不再存储到数据库
+>
+> `folder_sync_states` 表只存储 IMAP 同步元数据（uidvalidity, uidnext, highest_modseq）
 
 ```sql
-CREATE TABLE folder (
+CREATE TABLE folder_sync_states (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    display_name TEXT,
-    parent_id TEXT,
-    attributes TEXT,
-    email_count INTEGER DEFAULT 0,
-    unread_count INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    UNIQUE(account_id, name),
-    FOREIGN KEY (account_id) REFERENCES account(id) ON DELETE CASCADE
+    imap_name TEXT NOT NULL,
+    uidvalidity INTEGER,
+    uidnext INTEGER,
+    highest_modseq INTEGER,
+    synced_at INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    UNIQUE(account_id, imap_name)
 );
+
+CREATE INDEX idx_folder_sync_states_account ON folder_sync_states(account_id);
+CREATE INDEX idx_folder_sync_states_uidvalidity ON folder_sync_states(uidvalidity);
+CREATE INDEX idx_folder_sync_states_synced_at ON folder_sync_states(synced_at);
 ```
+
+### 标准文件夹映射
+
+各服务商通过 `MailProvider::folder_mapping()` 方法声明其标准文件夹：
+
+```rust
+pub struct StandardFolder {
+    pub inbox: Vec<String>,      // 收件箱 IMAP 名称列表
+    pub sent: Vec<String>,       // 已发送 IMAP 名称列表
+    pub drafts: Vec<String>,     // 草稿箱 IMAP 名称列表
+    pub spam: Vec<String>,       // 垃圾邮件 IMAP 名称列表
+    pub trash: Vec<String>,      // 已删除 IMAP 名称列表
+    pub archive: Vec<String>,    // 归档 IMAP 名称列表
+    pub starred: Vec<String>,    // 星标邮件 IMAP 名称列表
+}
+```
+
+**示例服务商映射**：
+- **Gmail**: `archive` → `["[Gmail]/All Mail"]`
+- **Outlook**: `inbox` → `["收件箱", "INBOX"]`
+- **163/QQ**: `sent` → `["已发送", "Sent"]`
 
 ---
 
-*最后更新: 2026-03-20*
+*最后更新: 2026-03-21*
