@@ -2,7 +2,7 @@
 //!
 //! 测试 163、QQ、iCloud 等原生邮箱服务商
 
-use crate::provider::config::{Email163Config, EmailQQConfig};
+use crate::config::{Email163Config, EmailQQConfig};
 
 #[cfg(test)]
 mod tests {

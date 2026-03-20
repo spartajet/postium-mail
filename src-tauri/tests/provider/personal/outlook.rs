@@ -2,7 +2,7 @@
 //!
 //! 测试 Outlook 邮箱的连接和基本功能
 
-use crate::provider::config::OutlookConfig;
+use crate::config::OutlookConfig;
 
 #[cfg(test)]
 mod tests {

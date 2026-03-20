@@ -1,6 +1,6 @@
 //! 服务商测试辅助函数
 
-use crate::provider::ProviderTestConfig;
+use crate::ProviderTestConfig;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
