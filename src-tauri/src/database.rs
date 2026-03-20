@@ -49,5 +49,8 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
     // 添加 MODSEQ 支持（CONDSTORE 扩展）
     crate::storage::migration::m008_20250317_add_modseq_support::migrate(db).await?;
 
+    // 创建 folder_sync_states 表（分离同步状态）
+    crate::storage::migration::m009_20250321_create_folder_sync_states::migrate(db).await?;
+
     Ok(())
 }
