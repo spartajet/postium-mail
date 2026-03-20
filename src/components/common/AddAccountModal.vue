@@ -12,6 +12,7 @@ const uiStore = useUIStore()
 const accountStore = useAccountStore()
 
 const emit = defineEmits<{
+  (e: 'update:show', value: boolean): void
   (e: 'success'): void
 }>()
 
