@@ -2,8 +2,11 @@
 //!
 //! 支持 163.com、126.com、yeah.net 等网易邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
 
 /// 163 邮箱个人邮件服务商
 pub struct Mail163Provider;
@@ -11,7 +14,7 @@ pub struct Mail163Provider;
 #[async_trait]
 impl MailProvider for Mail163Provider {
     fn provider_id(&self) -> &str {
-        "163"
+        "yi"
     }
 
     fn provider_name(&self) -> &str {
@@ -101,13 +104,19 @@ mod tests {
         let imap_config = provider.default_imap_config();
         assert_eq!(imap_config.host, "imap.163.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.default_smtp_config();
         assert_eq!(smtp_config.host, "smtp.163.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
     }
 
     #[test]

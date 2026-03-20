@@ -18,6 +18,7 @@ mod test_macros;
 mod test_tracing;
 
 // 引入服务商测试模块
+mod common;
 mod config;
 mod email_parsing;
 mod encoding;

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! 服务商测试辅助函数
 
 use crate::ProviderTestConfig;
