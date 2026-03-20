@@ -349,17 +349,17 @@ impl ImapService {
         folder: &str,
         email_data: &EmailData,
     ) -> Result<i32> {
-        use crate::storage::models::email;
+        use crate::storage::service::email::EmailAddress;
 
         // 解析收件人列表
-        let recipients: Vec<email::EmailAddress> = email_data.to
+        let recipients: Vec<EmailAddress> = email_data.to
             .split(',')
             .filter_map(|s| {
                 let s = s.trim();
                 if s.is_empty() {
                     None
                 } else {
-                    Some(email::EmailAddress {
+                    Some(EmailAddress {
                         name: None,
                         email: s.to_string(),
                     })

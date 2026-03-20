@@ -42,29 +42,3 @@ impl ActiveModelBehavior for ActiveModel {
         }
     }
 }
-
-// 前端传输用的 DTO
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FolderSyncStateDto {
-    pub id: i32,
-    pub account_id: i32,
-    pub imap_name: String,
-    pub uidvalidity: Option<i64>,
-    pub uidnext: Option<i64>,
-    pub highest_modseq: Option<i64>,
-    pub synced_at: Option<i64>,
-}
-
-impl From<Model> for FolderSyncStateDto {
-    fn from(model: Model) -> Self {
-        Self {
-            id: model.id,
-            account_id: model.account_id,
-            imap_name: model.imap_name,
-            uidvalidity: model.uidvalidity,
-            uidnext: model.uidnext,
-            highest_modseq: model.highest_modseq,
-            synced_at: model.synced_at,
-        }
-    }
-}

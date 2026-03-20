@@ -1,6 +1,6 @@
-//! 账号数据访问层
+//! 账号服务层
 //!
-//! 提供账号的 CRUD 操作和 Keyring 凭证管理。
+//! 包含账号相关的 DTO 类型定义和数据访问逻辑。
 //!
 //! # 核心功能
 //!
@@ -46,58 +46,6 @@
 //! │ Password: "<json_token>"          │
 //! └────────────────────────────────────┘
 //! ```
-//!
-//! # 使用示例
-//!
-//! ## 创建账号
-//!
-//! ```rust,no_run
-//! # use crate::storage::{AccountRepository, CreateAccountRequest};
-//! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! # let app_handle = todo!();
-//! let request = CreateAccountRequest {
-//!     name: "我的邮箱".to_string(),
-//!     email: "user@example.com".to_string(),
-//!     provider: "gmail".to_string(),
-//!     password: "app_password".to_string(),
-//!     ..Default::default()
-//! };
-//!
-//! let account = AccountRepository::create(&db, &app_handle, request).await?;
-//! println!("账号创建成功: ID {}", account.id);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 获取密码
-//!
-//! ```rust,no_run
-//! # use crate::storage::AccountRepository;
-//! # fn example(app_handle: &tauri::AppHandle) -> anyhow::Result<()> {
-//! let password = AccountRepository::get_password(app_handle, 1)?;
-//! println!("密码已获取");
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 服务商自动检测
-//!
-//! ```text
-//! user@gmail.com     → gmail
-//! user@outlook.com   → outlook
-//! user@qq.com        → qqmail
-//! user@163.com       → mail163
-//! user@icloud.com    → icloud
-//! user@example.com   → native (自定义)
-//! ```
-//!
-//! # 安全注意事项
-//!
-//! - 密码永远不存储在数据库中
-//! - OAuth Token 包含敏感信息，使用 Keyring 加密存储
-//! - 删除账号时同步清理 Keyring 中的凭证
-//! - 生产环境应考虑额外的加密层
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, DbConn, EntityTrait, QueryFilter, Set};
 use tauri::AppHandle;
@@ -107,6 +55,121 @@ use crate::crypto::{self, OAuthToken, KEYRING_SERVICE};
 use crate::error::{Result, StorageError};
 use crate::providers::ProviderPool;
 use crate::storage::models::account;
+
+// ============================================================================
+// DTO 类型定义
+// ============================================================================
+
+/// 创建账号请求
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CreateAccountRequest {
+    pub name: String,
+    pub email: String,
+    pub provider: String,
+    #[serde(default)]
+    pub password: String,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i32>,
+    pub imap_ssl: Option<bool>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i32>,
+    pub smtp_ssl: Option<bool>,
+    pub color: Option<String>,
+    pub auth_type: Option<String>,
+    pub oauth_provider: Option<String>,
+    pub oauth_token: Option<String>,
+    pub oauth_refresh_token: Option<String>,
+    pub oauth_expires_at: Option<i64>,
+}
+
+impl Default for CreateAccountRequest {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            email: String::new(),
+            provider: "auto".to_string(),
+            password: String::new(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl: None,
+            color: None,
+            auth_type: None,
+            oauth_provider: None,
+            oauth_token: None,
+            oauth_refresh_token: None,
+            oauth_expires_at: None,
+        }
+    }
+}
+
+/// 更新账号请求
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpdateAccountRequest {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub provider: Option<String>,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i32>,
+    pub imap_ssl: Option<bool>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i32>,
+    pub smtp_ssl: Option<bool>,
+    pub color: Option<String>,
+    pub sync_enabled: Option<bool>,
+}
+
+/// 账号数据传输对象
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountDto {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub provider: String,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i32>,
+    pub imap_ssl: Option<bool>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i32>,
+    pub smtp_ssl: Option<bool>,
+    pub color: Option<String>,
+    pub sync_enabled: bool,
+    pub last_sync_at: Option<i64>,
+    pub auth_type: String,
+    pub oauth_provider: Option<String>,
+    pub created_at: Option<i64>,
+    pub updated_at: Option<i64>,
+}
+
+impl From<account::Model> for AccountDto {
+    fn from(model: account::Model) -> Self {
+        Self {
+            id: model.id,
+            name: model.name,
+            email: model.email,
+            provider: model.provider,
+            imap_host: model.imap_host,
+            imap_port: model.imap_port,
+            imap_ssl: model.imap_ssl,
+            smtp_host: model.smtp_host,
+            smtp_port: model.smtp_port,
+            smtp_ssl: model.smtp_ssl,
+            color: model.color,
+            sync_enabled: model.sync_enabled,
+            last_sync_at: model.last_sync_at,
+            auth_type: model.auth_type,
+            oauth_provider: model.oauth_provider,
+            created_at: Some(model.created_at),
+            updated_at: Some(model.updated_at),
+        }
+    }
+}
+
+// ============================================================================
+// Repository 实现
+// ============================================================================
 
 /// 账号仓库
 ///
@@ -433,74 +496,54 @@ impl AccountRepository {
     }
 }
 
-/// 创建账号请求
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CreateAccountRequest {
-    pub name: String,
-    pub email: String,
-    pub provider: String,
-    pub password: String,
-    pub imap_host: Option<String>,
-    pub imap_port: Option<i32>,
-    pub imap_ssl: Option<bool>,
-    pub smtp_host: Option<String>,
-    pub smtp_port: Option<i32>,
-    pub smtp_ssl: Option<bool>,
-    pub color: Option<String>,
-    pub auth_type: Option<String>,
-    pub oauth_provider: Option<String>,
-    pub oauth_token: Option<String>,
-    pub oauth_refresh_token: Option<String>,
-    pub oauth_expires_at: Option<i64>,
-}
-
-/// 更新账号请求
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UpdateAccountRequest {
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub provider: Option<String>,
-    pub imap_host: Option<String>,
-    pub imap_port: Option<i32>,
-    pub imap_ssl: Option<bool>,
-    pub smtp_host: Option<String>,
-    pub smtp_port: Option<i32>,
-    pub smtp_ssl: Option<bool>,
-    pub color: Option<String>,
-    pub sync_enabled: Option<bool>,
-}
-
-/// 从 models::account::CreateAccountRequest 转换
-impl From<account::CreateAccountRequest> for CreateAccountRequest {
-    fn from(req: account::CreateAccountRequest) -> Self {
-        Self {
-            name: req.name,
-            email: req.email,
-            provider: req.provider,
-            password: req.password,
-            imap_host: req.imap_host,
-            imap_port: req.imap_port,
-            imap_ssl: req.imap_ssl,
-            smtp_host: req.smtp_host,
-            smtp_port: req.smtp_port,
-            smtp_ssl: req.smtp_ssl,
-            color: req.color,
-            auth_type: req.auth_type,
-            oauth_provider: req.oauth_provider,
-            oauth_token: req.oauth_token,
-            oauth_refresh_token: req.oauth_refresh_token,
-            oauth_expires_at: req.oauth_expires_at,
-        }
-    }
-}
+// ============================================================================
+// 测试
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_convert_create_request() {
-        let req = account::CreateAccountRequest {
+    fn test_account_dto_conversion() {
+        let model = account::Model {
+            id: 1,
+            name: "Test".to_string(),
+            email: "test@example.com".to_string(),
+            provider: "gmail".to_string(),
+            imap_host: Some("imap.gmail.com".to_string()),
+            imap_port: Some(993),
+            imap_ssl: Some(true),
+            smtp_host: Some("smtp.gmail.com".to_string()),
+            smtp_port: Some(465),
+            smtp_ssl: Some(true),
+            color: Some("#FF0000".to_string()),
+            sync_enabled: true,
+            last_sync_at: Some(1234567890),
+            auth_type: "oauth2".to_string(),
+            oauth_provider: Some("google".to_string()),
+            oauth_expires_at: Some(1234567890),
+            created_at: 1234567890i64,
+            updated_at: 1234567890i64,
+        };
+
+        let dto = AccountDto::from(model);
+        assert_eq!(dto.id, 1);
+        assert_eq!(dto.name, "Test");
+        assert_eq!(dto.email, "test@example.com");
+        assert_eq!(dto.provider, "gmail");
+    }
+
+    #[test]
+    fn test_create_request_default() {
+        let req = CreateAccountRequest::default();
+        assert_eq!(req.provider, "auto");
+        assert_eq!(req.password, "");
+    }
+
+    #[test]
+    fn test_create_request_fields() {
+        let req = CreateAccountRequest {
             name: "Test".to_string(),
             email: "test@example.com".to_string(),
             provider: "gmail".to_string(),
@@ -519,10 +562,9 @@ mod tests {
             oauth_expires_at: None,
         };
 
-        let converted = CreateAccountRequest::from(req);
-        assert_eq!(converted.name, "Test");
-        assert_eq!(converted.email, "test@example.com");
-        assert_eq!(converted.provider, "gmail");
-        assert_eq!(converted.color, Some("#FF0000".to_string()));
+        assert_eq!(req.name, "Test");
+        assert_eq!(req.email, "test@example.com");
+        assert_eq!(req.provider, "gmail");
+        assert_eq!(req.color, Some("#FF0000".to_string()));
     }
 }

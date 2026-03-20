@@ -93,7 +93,7 @@
 //! - 数据库文件应放置在用户数据目录中
 //! - 生产环境应考虑数据库备份策略
 
-use sea_orm::{Database, DbConn, DbErr, ConnectOptions};
+use sea_orm::{ConnectOptions, Database, DbConn, DbErr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -228,7 +228,6 @@ pub trait Repository: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_database_url_parsing() {

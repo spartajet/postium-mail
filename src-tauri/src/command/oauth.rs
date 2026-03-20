@@ -20,7 +20,6 @@
 //! 5. 后续可使用 `refresh_oauth_token` 刷新令牌
 
 use super::{AuthManagerState, DatabaseState, KeyringState};
-use crate::storage::models;
 use crate::storage;
 use crate::providers;
 
@@ -198,7 +197,7 @@ pub async fn exchange_oauth_code(
     email: String,
     code: String,
     state: String,
-) -> Result<models::account::AccountDto, String> {
+) -> Result<storage::AccountDto, String> {
     let db = db_state.clone_conn();
     let auth_manager = auth_manager_state.clone_manager();
 
@@ -219,7 +218,7 @@ pub async fn exchange_oauth_code(
     let smtp_config = provider.smtp_config(&email);
 
     // 构建账号创建请求
-    let account_req = models::account::CreateAccountRequest {
+    let account_req = storage::CreateAccountRequest {
         name: auth_result.display_name.unwrap_or_else(|| {
             email.split('@')
                 .next()
@@ -251,7 +250,7 @@ pub async fn exchange_oauth_code(
     let account = storage::AccountRepository::create(
         &db,
         &keyring_state.app_handle,
-        account_req.into(),
+        account_req,
     )
     .await
     .map_err(|e| e.to_string())?;

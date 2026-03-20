@@ -191,22 +191,23 @@
 //! - 大量数据操作应使用批量接口
 //! - 数据库连接应正确关闭
 
-pub mod accounts;
 pub mod cache;
 pub mod database;
-pub mod emails;
-pub mod folders;
 pub mod migration;
 pub mod models;
 pub mod search;
+pub mod service;
 
 // 重新导出常用类型
-pub use accounts::{AccountRepository, CreateAccountRequest, UpdateAccountRequest};
 pub use cache::{
     CacheManager, CounterCache, EmailContentCache, FolderListCache, MemoryCache,
 };
 pub use database::{DatabaseConnection, Repository, establish_connection, init_database};
-pub use emails::{EmailListResponse, EmailRepository};
-pub use folders::FolderRepository;
 pub use models::{account, attachment, email, folder, folder_sync_state, sync_error, sync_state};
 pub use search::{SearchResult, SearchService};
+pub use service::{
+    AccountDto, AccountRepository, CreateAccountRequest, UpdateAccountRequest,
+    AttachmentInfo, EmailAddress, EmailDetail, EmailListResponse,
+    EmailListItem, EmailRepository, EmailSearchParams, SendEmailRequest,
+    FolderDto, FolderSyncStateDto, StandardFolder
+};
