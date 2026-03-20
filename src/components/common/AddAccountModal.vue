@@ -500,29 +500,49 @@ async function createAccountAndSync() {
       accountData.enterprise_domain = form.value.enterpriseDomain || null
     }
 
-    // 创建账号
+    // 1. 创建账号
     console.log('[AddAccountModal] 调用 add_account')
     const accountResult = await invoke('add_account', { account: accountData }) as { id: number }
     const accountId = accountResult.id
 
     console.log('[AddAccountModal] 账号创建成功, ID:', accountId)
 
+    // 2. 立即添加到本地账号列表
+    const newAccount = await accountStore.addAccount({
+      ...accountData,
+      id: String(accountId),
+      syncEnabled: true,
+      lastSyncAt: new Date(),
+      unreadCount: 0,
+    } as Account)
+
+    // 3. 立即关闭对话框并返回成功
     syncProgress.value = {
-      stage: 'syncing',
+      stage: 'idle',
       currentStep: 3,
       totalSteps: 3,
-      message: '正在同步邮件列表...',
-      percentage: 60,
+      message: '账号已添加，正在后台同步...',
+      percentage: 100,
     }
 
-    // 先注册监听器（必须在同步之前，否则会错过早期事件）
-    console.log('[AddAccountModal] 注册同步进度监听器')
+    // 4. 注册同步进度监听器（用于状态栏显示）
+    console.log('[AddAccountModal] 注册同步进度监听器（用于状态栏）')
     await listenToSyncProgress(accountId)
 
-    // 开始同步（带进度）
-    console.log('[AddAccountModal] 开始同步, accountId:', accountId)
-    await invoke('sync_account_with_progress', { accountId })
-    console.log('[AddAccountModal] 同步命令已发送')
+    // 5. 关闭对话框
+    emit('update:show', false)
+
+    // 6. 触发后台同步（不等待完成）
+    console.log('[AddAccountModal] 触发后台同步, accountId:', accountId)
+    invoke('sync_account_with_progress', { accountId })
+      .then(() => {
+        console.log('[AddAccountModal] 后台同步完成')
+      })
+      .catch((error) => {
+        console.error('[AddAccountModal] 后台同步失败:', error)
+      })
+
+    console.log('[AddAccountModal] 账号添加成功，对话框已关闭，同步在后台进行')
   } catch (e: any) {
     console.error('[AddAccountModal] createAccountAndSync 出错:', e)
     console.error('[AddAccountModal] 错误详情:', {
