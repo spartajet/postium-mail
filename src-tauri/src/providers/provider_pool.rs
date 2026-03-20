@@ -50,8 +50,8 @@ pub struct ProviderPool {
 impl Default for ProviderPool {
     fn default() -> Self {
         use super::enterprise::{CustomProvider, GoogleWorkspaceProvider, Microsoft365Provider};
-        use super::personal::{GmailProvider, OutlookProvider, YahooProvider};
-        use super::personal::{ICloudProvider, Mail163Provider, QqMailProvider};
+        use super::personal::{GmailProvider, OutlookProvider, SinaMailProvider, YahooProvider};
+        use super::personal::{AolMailProvider, ChinaMailProvider, CmccMailProvider, Cn21MailProvider, GmxMailProvider, ICloudProvider, MailComProvider, Mail163Provider, Net263MailProvider, QqMailProvider, SohuMailProvider, TomMailProvider, YandexMailProvider, ZohoMailProvider};
 
         let mut pool = Self::new();
 
@@ -59,10 +59,22 @@ impl Default for ProviderPool {
         pool.register(Box::new(GmailProvider));
         pool.register(Box::new(OutlookProvider));
         pool.register(Box::new(YahooProvider));
+        pool.register(Box::new(AolMailProvider));
+        pool.register(Box::new(GmxMailProvider));
+        pool.register(Box::new(MailComProvider));
+        pool.register(Box::new(ZohoMailProvider));
+        pool.register(Box::new(YandexMailProvider));
 
         // 国内邮箱服务商
         pool.register(Box::new(Mail163Provider));
         pool.register(Box::new(QqMailProvider));
+        pool.register(Box::new(SinaMailProvider));
+        pool.register(Box::new(SohuMailProvider));
+        pool.register(Box::new(TomMailProvider));
+        pool.register(Box::new(CmccMailProvider));
+        pool.register(Box::new(ChinaMailProvider));
+        pool.register(Box::new(Net263MailProvider));
+        pool.register(Box::new(Cn21MailProvider));
         pool.register(Box::new(ICloudProvider));
 
         // 企业邮箱服务商（使用默认配置）
@@ -211,10 +223,33 @@ impl ProviderPool {
             "hotmail.com",
             "outlook.com",
             "live.com",
+            "aol.com",
+            "aim.com",
+            "gmx.com",
+            "gmx.net",
+            "gmx.de",
+            "mail.com",
+            "zoho.com",
+            "yandex.com",
+            "yandex.ru",
             "163.com",
             "126.com",
             "qq.com",
             "foxmail.com",
+            "sina.com",
+            "sina.cn",
+            "sohu.com",
+            "sohu.net",
+            "tom.com",
+            "139.com",
+            "139.com.cn",
+            "10086.cn",
+            "10086.com",
+            "china.com",
+            "263.net",
+            "263.com",
+            "21cn.com",
+            "21cn.net",
             "icloud.com",
             "me.com",
         ];
@@ -392,15 +427,27 @@ mod tests {
 
         // 应该包含所有默认服务商
         let providers = pool.get_providers_info();
-        assert!(providers.len() >= 9); // Gmail, Outlook, Yahoo, 163, QQ, iCloud, Microsoft365, GoogleWorkspace, Custom
+        assert!(providers.len() >= 21); // Gmail, Outlook, Yahoo, AOL, GMX, Mail.com, Zoho, Yandex, 163(yi), QQ, Sina, Sohu, Tom, CMCC, China, 263, 21CN, iCloud, Microsoft365, GoogleWorkspace, Custom
 
         // 验证包含关键服务商
         let ids: Vec<_> = providers.iter().map(|p| p.id.clone()).collect();
         assert!(ids.contains(&"gmail".to_string()));
         assert!(ids.contains(&"outlook".to_string()));
         assert!(ids.contains(&"yahoo".to_string()));
-        assert!(ids.contains(&"163".to_string()));
+        assert!(ids.contains(&"aol".to_string()));
+        assert!(ids.contains(&"gmx".to_string()));
+        assert!(ids.contains(&"mailcom".to_string()));
+        assert!(ids.contains(&"zoho".to_string()));
+        assert!(ids.contains(&"yandex".to_string()));
+        assert!(ids.contains(&"yi".to_string())); // 163邮箱的ID是"yi"
         assert!(ids.contains(&"qq".to_string()));
+        assert!(ids.contains(&"sina".to_string()));
+        assert!(ids.contains(&"sohu".to_string()));
+        assert!(ids.contains(&"tom".to_string()));
+        assert!(ids.contains(&"cmcc".to_string()));
+        assert!(ids.contains(&"china".to_string()));
+        assert!(ids.contains(&"net263".to_string()));
+        assert!(ids.contains(&"cn21".to_string()));
         assert!(ids.contains(&"icloud".to_string()));
         assert!(ids.contains(&"microsoft365".to_string()));
         assert!(ids.contains(&"google-workspace".to_string()));
@@ -444,15 +491,15 @@ mod tests {
 
         // 测试 163.com
         let provider = pool.detect_provider("user@163.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "163");
+        assert_eq!(provider.provider_id(), "yi");
 
         // 测试 126.com
         let provider = pool.detect_provider("user@126.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "163");
+        assert_eq!(provider.provider_id(), "yi");
 
         // 测试 yeah.net
         let provider = pool.detect_provider("user@yeah.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "163");
+        assert_eq!(provider.provider_id(), "yi");
     }
 
     #[tokio::test]
@@ -485,5 +532,217 @@ mod tests {
         // 测试 mac.com
         let provider = pool.detect_provider("user@mac.com").await.unwrap();
         assert_eq!(provider.provider_id(), "icloud");
+    }
+
+    #[tokio::test]
+    async fn test_detect_sinamail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 sina.com
+        let provider = pool.detect_provider("user@sina.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "sina");
+
+        // 测试 sina.cn
+        let provider = pool.detect_provider("user@sina.cn").await.unwrap();
+        assert_eq!(provider.provider_id(), "sina");
+
+        // 测试 vip.sina.com
+        let provider = pool.detect_provider("user@vip.sina.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "sina");
+    }
+
+    #[tokio::test]
+    async fn test_detect_cmccmail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 139.com
+        let provider = pool.detect_provider("user@139.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "cmcc");
+
+        // 测试 139.com.cn
+        let provider = pool.detect_provider("user@139.com.cn").await.unwrap();
+        assert_eq!(provider.provider_id(), "cmcc");
+
+        // 测试 10086.cn
+        let provider = pool.detect_provider("user@10086.cn").await.unwrap();
+        assert_eq!(provider.provider_id(), "cmcc");
+
+        // 测试 10086.com
+        let provider = pool.detect_provider("user@10086.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "cmcc");
+    }
+
+    #[tokio::test]
+    async fn test_detect_sohumail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 sohu.com
+        let provider = pool.detect_provider("user@sohu.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "sohu");
+
+        // 测试 vip.sohu.com
+        let provider = pool.detect_provider("user@vip.sohu.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "sohu");
+
+        // 测试 sohu.net
+        let provider = pool.detect_provider("user@sohu.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "sohu");
+    }
+
+    #[tokio::test]
+    async fn test_detect_chinamail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 china.com
+        let provider = pool.detect_provider("user@china.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "china");
+
+        // 测试 mail.china.com
+        let provider = pool.detect_provider("user@mail.china.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "china");
+    }
+
+    #[tokio::test]
+    async fn test_detect_tommail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 tom.com
+        let provider = pool.detect_provider("user@tom.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "tom");
+
+        // 测试 mail.tom.com
+        let provider = pool.detect_provider("user@mail.tom.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "tom");
+
+        // 测试 163.tom.com
+        let provider = pool.detect_provider("user@163.tom.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "tom");
+    }
+
+    #[tokio::test]
+    async fn test_detect_net263mail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 263.net
+        let provider = pool.detect_provider("user@263.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "net263");
+
+        // 测试 263.com
+        let provider = pool.detect_provider("user@263.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "net263");
+
+        // 测试 x263.net
+        let provider = pool.detect_provider("user@x263.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "net263");
+    }
+
+    #[tokio::test]
+    async fn test_detect_cn21mail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 21cn.com
+        let provider = pool.detect_provider("user@21cn.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "cn21");
+
+        // 测试 21cn.net
+        let provider = pool.detect_provider("user@21cn.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "cn21");
+
+        // 测试 mail.21cn.com
+        let provider = pool.detect_provider("user@mail.21cn.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "cn21");
+    }
+
+    #[tokio::test]
+    async fn test_detect_aolmail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 aol.com
+        let provider = pool.detect_provider("user@aol.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "aol");
+
+        // 测试 aim.com
+        let provider = pool.detect_provider("user@aim.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "aol");
+
+        // 测试 verizon.net
+        let provider = pool.detect_provider("user@verizon.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "aol");
+    }
+
+    #[tokio::test]
+    async fn test_detect_gmxmail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 gmx.com
+        let provider = pool.detect_provider("user@gmx.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "gmx");
+
+        // 测试 gmx.de
+        let provider = pool.detect_provider("user@gmx.de").await.unwrap();
+        assert_eq!(provider.provider_id(), "gmx");
+
+        // 测试 gmx.net
+        let provider = pool.detect_provider("user@gmx.net").await.unwrap();
+        assert_eq!(provider.provider_id(), "gmx");
+    }
+
+    #[tokio::test]
+    async fn test_detect_zohomail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 zoho.com
+        let provider = pool.detect_provider("user@zoho.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "zoho");
+
+        // 测试 zohomail.com
+        let provider = pool.detect_provider("user@zohomail.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "zoho");
+
+        // 测试 zoho.eu
+        let provider = pool.detect_provider("user@zoho.eu").await.unwrap();
+        assert_eq!(provider.provider_id(), "zoho");
+    }
+
+    #[tokio::test]
+    async fn test_detect_yandexmail() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 yandex.com
+        let provider = pool.detect_provider("user@yandex.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "yandex");
+
+        // 测试 yandex.ru
+        let provider = pool.detect_provider("user@yandex.ru").await.unwrap();
+        assert_eq!(provider.provider_id(), "yandex");
+
+        // 测试 ya.ru
+        let provider = pool.detect_provider("user@ya.ru").await.unwrap();
+        assert_eq!(provider.provider_id(), "yandex");
+    }
+
+    #[tokio::test]
+    async fn test_detect_mailcom() {
+        init_tracing();
+        let pool = ProviderPool::default();
+
+        // 测试 mail.com
+        let provider = pool.detect_provider("user@mail.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "mailcom");
+
+        // 测试 email.com
+        let provider = pool.detect_provider("user@email.com").await.unwrap();
+        assert_eq!(provider.provider_id(), "mailcom");
     }
 }

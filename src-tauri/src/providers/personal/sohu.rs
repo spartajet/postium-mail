@@ -1,24 +1,21 @@
-//! 163 邮箱个人邮件服务商
+//! 搜狐邮箱个人邮件服务商
 //!
-//! 支持 163.com、126.com、yeah.net 等网易邮箱域名
+//! 支持 sohu.com、vip.sohu.com、sohu.net 等搜狐邮箱域名
 
-use super::super::{
-    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig,
-};
 use async_trait::async_trait;
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
 
-/// 163 邮箱个人邮件服务商
-pub struct Mail163Provider;
+/// 搜狐邮箱个人邮件服务商
+pub struct SohuMailProvider;
 
 #[async_trait]
-impl MailProvider for Mail163Provider {
+impl MailProvider for SohuMailProvider {
     fn provider_id(&self) -> &str {
-        "yi"
+        "sohu"
     }
 
     fn provider_name(&self) -> &str {
-        "网易邮箱"
+        "搜狐邮箱"
     }
 
     fn account_type(&self) -> AccountType {
@@ -31,7 +28,7 @@ impl MailProvider for Mail163Provider {
 
     fn default_imap_config(&self) -> ImapServerConfig {
         ImapServerConfig {
-            host: "imap.163.com".to_string(),
+            host: "imap.sohu.com".to_string(),
             port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
@@ -39,14 +36,14 @@ impl MailProvider for Mail163Provider {
 
     fn default_smtp_config(&self) -> SmtpServerConfig {
         SmtpServerConfig {
-            host: "smtp.163.com".to_string(),
+            host: "smtp.sohu.com".to_string(),
             port: 465,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
-        None // 163 邮箱不支持 OAuth
+        None // 搜狐邮箱不支持 OAuth
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
@@ -66,15 +63,15 @@ impl MailProvider for Mail163Provider {
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
         let domain = email.split('@').nth(1).unwrap_or("");
-        Ok(matches!(domain, "163.com" | "126.com" | "yeah.net"))
+        Ok(matches!(domain, "sohu.com" | "vip.sohu.com" | "sohu.net"))
     }
 
     fn supported_domains(&self) -> Vec<&'static str> {
-        vec!["163.com", "126.com", "yeah.net"]
+        vec!["sohu.com", "vip.sohu.com", "sohu.net"]
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Mail163Provider)
+        Box::new(SohuMailProvider)
     }
 }
 
@@ -83,63 +80,57 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_mail163_detection() {
-        let provider = Mail163Provider;
+    async fn test_sohu_detection() {
+        let provider = SohuMailProvider;
 
-        // 测试 163 域名
-        assert!(provider.detect("test@163.com").await.unwrap());
-        assert!(provider.detect("test@126.com").await.unwrap());
-        assert!(provider.detect("test@yeah.net").await.unwrap());
+        // 测试搜狐邮箱域名
+        assert!(provider.detect("test@sohu.com").await.unwrap());
+        assert!(provider.detect("test@vip.sohu.com").await.unwrap());
+        assert!(provider.detect("test@sohu.net").await.unwrap());
 
-        // 测试非 163 域名
+        // 测试非搜狐域名
         assert!(!provider.detect("test@qq.com").await.unwrap());
-        assert!(!provider.detect("test@gmail.com").await.unwrap());
+        assert!(!provider.detect("test@163.com").await.unwrap());
     }
 
     #[test]
-    fn test_mail163_config() {
-        let provider = Mail163Provider;
+    fn test_sohu_config() {
+        let provider = SohuMailProvider;
 
         // 测试 IMAP 配置
         let imap_config = provider.default_imap_config();
-        assert_eq!(imap_config.host, "imap.163.com");
+        assert_eq!(imap_config.host, "imap.sohu.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(
-            imap_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
+        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
         // 测试 SMTP 配置
         let smtp_config = provider.default_smtp_config();
-        assert_eq!(smtp_config.host, "smtp.163.com");
+        assert_eq!(smtp_config.host, "smtp.sohu.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(
-            smtp_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
+        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
     }
 
     #[test]
-    fn test_mail163_domains() {
-        let provider = Mail163Provider;
+    fn test_sohu_domains() {
+        let provider = SohuMailProvider;
         let domains = provider.supported_domains();
 
-        assert_eq!(domains, vec!["163.com", "126.com", "yeah.net"]);
+        assert_eq!(domains, vec!["sohu.com", "vip.sohu.com", "sohu.net"]);
     }
 
     #[test]
-    fn test_mail163_provider_info() {
-        let provider = Mail163Provider;
+    fn test_sohu_provider_info() {
+        let provider = SohuMailProvider;
 
-        assert_eq!(provider.provider_id(), "yi");
-        assert_eq!(provider.provider_name(), "网易邮箱");
+        assert_eq!(provider.provider_id(), "sohu");
+        assert_eq!(provider.provider_name(), "搜狐邮箱");
         assert_eq!(provider.account_type(), AccountType::Personal);
         assert_eq!(provider.auth_types(), vec![AuthType::Password]);
     }
 
     #[test]
-    fn test_mail163_capabilities() {
-        let provider = Mail163Provider;
+    fn test_sohu_capabilities() {
+        let provider = SohuMailProvider;
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -155,10 +146,10 @@ mod tests {
     }
 
     #[test]
-    fn test_mail163_box_clone() {
-        let provider = Mail163Provider;
+    fn test_sohu_box_clone() {
+        let provider = SohuMailProvider;
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "yi");
+        assert_eq!(cloned.provider_id(), "sohu");
     }
 }

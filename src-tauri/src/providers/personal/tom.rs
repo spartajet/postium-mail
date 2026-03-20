@@ -1,24 +1,21 @@
-//! 163 邮箱个人邮件服务商
+//! Tom邮箱个人邮件服务商
 //!
-//! 支持 163.com、126.com、yeah.net 等网易邮箱域名
+//! 支持 tom.com、mail.tom.com、163.tom.com 等Tom邮箱域名
 
-use super::super::{
-    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig,
-};
 use async_trait::async_trait;
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
 
-/// 163 邮箱个人邮件服务商
-pub struct Mail163Provider;
+/// Tom邮箱个人邮件服务商
+pub struct TomMailProvider;
 
 #[async_trait]
-impl MailProvider for Mail163Provider {
+impl MailProvider for TomMailProvider {
     fn provider_id(&self) -> &str {
-        "yi"
+        "tom"
     }
 
     fn provider_name(&self) -> &str {
-        "网易邮箱"
+        "Tom邮箱"
     }
 
     fn account_type(&self) -> AccountType {
@@ -31,7 +28,7 @@ impl MailProvider for Mail163Provider {
 
     fn default_imap_config(&self) -> ImapServerConfig {
         ImapServerConfig {
-            host: "imap.163.com".to_string(),
+            host: "imap.tom.com".to_string(),
             port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
@@ -39,14 +36,14 @@ impl MailProvider for Mail163Provider {
 
     fn default_smtp_config(&self) -> SmtpServerConfig {
         SmtpServerConfig {
-            host: "smtp.163.com".to_string(),
+            host: "smtp.tom.com".to_string(),
             port: 465,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
-        None // 163 邮箱不支持 OAuth
+        None // Tom邮箱不支持 OAuth
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
@@ -66,15 +63,18 @@ impl MailProvider for Mail163Provider {
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
         let domain = email.split('@').nth(1).unwrap_or("");
-        Ok(matches!(domain, "163.com" | "126.com" | "yeah.net"))
+        Ok(matches!(
+            domain,
+            "tom.com" | "mail.tom.com" | "163.tom.com" | "vip.tom.com"
+        ))
     }
 
     fn supported_domains(&self) -> Vec<&'static str> {
-        vec!["163.com", "126.com", "yeah.net"]
+        vec!["tom.com", "mail.tom.com", "163.tom.com", "vip.tom.com"]
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Mail163Provider)
+        Box::new(TomMailProvider)
     }
 }
 
@@ -83,63 +83,61 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_mail163_detection() {
-        let provider = Mail163Provider;
+    async fn test_tom_detection() {
+        let provider = TomMailProvider;
 
-        // 测试 163 域名
-        assert!(provider.detect("test@163.com").await.unwrap());
-        assert!(provider.detect("test@126.com").await.unwrap());
-        assert!(provider.detect("test@yeah.net").await.unwrap());
+        // 测试Tom邮箱域名
+        assert!(provider.detect("test@tom.com").await.unwrap());
+        assert!(provider.detect("test@mail.tom.com").await.unwrap());
+        assert!(provider.detect("test@163.tom.com").await.unwrap());
+        assert!(provider.detect("test@vip.tom.com").await.unwrap());
 
-        // 测试非 163 域名
+        // 测试非Tom域名
         assert!(!provider.detect("test@qq.com").await.unwrap());
-        assert!(!provider.detect("test@gmail.com").await.unwrap());
+        assert!(!provider.detect("test@163.com").await.unwrap());
     }
 
     #[test]
-    fn test_mail163_config() {
-        let provider = Mail163Provider;
+    fn test_tom_config() {
+        let provider = TomMailProvider;
 
         // 测试 IMAP 配置
         let imap_config = provider.default_imap_config();
-        assert_eq!(imap_config.host, "imap.163.com");
+        assert_eq!(imap_config.host, "imap.tom.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(
-            imap_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
+        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
         // 测试 SMTP 配置
         let smtp_config = provider.default_smtp_config();
-        assert_eq!(smtp_config.host, "smtp.163.com");
+        assert_eq!(smtp_config.host, "smtp.tom.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(
-            smtp_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
+        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
     }
 
     #[test]
-    fn test_mail163_domains() {
-        let provider = Mail163Provider;
+    fn test_tom_domains() {
+        let provider = TomMailProvider;
         let domains = provider.supported_domains();
 
-        assert_eq!(domains, vec!["163.com", "126.com", "yeah.net"]);
+        assert_eq!(
+            domains,
+            vec!["tom.com", "mail.tom.com", "163.tom.com", "vip.tom.com"]
+        );
     }
 
     #[test]
-    fn test_mail163_provider_info() {
-        let provider = Mail163Provider;
+    fn test_tom_provider_info() {
+        let provider = TomMailProvider;
 
-        assert_eq!(provider.provider_id(), "yi");
-        assert_eq!(provider.provider_name(), "网易邮箱");
+        assert_eq!(provider.provider_id(), "tom");
+        assert_eq!(provider.provider_name(), "Tom邮箱");
         assert_eq!(provider.account_type(), AccountType::Personal);
         assert_eq!(provider.auth_types(), vec![AuthType::Password]);
     }
 
     #[test]
-    fn test_mail163_capabilities() {
-        let provider = Mail163Provider;
+    fn test_tom_capabilities() {
+        let provider = TomMailProvider;
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -155,10 +153,10 @@ mod tests {
     }
 
     #[test]
-    fn test_mail163_box_clone() {
-        let provider = Mail163Provider;
+    fn test_tom_box_clone() {
+        let provider = TomMailProvider;
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "yi");
+        assert_eq!(cloned.provider_id(), "tom");
     }
 }
