@@ -139,24 +139,24 @@
 mod command;
 pub mod config;
 mod crypto;
-pub mod database;  // 公开以支持测试
+pub mod database; // 公开以支持测试
 
 // 新增模块
-pub mod auth;  // 公开以支持测试
+pub mod auth; // 公开以支持测试
 pub mod engine;
 pub mod error;
-pub mod providers;  // 公开以支持测试
-pub mod protocols;  // 协议层（IMAP/SMTP）
-pub mod storage;  // 存储层
-pub mod sync;  // 公开以支持测试
+pub mod protocols; // 协议层（IMAP/SMTP）
+pub mod providers; // 公开以支持测试
+pub mod storage; // 存储层
+pub mod sync; // 公开以支持测试
 
 // 重新导出关键类型
 pub use auth::AuthManager;
+pub use database::init_database;
 pub use engine::FlowEngine;
 pub use error::{MailError, Result};
 pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
-pub use sync::SyncManager;
-pub use database::init_database;  // 用于测试
+pub use sync::SyncManager; // 用于测试
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -164,7 +164,7 @@ use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-use command::{DatabaseState, FlowEngineState, KeyringState, AuthManagerState, ProviderPoolState};
+use command::{AuthManagerState, DatabaseState, FlowEngineState, KeyringState, ProviderPoolState};
 
 /// 处理 OAuth Deep Link 回调
 fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
@@ -240,12 +240,12 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
 /// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
 fn init_tracing() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)  // 默认级别
-        .with_target(true)  // 显示模块路径，便于调试
-        .with_thread_ids(false)  // 线程ID通常不需要
-        .with_file(false)  // 不显示文件名，减少日志冗余
-        .with_line_number(false)  // 不显示行号
-        .compact()  // 使用紧凑格式
+        .with_max_level(tracing::Level::INFO) // 默认级别
+        .with_target(false) // 显示模块路径，便于调试
+        .with_thread_ids(false) // 线程ID通常不需要
+        .with_file(true) // 不显示文件名，减少日志冗余
+        .with_line_number(true) // 不显示行号
+        .compact() // 使用紧凑格式
         .init();
 }
 
@@ -372,12 +372,11 @@ pub fn run() {
                 // ========== FlowEngine 初始化 ==========
                 // 创建 AuthManager
                 let auth_manager = std::sync::Arc::new(
-                    auth::AuthManager::new(app.handle())
-                        .expect("无法创建 AuthManager"),
+                    auth::AuthManager::new(app.handle()).expect("无法创建 AuthManager"),
                 );
 
-                // 创建 ProviderPool（与 AuthManager 使用相同的实例）
-                let provider_pool = std::sync::Arc::new(providers::ProviderPool::new());
+                // 创建 ProviderPool（注册所有默认服务商）
+                let provider_pool = std::sync::Arc::new(providers::ProviderPool::with_defaults());
 
                 // 创建 SyncManager（使用 clone）
                 let sync_manager = std::sync::Arc::new(sync::SyncManager::new(
@@ -388,16 +387,11 @@ pub fn run() {
                 ));
 
                 // 创建 FlowEngine
-                let flow_engine = engine::FlowEngine::new(
-                    db_arc,
-                    sync_manager,
-                    app.handle().clone(),
-                );
+                let flow_engine =
+                    engine::FlowEngine::new(db_arc, sync_manager, app.handle().clone());
 
                 // 注册 FlowEngineState（包装在 Arc<tokio::sync::Mutex> 中）
-                let flow_engine_state = std::sync::Arc::new(tokio::sync::Mutex::new(
-                    flow_engine,
-                ));
+                let flow_engine_state = std::sync::Arc::new(tokio::sync::Mutex::new(flow_engine));
                 app.manage(FlowEngineState(flow_engine_state.clone()));
 
                 // 注册 AuthManagerState 和 ProviderPoolState
@@ -423,7 +417,8 @@ pub fn run() {
 
                         tracing::info!("正在停止 FlowEngine...");
                         let engine_guard = engine_state.lock().await;
-                        let stop_result = timeout(Duration::from_secs(5), engine_guard.stop()).await;
+                        let stop_result =
+                            timeout(Duration::from_secs(5), engine_guard.stop()).await;
 
                         match stop_result {
                             Ok(Ok(())) => tracing::info!("FlowEngine 已停止"),
