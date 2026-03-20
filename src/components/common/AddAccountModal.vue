@@ -536,8 +536,8 @@ async function createAccountAndSync() {
     console.log('[AddAccountModal] 注册同步进度监听器（用于状态栏）')
     await listenToSyncProgress(accountId)
 
-    // 6. 关闭对话框
-    emit('update:show', false)
+    // 6. 关闭对话框（通过 uiStore 而不是 emit）
+    uiStore.closeAddAccountModal()
 
     // 7. 触发后台同步（不等待完成）
     console.log('[AddAccountModal] 触发后台同步, accountId:', accountId)
