@@ -220,8 +220,9 @@ pub struct OAuthConfig {
 impl OAuthConfig {
     /// 从环境变量加载指定服务商的配置
     pub fn from_env_for_provider(provider_id: &str) -> Result<Self> {
-        let config = crate::config::load_oauth_config_for_provider(provider_id)
-            .map_err(|e| crate::error::MailError::Internal(format!("加载 OAuth 配置失败: {}", e)))?;
+        let config = crate::config::load_oauth_config_for_provider(provider_id).map_err(|e| {
+            crate::error::MailError::Internal(format!("加载 OAuth 配置失败: {}", e))
+        })?;
 
         // 将 config::OAuthConfig 转换为 traits::OAuthConfig
         Ok(Self {
@@ -242,7 +243,7 @@ impl OAuthConfig {
 
     /// 验证配置是否有效
     pub fn validate(&self) -> Result<()> {
-        use crate::error::{MailError, AuthError};
+        use crate::error::{AuthError, MailError};
 
         // 检查 client_id
         if self.client_id.is_empty() {
@@ -402,10 +403,7 @@ pub trait MailProvider: Send + Sync {
         use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine;
 
-        let auth_string = format!(
-            "user={}\x01auth=Bearer {}\x01\x01",
-            email, access_token
-        );
+        let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token);
         BASE64.encode(auth_string)
     }
 
@@ -452,15 +450,33 @@ mod tests {
         struct TestProvider;
         #[async_trait]
         impl MailProvider for TestProvider {
-            fn provider_id(&self) -> &str { "test" }
-            fn provider_name(&self) -> &str { "Test" }
-            fn account_type(&self) -> AccountType { AccountType::Personal }
-            fn auth_types(&self) -> Vec<AuthType> { vec![AuthType::Password] }
-            fn default_imap_config(&self) -> ImapServerConfig { Default::default() }
-            fn default_smtp_config(&self) -> SmtpServerConfig { Default::default() }
-            fn capabilities(&self) -> ProviderCapabilities { Default::default() }
-            async fn detect(&self, _email: &str) -> Result<bool> { Ok(true) }
-            fn supported_domains(&self) -> Vec<&'static str> { vec!["example.com"] }
+            fn provider_id(&self) -> &str {
+                "test"
+            }
+            fn provider_name(&self) -> &str {
+                "Test"
+            }
+            fn account_type(&self) -> AccountType {
+                AccountType::Personal
+            }
+            fn auth_types(&self) -> Vec<AuthType> {
+                vec![AuthType::Password]
+            }
+            fn default_imap_config(&self) -> ImapServerConfig {
+                Default::default()
+            }
+            fn default_smtp_config(&self) -> SmtpServerConfig {
+                Default::default()
+            }
+            fn capabilities(&self) -> ProviderCapabilities {
+                Default::default()
+            }
+            async fn detect(&self, _email: &str) -> Result<bool> {
+                Ok(true)
+            }
+            fn supported_domains(&self) -> Vec<&'static str> {
+                vec!["example.com"]
+            }
             fn box_clone(&self) -> Box<dyn MailProvider> {
                 Box::new(TestProvider)
             }
@@ -472,6 +488,8 @@ mod tests {
         // 验证 XOAUTH2 字符串不为空且是 base64 编码
         assert!(!xoauth2.is_empty());
         // base64 编码应该只包含这些字符
-        assert!(xoauth2.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
+        assert!(xoauth2
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
     }
 }

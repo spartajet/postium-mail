@@ -1108,6 +1108,9 @@ impl AsyncImapClient {
             .capabilities()
             .await
             .map_err(|e| anyhow!("获取服务器能力失败: {}", e))?;
+        for c in capabilities.iter() {
+            tracing::debug!("邮件服务器能力：{:?}", c)
+        }
 
         // 检查是否包含 CONDSTORE
         let has_condstore = capabilities.iter().any(|cap| {

@@ -10,7 +10,6 @@ mod outlook;
 mod outlook_oauth;
 mod qq;
 mod yahoo;
-mod native;
 
 // 重新导出
 pub use gmail::GmailProvider;
@@ -19,4 +18,3 @@ pub use mail163::Mail163Provider;
 pub use outlook::OutlookProvider;
 pub use qq::QqMailProvider;
 pub use yahoo::YahooProvider;
-pub use native::NativeProvider;

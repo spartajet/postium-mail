@@ -3,11 +3,11 @@
 //! 管理邮件文件夹，支持 RFC 6154 Special-Use 文件夹
 
 use crate::error::{MailError, Result};
-use crate::storage::models::folder;
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
-use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
-use std::sync::Arc;
+use crate::storage::models::folder;
+use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// RFC 6154 Special-Use 文件夹类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,13 +246,23 @@ impl FolderManager {
             SpecialUse::Sent
         } else if name_lower.contains("draft") || name_lower.contains("草稿") {
             SpecialUse::Drafts
-        } else if name_lower.contains("trash") || name_lower.contains("deleted") || name_lower.contains("已删除") || name_lower.contains("垃圾箱") {
+        } else if name_lower.contains("trash")
+            || name_lower.contains("deleted")
+            || name_lower.contains("已删除")
+            || name_lower.contains("垃圾箱")
+        {
             SpecialUse::Trash
-        } else if name_lower.contains("junk") || name_lower.contains("spam") || name_lower.contains("垃圾邮件") {
+        } else if name_lower.contains("junk")
+            || name_lower.contains("spam")
+            || name_lower.contains("垃圾邮件")
+        {
             SpecialUse::Junk
         } else if name_lower.contains("archive") || name_lower.contains("归档") {
             SpecialUse::Archive
-        } else if name_lower.contains("flagged") || name_lower.contains("star") || name_lower.contains("标记") {
+        } else if name_lower.contains("flagged")
+            || name_lower.contains("star")
+            || name_lower.contains("标记")
+        {
             SpecialUse::Flagged
         } else {
             SpecialUse::Inbox // 默认为收件箱
@@ -261,7 +271,7 @@ impl FolderManager {
 
     /// 获取本地文件夹列表
     async fn get_local_folders(&self, account_id: i32) -> Result<Vec<folder::Model>> {
-        use sea_orm::{QueryFilter, ColumnTrait, QueryOrder, Order};
+        use sea_orm::{ColumnTrait, Order, QueryFilter, QueryOrder};
 
         let folders = folder::Entity::find()
             .filter(folder::Column::AccountId.eq(account_id))
@@ -281,7 +291,9 @@ impl FolderManager {
             name: Set(imap_folder.special_use.standard_name().to_string()),
             imap_name: Set(imap_folder.imap_name.clone()),
             parent_id: Set(None),
-            attributes: Set(Some(serde_json::to_string(&imap_folder.attributes).unwrap_or_default())),
+            attributes: Set(Some(
+                serde_json::to_string(&imap_folder.attributes).unwrap_or_default(),
+            )),
             email_count: Set(0),
             unread_count: Set(0),
             synced_at: Set(Some(chrono::Utc::now().timestamp())),
@@ -307,7 +319,11 @@ impl FolderManager {
     }
 
     /// 更新现有文件夹
-    async fn update_folder(&self, local_folder: &folder::Model, imap_folder: &ImapFolder) -> Result<()> {
+    async fn update_folder(
+        &self,
+        local_folder: &folder::Model,
+        imap_folder: &ImapFolder,
+    ) -> Result<()> {
         use crate::storage::models::folder::ActiveModel;
 
         let mut folder_active: ActiveModel = local_folder.clone().into();
