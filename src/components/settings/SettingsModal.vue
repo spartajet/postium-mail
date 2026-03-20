@@ -20,7 +20,8 @@ import {
   NRadio,
   NList,
   NListItem,
-  NThing
+  NThing,
+  NPopconfirm
 } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 
@@ -173,12 +174,6 @@ async function deleteAccount(accountId: string) {
   }
 }
 
-function confirmDeleteAccount(account: any) {
-  if (confirm(`确定要删除账号 "${account.name}" 吗？`)) {
-    deleteAccount(account.id)
-  }
-}
-
 function editAccount(_accountId: string) {
   // TODO: 打开编辑账号模态框
   uiStore.showInfo('编辑账号功能即将推出')
@@ -274,16 +269,24 @@ function formatDate(date: Date | string): string {
                               <NIcon><EditOutlined :size="16" /></NIcon>
                             </template>
                           </NButton>
-                          <NButton
-                            size="tiny"
-                            quaternary
-                            type="error"
-                            @click="confirmDeleteAccount(account)"
+                          <NPopconfirm
+                            @positive-click="deleteAccount(account.id)"
+                            positive-text="确认删除"
+                            negative-text="取消"
                           >
-                            <template #icon>
-                              <NIcon><DeleteOutlined :size="16" /></NIcon>
+                            <template #trigger>
+                              <NButton
+                                size="tiny"
+                                quaternary
+                                type="error"
+                              >
+                                <template #icon>
+                                  <NIcon><DeleteOutlined :size="16" /></NIcon>
+                                </template>
+                              </NButton>
                             </template>
-                          </NButton>
+                            <div>确定要删除账号 "{{ account.name }}" 吗？</div>
+                          </NPopconfirm>
                         </NSpace>
                       </div>
                     </template>
