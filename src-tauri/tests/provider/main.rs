@@ -14,8 +14,22 @@
 use std::env;
 
 // 引入测试辅助模块
-mod test_tracing;
 mod test_macros;
+mod test_tracing;
+
+// 引入服务商测试模块
+mod config;
+mod email_parsing;
+mod encoding;
+mod enterprise;
+mod folder_attrs;
+mod folder_sync;
+mod helpers;
+mod personal;
+mod rfc6154;
+mod smtp;
+mod sync_features;
+mod uid_tests;
 
 /// 测试账号配置
 #[derive(Debug, Clone)]
@@ -137,11 +151,11 @@ fn main() {
 
     // 检查是否配置了环境变量
     let has_config = env::vars().any(|(k, _)| {
-        k.contains("EMAIL") ||
-        k.contains("GMAIL") ||
-        k.contains("OUTLOOK") ||
-        k.contains("PASSWORD") ||
-        k.contains("PASS")
+        k.contains("EMAIL")
+            || k.contains("GMAIL")
+            || k.contains("OUTLOOK")
+            || k.contains("PASSWORD")
+            || k.contains("PASS")
     });
 
     if has_config {

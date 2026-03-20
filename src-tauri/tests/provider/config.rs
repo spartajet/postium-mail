@@ -2,8 +2,8 @@
 //!
 //! 从环境变量读取真实账号配置
 
+use crate::ProviderTestConfig;
 use std::env;
-use crate::provider::ProviderTestConfig;
 
 /// Gmail 配置加载器
 pub struct GmailConfig;

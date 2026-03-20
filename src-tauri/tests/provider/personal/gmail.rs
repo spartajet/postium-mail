@@ -2,7 +2,7 @@
 //!
 //! 测试 Gmail 邮箱的连接和基本功能
 
-use crate::provider::config::GmailConfig;
+use crate::config::GmailConfig;
 
 #[cfg(test)]
 mod tests {
