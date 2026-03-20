@@ -166,6 +166,7 @@ impl AccountRepository {
         req: CreateAccountRequest,
     ) -> Result<account::Model> {
         // 检查邮箱是否已存在
+        tracing::info!("检查邮箱地址是否已存在: email={}", req.email);
         if let Some(existing) = Self::get_by_email(db, &req.email).await? {
             tracing::error!(
                 "邮箱地址已存在: requested={}, existing_id={}, existing_email={}",
@@ -179,6 +180,7 @@ impl AccountRepository {
             ))
             .into());
         }
+        tracing::info!("邮箱地址检查通过，准备创建账号: email={}", req.email);
 
         // 如果 provider 为 "auto"，使用 ProviderPool 检测
         let provider = if req.provider == "auto" {
@@ -221,6 +223,7 @@ impl AccountRepository {
         });
 
         // 创建数据库记录
+        tracing::info!("开始创建账号记录: email={}, provider={}, auth_type={}", req.email, provider, auth_type);
         let now = chrono::Utc::now().timestamp();
         let active_account = account::ActiveModel {
             name: Set(req.name.clone()),
@@ -246,7 +249,23 @@ impl AccountRepository {
         let account = active_account
             .insert(db)
             .await
-            .map_err(|e| StorageError::Database(format!("创建账号失败: {}", e)))?;
+            .map_err(|e| {
+                // 检查是否是 UNIQUE 约束错误
+                let error_str = e.to_string();
+                if error_str.contains("UNIQUE constraint failed") || error_str.contains("unique") {
+                    tracing::error!(
+                        "数据库唯一性约束冲突: email={}, error={}",
+                        req.email,
+                        error_str
+                    );
+                    StorageError::Database(format!(
+                        "邮箱地址 '{}' 已存在（数据库约束）",
+                        req.email
+                    ))
+                } else {
+                    StorageError::Database(format!("创建账号失败: {}", e))
+                }
+            })?;
 
         // 保存凭证到 Keyring
         let keyring = app_handle.keyring();
