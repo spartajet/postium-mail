@@ -500,14 +500,20 @@ async function createAccountAndSync() {
       accountData.enterprise_domain = form.value.enterpriseDomain || null
     }
 
-    // 1. 创建账号
+    // 1. 检查邮箱是否已存在于本地列表
+    const existingAccount = accountStore.accounts.find(a => a.email === form.value.email)
+    if (existingAccount) {
+      throw new Error(`邮箱地址 ${form.value.email} 已存在于账号列表中（账号名：${existingAccount.name}）。请先在设置中删除旧账号，或使用不同的邮箱地址。`)
+    }
+
+    // 2. 创建账号
     console.log('[AddAccountModal] 调用 add_account')
     const accountResult = await invoke('add_account', { account: accountData }) as { id: number }
     const accountId = accountResult.id
 
     console.log('[AddAccountModal] 账号创建成功, ID:', accountId)
 
-    // 2. 立即添加到本地账号列表
+    // 3. 立即添加到本地账号列表
     const newAccount = await accountStore.addAccount({
       ...accountData,
       id: String(accountId),
@@ -516,7 +522,7 @@ async function createAccountAndSync() {
       unreadCount: 0,
     } as Account)
 
-    // 3. 立即关闭对话框并返回成功
+    // 4. 立即关闭对话框并返回成功
     syncProgress.value = {
       stage: 'idle',
       currentStep: 3,
@@ -525,14 +531,14 @@ async function createAccountAndSync() {
       percentage: 100,
     }
 
-    // 4. 注册同步进度监听器（用于状态栏显示）
+    // 5. 注册同步进度监听器（用于状态栏显示）
     console.log('[AddAccountModal] 注册同步进度监听器（用于状态栏）')
     await listenToSyncProgress(accountId)
 
-    // 5. 关闭对话框
+    // 6. 关闭对话框
     emit('update:show', false)
 
-    // 6. 触发后台同步（不等待完成）
+    // 7. 触发后台同步（不等待完成）
     console.log('[AddAccountModal] 触发后台同步, accountId:', accountId)
     invoke('sync_account_with_progress', { accountId })
       .then(() => {
