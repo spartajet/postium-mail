@@ -1,58 +1,21 @@
-// 测试：163 邮箱 IMAP 功能测试
+// 测试：通用 IMAP 功能测试
 //
-// 运行：cargo test --test provider test_163_emails -- --nocapture
-
-use std::fs;
-use std::path::Path;
-
-#[derive(Debug, Clone)]
-struct TestAccount {
-    account: String,
-    imap_server: String,
-    imap_port: u16,
-    password: String,
-}
-
-fn load_test_account() -> TestAccount {
-    let account_path = Path::new("../.test_mail_accounts");
-    let content = fs::read_to_string(account_path).expect("无法读取 .test_mail_accounts 文件");
-
-    let mut account = String::new();
-    let mut imap_server = String::new();
-    let mut imap_port = 993u16;
-    let mut password = String::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        if let Some((key_value, value)) = line.split_once('=') {
-            let key = key_value.trim();
-            let value = value.trim();
-
-            match key {
-                "account" => account = value.to_string(),
-                "imap_server" => imap_server = value.to_string(),
-                "imap_port" => imap_port = value.parse().unwrap_or(993),
-                "password" => password = value.to_string(),
-                _ => {}
-            }
-        }
-    }
-
-    TestAccount {
-        account,
-        imap_server,
-        imap_port,
-        password,
-    }
-}
+// 从 JSON 配置文件读取账号，支持任意邮件服务商
+//
+// 运行方式：
+//   cargo test --test provider test_imap_emails -- --nocapture
+//
+// 指定测试账号（通过环境变量）：
+//   TEST_ACCOUNT=163 cargo test --test provider test_imap_emails -- --nocapture
+//   TEST_ACCOUNT=gmail cargo test --test provider test_imap_emails -- --nocapture
+//   TEST_ACCOUNT=outlook cargo test --test provider test_imap_emails -- --nocapture
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::env;
+
+    use crate::common::load_test_account;
+
     use postium_mail_lib::protocols::imap::{AsyncImapClient, ImapAuth};
     use tracing::{debug, info, warn};
 
@@ -177,7 +140,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_163_emails() {
+    async fn test_imap_emails() {
         // 初始化 tracing
         let _ = tracing_subscriber::fmt()
             .with_test_writer()
@@ -186,27 +149,54 @@ mod tests {
             .with_line_number(true)
             .try_init();
 
-        let account = load_test_account();
+        // 从环境变量获取要测试的账号 key，默认为 "163"
+        let account_key = env::var("TEST_ACCOUNT").unwrap_or_else(|_| "163".to_string());
 
         info!("========================================");
-        info!("163 邮箱 IMAP 功能测试");
-        info!("账号: {}", account.account);
-        info!("服务器: {}:{}", account.imap_server, account.imap_port);
+        info!("通用 IMAP 功能测试");
+        info!("========================================");
+        info!("测试账号: {}", account_key);
+        info!("========================================");
+        info!("");
+
+        // 加载测试账号
+        let account = match load_test_account(&account_key) {
+            Some(acc) => acc,
+            None => {
+                info!("❌ 未找到账号配置: {}", account_key);
+                info!("提示：");
+                info!("  1. 请确保 .test_mail_accounts.json 文件存在");
+                info!("  2. 请确保配置文件中包含 '{}' 账号", account_key);
+                info!("  3. 或者设置相应的环境变量");
+                info!("");
+                info!("示例配置文件：.test_mail_accounts.json.example");
+                return;
+            }
+        };
+
+        info!("========================================");
+        info!("账号信息");
+        info!("========================================");
+        info!("邮箱: {}", account.email);
+        info!("IMAP 服务器: {}:{}", account.imap.host, account.imap.port);
+        info!("IMAP SSL: {}", account.imap.ssl);
+        info!("SMTP 服务器: {}:{}", account.smtp.host, account.smtp.port);
+        info!("SMTP SSL: {}", account.smtp.ssl);
         info!("========================================");
         info!("");
 
         let mut client = AsyncImapClient::new();
 
-        // 步骤 1: 登录 163 邮箱
+        // 步骤 1: 连接并登录
         info!("========================================");
-        info!("步骤 1: 连接并登录 163 邮箱");
+        info!("步骤 1: 连接并登录 IMAP 服务器");
         info!("========================================");
 
         match client
             .connect(
-                &account.imap_server,
-                account.imap_port,
-                &account.account,
+                &account.imap.host,
+                account.imap.port,
+                &account.email,
                 ImapAuth::Password(account.password.clone()),
             )
             .await
@@ -230,6 +220,11 @@ mod tests {
         match client.check_condstore_support().await {
             Ok(has_condstore) => {
                 debug!("CONDSTORE 支持: {}", has_condstore);
+                if has_condstore {
+                    info!("✅ CONDSTORE 支持: 是");
+                } else {
+                    info!("⚠️  CONDSTORE 支持: 否");
+                }
             }
             Err(e) => {
                 warn!("获取 CONDSTORE 支持状态失败: {}", e);
@@ -239,6 +234,11 @@ mod tests {
         match client.check_idle_support().await {
             Ok(has_idle) => {
                 debug!("IDLE 支持: {}", has_idle);
+                if has_idle {
+                    info!("✅ IDLE 支持: 是");
+                } else {
+                    info!("⚠️  IDLE 支持: 否");
+                }
             }
             Err(e) => {
                 warn!("获取 IDLE 支持状态失败: {}", e);
@@ -282,6 +282,7 @@ mod tests {
             // 显示特殊用途属性
             if let Some(ref special_use) = folder.special_use {
                 debug!("  特殊用途: {:?}", special_use);
+                info!("  📌 特殊用途: {:?}", special_use);
             }
 
             // 获取邮件数量
@@ -301,11 +302,79 @@ mod tests {
         info!("========================================");
         info!("测试完成");
         info!("========================================");
+        info!("账号: {} ({})", account.email, account_key);
         info!("总文件夹数: {}", folders.len());
         info!("总邮件数: {}", total_emails);
         info!("========================================");
 
         // 登出
         let _ = client.logout().await;
+    }
+
+    /// 测试所有可用账号
+    ///
+    /// 这个测试会列出所有配置的账号，但不会实际连接
+    #[test]
+    fn test_list_available_accounts() {
+        // 初始化 tracing
+        let _ = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(tracing::Level::INFO)
+            .with_target(false)
+            .try_init();
+
+        use crate::common::list_available_accounts;
+
+        info!("========================================");
+        info!("列出所有可用的测试账号");
+        info!("========================================");
+
+        let accounts = list_available_accounts();
+
+        if accounts.is_empty() {
+            info!("⚠️  没有找到任何配置的测试账号");
+            info!("");
+            info!("请创建 .test_mail_accounts.json 文件或设置环境变量");
+            info!("参考 .test_mail_accounts.json.example 文件");
+        } else {
+            info!("✅ 找到 {} 个可用账号:", accounts.len());
+            info!("");
+            for (index, account_key) in accounts.iter().enumerate() {
+                info!("  {}. {}", index + 1, account_key);
+
+                // 尝试加载账号信息
+                if let Some(account) = load_test_account(account_key) {
+                    info!("     邮箱: {}", account.email);
+                    info!("     IMAP: {}:{}", account.imap.host, account.imap.port);
+                }
+                info!("");
+            }
+        }
+
+        info!("========================================");
+        info!("使用方法");
+        info!("========================================");
+        info!("测试特定账号:");
+        info!("  TEST_ACCOUNT=163 cargo test --test provider test_imap_emails -- --nocapture");
+        info!("  TEST_ACCOUNT=gmail cargo test --test provider test_imap_emails -- --nocapture");
+        info!("========================================");
+    }
+
+    /// 测试特定账号的配置加载
+    #[test]
+    fn test_account_config_load() {
+        let account_key = env::var("TEST_ACCOUNT").unwrap_or_else(|_| "163".to_string());
+
+        match load_test_account(&account_key) {
+            Some(account) => {
+                println!("✅ 成功加载账号配置: {}", account_key);
+                println!("   邮箱: {}", account.email);
+                println!("   IMAP: {}:{}", account.imap.host, account.imap.port);
+                println!("   SMTP: {}:{}", account.smtp.host, account.smtp.port);
+            }
+            None => {
+                println!("❌ 未找到账号配置: {}", account_key);
+            }
+        }
     }
 }
