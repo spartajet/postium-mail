@@ -752,7 +752,7 @@ mod tests {
     fn test_auth_manager_new() {
         // 注意：测试需要 Tauri AppHandle，这里只测试结构
         // 实际测试需要集成测试环境
-        assert!(true);
+        // TODO: 实现实际的集成测试
     }
 
     #[test]

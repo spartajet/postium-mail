@@ -50,6 +50,7 @@ pub struct ScheduledTask {
 
 /// 任务类型
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::enum_variant_names)]
 pub enum TaskType {
     /// 完整同步
     #[serde(rename = "full_sync")]

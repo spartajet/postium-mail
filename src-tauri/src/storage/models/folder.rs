@@ -117,7 +117,7 @@ impl StandardFolder {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_folder_name(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "inbox" => StandardFolder::Inbox,
             "starred" => StandardFolder::Starred,

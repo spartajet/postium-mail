@@ -108,7 +108,7 @@ impl OAuthHandler {
         let (code_verifier, code_challenge) = self
             .pkce_store
             .generate_and_store(&state)
-            .map_err(|e| OAuthError::RefreshFailed(e))?;
+            .map_err(OAuthError::RefreshFailed)?;
 
         // 4. 构建 URL 参数
         let scope = oauth_config.scopes.join(" ");
@@ -181,7 +181,7 @@ impl OAuthHandler {
         let code_verifier = self
             .pkce_store
             .take(state)
-            .ok_or_else(|| OAuthError::InvalidGrant)?;
+            .ok_or(OAuthError::InvalidGrant)?;
 
         // 2. 获取 OAuth 配置
         let oauth_config = provider.oauth_config().ok_or_else(|| {
@@ -345,7 +345,7 @@ impl OAuthHandler {
     /// - `Err(message)` - Token 格式无效
     pub fn validate_access_token(&self, access_token: &str) -> Result<()> {
         validate_access_token(access_token)
-            .map_err(|e| OAuthError::RefreshFailed(e))?;
+            .map_err(OAuthError::RefreshFailed)?;
         Ok(())
     }
 

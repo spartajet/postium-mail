@@ -337,11 +337,11 @@ impl FolderRepository {
 
         // IMAP UTF-7 解码逻辑
         let mut result = String::new();
-        let mut chars = encoded.chars().peekable();
+        let chars = encoded.chars().peekable();
         let mut base64_buffer = String::new();
         let mut in_base64 = false;
 
-        while let Some(c) = chars.next() {
+        for c in chars {
             if c == '&' {
                 if in_base64 {
                     // 结束 base64 模式

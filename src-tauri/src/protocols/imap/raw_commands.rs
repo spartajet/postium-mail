@@ -244,7 +244,7 @@ impl CondstoreCommands {
             if line.contains("* CAPABILITY") {
                 // 提取 "* CAPABILITY ..." 后面的部分
                 if let Some(rest) = line.strip_prefix("* CAPABILITY") {
-                    let parts: Vec<&str> = rest.trim().split_whitespace().collect();
+                    let parts: Vec<&str> = rest.split_whitespace().collect();
                     for part in parts {
                         // 处理 AUTH=PLAIN 这样的形式
                         if let Some(clean_part) = part.strip_prefix("AUTH=") {
@@ -297,7 +297,7 @@ impl CondstoreCommands {
             if line.contains("* SEARCH") {
                 // 提取 "* SEARCH ..." 后面的 UID 列表
                 if let Some(rest) = line.strip_prefix("* SEARCH") {
-                    let parts: Vec<&str> = rest.trim().split_whitespace().collect();
+                    let parts: Vec<&str> = rest.split_whitespace().collect();
                     for part in parts {
                         if let Ok(uid) = part.parse::<u32>() {
                             uids.push(uid);

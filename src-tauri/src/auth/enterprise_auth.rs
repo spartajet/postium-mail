@@ -255,13 +255,15 @@ mod tests {
     #[test]
     fn test_enterprise_auth_new() {
         let handler = EnterpriseAuth::new();
-        assert!(true); // 只测试创建成功
+        // 只测试创建成功，不进行实际验证
+        let _ = handler;
     }
 
     #[test]
     fn test_enterprise_auth_default() {
-        let handler = EnterpriseAuth::default();
-        assert!(true); // 只测试创建成功
+        let handler = EnterpriseAuth;
+        // 只测试创建成功，不进行实际验证
+        let _ = handler;
     }
 
     #[test]

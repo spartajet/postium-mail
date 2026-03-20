@@ -4,10 +4,10 @@
 //!
 //! # 核心类型
 //!
-//! - [`EmailAddress`]: 邮件地址（包含邮箱和可选的显示名称）
-//! - [`EmailAttachment`]: 邮件附件
-//! - [`SendEmailRequest`]: 发送邮件请求
-//! - [`SendEmailResult`]: 发送邮件结果
+//! - [`EmailAddress`][]: 邮件地址（包含邮箱和可选的显示名称）
+//! - [`EmailAttachment`][]: 邮件附件
+//! - [`SendEmailRequest`][]: 发送邮件请求
+//! - [`SendEmailResult`][]: 发送邮件结果
 //!
 //! # 使用示例
 //!

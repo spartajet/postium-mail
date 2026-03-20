@@ -166,8 +166,8 @@ impl AccountRepository {
         req: CreateAccountRequest,
     ) -> Result<account::Model> {
         // 检查邮箱是否已存在
-        if let Some(_) = Self::get_by_email(db, &req.email).await? {
-            return Err(StorageError::Database(format!("该邮箱地址已存在")).into());
+        if Self::get_by_email(db, &req.email).await?.is_some() {
+            return Err(StorageError::Database("该邮箱地址已存在".to_string()).into());
         }
 
         // 如果 provider 为 "auto"，使用 ProviderPool 检测

@@ -41,9 +41,9 @@
 //!
 //! ## 主要类型
 //!
-//! - [`AsyncImapClient`]: 异步 IMAP 客户端
-//! - [`ImapAuth`]: 认证方式（密码/OAuth2）
-//! - [`ImapFolder`]: 文件夹元数据
+//! - [`AsyncImapClient`][]: 异步 IMAP 客户端
+//! - [`ImapAuth`][]: 认证方式（密码/OAuth2）
+//! - [`ImapFolder`][]: 文件夹元数据
 //!
 //! # SMTP 模块
 //!
@@ -56,10 +56,10 @@
 //!
 //! ## 主要类型
 //!
-//! - [`SmtpClient`]: SMTP 客户端
-//! - [`SmtpAuth`]: 认证方式
-//! - [`SendEmailRequest`]: 发送邮件请求
-//! - [`SendEmailResult`]: 发送结果
+//! - [`SmtpClient`][]: SMTP 客户端
+//! - [`SmtpAuth`][]: 认证方式
+//! - [`SendEmailRequest`][]: 发送邮件请求
+//! - [`SendEmailResult`][]: 发送结果
 //!
 //! # 连接配置
 //!

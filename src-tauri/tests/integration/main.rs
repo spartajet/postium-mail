@@ -46,10 +46,6 @@ impl GreenMailConfig {
         }
     }
 
-    pub fn default() -> Self {
-        Self::from_env()
-    }
-
     /// 获取 IMAP 服务器地址
     pub fn imap_addr(&self) -> String {
         format!("{}:{}", self.host, self.imap_port)

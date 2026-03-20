@@ -242,6 +242,6 @@ mod tests {
     fn test_command_exports() {
         // 验证命令函数可以被导出
         // 这些测试主要是为了确保编译通过
-        assert!(true);
+        // TODO: 添加实际的测试用例
     }
 }

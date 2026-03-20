@@ -145,20 +145,20 @@
 //!
 //! 本模块还提供 OAuth2 相关工具：
 //!
-//! - [`generate_xoauth2_string()`]: 生成 XOAUTH2 认证字符串
-//! - [`validate_access_token()`]: 验证访问令牌有效性
-//! - [`OAuthTokenResponse`]: OAuth 令牌响应结构
-//! - [`PkceVerifierStore`]: PKCE 验证器存储
+//! - [`generate_xoauth2_string()`][]: 生成 XOAUTH2 认证字符串
+//! - [`validate_access_token()`][]: 验证访问令牌有效性
+//! - [`OAuthTokenResponse`][]: OAuth 令牌响应结构
+//! - [`PkceVerifierStore`][]: PKCE 验证器存储
 //!
 //! # 模块结构
 //!
-//! - [`traits`] - 核心接口定义
-//! - [`account_type`] - 账号类型枚举
-//! - [`config`] - 配置结构体
-//! - [`oauth_utils`] - OAuth 工具函数
-//! - [`provider_pool`] - 服务商池
-//! - [`personal`] - 个人邮箱实现
-//! - [`enterprise`] - 企业邮箱实现
+//! - [`traits`][] - 核心接口定义
+//! - [`account_type`][] - 账号类型枚举
+//! - [`config`][] - 配置结构体
+//! - [`oauth_utils`][] - OAuth 工具函数
+//! - [`provider_pool`][] - 服务商池
+//! - [`personal`][] - 个人邮箱实现
+//! - [`enterprise`][] - 企业邮箱实现
 //!
 //! # 注意事项
 //!

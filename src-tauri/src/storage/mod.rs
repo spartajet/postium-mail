@@ -73,10 +73,10 @@
 //! ## [`cache`] - 缓存管理
 //!
 //! 提供多级缓存策略：
-//! - [`EmailContentCache`]: 邮件内容缓存
-//! - [`CounterCache`]: 计数缓存（未读数等）
-//! - [`FolderListCache`]: 文件夹列表缓存
-//! - [`MemoryCache`]: 通用内存缓存
+//! - [`EmailContentCache`][]: 邮件内容缓存
+//! - [`CounterCache`][]: 计数缓存（未读数等）
+//! - [`FolderListCache`][]: 文件夹列表缓存
+//! - [`MemoryCache`][]: 通用内存缓存
 //!
 //! ## [`search`] - 全文搜索
 //!
@@ -85,12 +85,12 @@
 //! ## [`models`] - 数据模型
 //!
 //! 定义所有实体模型和关系：
-//! - [`account`]: 账号实体
-//! - [`email`]: 邮件实体
-//! - [`folder`]: 文件夹实体
-//! - [`attachment`]: 附件实体
-//! - [`sync_state`]: 同步状态实体
-//! - [`sync_error`): 同步错误实体
+//! - [`account`][]: 账号实体
+//! - [`email`][]: 邮件实体
+//! - [`folder`][]: 文件夹实体
+//! - [`attachment`][]: 附件实体
+//! - [`sync_state`][]: 同步状态实体
+//! - [`sync_error`][]: 同步错误实体
 //!
 //! ## [`migration`] - 数据库迁移
 //!
@@ -189,7 +189,7 @@
 //! - 所有数据库操作都应通过 Repository 层进行
 //! - 缓存数据可能不是实时的
 //! - 大量数据操作应使用批量接口
-//!//! 数据库连接应正确关闭
+//! - 数据库连接应正确关闭
 
 pub mod accounts;
 pub mod cache;

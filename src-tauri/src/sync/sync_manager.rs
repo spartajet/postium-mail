@@ -422,6 +422,7 @@ impl SyncManager {
     /// * `imap_client` - IMAP 客户端引用（可选，用于获取邮件内容）
     /// * `condstore_modified_uids` - CONDSTORE SEARCH MODSEQ 返回的修改 UID（可选）
     /// * `highest_modseq` - 服务器当前的 HIGHESTMODSEQ（可选）
+    #[allow(clippy::too_many_arguments)]
     pub async fn sync_folder(
         &self,
         account_id: i32,

@@ -1196,7 +1196,7 @@ impl AsyncImapClient {
             .map_err(|e| anyhow!("选择文件夹失败 (CONDSTORE): {}", e))?;
 
         // 获取 HIGHESTMODSEQ（服务器支持 CONDSTORE 时返回）
-        let highest_modseq = mailbox.highest_modseq.map(|v| v as u64);
+        let highest_modseq = mailbox.highest_modseq;
 
         tracing::debug!(
             "CONDSTORE SELECT: folder={}, exists={}, highest_modseq={:?}",

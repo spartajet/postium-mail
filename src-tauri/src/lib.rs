@@ -372,7 +372,7 @@ pub fn run() {
                 // ========== FlowEngine 初始化 ==========
                 // 创建 AuthManager
                 let auth_manager = std::sync::Arc::new(
-                    auth::AuthManager::new(&app.handle())
+                    auth::AuthManager::new(app.handle())
                         .expect("无法创建 AuthManager"),
                 );
 

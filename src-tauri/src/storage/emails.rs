@@ -171,7 +171,7 @@ impl EmailRepository {
             .map_err(|e| StorageError::Database(format!("统计邮件失败: {}", e)))?;
 
         // 计算总页数
-        let total_pages = (total + page_size - 1) / page_size;
+        let total_pages = total.div_ceil(page_size);
 
         // 分页查询
         let emails = query
@@ -427,6 +427,7 @@ impl EmailRepository {
     // ========== 同步辅助方法 ==========
 
     /// 保存邮件从 IMAP
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_email_from_imap(
         db: &DbConn,
         account_id: i32,

@@ -10,38 +10,38 @@
 //!
 //! ### 必需方法
 //!
-//! - [`provider_id()`]: 服务商唯一标识
-//! - [`provider_name()`]: 服务商显示名称
-//! - [`account_type()`]: 账号类型（个人/企业）
-//! - [`auth_types()`]: 支持的认证类型列表
-//! - [`default_imap_config()`]: 默认 IMAP 配置
-//! - [`default_smtp_config()`]: 默认 SMTP 配置
-//! - [`capabilities()`]: 服务商能力
-//! - [`detect()`]: 检测邮箱地址是否属于此服务商
-//! - [`supported_domains()`]: 支持的域名列表
+//! - [`provider_id()`][]: 服务商唯一标识
+//! - [`provider_name()`][]: 服务商显示名称
+//! - [`account_type()`][]: 账号类型（个人/企业）
+//! - [`auth_types()`][]: 支持的认证类型列表
+//! - [`default_imap_config()`][]: 默认 IMAP 配置
+//! - [`default_smtp_config()`][]: 默认 SMTP 配置
+//! - [`capabilities()`][]: 服务商能力
+//! - [`detect()`][]: 检测邮箱地址是否属于此服务商
+//! - [`supported_domains()`][]: 支持的域名列表
 //!
 //! ### 可选方法
 //!
-//! - [`oauth_config()`]: OAuth 配置（如果支持 OAuth）
-//! - [`enterprise_config()`]: 企业配置（仅企业账号）
+//! - [`oauth_config()`][]: OAuth 配置（如果支持 OAuth）
+//! - [`enterprise_config()`][]: 企业配置（仅企业账号）
 //!
 //! # 数据类型
 //!
 //! ## 认证相关
 //!
-//! - [`AuthType`]: 认证类型枚举
-//! - [`OAuthConfig`]: OAuth 配置结构体
+//! - [`AuthType`][]: 认证类型枚举
+//! - [`OAuthConfig`][]: OAuth 配置结构体
 //!
 //! ## 服务器配置
 //!
-//! - [`ImapServerConfig`]: IMAP 服务器配置
-//! - [`SmtpServerConfig`]: SMTP 服务器配置
-//! - [`SslMode`]: SSL 模式枚举
+//! - [`ImapServerConfig`][]: IMAP 服务器配置
+//! - [`SmtpServerConfig`][]: SMTP 服务器配置
+//! - [`SslMode`][]: SSL 模式枚举
 //!
 //! ## 服务商能力
 //!
-//! - [`ProviderCapabilities`]: 服务商能力描述
-//! - [`ProviderInfo`]: 服务商信息（用于前端展示）
+//! - [`ProviderCapabilities`][]: 服务商能力描述
+//! - [`ProviderInfo`][]: 服务商信息（用于前端展示）
 //!
 //! # 使用示例
 //!

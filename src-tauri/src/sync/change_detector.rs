@@ -28,6 +28,7 @@ pub mod imap_flags {
 
 /// 邮件标志状态
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub struct EmailFlags {
     pub seen: bool,       // \Seen
     pub flagged: bool,    // \Flagged
@@ -37,18 +38,6 @@ pub struct EmailFlags {
     pub recent: bool,     // \Recent (只读)
 }
 
-impl Default for EmailFlags {
-    fn default() -> Self {
-        Self {
-            seen: false,
-            flagged: false,
-            answered: false,
-            draft: false,
-            deleted: false,
-            recent: false,
-        }
-    }
-}
 
 impl EmailFlags {
     /// 从 IMAP flag 字符串列表解析
@@ -581,12 +570,12 @@ mod tests {
         // 这个测试需要实际的数据库，这里只测试逻辑
         // 模拟数据
         let server_uids = vec![100, 200, 300];
-        let last_sync_uid = Some(150);
+        let last_sync_uid = 150u32;
 
         // 期望：过滤出 > 150 的 UID
         let expected: Vec<u32> = server_uids
             .into_iter()
-            .filter(|&uid| uid > last_sync_uid.unwrap())
+            .filter(|&uid| uid > last_sync_uid)
             .collect();
 
         assert_eq!(expected, vec![200, 300]);
