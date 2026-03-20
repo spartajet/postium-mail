@@ -177,10 +177,8 @@
 //! - 连接会在 Drop 时自动关闭
 //! - OAuth2 认证需要进一步实现（当前返回错误）
 
-use super::{
-    types::{EmailData, EmailFlags, FolderInfo, SpecialUse},
-};
 use super::auth::ImapAuth;
+use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
 use crate::providers::generate_xoauth2_string;
 use anyhow::{anyhow, Result};
 use chrono::Datelike;
