@@ -153,10 +153,10 @@ impl SyncManager {
 
         tracing::info!("获取到 {} 个文件夹", folder_infos.len());
 
-        // 7. 使用 FolderManager 同步文件夹到数据库
+        // 7. 使用 FolderManager 同步文件夹到数据库（传入 provider 以获取文件夹映射）
         let folder_sync_result = self
             .folder_manager
-            .sync_folders_from_info(account_id, &folder_infos)
+            .sync_folders_from_info(account_id, &folder_infos, provider.as_ref())
             .await?;
 
         tracing::info!(

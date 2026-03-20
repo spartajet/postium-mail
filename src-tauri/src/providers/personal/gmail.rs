@@ -4,7 +4,7 @@
 //! OAuth 2.0、密码认证、应用专用密码
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
 
 impl GmailProvider {
     /// Gmail 默认客户端 ID
@@ -125,6 +125,30 @@ impl MailProvider for GmailProvider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["gmail.com", "googlemail.com"]
+    }
+
+    fn folder_mapping(&self) -> StandardFolder {
+        StandardFolder {
+            inbox: vec!["INBOX".to_string()],
+            sent: vec![
+                "Sent".to_string(),
+                "[Gmail]/Sent Mail".to_string(),
+            ],
+            drafts: vec![
+                "Drafts".to_string(),
+                "[Gmail]/Drafts".to_string(),
+            ],
+            spam: vec![
+                "Spam".to_string(),
+                "[Gmail]/Spam".to_string(),
+            ],
+            trash: vec![
+                "Trash".to_string(),
+                "[Gmail]/Trash".to_string(),
+            ],
+            archive: vec!["[Gmail]/All Mail".to_string()],
+            starred: vec!["Starred".to_string()],
+        }
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {

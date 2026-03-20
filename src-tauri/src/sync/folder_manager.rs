@@ -4,6 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
+use crate::providers::MailProvider;
 use crate::storage::models::folder;
 use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set};
 use std::collections::HashMap;
@@ -192,6 +193,7 @@ impl FolderManager {
     ///
     /// * `account_id` - 账号 ID
     /// * `folder_infos` - 从 IMAP 服务器获取的文件夹信息列表
+    /// * `provider` - 邮件服务商（用于获取文件夹映射）
     ///
     /// # 返回
     ///
@@ -200,7 +202,11 @@ impl FolderManager {
         &self,
         account_id: i32,
         folder_infos: &[ImapFolderInfo],
+        provider: &dyn MailProvider,
     ) -> Result<FolderSyncResult> {
+        // 获取服务商的文件夹映射
+        let folder_mapping = provider.folder_mapping();
+
         // 转换 ImapFolderInfo 为 ImapFolder
         let imap_folders: Vec<ImapFolder> = folder_infos
             .iter()
@@ -217,8 +223,18 @@ impl FolderManager {
                         crate::protocols::imap::SpecialUse::Trash => SpecialUse::Trash,
                     },
                     None => {
-                        // 如果没有 special-use，根据名称推断
-                        Self::infer_special_use_from_name(&info.name)
+                        // 如果没有 RFC 6154 special-use，使用服务商映射推断
+                        let standard_type = folder_mapping.find_standard_type(&info.name);
+                        match standard_type {
+                            "inbox" => SpecialUse::Inbox,
+                            "sent" => SpecialUse::Sent,
+                            "drafts" => SpecialUse::Drafts,
+                            "spam" | "junk" => SpecialUse::Junk,
+                            "trash" => SpecialUse::Trash,
+                            "archive" => SpecialUse::Archive,
+                            "starred" | "flagged" => SpecialUse::Flagged,
+                            _ => Self::infer_special_use_from_name(&info.name),
+                        }
                     }
                 };
 

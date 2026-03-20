@@ -4,7 +4,7 @@
 
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig,
+    SmtpServerConfig, StandardFolder,
 };
 use async_trait::async_trait;
 
@@ -83,6 +83,21 @@ impl MailProvider for Mail163Provider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["163.com", "126.com", "yeah.net"]
+    }
+
+    fn folder_mapping(&self) -> StandardFolder {
+        StandardFolder {
+            inbox: vec!["INBOX".to_string()],
+            sent: vec!["Sent".to_string(), "&XfJT0ZAB-".to_string()],
+            drafts: vec!["&g0l6P3ux-".to_string()],
+            spam: vec![
+                "&W4xRaFeDVz6Qrk72-".to_string(),
+                "&V4NXPpCuTvY-".to_string(),
+            ],
+            trash: vec!["&XfJSIJZk-".to_string()],
+            archive: vec!["Archive".to_string(), "&W1hoYw-".to_string()],
+            starred: vec![],
+        }
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {

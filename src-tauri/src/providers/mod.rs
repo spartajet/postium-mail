@@ -180,7 +180,7 @@ mod traits;
 pub use account_type::{AccountType, EnterpriseConfig, ImapConfig, SmtpConfig};
 pub use traits::{
     AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities, SmtpServerConfig,
-    SslMode,
+    SslMode, StandardFolder,
 };
 
 // OAuth 工具导出（供 auth 模块使用）

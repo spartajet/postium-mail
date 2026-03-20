@@ -339,6 +339,96 @@ impl Default for ProviderCapabilities {
     }
 }
 
+/// 标准文件夹映射
+///
+/// 定义了7个标准邮箱文件夹，每个文件夹对应一个或多个 IMAP 文件夹名称
+/// 不同邮件服务商对标准文件夹使用不同的命名，此结构体提供映射关系
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StandardFolder {
+    /// 收件箱对应的 IMAP 文件夹名称列表
+    pub inbox: Vec<String>,
+    /// 已发送对应的 IMAP 文件夹名称列表
+    pub sent: Vec<String>,
+    /// 草稿箱对应的 IMAP 文件夹名称列表
+    pub drafts: Vec<String>,
+    /// 垃圾邮件对应的 IMAP 文件夹名称列表
+    pub spam: Vec<String>,
+    /// 已删除对应的 IMAP 文件夹名称列表
+    pub trash: Vec<String>,
+    /// 归档对应的 IMAP 文件夹名称列表
+    pub archive: Vec<String>,
+    /// 星标邮件对应的 IMAP 文件夹名称列表
+    pub starred: Vec<String>,
+}
+
+impl StandardFolder {
+    /// 创建默认的英文文件夹映射
+    ///
+    /// 提供常见的英文文件夹名称作为默认值
+    pub fn default_english() -> Self {
+        Self {
+            inbox: vec!["INBOX".to_string()],
+            sent: vec!["Sent".to_string(), "Sent Items".to_string()],
+            drafts: vec!["Drafts".to_string()],
+            spam: vec!["Spam".to_string(), "Junk".to_string()],
+            trash: vec!["Trash".to_string(), "Deleted".to_string()],
+            archive: vec!["Archive".to_string()],
+            starred: vec!["Starred".to_string(), "Flagged".to_string()],
+        }
+    }
+
+    /// 从 IMAP 文件夹名称查找对应的标准文件夹类型
+    ///
+    /// 先进行精确匹配，然后进行包含匹配（处理前缀/后缀情况）
+    /// 返回 "inbox", "sent", "drafts", "spam", "trash", "archive", "starred" 或 "other"
+    pub fn find_standard_type(&self, imap_name: &str) -> &str {
+        // 优先完全匹配
+        if self.inbox.iter().any(|n| n == imap_name) {
+            return "inbox";
+        }
+        if self.sent.iter().any(|n| n == imap_name) {
+            return "sent";
+        }
+        if self.drafts.iter().any(|n| n == imap_name) {
+            return "drafts";
+        }
+        if self.spam.iter().any(|n| n == imap_name) {
+            return "spam";
+        }
+        if self.trash.iter().any(|n| n == imap_name) {
+            return "trash";
+        }
+        if self.archive.iter().any(|n| n == imap_name) {
+            return "archive";
+        }
+        if self.starred.iter().any(|n| n == imap_name) {
+            return "starred";
+        }
+
+        // 其次包含匹配（处理前缀/后缀、嵌套文件夹等情况）
+        let imap_lower = imap_name.to_lowercase();
+        for (name, folders) in [
+            ("inbox", &self.inbox),
+            ("sent", &self.sent),
+            ("drafts", &self.drafts),
+            ("spam", &self.spam),
+            ("trash", &self.trash),
+            ("archive", &self.archive),
+            ("starred", &self.starred),
+        ] {
+            // 双向包含匹配：imap_name 包含某个标准名，或某个标准名包含 imap_name
+            if folders.iter().any(|n| {
+                let n_lower = n.to_lowercase();
+                imap_lower.contains(&n_lower) || n_lower.contains(&imap_lower)
+            }) {
+                return name;
+            }
+        }
+
+        "other"
+    }
+}
+
 /// 服务商信息（用于前端展示）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfo {
@@ -397,6 +487,16 @@ pub trait MailProvider: Send + Sync {
 
     /// 获取支持的域名列表
     fn supported_domains(&self) -> Vec<&'static str>;
+
+    /// 获取标准文件夹映射
+    ///
+    /// 返回该服务商使用的标准文件夹到 IMAP 文件夹名称的映射
+    /// 每个标准文件夹可对应多个 IMAP 文件夹名称（支持中英文、别名等）
+    ///
+    /// 默认实现返回通用英文映射，服务商可根据自身特性重写此方法
+    fn folder_mapping(&self) -> StandardFolder {
+        StandardFolder::default_english()
+    }
 
     /// 生成 XOAUTH2 字符串
     fn generate_xoauth2(&self, email: &str, access_token: &str) -> String {
