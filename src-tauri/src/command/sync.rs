@@ -71,7 +71,9 @@ use crate::sync;
 /// - 耗时（毫秒）
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run,ignore
+/// use crate::command::sync::sync_account_with_progress;
+///
 /// // 前端监听进度事件
 /// listen(`sync-progress-${accountId}`, (event) => {
 ///   console.log(`进度: ${event.payload.current}/${event.payload.total}`);
@@ -137,7 +139,9 @@ pub async fn sync_account_with_progress(
 /// | 适用场景 | 后台同步 | 用户触发的同步 |
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::sync::sync_account;
+///
 /// let total = sync_account(db_state, auth_state, provider_state, keyring_state, app_handle, 1).await?;
 /// println!("同步了 {} 封邮件", total);
 /// ```
@@ -203,7 +207,11 @@ pub async fn sync_account(
 /// 6. 返回邮件 ID
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::sync::send_email;
+/// use crate::models::email::{SendEmailRequest, EmailAddress};
+/// use std::default::Default;
+///
 /// let request = SendEmailRequest {
 ///     account_id: 1,
 ///     to: vec![EmailAddress { email: "recipient@example.com".to_string(), name: None }],

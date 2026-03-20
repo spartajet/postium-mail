@@ -224,9 +224,14 @@ export const useAccountStore = defineStore('account', () => {
 
   // 通过 ID 选择账号
   function selectAccountById(accountId: string) {
+    console.log('[selectAccountById] 尝试选择账号:', accountId)
+    console.log('[selectAccountById] 当前账号列表:', accounts.value.map(a => ({ id: a.id, email: a.email })))
     const account = accounts.value.find(a => a.id === accountId)
     if (account) {
+      console.log('[selectAccountById] 找到账号，设置为当前账号:', account.email)
       currentAccount.value = account
+    } else {
+      console.warn('[selectAccountById] 未找到账号:', accountId)
     }
   }
 

@@ -39,7 +39,11 @@ use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
 /// - 其他 → imap.example.com:993
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::connection::test_account_connection;
+/// use crate::models::account::CreateAccountRequest;
+/// use std::default::Default;
+///
 /// let account = CreateAccountRequest {
 ///     email: "user@gmail.com".to_string(),
 ///     provider: "gmail".to_string(),
@@ -105,7 +109,9 @@ pub async fn test_account_connection(
 /// - 其他 → imap.example.com
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::connection::test_email_connection;
+///
 /// // 测试 Gmail 连接
 /// test_email_connection(
 ///     "user@gmail.com".to_string(),

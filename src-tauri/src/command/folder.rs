@@ -44,7 +44,9 @@ use crate::storage;
 /// - `\Unmarked`: 未标记
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::folder::get_folder_stats;
+///
 /// let folders = get_folder_stats(state, 1).await?;
 /// for folder in folders {
 ///     println!("{}: {} 总邮件, {} 未读",

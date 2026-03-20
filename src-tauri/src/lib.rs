@@ -376,7 +376,7 @@ pub fn run() {
                 );
 
                 // 创建 ProviderPool（注册所有默认服务商）
-                let provider_pool = std::sync::Arc::new(providers::ProviderPool::with_defaults());
+                let provider_pool = std::sync::Arc::new(providers::ProviderPool::default());
 
                 // 创建 SyncManager（使用 clone）
                 let sync_manager = std::sync::Arc::new(sync::SyncManager::new(

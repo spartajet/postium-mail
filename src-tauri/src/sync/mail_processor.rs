@@ -5,7 +5,7 @@
 use crate::error::{MailError, Result};
 use crate::storage::models::email;
 use crate::sync::change_detector::EmailFlags;
-use sea_orm::{DbConn, EntityTrait, ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set};
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -27,6 +27,8 @@ pub struct MailProcessResult {
 pub struct MailData {
     /// UID
     pub uid: u32,
+    /// 文件夹名称（标准化为小写）
+    pub folder: String,
     /// Message-ID
     pub message_id: Option<String>,
     /// 主题
@@ -67,15 +69,20 @@ pub struct MailProcessor {
 /// # 参数
 ///
 /// * `email_data` - IMAP 客户端获取的邮件数据
+/// * `folder` - IMAP 文件夹名称（将被标准化为小写）
 ///
 /// # 返回
 ///
 /// 返回 MailData
-pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData) -> MailData {
+pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData, folder: &str) -> MailData {
     use crate::sync::change_detector::EmailFlags;
+
+    // 标准化文件夹名称
+    let normalized_folder = normalize_folder_name(folder);
 
     MailData {
         uid: email_data.uid,
+        folder: normalized_folder,
         message_id: None, // 需要从邮件头中提取
         subject: Some(email_data.subject.clone()),
         sender_name: extract_name_from_address(&email_data.from),
@@ -123,6 +130,74 @@ fn extract_name_from_address(address: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// 标准化文件夹名称
+///
+/// 将 IMAP 文件夹名称映射为标准小写名称
+///
+/// # 参数
+///
+/// * `folder` - IMAP 文件夹名称（如 "INBOX", "Sent Messages", "已发送邮件" 等）
+///
+/// # 返回
+///
+/// 返回标准化的文件夹名称（如 "inbox", "sent", "drafts", "spam", "trash", "archive"）
+fn normalize_folder_name(folder: &str) -> String {
+    let folder_lower = folder.to_lowercase();
+
+    // 常见文件夹名称映射
+    if folder_lower == "inbox" {
+        return "inbox".to_string();
+    }
+
+    // 已发送文件夹映射
+    if folder_lower.contains("sent")
+        || folder_lower.contains("已发送")
+        || folder_lower.contains("发件箱")
+        || folder_lower.contains("已发送邮件")
+    {
+        return "sent".to_string();
+    }
+
+    // 草稿文件夹映射
+    if folder_lower.contains("draft")
+        || folder_lower.contains("草稿")
+        || folder_lower.contains("草稿箱")
+    {
+        return "drafts".to_string();
+    }
+
+    // 垃圾邮件/垃圾箱映射
+    if folder_lower.contains("junk")
+        || folder_lower.contains("spam")
+        || folder_lower.contains("垃圾")
+        || folder_lower.contains("垃圾邮件")
+        || folder_lower.contains("垃圾箱")
+    {
+        return "spam".to_string();
+    }
+
+    // 已删除/废纸篓文件夹映射
+    if folder_lower.contains("trash")
+        || folder_lower.contains("deleted")
+        || folder_lower.contains("已删除")
+        || folder_lower.contains("废纸篓")
+        || folder_lower.contains("删除")
+    {
+        return "trash".to_string();
+    }
+
+    // 归档文件夹映射
+    if folder_lower.contains("archive")
+        || folder_lower.contains("归档")
+        || folder_lower.contains("存档")
+    {
+        return "archive".to_string();
+    }
+
+    // 默认返回原始名称的小写形式
+    folder_lower
 }
 
 /// 从地址字符串中提取邮箱
@@ -199,6 +274,9 @@ impl MailProcessor {
         folder: &str,
         mails: Vec<MailData>,
     ) -> Result<MailProcessResult> {
+        // 将 folder 转换为小写，确保与前端一致
+        let folder = folder.to_lowercase();
+
         tracing::info!(
             "开始处理邮件: account_id={}, folder={}, count={}",
             account_id,
@@ -211,15 +289,14 @@ impl MailProcessor {
         let mut skipped_count = 0;
 
         for mail_data in mails {
-            match self.process_single_mail(account_id, folder, &mail_data).await {
+            match self
+                .process_single_mail(account_id, &folder, &mail_data)
+                .await
+            {
                 Ok(true) => success_count += 1,
                 Ok(false) => skipped_count += 1,
                 Err(e) => {
-                    tracing::error!(
-                        "处理邮件失败: uid={}, error={}",
-                        mail_data.uid,
-                        e
-                    );
+                    tracing::error!("处理邮件失败: uid={}, error={}", mail_data.uid, e);
                     failed_count += 1;
                 }
             }
@@ -284,11 +361,14 @@ impl MailProcessor {
         use crate::storage::models::email::ActiveModel;
 
         // 检查邮件是否已存在
-        let existing = self.check_mail_exists(account_id, folder, mail_data.uid).await?;
+        let existing = self
+            .check_mail_exists(account_id, folder, mail_data.uid)
+            .await?;
 
         if existing {
             // 邮件已存在，更新标志和 MODSEQ
-            self.update_mail_flags(account_id, folder, mail_data).await?;
+            self.update_mail_flags(account_id, folder, mail_data)
+                .await?;
             Ok(false) // 返回 false 表示已存在（跳过插入）
         } else {
             // 插入新邮件
@@ -330,13 +410,8 @@ impl MailProcessor {
     }
 
     /// 检查邮件是否已存在
-    async fn check_mail_exists(
-        &self,
-        account_id: i32,
-        folder: &str,
-        uid: u32,
-    ) -> Result<bool> {
-        use sea_orm::{QueryFilter, ColumnTrait, EntityTrait};
+    async fn check_mail_exists(&self, account_id: i32, folder: &str, uid: u32) -> Result<bool> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         let mails = email::Entity::find()
             .filter(email::Column::AccountId.eq(account_id))
@@ -356,7 +431,7 @@ impl MailProcessor {
         mail_data: &MailData,
     ) -> Result<()> {
         use crate::storage::models::email::ActiveModel;
-        use sea_orm::{QueryFilter, ColumnTrait};
+        use sea_orm::{ColumnTrait, QueryFilter};
 
         let mails = email::Entity::find()
             .filter(email::Column::AccountId.eq(account_id))
@@ -397,13 +472,8 @@ impl MailProcessor {
     /// * `account_id` - 账号 ID
     /// * `folder` - 文件夹名称
     /// * `uids` - 要删除的 UID 列表
-    pub async fn delete_mails(
-        &self,
-        account_id: i32,
-        folder: &str,
-        uids: &[u32],
-    ) -> Result<usize> {
-        use sea_orm::{QueryFilter, ColumnTrait, EntityTrait};
+    pub async fn delete_mails(&self, account_id: i32, folder: &str, uids: &[u32]) -> Result<usize> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         let uid_i32: Vec<i32> = uids.iter().map(|&uid| uid as i32).collect();
 
@@ -460,6 +530,7 @@ mod tests {
 
         let mail_data = MailData {
             uid: 12345,
+            folder: "inbox".to_string(),
             message_id: Some("<test@example.com>".to_string()),
             subject: Some("Test Email".to_string()),
             sender_name: Some("John Doe".to_string()),

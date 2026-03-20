@@ -44,7 +44,9 @@ use crate::providers;
 /// - **Microsoft**: 调用 `https://graph.microsoft.com/v1.0/me`
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::oauth::validate_oauth_token;
+///
 /// let is_valid = validate_oauth_token("google".to_string(), "ya29.a0Af...".to_string()).await?;
 /// if is_valid {
 ///     println!("令牌有效");
@@ -113,7 +115,9 @@ pub async fn validate_oauth_token(
 /// - 其他域名 → 尝试通过 MX 记录检测
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::oauth::get_oauth_auth_url;
+///
 /// let (auth_url, state) = get_oauth_auth_url(auth_manager_state, "user@gmail.com".to_string()).await?;
 /// // 在浏览器中打开 auth_url
 /// open::that(auth_url)?;
@@ -171,7 +175,9 @@ pub async fn get_oauth_auth_url(
 /// - 认证类型：设置为 OAuth2
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::oauth::exchange_oauth_code;
+///
 /// // 收到 OAuth 回调后
 /// let account = exchange_oauth_code(
 ///     db_state,
@@ -293,7 +299,9 @@ pub async fn exchange_oauth_code(
 /// - 在访问令牌即将过期前主动刷新（建议提前 5 分钟）
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::oauth::refresh_oauth_token;
+///
 /// match refresh_oauth_token(auth_manager_state, "user@gmail.com".to_string(), 1).await {
 ///     Ok(token) => println!("令牌已刷新: {}", token.access_token),
 ///     Err(e) => println!("刷新失败: {}", e),

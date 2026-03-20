@@ -40,7 +40,9 @@ use crate::storage;
 /// 失败时返回错误信息字符串
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::email::list_emails;
+///
 /// // 获取 INBOX 的第一页，每页 20 封
 /// let result = list_emails(state, 1, "INBOX".to_string(), 0, 20).await?;
 /// ```
@@ -138,7 +140,9 @@ pub async fn get_email(
 /// - 指定 `account_id`: 仅搜索该账号的邮件
 ///
 /// # 示例
-/// ```rust
+/// ```rust,no_run
+/// use crate::command::email::search_emails_fts;
+///
 /// // 搜索所有账号中包含 "重要" 的邮件
 /// let results = search_emails_fts(state, "重要".to_string(), None, Some(20)).await?;
 ///
