@@ -27,8 +27,8 @@
 //! ## [`folder`]
 //!
 //! 文件夹相关的服务类型：
-//! - `FolderDto` - 文件夹数据传输对象
 //! - `FolderSyncStateDto` - 文件夹同步状态传输对象
+//! - `StandardFolder` - 标准文件夹枚举
 //!
 //! # 设计原则
 //!
@@ -44,4 +44,4 @@ pub mod folder;
 // 重新导出常用类型
 pub use account::{AccountDto, AccountRepository, CreateAccountRequest, UpdateAccountRequest};
 pub use email::{AttachmentInfo, EmailAddress, EmailDetail, EmailListResponse, EmailListItem, EmailRepository, EmailSearchParams, SendEmailRequest};
-pub use folder::{FolderDto, FolderSyncStateDto, StandardFolder};
+pub use folder::{FolderSyncStateDto, StandardFolder};
