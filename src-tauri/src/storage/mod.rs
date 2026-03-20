@@ -203,11 +203,11 @@ pub use cache::{
     CacheManager, CounterCache, EmailContentCache, FolderListCache, MemoryCache,
 };
 pub use database::{DatabaseConnection, Repository, establish_connection, init_database};
-pub use models::{account, attachment, email, folder, folder_sync_state, sync_error, sync_state};
+pub use models::{account, attachment, email, folder_sync_state, sync_error, sync_state};
 pub use search::{SearchResult, SearchService};
 pub use service::{
     AccountDto, AccountRepository, CreateAccountRequest, UpdateAccountRequest,
     AttachmentInfo, EmailAddress, EmailDetail, EmailListResponse,
     EmailListItem, EmailRepository, EmailSearchParams, SendEmailRequest,
-    FolderDto, FolderSyncStateDto, StandardFolder
+    FolderSyncStateDto, StandardFolder
 };
