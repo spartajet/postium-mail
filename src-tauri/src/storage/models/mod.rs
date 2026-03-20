@@ -7,6 +7,7 @@
 //! - [`account`][]: 邮箱账号实体
 //! - [`email`][]: 邮件实体
 //! - [`folder`][]: 文件夹实体
+//! - [`folder_sync_state`][]: 文件夹同步状态实体
 //! - [`attachment`][]: 附件实体
 //! - [`sync_state`][]: 同步状态实体
 //! - [`sync_error`][]: 同步错误实体
@@ -92,6 +93,7 @@ pub mod account;
 pub mod email;
 pub mod attachment;
 pub mod folder;
+pub mod folder_sync_state;
 pub mod sync_state;
 pub mod sync_error;
 
@@ -99,5 +101,6 @@ pub use account::Entity as AccountEntity;
 pub use email::Entity as EmailEntity;
 pub use attachment::Entity as AttachmentEntity;
 pub use folder::Entity as FolderEntity;
+pub use folder_sync_state::Entity as FolderSyncStateEntity;
 pub use sync_state::Entity as SyncStateEntity;
 pub use sync_error::Entity as SyncErrorEntity;

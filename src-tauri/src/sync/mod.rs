@@ -203,7 +203,7 @@ mod sync_error;
 pub use sync_manager::{SyncManager, SyncProgress, SyncStage, SyncResult};
 pub use delta_sync::{DeltaSync, SyncStrategy, DeltaSyncResult};
 pub use change_detector::{ChangeDetector, ChangeType, ChangeDetectionResult, EmailFlags, UidSet};
-pub use folder_manager::{FolderManager, SpecialUse, ImapFolder, FolderSyncResult};
+pub use folder_manager::{FolderManager, SyncStateUpdateResult};
 pub use mail_processor::{MailProcessor, MailData, MailProcessResult};
 pub use sync_state::SyncStateManager;
 pub use sync_error::SyncErrorManager;

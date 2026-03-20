@@ -455,7 +455,7 @@ pub fn run() {
             command::toggle_star,
             command::delete_emails,
             command::move_email_to_folder,
-            command::get_folder_stats,
+            command::get_standard_folders,
             // 同步
             command::sync_account,
             command::sync_account_with_progress,
