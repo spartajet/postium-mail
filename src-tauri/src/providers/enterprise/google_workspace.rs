@@ -116,7 +116,7 @@ impl MailProvider for GoogleWorkspaceProvider {
         vec![AuthType::OAuth2]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: Self::IMAP_HOST.to_string(),
             port: Self::IMAP_PORT,
@@ -124,7 +124,7 @@ impl MailProvider for GoogleWorkspaceProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: Self::SMTP_HOST.to_string(),
             port: Self::SMTP_PORT,
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_google_workspace_imap_config() {
         let provider = GoogleWorkspaceProvider::with_defaults();
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("user@example.com");
 
         assert_eq!(imap_config.host, "imap.gmail.com");
         assert_eq!(imap_config.port, 993);
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_google_workspace_smtp_config() {
         let provider = GoogleWorkspaceProvider::with_defaults();
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("user@example.com");
 
         assert_eq!(smtp_config.host, "smtp.gmail.com");
         assert_eq!(smtp_config.port, 587);

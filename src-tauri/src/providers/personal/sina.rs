@@ -26,17 +26,29 @@ impl MailProvider for SinaMailProvider {
         vec![AuthType::Password]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "sina.cn" => "imap.sina.cn",
+            "vip.sina.com" | "2008.sina.com" => "imap.mail.sina.com.cn",
+            _ => "imap.sina.com",
+        };
         ImapServerConfig {
-            host: "imap.sina.com".to_string(),
+            host: host.to_string(),
             port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "sina.cn" => "smtp.sina.cn",
+            "vip.sina.com" | "2008.sina.com" => "smtp.mail.sina.com.cn",
+            _ => "smtp.sina.com",
+        };
         SmtpServerConfig {
-            host: "smtp.sina.com".to_string(),
+            host: host.to_string(),
             port: 465,
             ssl: crate::providers::SslMode::Implicit,
         }
@@ -98,17 +110,27 @@ mod tests {
     fn test_sina_config() {
         let provider = SinaMailProvider;
 
-        // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        // 测试 sina.com 域名的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@sina.com");
         assert_eq!(imap_config.host, "imap.sina.com");
         assert_eq!(imap_config.port, 993);
         assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
-        // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@sina.com");
         assert_eq!(smtp_config.host, "smtp.sina.com");
         assert_eq!(smtp_config.port, 465);
         assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+
+        // 测试 sina.cn 域名的配置
+        let imap_config = provider.imap_config("test@sina.cn");
+        assert_eq!(imap_config.host, "imap.sina.cn");
+
+        // 测试 vip.sina.com 和 2008.sina.com 域名使用相同服务器
+        let imap_config = provider.imap_config("test@vip.sina.com");
+        assert_eq!(imap_config.host, "imap.mail.sina.com.cn");
+
+        let imap_config = provider.imap_config("test@2008.sina.com");
+        assert_eq!(imap_config.host, "imap.mail.sina.com.cn");
     }
 
     #[test]

@@ -127,7 +127,7 @@ impl SyncManager {
             .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
 
         // 3. 获取 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config(&account.email);
 
         // 4. 连接到 IMAP 服务器
         let mut imap_client = self

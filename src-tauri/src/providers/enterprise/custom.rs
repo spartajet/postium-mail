@@ -145,7 +145,7 @@ impl MailProvider for CustomProvider {
         vec![AuthType::Password, AuthType::OAuth2]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: self.imap_host.clone(),
             port: self.imap_port,
@@ -153,7 +153,7 @@ impl MailProvider for CustomProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: self.smtp_host.clone(),
             port: self.smtp_port,
@@ -283,7 +283,7 @@ mod tests {
             "imap.test.com",
             "smtp.test.com"
         );
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("user@example.com");
 
         assert_eq!(imap_config.host, "imap.test.com");
         assert_eq!(imap_config.port, 993);
@@ -297,7 +297,7 @@ mod tests {
             "imap.test.com",
             "smtp.test.com"
         );
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("user@example.com");
 
         assert_eq!(smtp_config.host, "smtp.test.com");
         assert_eq!(smtp_config.port, 587);

@@ -27,7 +27,7 @@ impl MailProvider for YahooProvider {
         ]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "imap.mail.yahoo.com".to_string(),
             port: 993,
@@ -35,7 +35,7 @@ impl MailProvider for YahooProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.mail.yahoo.com".to_string(),
             port: 587,

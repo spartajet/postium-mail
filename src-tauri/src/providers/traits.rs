@@ -373,11 +373,11 @@ pub trait MailProvider: Send + Sync {
     /// 支持的认证类型
     fn auth_types(&self) -> Vec<AuthType>;
 
-    /// 默认 IMAP 配置
-    fn default_imap_config(&self) -> ImapServerConfig;
+    /// 获取 IMAP 配置（根据邮箱地址返回对应域名服务器配置）
+    fn imap_config(&self, email: &str) -> ImapServerConfig;
 
-    /// 默认 SMTP 配置
-    fn default_smtp_config(&self) -> SmtpServerConfig;
+    /// 获取 SMTP 配置（根据邮箱地址返回对应域名服务器配置）
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig;
 
     /// OAuth 配置（如果支持）
     fn oauth_config(&self) -> Option<OAuthConfig> {
@@ -462,10 +462,10 @@ mod tests {
             fn auth_types(&self) -> Vec<AuthType> {
                 vec![AuthType::Password]
             }
-            fn default_imap_config(&self) -> ImapServerConfig {
+            fn imap_config(&self, _email: &str) -> ImapServerConfig {
                 Default::default()
             }
-            fn default_smtp_config(&self) -> SmtpServerConfig {
+            fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
                 Default::default()
             }
             fn capabilities(&self) -> ProviderCapabilities {

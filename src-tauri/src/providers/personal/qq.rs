@@ -26,17 +26,27 @@ impl MailProvider for QqMailProvider {
         vec![AuthType::Password]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "foxmail.com" => "imap.foxmail.com",
+            _ => "imap.qq.com",
+        };
         ImapServerConfig {
-            host: "imap.qq.com".to_string(),
+            host: host.to_string(),
             port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "foxmail.com" => "smtp.foxmail.com",
+            _ => "smtp.qq.com",
+        };
         SmtpServerConfig {
-            host: "smtp.qq.com".to_string(),
+            host: host.to_string(),
             port: 587,
             ssl: crate::providers::SslMode::StartTls,
         }
@@ -96,17 +106,23 @@ mod tests {
     fn test_qqmail_config() {
         let provider = QqMailProvider;
 
-        // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        // 测试 QQ 邮箱 (qq.com) 的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@qq.com");
         assert_eq!(imap_config.host, "imap.qq.com");
         assert_eq!(imap_config.port, 993);
         assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
-        // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@qq.com");
         assert_eq!(smtp_config.host, "smtp.qq.com");
         assert_eq!(smtp_config.port, 587);
         assert!(matches!(smtp_config.ssl, crate::providers::SslMode::StartTls));
+
+        // 测试 Foxmail 邮箱 (foxmail.com) 的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@foxmail.com");
+        assert_eq!(imap_config.host, "imap.foxmail.com");
+
+        let smtp_config = provider.smtp_config("test@foxmail.com");
+        assert_eq!(smtp_config.host, "smtp.foxmail.com");
     }
 
     #[test]
