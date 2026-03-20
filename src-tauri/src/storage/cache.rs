@@ -1,6 +1,134 @@
-//! 缓存管理
+//! 缓存管理模块
 //!
-//! 提供内存缓存功能，用于减少数据库查询
+//! 提供多级内存缓存策略，用于减少数据库查询和提高响应速度。
+//!
+//! # 核心功能
+//!
+//! - **通用缓存**: 键值对内存缓存，支持 TTL 和容量限制
+//! - **文件夹缓存**: 缓存账号的文件夹列表
+//! - **邮件内容缓存**: 缓存邮件正文内容
+//! - **计数器缓存**: 缓存未读数等统计数据
+//!
+//! # 缓存策略
+//!
+//! ## TTL 配置
+//!
+//! | 缓存类型 | TTL | 容量 | 用途 |
+//! |----------|-----|------|------|
+//! | FolderListCache | 5 分钟 | 100 项 | 文件夹列表 |
+//! | EmailContentCache | 10 分钟 | 500 项 | 邮件内容 |
+//! | CounterCache | 1 分钟 | 100 项 | 未读数等统计 |
+//!
+//! ## 淘汰策略
+//!
+//! 当缓存达到容量上限时，采用简单的 FIFO 淘汰策略：
+//!
+//! ```text
+//! 插入新项时：
+//! 1. 检查容量
+//! 2. 如果已满且键不存在，移除一个旧项
+//! 3. 插入新项
+//! ```
+//!
+//! # 数据结构
+//!
+//! ## CacheItem
+//!
+//! 每个缓存项包含：
+//!
+//! ```rust
+//! struct CacheItem<T> {
+//!     value: T,                // 缓存值
+//!     expires_at: Option<Instant>,  // 过期时间
+//! }
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 基本使用
+//!
+//! ```rust,no_run
+//! # use crate::storage::cache::MemoryCache;
+//! # async fn example() {
+//! let cache = MemoryCache::new();
+//!
+//! // 设置缓存
+//! cache.set("key1".to_string(), "value1".to_string()).await;
+//!
+//! // 获取缓存
+//! if let Some(value) = cache.get(&"key1".to_string()).await {
+//!     println!("缓存命中: {}", value);
+//! }
+//!
+//! // 删除缓存
+//! cache.remove(&"key1".to_string()).await;
+//! # }
+//! ```
+//!
+//! ## 带配置的缓存
+//!
+//! ```rust,no_run
+//! # use crate::storage::cache::MemoryCache;
+//! # use std::time::Duration;
+//! # async fn example() {
+//! // 10 秒 TTL，最多 100 项
+//! let cache = MemoryCache::with_config(
+//!     Some(Duration::from_secs(10)),
+//!     Some(100),
+//! );
+//! # }
+//! ```
+//!
+//! ## CacheManager
+//!
+//! ```rust,no_run
+//! # use crate::storage::cache::CacheManager;
+//! # async fn example() {
+//! let manager = CacheManager::new();
+//!
+//! // 缓存文件夹列表
+//! manager.folders.set(1, folders_vec).await;
+//!
+//! // 缓存邮件内容
+//! manager.email_contents.set("email:123", body_html).await;
+//!
+//! // 缓存未读数
+//! manager.counters.set("unread:1", 10).await;
+//!
+//! // 定期清理过期项
+//! manager.cleanup_all().await;
+//! # }
+//! ```
+//!
+//! # 缓存失效
+//!
+//! ## 主动失效
+//!
+//! ```rust,no_run
+//! # use crate::storage::cache::CacheManager;
+//! # async fn example(manager: &CacheManager, account_id: i32) {
+//! // 新邮件到达时，清除相关缓存
+//! manager.counters.remove(&format!("unread:{}", account_id)).await;
+//!
+//! // 文件夹变更时，清除文件夹缓存
+//! manager.folders.remove(&account_id).await;
+//! # }
+//! ```
+//!
+//! ## 自动过期
+//!
+//! 缓存在读取时自动检查过期：
+//!
+//! ```text
+//! 读取 → 检查过期时间 → 已过期返回 None → 未过期返回值
+//! ```
+//!
+//! # 性能考虑
+//!
+//! - **内存占用**: 缓存项占用内存，应根据实际情况调整容量
+//! - **并发访问**: 使用 `Arc<RwLock<>>` 保证线程安全
+//! - **清理频率**: 建议定期调用 `cleanup_expired` 清理过期项
+//! - **命中率**: 监控缓存命中率以优化 TTL 和容量配置
 
 use std::collections::HashMap;
 use std::sync::Arc;

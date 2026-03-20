@@ -1,6 +1,141 @@
-//! 服务商 Trait 定义
+//! 邮件服务商 Trait 定义
 //!
-//! 定义邮件服务商的抽象接口
+//! 定义所有邮件服务商必须实现的抽象接口。
+//!
+//! # 核心接口
+//!
+//! ## MailProvider Trait
+//!
+//! [`MailProvider`] 是所有邮件服务商必须实现的核心接口。
+//!
+//! ### 必需方法
+//!
+//! - [`provider_id()`]: 服务商唯一标识
+//! - [`provider_name()`]: 服务商显示名称
+//! - [`account_type()`]: 账号类型（个人/企业）
+//! - [`auth_types()`]: 支持的认证类型列表
+//! - [`default_imap_config()`]: 默认 IMAP 配置
+//! - [`default_smtp_config()`]: 默认 SMTP 配置
+//! - [`capabilities()`]: 服务商能力
+//! - [`detect()`]: 检测邮箱地址是否属于此服务商
+//! - [`supported_domains()`]: 支持的域名列表
+//!
+//! ### 可选方法
+//!
+//! - [`oauth_config()`]: OAuth 配置（如果支持 OAuth）
+//! - [`enterprise_config()`]: 企业配置（仅企业账号）
+//!
+//! # 数据类型
+//!
+//! ## 认证相关
+//!
+//! - [`AuthType`]: 认证类型枚举
+//! - [`OAuthConfig`]: OAuth 配置结构体
+//!
+//! ## 服务器配置
+//!
+//! - [`ImapServerConfig`]: IMAP 服务器配置
+//! - [`SmtpServerConfig`]: SMTP 服务器配置
+//! - [`SslMode`]: SSL 模式枚举
+//!
+//! ## 服务商能力
+//!
+//! - [`ProviderCapabilities`]: 服务商能力描述
+//! - [`ProviderInfo`]: 服务商信息（用于前端展示）
+//!
+//! # 使用示例
+//!
+//! ## 实现自定义服务商
+//!
+//! ```rust
+//! use crate::providers::MailProvider;
+//! use async_trait::async_trait;
+//!
+//! pub struct MyProvider {
+//!     email: String,
+//! }
+//!
+//! #[async_trait]
+//! impl MailProvider for MyProvider {
+//!     fn provider_id(&self) -> &str {
+//!         "my-provider"
+//!     }
+//!
+//!     fn provider_name(&self) -> &str {
+//!         "My Provider"
+//!     }
+//!
+//!     fn account_type(&self) -> crate::providers::AccountType {
+//!         crate::providers::AccountType::Personal
+//!     }
+//!
+//!     fn auth_types(&self) -> Vec<crate::providers::AuthType> {
+//!         vec![crate::providers::AuthType::Password]
+//!     }
+//!
+//!     fn default_imap_config(&self) -> crate::providers::ImapServerConfig {
+//!         // ...
+//! # }
+//!     # fn default_smtp_config(&self) -> crate::providers::SmtpServerConfig { ... }
+//!     # fn capabilities(&self) -> crate::providers::ProviderCapabilities { ... }
+//!     # async fn detect(&self, email: &str) -> crate::error::Result<bool> { ... }
+//!     # fn supported_domains(&self) -> Vec<&'static str> { ... }
+//!     # fn box_clone(&self) -> Box<dyn MailProvider> { ... }
+//! }
+//! ```
+//!
+//! ## 获取服务器配置
+//!
+//! ```rust,no_run
+//! # async fn example() -> anyhow::Result<()> {
+//! # let provider: Box<dyn crate::providers::MailProvider> = todo!();
+//! // 获取 IMAP 配置
+//! let imap = provider.default_imap_config();
+//! println!("IMAP: {}:{}", imap.host, imap.port);
+//!
+//! // 获取 SMTP 配置
+//! let smtp = provider.default_smtp_config();
+//! println!("SMTP: {}:{}", smtp.host, smtp.port);
+//!
+//! // 检查能力
+//! let caps = provider.capabilities();
+//! if caps.supports_oauth {
+//!     println!("支持 OAuth");
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 生成 XOAUTH2 字符串
+//!
+//! ```rust,no_run
+//! # let provider: Box<dyn crate::providers::MailProvider> = todo!();
+//! let xoauth2 = provider.generate_xoauth2(
+//!     "user@example.com",
+//!     "ya29.a0AfH6..."
+//! );
+//! // 用于 SASL XOAUTH2 认证
+//! ```
+//!
+//! # SSL 模式说明
+//!
+//! - **None**: 无加密（不推荐）
+//! - **StartTls**: STARTTLS 升级（端口 587，推荐）
+//! - **Implicit**: 隐式 SSL/TLS（端口 465）
+//!
+//! # 服务商能力说明
+//!
+//! [`ProviderCapabilities`] 描述服务商支持的 IMAP 扩展和功能：
+//!
+//! - `supports_idle`: 支持 IDLE 实时推送
+//! - `supports_condstore`: 支持 CONDSTORE 增量同步
+//! - `supports_push`: 支持推送通知
+//! - `supports_oauth`: 支持 OAuth2 认证
+//! - `supports_enterprise`: 支持企业特性
+//! - `supports_labels`: 支持标签（如 Gmail 标签）
+//! - `supports_threads`: 支持邮件线程
+//! - `supports_search`: 支持服务器搜索
+//! - `max_message_size`: 最大邮件大小
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,90 @@
-//! 数据库访问层
+//! 数据库连接管理
 //!
-//! 提供统一的数据库操作接口，封装 Sea-ORM
+//! 提供统一的数据库连接池管理和健康检查功能。
+//!
+//! # 核心功能
+//!
+//! - **连接池管理**: SeaORM 连接池配置和生命周期管理
+//! - **健康检查**: 数据库连接健康状态检测
+//! - **连接配置**: 可配置的连接参数（超时、连接数等）
+//! - **Repository Trait**: 统一的数据库访问抽象
+//!
+//! # 连接池配置
+//!
+//! ```text
+//! max_connections: 10      - 最大连接数
+//! min_connections: 1       - 最小空闲连接数
+//! connect_timeout: 8s      - 连接超时
+//! idle_timeout: 600s       - 空闲连接超时
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 创建数据库连接
+//!
+//! ```rust,no_run
+//! use crate::storage::DatabaseConnection;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! // 创建新的数据库实例
+//! let db = DatabaseConnection::new("sqlite://./data.db").await?;
+//!
+//! // 健康检查
+//! let is_healthy = db.health_check().await?;
+//! println!("数据库健康: {}", is_healthy);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 从现有连接创建
+//!
+//! ```rust,no_run
+//! # use sea_orm::DbConn;
+//! # use crate::storage::DatabaseConnection;
+//! # fn example(conn: DbConn) {
+//! let db = DatabaseConnection::from_conn(conn);
+//!
+//! // 获取底层连接
+//! let conn = db.connection();
+//! # }
+//! ```
+//!
+//! # Repository Trait
+//!
+//! [`Repository`] trait 定义了统一的数据访问接口：
+//!
+//! ```rust
+//! #[async_trait::async_trait]
+//! pub trait Repository: Send + Sync {
+//!     fn db(&self) -> &DbConn;
+//! }
+//! ```
+//!
+//! 实现 Repository 的结构体可以：
+//! - 访问数据库连接
+//! - 执行 CRUD 操作
+//! - 被组合到更复杂的存储操作中
+//!
+//! # 连接 URL 格式
+//!
+//! ## SQLite
+//!
+//! ```text
+//! sqlite://./path/to/db.db
+//! sqlite://./data.db?mode=rwc
+//! ```
+//!
+//! 查询参数：
+//! - `mode=rwc` - 读写创建模式
+//! - `cache=shared` - 共享缓存模式
+//! - `thread_mode=SERIALIZED` - 线程安全模式
+//!
+//! # 注意事项
+//!
+//! - SQLite 连接池大小通常较小（1-10 个连接）
+//! - 长时间运行的应用应定期进行健康检查
+//! - 数据库文件应放置在用户数据目录中
+//! - 生产环境应考虑数据库备份策略
 
 use sea_orm::DbConn;
 use std::sync::Arc;

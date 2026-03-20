@@ -1,3 +1,44 @@
+//! 账号实体模型
+//!
+//! 定义邮箱账号的数据库实体和相关 DTO。
+//!
+//! # 实体字段
+//!
+//! | 字段 | 类型 | 说明 | 默认值 |
+//! |------|------|------|--------|
+//! | id | i32 | 主键 | 自动生成 |
+//! | name | String | 账号显示名称 | - |
+//! | email | String | 邮箱地址（唯一） | - |
+//! | provider | String | 服务商 ID | - |
+//! | imap_host | Option\<String\> | IMAP 服务器地址 | 自动配置 |
+//! | imap_port | Option\<i32\> | IMAP 端口 | 自动配置 |
+//! | imap_ssl | Option\<bool\> | IMAP SSL | true |
+//! | smtp_host | Option\<String\> | SMTP 服务器地址 | 自动配置 |
+//! | smtp_port | Option\<i32\> | SMTP 端口 | 自动配置 |
+//! | smtp_ssl | Option\<bool\> | SMTP SSL | true |
+//! | color | Option\<String\> | UI 显示颜色 | - |
+//! | sync_enabled | bool | 是否启用同步 | true |
+//! | last_sync_at | Option\<i64\> | 最后同步时间 | - |
+//! | auth_type | String | 认证类型 | "password" |
+//! | oauth_provider | Option\<String\> | OAuth 服务商 | - |
+//! | oauth_expires_at | Option\<i64\> | Token 过期时间 | - |
+//!
+//! # 安全注意事项
+//!
+//! 敏感信息不存储在数据库中：
+//!
+//! - `password`: 已删除，使用 Keyring 存储
+//! - `oauth_token`: 已删除，使用 Keyring 存储
+//! - `oauth_refresh_token`: 已删除，使用 Keyring 存储
+//!
+//! # 关联关系
+//!
+//! ```text
+//! Account
+//!   ├─ 1:N ─ Email (账号的所有邮件)
+//!   └─ 1:N ─ Folder (账号的所有文件夹)
+//! ```
+
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 use serde::{Deserialize, Serialize};

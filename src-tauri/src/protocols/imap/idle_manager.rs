@@ -208,9 +208,14 @@ impl ImapIdleManager {
                         tracing::error!("检查 IDLE 支持失败: {}", e);
                         *state.write().await = IdleState::Disconnected;
 
-                        if reconnect_config.enabled && reconnect_attempts < reconnect_config.max_attempts {
+                        if reconnect_config.enabled
+                            && reconnect_attempts < reconnect_config.max_attempts
+                        {
                             reconnect_attempts += 1;
-                            let delay = Self::calculate_reconnect_delay(reconnect_attempts, &reconnect_config);
+                            let delay = Self::calculate_reconnect_delay(
+                                reconnect_attempts,
+                                &reconnect_config,
+                            );
                             tracing::info!("等待 {} 秒后重连...", delay);
                             *state.write().await = IdleState::Reconnecting;
                             tokio::time::sleep(Duration::from_secs(delay)).await;
@@ -228,7 +233,11 @@ impl ImapIdleManager {
                 }
             }
 
-            tracing::info!("⏹ IDLE 监听已停止: account_id={}, folder={}", account_id, folder);
+            tracing::info!(
+                "⏹ IDLE 监听已停止: account_id={}, folder={}",
+                account_id,
+                folder
+            );
         });
 
         Ok(())
@@ -293,7 +302,7 @@ impl ImapIdleManager {
     fn calculate_reconnect_delay(attempt: u32, config: &ReconnectConfig) -> u64 {
         let delay = (config.initial_delay_secs as f64
             * config.backoff_multiplier.powi(attempt as i32 - 1))
-            .min(config.max_delay_secs as f64) as u64;
+        .min(config.max_delay_secs as f64) as u64;
         delay
     }
 }
@@ -309,10 +318,13 @@ mod tests {
             folder: "INBOX".to_string(),
             uid: 123,
         };
-        assert_eq!(event, IdleEvent::NewEmail {
-            folder: "INBOX".to_string(),
-            uid: 123,
-        });
+        assert_eq!(
+            event,
+            IdleEvent::NewEmail {
+                folder: "INBOX".to_string(),
+                uid: 123,
+            }
+        );
     }
 
     #[test]
@@ -389,16 +401,22 @@ mod tests {
 
         // 接收事件
         let event1 = rx.recv().await.unwrap();
-        assert_eq!(event1, IdleEvent::NewEmail {
-            folder: "INBOX".to_string(),
-            uid: 1,
-        });
+        assert_eq!(
+            event1,
+            IdleEvent::NewEmail {
+                folder: "INBOX".to_string(),
+                uid: 1,
+            }
+        );
 
         let event2 = rx.recv().await.unwrap();
-        assert_eq!(event2, IdleEvent::FlagsChanged {
-            folder: "INBOX".to_string(),
-            uid: 1,
-            flags: vec!["\\Seen".to_string()],
-        });
+        assert_eq!(
+            event2,
+            IdleEvent::FlagsChanged {
+                folder: "INBOX".to_string(),
+                uid: 1,
+                flags: vec!["\\Seen".to_string()],
+            }
+        );
     }
 }

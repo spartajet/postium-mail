@@ -1,6 +1,150 @@
 //! SMTP 客户端实现
 //!
-//! 提供邮件发送功能，支持密码和 OAuth2 认证
+//! 提供邮件发送功能，基于 `lettre` 库实现。
+//!
+//! # 核心功能
+//!
+//! - **TLS 支持**: STARTTLS (端口 587) 和隐式 SSL/TLS (端口 465)
+//! - **认证方式**: 密码认证和 OAuth2/XOAUTH2
+//! - **邮件构建**: 支持纯文本、HTML 和多部分邮件
+//! - **附件支持**: MIME 多部分附件（待完整实现）
+//! - **异步接口**: 使用 tokio spawn_blocking 包装 lettre 的同步 API
+//!
+//! # 与 lettre 库的关系
+//!
+//! 本模块是对 `lettre` 库的封装：
+//!
+//! | 功能 | lettre | SmtpClient |
+//! |------|--------|------------|
+//! | 核心协议 | ✅ | ✅ (使用 lettre) |
+//! | 异步接口 | ❌ (同步) | ✅ (spawn_blocking) |
+//! | 状态管理 | 手动 | 自动 |
+//! | 错误处理 | lettre::error | SmtpError |
+//! | 类型定义 | lettre | 自定义类型 |
+//!
+//! # 连接类型
+//!
+//! ## 端口 465 - SSL/TLS
+//!
+//! 直接使用 SSL/TLS 加密连接。
+//!
+//! ```rust,no_run
+//! # use crate::protocols::smtp::{SmtpClient, SmtpAuth};
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = SmtpClient::new();
+//! client.connect("smtp.gmail.com", 465, "user@gmail.com", SmtpAuth::Password("...".to_string())).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 端口 587 - STARTTLS
+//!
+//! 先使用普通连接，然后升级到 TLS。
+//!
+//! ```rust,no_run
+//! # use crate::protocols::smtp::{SmtpClient, SmtpAuth};
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = SmtpClient::new();
+//! client.connect("smtp.gmail.com", 587, "user@gmail.com", SmtpAuth::Password("...".to_string())).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 其他端口
+//!
+//! 使用普通连接（不推荐，不安全）。
+//!
+//! # 使用示例
+//!
+//! ## 基本发送流程
+//!
+//! ```rust,no_run
+//! use crate::protocols::smtp::{SmtpClient, SmtpAuth, SendEmailRequest};
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let mut client = SmtpClient::new();
+//!
+//! // 1. 连接
+//! let auth = SmtpAuth::Password("app_password".to_string());
+//! client.connect("smtp.gmail.com", 587, "user@gmail.com", auth).await?;
+//!
+//! // 2. 构建请求
+//! let request = SendEmailRequest {
+//!     from: "sender@example.com".to_string(),
+//!     to: vec!["recipient@example.com".to_string()],
+//!     cc: None,
+//!     bcc: None,
+//!     subject: "测试邮件".to_string(),
+//!     html_body: "<h1>测试内容</h1>".to_string(),
+//!     text_body: Some("测试内容".to_string()),
+//!     attachments: vec![],
+//! };
+//!
+//! // 3. 发送
+//! let result = client.send_email(request).await?;
+//! println!("邮件已发送: {}", result.message_id);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## OAuth2 认证
+//!
+//! ```rust,no_run
+//! # use crate::protocols::smtp::{SmtpClient, SmtpAuth};
+//! # async fn example() -> anyhow::Result<()> {
+//! # let mut client = SmtpClient::new();
+//! let auth = SmtpAuth::OAuth2("ya29.a0AfH6...".to_string());
+//! client.connect("smtp.gmail.com", 587, "user@gmail.com", auth).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # MIME 邮件结构
+//!
+//! ## 多部分邮件
+//!
+//! ```text
+//! mixed (根容器)
+//!   ├── alternative (正文选择)
+//!   │   ├── text/plain (纯文本)
+//!   │   └── text/html (HTML)
+//!   └── attachment (附件 1)
+//! ```
+//!
+//! - `alternative`: 客户端选择显示纯文本或 HTML
+//! - `mixed`: 混合正文和附件
+//!
+//! # 常见问题
+//!
+//! ## 认证失败
+//!
+//! - 检查用户名和密码是否正确
+//! - Gmail/Outlook 需要应用专用密码
+//! - OAuth2 令牌可能已过期
+//!
+//! ## 连接超时
+//!
+//! - 检查网络连接
+//! - 检查防火墙设置
+//! - 验证服务器地址和端口
+//!
+//! ## 邮件被拒
+//!
+//! - 检查发件人地址是否有效
+//! - 检查收件人地址是否有效
+//! - 检查邮件内容是否触发垃圾邮件过滤
+//!
+//! # 限制说明
+//!
+//! - lettre 是同步库，使用 spawn_blocking 包装为异步
+//! - 附件功能尚未完整实现（当前仅占位）
+//! - 暂不支持自定义邮件头
+//!
+//! # 参考资料
+//!
+//! - [lettre 文档](https://docs.rs/lettre/)
+//! - [RFC 5321 - SMTP](https://datatracker.ietf.org/doc/html/rfc5321)
+//! - [RFC 6409 - Submission Port](https://datatracker.ietf.org/doc/html/rfc6409)
 
 use lettre::{
     message::{header::ContentType, Mailbox},
@@ -15,6 +159,31 @@ use super::error::{SmtpError, SmtpResult};
 use super::types::{SendEmailRequest, SendEmailResult};
 
 /// SMTP 客户端
+///
+/// 基于 lettre 库的异步 SMTP 客户端封装。
+///
+/// # 设计目标
+///
+/// - 简化邮件发送流程
+/// - 自动管理连接状态
+/// - 支持常见的认证方式
+/// - 提供异步接口
+///
+/// # 使用模式
+///
+/// ```text
+/// 创建实例 → 连接服务器 → 发送邮件 → 断开连接
+/// ```
+///
+/// # 注意事项
+///
+/// - 客户端内部持有连接，需要注意生命周期
+/// - 连接可以复用发送多封邮件
+/// - 建议在使用完毕后调用 `disconnect()` 清理资源
+///
+/// # 线程安全
+///
+/// 使用 Arc<Mutex<>> 包装内部状态，支持跨线程访问。
 pub struct SmtpClient {
     mailer: Arc<Mutex<Option<SmtpTransport>>>,
     from_address: Arc<Mutex<String>>,
@@ -22,6 +191,11 @@ pub struct SmtpClient {
 
 impl SmtpClient {
     /// 创建新的 SMTP 客户端
+    ///
+    /// # 返回
+    ///
+    /// 返回一个未连接的客户端实例。
+    /// 需要调用 `connect()` 方法建立连接后才能发送邮件。
     pub fn new() -> Self {
         Self {
             mailer: Arc::new(Mutex::new(None)),
@@ -30,6 +204,41 @@ impl SmtpClient {
     }
 
     /// 连接到 SMTP 服务器
+    ///
+    /// 建立到 SMTP 服务器的连接并执行认证。
+    ///
+    /// # 参数
+    ///
+    /// - `host`: SMTP 服务器地址（如 "smtp.gmail.com"）
+    /// - `port`: SMTP 服务器端口
+    ///   - `465`: SSL/TLS 加密连接
+    ///   - `587`: STARTTLS（推荐）
+    ///   - 其他: 普通连接（不推荐）
+    /// - `username`: 用户名（通常是邮箱地址）
+    /// - `auth`: 认证信息
+    ///
+    /// # 返回
+    ///
+    /// 成功时返回空值，失败时返回错误。
+    ///
+    /// # 错误
+    ///
+    /// - 网络连接失败
+    /// - TLS 握手失败
+    /// - 认证失败
+    /// - 配置错误
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use crate::protocols::smtp::{SmtpClient, SmtpAuth};
+    /// # async fn example() -> anyhow::Result<()> {
+    /// # let mut client = SmtpClient::new();
+    /// let auth = SmtpAuth::Password("app_password".to_string());
+    /// client.connect("smtp.gmail.com", 587, "user@gmail.com", auth).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn connect(
         &self,
         host: &str,

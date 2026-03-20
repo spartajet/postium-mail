@@ -1,6 +1,130 @@
-//! 邮件全文搜索
+//! 邮件全文搜索模块
 //!
-//! 提供基于 SQLite FTS5 的邮件全文搜索功能
+//! 提供基于 SQLite FTS5 全文搜索扩展的邮件搜索功能。
+//!
+//! # 核心功能
+//!
+//! - **全文搜索**: 基于 FTS5 的高效全文搜索
+//! - **多字段搜索**: 同时搜索主题、发件人、正文
+//! - **简单搜索**: 使用 LIKE 的备用搜索方案
+//! - **搜索历史**: 热门搜索关键词（TODO）
+//!
+//! # FTS5 全文搜索
+//!
+//! ## 什么是 FTS5
+//!
+//! FTS (Full-Text Search) 是 SQLite 的全文搜索扩展，FTS5 是最新版本：
+//!
+//! - 高效的倒排索引
+//! - 支持布尔查询、短语查询、前缀查询
+//! - 支持中文分词（需配置 simple tokenizer）
+//!
+//! ## 虚拟表结构
+//!
+//! ```sql
+//! CREATE VIRTUAL TABLE emails_fts USING fts5(
+//!     subject,
+//!     sender_email,
+//!     sender_name,
+//!     body_text,
+//!     content=emails,
+//!     content_rowid=rowid
+//! );
+//! ```
+//!
+//! # 搜索语法
+//!
+//! ## 基本搜索
+//!
+//! ```text
+//! hello           → 包含 "hello" 的邮件
+//! "hello world"   → 精确短语 "hello world"
+//! ```
+//!
+//! ## 布尔操作
+//!
+//! ```text
+//! hello OR world  → 包含 "hello" 或 "world"
+//! hello NOT world → 包含 "hello" 但不含 "world"
+//! hello AND world → 同时包含 "hello" 和 "world"
+//! ```
+//!
+//! ## 前缀查询
+//!
+//! ```text
+//! hel*            → 以 "hel" 开头的单词
+//! ```
+//!
+//! # 使用示例
+//!
+//! ## 基本搜索
+//!
+//! ```rust,no_run
+//! # use crate::storage::SearchService;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! let results = SearchService::search_emails(
+//!     &db,
+//!     Some(1),              // 账号 ID（None 表示所有账号）
+//!     "重要通知",           // 搜索关键词
+//!     Some(50),             // 最大结果数
+//! ).await?;
+//!
+//! for result in results {
+//!     println!("{} - {}", result.subject, result.sender_email);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## 简单搜索（备用）
+//!
+//! 当 FTS5 不可用时，使用 LIKE 搜索：
+//!
+//! ```rust,no_run
+//! # use crate::storage::SearchService;
+//! # async fn example() -> anyhow::Result<()> {
+//! # let db = todo!();
+//! let results = SearchService::simple_search(
+//!     &db,
+//!     Some(1),
+//!     "重要",
+//! ).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # 查询处理
+//!
+//! ## 特殊字符转义
+//!
+//! FTS5 查询中的单引号需要转义为双引号：
+//!
+//! ```text
+//! John's email → John''s email
+//! ```
+//!
+//! ## 空格处理
+//!
+//! 包含空格的查询自动转为短语搜索：
+//!
+//! ```text
+//! "hello world" → MATCH '"hello world"'
+//! ```
+//!
+//! # 性能优化
+//!
+//! - FTS5 使用倒排索引，搜索速度快
+//! - 限制返回结果数量（默认 50）
+//! - 结果按时间倒序排列
+//! - 考虑添加搜索结果缓存
+//!
+//! # 安全注意事项
+//!
+//! - FTS5 MATCH 不支持参数化查询
+//! - 使用字符串拼接，需要手动转义特殊字符
+//! - 单引号转义为双引号防止 SQL 注入
+//! - 未来考虑使用更安全的查询方式
 
 use crate::storage::models::email;
 use anyhow::{Context, Result};

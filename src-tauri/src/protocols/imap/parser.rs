@@ -1,5 +1,148 @@
+//! 邮件解析模块
+//!
+//! 提供邮件解析功能，基于 `mail_parser` 库实现 RFC 5322 和 MIME 标准。
+//!
+//! # 核心功能
+//!
+//! - **RFC 2047 解码**: 支持多种字符集和编码方式的邮件头解码
+//! - **乱码检测**: 自动检测并修复常见的编码问题
+//! - **中文支持**: 特殊优化 GBK、GB18030、Big5 等中文编码
+//! - **骨架同步**: 仅解析邮件头，不下载完整正文
+//! - **附件提取**: 解析 MIME 附件信息
+//!
+//! # RFC 2047 编码支持
+//!
+//! 邮件头（如 Subject、From）可能使用 RFC 2047 编码来表示非 ASCII 字符。
+//!
+//! ## 编码格式
+//!
+//! ```text
+//! =?charset?encoding?encoded-text?=
+//! ```
+//!
+//! ## 支持的编码
+//!
+//! | 字符集 | Base64 (B) | Quoted-Printable (Q) |
+//! |--------|-----------|---------------------|
+//! | UTF-8 | ✅ | ✅ |
+//! | GBK | ✅ | ✅ |
+//! | GB18030 | ✅ | ✅ |
+//! | GB2312 | ✅ | ✅ |
+//! | Big5 | ✅ | ❌ |
+//!
+//! ## 示例
+//!
+//! ```text
+//! Subject: =?GBK?B?xOO6ww==?=           (Base64 编码的 GBK)
+//! Subject: =?UTF-8?Q?=E4=B8=AD=E6=96=87?=  (Quoted-Printable 编码的 UTF-8)
+//! ```
+//!
+//! # 乱码检测与修复
+//!
+//! `is_garbled()` 函数检测以下乱码模式：
+//!
+//! 1. **Unicode 替换字符过多**: 替换字符（�）占比超过 5%
+//! 2. **GBK 错误解码模式**: 检测 GBK 被错误当作 Latin-1 解码的特征字符
+//!
+//! `fix_encoding_issue()` 函数尝试以下修复策略：
+//!
+//! 1. 解码 RFC 2047 编码
+//! 2. 检测是否仍然乱码
+//! 3. 移除替换字符
+//! 4. 返回清理后的文本
+//!
+//! # mail_parser 集成
+//!
+//! 本模块使用 `mail_parser` 库进行核心邮件解析，但针对以下问题进行了增强：
+//!
+//! ## mail_parser 的限制
+//!
+//! - 对 RFC 2047 GBK 编码的支持有问题
+//! - 某些中文邮件头解码不正确
+//!
+//! ## 增强方案
+//!
+//! 1. **原始邮件头提取**: 直接从原始邮件中提取 Subject 字段
+//! 2. **自定义解码器**: 实现完整的 RFC 2047 解码器
+//! 3. **编码检测**: 自动检测并处理编码问题
+//! 4. **降级策略**: mail_parser 解码失败时使用自定义解码
+//!
+//! # 中文字符编码支持
+//!
+//! ## 支持的编码
+//!
+//! | 编码 | 使用场景 | 解码支持 |
+//! |------|---------|---------|
+//! | GBK | 简体中文（大陆） | ✅ 完全支持 |
+//! | GB18030 | GBK 超集 | ✅ 完全支持 |
+//! | GB2312 | 简体中文（旧标准） | ✅ 完全支持 |
+//! | Big5 | 繁体中文（台湾/香港） | ✅ 完全支持 |
+//! | Shift_JIS | 日文 | ✅ 完全支持 |
+//! | UTF-8 | 通用 | ✅ 完全支持 |
+//!
+//! # 函数说明
+//!
+//! ## 主要解析函数
+//!
+//! - [`parse_email_with_mail_parser()`]: 解析完整邮件，包含正文和附件
+//! - [`parse_email_header_only()`]: 仅解析邮件头，用于骨架同步
+//!
+//! ## 编码处理函数
+//!
+//! - [`decode_rfc2047()`]: 解码 RFC 2047 编码字符串
+//! - [`is_garbled()`]: 检测字符串是否乱码
+//! - [`fix_encoding_issue()`]: 修复编码问题
+//! - [`extract_and_decode_subject()`]: 从原始邮件头提取并解码主题
+//!
+//! ## 辅助函数
+//!
+//! - [`decode_quoted_printable_utf8()`]: 解码 QP 编码的 UTF-8
+//! - [`decode_quoted_printable_gbk()`]: 解码 QP 编码的 GBK
+//! - [`extract_attachments()`]: 提取附件信息
+//!
+//! # 使用示例
+//!
+//! ## 解析完整邮件
+//!
+//! ```rust,no_run
+//! use crate::protocols::imap::parser::parse_email_with_mail_parser;
+//!
+//! let raw_email = "From: sender@example.com\n..."; // 原始邮件
+//! let email = parse_email_with_mail_parser(&raw_email, 123)?;
+//!
+//! println!("主题: {}", email.subject);
+//! println!("发件人: {}", email.from);
+//! println!("纯文本: {}", email.body_text);
+//! ```
+//!
+//! ## 仅解析邮件头
+//!
+//! ```rust,no_run
+//! use crate::protocols::imap::parser::parse_email_header_only;
+//!
+//! let raw_header = "From: sender@example.com\n..."; // 原始邮件头
+//! let header = parse_email_header_only(&raw_header, 123)?;
+//!
+//! println!("主题: {}", header.subject);
+//! // 不包含正文和附件
+//! ```
+//!
+//! # 注意事项
+//!
+//! - Subject 字段使用自定义解码器，绕过 mail_parser 的 GBK 问题
+//! - 日期解析失败时使用当前时间作为回退
+//! - From 地址缺失时使用空字符串而不是错误
+//! - 附件名缺失时根据 content-type 生成默认名称
+//!
+//! # 参考资料
+//!
+//! - [RFC 5322 - Internet Message Format](https://datatracker.ietf.org/doc/html/rfc5322)
+//! - [RFC 2047 - MIME (Multipurpose Internet Mail Extensions) Part Three](https://datatracker.ietf.org/doc/html/rfc2047)
+//! - [RFC 2183 - Communicating Presentation Information in Internet Messages](https://datatracker.ietf.org/doc/html/rfc2183)
+//!
+
+use super::types::{EmailAttachment, EmailData, EmailFlags};
 use anyhow::{anyhow, Result};
-use super::types::{EmailData, EmailFlags, EmailAttachment};
 use mail_parser::MimeHeaders;
 
 /// 检测字符串是否包含大量乱码字符
@@ -20,7 +163,8 @@ fn is_garbled(input: &str) -> bool {
 
     // 检查是否包含特定的GBK编码错误模式
     // GBK被当作Latin-1解码时，会产生特定的字符序列
-    if input.contains('ƶ') || input.contains('Ʊ') || input.contains('ĵ') || input.contains('ӷ') {
+    if input.contains('ƶ') || input.contains('Ʊ') || input.contains('ĵ') || input.contains('ӷ')
+    {
         // 这些字符是GBK中文被错误解码的典型标志
         return true;
     }
@@ -83,7 +227,12 @@ fn decode_rfc2047(input: &str) -> Result<String> {
                 // Quoted-Printable 编码的 UTF-8
                 decode_quoted_printable_utf8(encoded_text)
             }
-            ("GBK", "Q") | ("GBK", "q") | ("GB18030", "Q") | ("GB18030", "q") | ("GB2312", "Q") | ("GB2312", "q") => {
+            ("GBK", "Q")
+            | ("GBK", "q")
+            | ("GB18030", "Q")
+            | ("GB18030", "q")
+            | ("GB2312", "Q")
+            | ("GB2312", "q") => {
                 // Quoted-Printable 编码的 GBK
                 decode_quoted_printable_gbk(encoded_text)
             }
@@ -173,10 +322,7 @@ fn fix_encoding_issue(input: &str) -> String {
 
     // 如果解码后仍然存在乱码，尝试其他方法
     if is_garbled(&decoded) {
-        tracing::warn!(
-            "检测到编码问题且RFC 2047解码后仍有乱码: 主题={}",
-            decoded
-        );
+        tracing::warn!("检测到编码问题且RFC 2047解码后仍有乱码: 主题={}", decoded);
 
         // 尝试移除替换字符
         let cleaned = decoded.replace('\u{FFFD}', "");
@@ -268,21 +414,27 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
     // 解析 To 地址
     let to = message
         .to()
-        .map(|addrs| addrs.iter()
-            .filter_map(|addr| addr.address())
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", "))
+        .map(|addrs| {
+            addrs
+                .iter()
+                .filter_map(|addr| addr.address())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
 
     // 解析 Cc 地址
     let cc = message
         .cc()
-        .map(|addrs| addrs.iter()
-            .filter_map(|addr| addr.address())
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", "))
+        .map(|addrs| {
+            addrs
+                .iter()
+                .filter_map(|addr| addr.address())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
 
     // 解析日期 - 使用 to_rfc822() 而不是 to_rfc2822()
@@ -348,22 +500,36 @@ fn extract_attachments(message: &mail_parser::Message<'_>) -> Vec<EmailAttachmen
     let mut attachments = Vec::new();
 
     for part in message.attachments() {
-        let filename: String = part.attachment_name()
+        let filename: String = part
+            .attachment_name()
             .map(|s: &str| s.to_string())
             .unwrap_or_else(|| {
                 // 如果没有文件名，使用 content-type 生成一个
-                let content_type = part.content_type()
+                let content_type = part
+                    .content_type()
                     .map(|ct| {
-                        let subtype = ct.c_subtype.as_ref().map(|s| s.as_ref()).unwrap_or("octet-stream");
+                        let subtype = ct
+                            .c_subtype
+                            .as_ref()
+                            .map(|s| s.as_ref())
+                            .unwrap_or("octet-stream");
                         format!("{}/{}", ct.ctype(), subtype)
                     })
                     .unwrap_or_else(|| "application/octet-stream".to_string());
-                format!("attachment.{}", content_type.split('/').next_back().unwrap_or("bin"))
+                format!(
+                    "attachment.{}",
+                    content_type.split('/').next_back().unwrap_or("bin")
+                )
             });
 
-        let content_type = part.content_type()
+        let content_type = part
+            .content_type()
             .map(|ct| {
-                let subtype = ct.c_subtype.as_ref().map(|s| s.as_ref()).unwrap_or("octet-stream");
+                let subtype = ct
+                    .c_subtype
+                    .as_ref()
+                    .map(|s| s.as_ref())
+                    .unwrap_or("octet-stream");
                 format!("{}/{}", ct.ctype(), subtype)
             })
             .unwrap_or_else(|| "application/octet-stream".to_string());
@@ -409,21 +575,27 @@ pub fn parse_email_header_only(raw: &str, uid: u32) -> Result<super::types::Emai
     // 解析 To 地址
     let to = message
         .to()
-        .map(|addrs| addrs.iter()
-            .filter_map(|addr| addr.address())
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", "))
+        .map(|addrs| {
+            addrs
+                .iter()
+                .filter_map(|addr| addr.address())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
 
     // 解析 Cc 地址
     let cc = message
         .cc()
-        .map(|addrs| addrs.iter()
-            .filter_map(|addr| addr.address())
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(", "))
+        .map(|addrs| {
+            addrs
+                .iter()
+                .filter_map(|addr| addr.address())
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
 
     // 解析日期
