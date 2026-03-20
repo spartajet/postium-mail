@@ -15,6 +15,7 @@
 //! | m007 | 2025-03-17 | 添加账号类型字段（个人/企业） |
 //! | m008 | 2025-03-17 | 添加 MODSEQ 支持（CONDSTORE） |
 //! | m009 | 2025-03-21 | 创建 folder_sync_states 表（分离同步状态） |
+//! | m010 | 2025-03-21 | 删除 folders 表（已废弃） |
 //!
 //! # 迁移顺序
 //!
@@ -83,7 +84,7 @@
 //!
 //! - **accounts**: email (UNIQUE)
 //! - **emails**: (account_id, folder), is_read, is_starred
-//! - **folders**: (account_id, imap_name) UNIQUE
+//! - **folder_sync_states**: (account_id, imap_name) UNIQUE, uidvalidity, synced_at
 //! - **attachments**: email_id
 
 pub mod m001_20250314_init;
@@ -95,4 +96,5 @@ pub mod m006_20250315_add_sync_operations;
 pub mod m007_20250317_add_account_types;
 pub mod m008_20250317_add_modseq_support;
 pub mod m009_20250321_create_folder_sync_states;
+pub mod m010_20250321_drop_folders_table;
 

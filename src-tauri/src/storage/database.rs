@@ -216,6 +216,11 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
         .await
         .map_err(|e| StorageError::Database(format!("运行迁移 m009 失败: {}", e)))?;
 
+    // 删除 folders 表（已废弃）
+    m::m010_20250321_drop_folders_table::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m010 失败: {}", e)))?;
+
     Ok(())
 }
 
