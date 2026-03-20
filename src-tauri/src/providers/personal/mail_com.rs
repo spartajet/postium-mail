@@ -26,7 +26,7 @@ impl MailProvider for MailComProvider {
         vec![AuthType::Password]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "imap.mail.com".to_string(),
             port: 993,
@@ -34,7 +34,7 @@ impl MailProvider for MailComProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.mail.com".to_string(),
             port: 587,
@@ -98,13 +98,13 @@ mod tests {
         let provider = MailComProvider;
 
         // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.mail.com");
         assert_eq!(imap_config.port, 993);
         assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
         // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.mail.com");
         assert_eq!(smtp_config.port, 587);
         assert!(matches!(smtp_config.ssl, crate::providers::SslMode::StartTls));

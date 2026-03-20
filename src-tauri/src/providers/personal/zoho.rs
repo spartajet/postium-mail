@@ -29,7 +29,7 @@ impl MailProvider for ZohoMailProvider {
         vec![AuthType::Password, AuthType::OAuth2]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "imap.zoho.com".to_string(),
             port: 993,
@@ -37,7 +37,7 @@ impl MailProvider for ZohoMailProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.zoho.com".to_string(),
             port: 465,
@@ -123,7 +123,7 @@ mod tests {
         let provider = ZohoMailProvider;
 
         // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.zoho.com");
         assert_eq!(imap_config.port, 993);
         assert!(matches!(
@@ -132,7 +132,7 @@ mod tests {
         ));
 
         // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.zoho.com");
         assert_eq!(smtp_config.port, 465);
         assert!(matches!(

@@ -90,7 +90,7 @@ impl MailProvider for OutlookProvider {
         ]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: Self::IMAP_HOST.to_string(),
             port: Self::IMAP_PORT,
@@ -98,7 +98,7 @@ impl MailProvider for OutlookProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: Self::SMTP_HOST.to_string(),
             port: Self::SMTP_PORT,

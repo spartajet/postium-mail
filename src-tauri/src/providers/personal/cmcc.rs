@@ -26,7 +26,7 @@ impl MailProvider for CmccMailProvider {
         vec![AuthType::Password]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "imap.139.com".to_string(),
             port: 993,
@@ -34,7 +34,7 @@ impl MailProvider for CmccMailProvider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.139.com".to_string(),
             port: 465,
@@ -103,13 +103,13 @@ mod tests {
         let provider = CmccMailProvider;
 
         // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.139.com");
         assert_eq!(imap_config.port, 993);
         assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
 
         // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.139.com");
         assert_eq!(smtp_config.port, 465);
         assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));

@@ -374,10 +374,10 @@ mod tests {
         fn auth_types(&self) -> Vec<AuthType> {
             vec![AuthType::Password]
         }
-        fn default_imap_config(&self) -> ImapServerConfig {
+        fn imap_config(&self, _email: &str) -> ImapServerConfig {
             Default::default()
         }
-        fn default_smtp_config(&self) -> SmtpServerConfig {
+        fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
             Default::default()
         }
         fn capabilities(&self) -> ProviderCapabilities {

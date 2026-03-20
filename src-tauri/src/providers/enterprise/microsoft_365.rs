@@ -130,7 +130,7 @@ impl MailProvider for Microsoft365Provider {
         ]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "outlook.office365.com".to_string(),
             port: 993,
@@ -138,7 +138,7 @@ impl MailProvider for Microsoft365Provider {
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.office365.com".to_string(),
             port: 587,
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn test_microsoft365_imap_config() {
         let provider = Microsoft365Provider::with_defaults();
-        let imap_config = provider.default_imap_config();
+        let imap_config = provider.imap_config("user@example.com");
 
         assert_eq!(imap_config.host, "outlook.office365.com");
         assert_eq!(imap_config.port, 993);
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn test_microsoft365_smtp_config() {
         let provider = Microsoft365Provider::with_defaults();
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("user@example.com");
 
         assert_eq!(smtp_config.host, "smtp.office365.com");
         assert_eq!(smtp_config.port, 587);

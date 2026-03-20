@@ -29,17 +29,29 @@ impl MailProvider for Mail163Provider {
         vec![AuthType::Password]
     }
 
-    fn default_imap_config(&self) -> ImapServerConfig {
+    fn imap_config(&self, email: &str) -> ImapServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "126.com" => "imap.126.com",
+            "yeah.net" => "imap.yeah.net",
+            _ => "imap.163.com",
+        };
         ImapServerConfig {
-            host: "imap.163.com".to_string(),
+            host: host.to_string(),
             port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
-    fn default_smtp_config(&self) -> SmtpServerConfig {
+    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
+        let domain = email.split('@').nth(1).unwrap_or("");
+        let host = match domain {
+            "126.com" => "smtp.126.com",
+            "yeah.net" => "smtp.yeah.net",
+            _ => "smtp.163.com",
+        };
         SmtpServerConfig {
-            host: "smtp.163.com".to_string(),
+            host: host.to_string(),
             port: 465,
             ssl: crate::providers::SslMode::Implicit,
         }
@@ -51,7 +63,7 @@ impl MailProvider for Mail163Provider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            supports_idle: true,
+            supports_idle: false,
             supports_condstore: false,
             supports_push: false,
             supports_oauth: false,
@@ -100,23 +112,28 @@ mod tests {
     fn test_mail163_config() {
         let provider = Mail163Provider;
 
-        // 测试 IMAP 配置
-        let imap_config = provider.default_imap_config();
+        // 测试 163.com 域名的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@163.com");
         assert_eq!(imap_config.host, "imap.163.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(
-            imap_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
 
-        // 测试 SMTP 配置
-        let smtp_config = provider.default_smtp_config();
+        let smtp_config = provider.smtp_config("test@163.com");
         assert_eq!(smtp_config.host, "smtp.163.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(
-            smtp_config.ssl,
-            crate::providers::SslMode::Implicit
-        ));
+
+        // 测试 126.com 域名的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@126.com");
+        assert_eq!(imap_config.host, "imap.126.com");
+
+        let smtp_config = provider.smtp_config("test@126.com");
+        assert_eq!(smtp_config.host, "smtp.126.com");
+
+        // 测试 yeah.net 域名的 IMAP/SMTP 配置
+        let imap_config = provider.imap_config("test@yeah.net");
+        assert_eq!(imap_config.host, "imap.yeah.net");
+
+        let smtp_config = provider.smtp_config("test@yeah.net");
+        assert_eq!(smtp_config.host, "smtp.yeah.net");
     }
 
     #[test]
@@ -142,7 +159,7 @@ mod tests {
         let provider = Mail163Provider;
         let caps = provider.capabilities();
 
-        assert!(caps.supports_idle);
+        assert!(!caps.supports_idle);
         assert!(!caps.supports_condstore);
         assert!(!caps.supports_push);
         assert!(!caps.supports_oauth);

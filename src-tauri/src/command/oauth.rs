@@ -215,8 +215,8 @@ pub async fn exchange_oauth_code(
         .await
         .map_err(|e| e.to_string())?;
 
-    let imap_config = provider.default_imap_config();
-    let smtp_config = provider.default_smtp_config();
+    let imap_config = provider.imap_config(&email);
+    let smtp_config = provider.smtp_config(&email);
 
     // 构建账号创建请求
     let account_req = models::account::CreateAccountRequest {

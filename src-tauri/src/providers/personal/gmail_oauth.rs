@@ -2,14 +2,13 @@
 //!
 //! 基于 OAuth 2.0 和 PKCE 的 Gmail 认证实现
 
+use crate::error::{MailError, Result};
 use oauth2::{
-    basic::BasicClient,
-    AuthUrl, ClientId, CsrfToken, PkceCodeVerifier, PkceCodeChallenge,
+    basic::BasicClient, AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
     RedirectUrl, Scope, TokenUrl,
 };
 use serde::{Deserialize, Serialize};
 use serde_json;
-use crate::error::{MailError, Result};
 
 impl GmailOAuthService {
     /// Gmail 默认客户端 ID
@@ -17,7 +16,8 @@ impl GmailOAuthService {
     /// 注册地址: https://console.cloud.google.com/
     /// 应用类型: Desktop app
     /// 授权重定向 URI: postium-mail://oauth/callback
-    const DEFAULT_CLIENT_ID: &str = "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
+    const DEFAULT_CLIENT_ID: &str =
+        "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
 
     /// Gmail 默认重定向 URI
     ///
@@ -62,15 +62,9 @@ impl GmailOAuthService {
     /// 从配置创建新的 OAuth 服务
     ///
     /// 用于自定义配置或特殊场景
-    pub fn new(
-        client_id: String,
-        redirect_uri: String,
-        scopes: Vec<String>,
-    ) -> Result<Self> {
+    pub fn new(client_id: String, redirect_uri: String, scopes: Vec<String>) -> Result<Self> {
         if client_id.is_empty() {
-            return Err(MailError::Internal(
-                "GOOGLE_CLIENT_ID 未设置".to_string()
-            ));
+            return Err(MailError::Internal("GOOGLE_CLIENT_ID 未设置".to_string()));
         }
 
         Ok(Self {
@@ -86,16 +80,17 @@ impl GmailOAuthService {
     pub fn from_env() -> Result<Self> {
         use std::env;
 
-        let client_id = env::var("GOOGLE_CLIENT_ID")
-            .unwrap_or_else(|_| Self::DEFAULT_CLIENT_ID.to_string());
+        let client_id =
+            env::var("GOOGLE_CLIENT_ID").unwrap_or_else(|_| Self::DEFAULT_CLIENT_ID.to_string());
 
         let redirect_uri = env::var("GOOGLE_REDIRECT_URI")
             .unwrap_or_else(|_| Self::DEFAULT_REDIRECT_URI.to_string());
 
-        let scopes_str = env::var("GOOGLE_SCOPES")
-            .unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));
+        let scopes_str =
+            env::var("GOOGLE_SCOPES").unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));
 
-        let scopes = scopes_str.split_whitespace()
+        let scopes = scopes_str
+            .split_whitespace()
             .map(|s| s.to_string())
             .collect();
 
@@ -124,12 +119,12 @@ impl GmailOAuthService {
             .set_token_uri(token_url)
             .set_redirect_uri(
                 RedirectUrl::new(self.redirect_uri.clone())
-                    .map_err(|e| MailError::Internal(format!("无效的重定向 URI: {}", e)))?
+                    .map_err(|e| MailError::Internal(format!("无效的重定向 URI: {}", e)))?,
             );
 
         // 生成 PKCE code verifier 和 challenge
-        use rand::Rng;
         use rand::distributions::Alphanumeric;
+        use rand::Rng;
 
         let code_verifier: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
@@ -138,7 +133,8 @@ impl GmailOAuthService {
             .collect();
 
         // 使用 oauth_utils 中的方法创建 code_challenge
-        let code_challenge_str = crate::providers::oauth_utils::PkceVerifierStore::create_code_challenge(&code_verifier);
+        let code_challenge_str =
+            crate::providers::oauth_utils::PkceVerifierStore::create_code_challenge(&code_verifier);
 
         // 存储 verifier（使用全局存储）
         use crate::providers::oauth_utils::PkceVerifierStore;
@@ -146,18 +142,21 @@ impl GmailOAuthService {
 
         static VERIFIER_STORE: Lazy<PkceVerifierStore> = Lazy::new(PkceVerifierStore::new);
 
-        VERIFIER_STORE.generate_and_store(state)
+        VERIFIER_STORE
+            .generate_and_store(state)
             .map_err(|e| MailError::Internal(format!("存储 verifier 失败: {}", e)))?;
 
         // 构建 scope
-        let scopes = self.scopes
+        let scopes = self
+            .scopes
             .iter()
             .map(|s| Scope::new(s.clone()))
             .collect::<Vec<_>>();
 
         // 创建 PkceCodeChallenge（v5 API 使用 from_code_verifier_sha256）
         let pkce_verifier_for_challenge = PkceCodeVerifier::new(code_verifier.clone());
-        let code_challenge = PkceCodeChallenge::from_code_verifier_sha256(&pkce_verifier_for_challenge);
+        let code_challenge =
+            PkceCodeChallenge::from_code_verifier_sha256(&pkce_verifier_for_challenge);
 
         // 生成授权 URL（v5 API：闭包不接受参数）
         let (auth_url, csrf_token) = client
@@ -180,7 +179,8 @@ impl GmailOAuthService {
 
         static VERIFIER_STORE: Lazy<PkceVerifierStore> = Lazy::new(PkceVerifierStore::new);
 
-        let code_verifier = VERIFIER_STORE.take(state)
+        let code_verifier = VERIFIER_STORE
+            .take(state)
             .ok_or_else(|| MailError::Internal("未找到 PKCE verifier，可能已过期".to_string()))?;
 
         // 将 code 转换为 AuthorizationCode
@@ -223,7 +223,9 @@ impl GmailOAuthService {
             .ok_or_else(|| MailError::Internal("缺少 access_token".to_string()))?
             .to_string();
 
-        let refresh_token = token_response["refresh_token"].as_str().map(|s| s.to_string());
+        let refresh_token = token_response["refresh_token"]
+            .as_str()
+            .map(|s| s.to_string());
         let expires_in = token_response["expires_in"].as_u64();
 
         Ok(GmailTokenResponse {
@@ -320,8 +322,14 @@ mod tests {
         assert!(service.is_ok());
         let service = service.unwrap();
         assert_eq!(service.client_id, GmailOAuthService::DEFAULT_CLIENT_ID);
-        assert_eq!(service.redirect_uri, GmailOAuthService::DEFAULT_REDIRECT_URI);
-        assert_eq!(service.scopes.len(), GmailOAuthService::DEFAULT_SCOPES.len());
+        assert_eq!(
+            service.redirect_uri,
+            GmailOAuthService::DEFAULT_REDIRECT_URI
+        );
+        assert_eq!(
+            service.scopes.len(),
+            GmailOAuthService::DEFAULT_SCOPES.len()
+        );
     }
 
     #[test]
@@ -410,7 +418,9 @@ mod tests {
         use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine;
 
-        assert!(xoauth2.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
+        assert!(xoauth2
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
 
         // 验证解码后包含正确的信息
         let decoded = BASE64.decode(&xoauth2).unwrap();
