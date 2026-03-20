@@ -29,7 +29,6 @@ use tauri_plugin_keyring::KeyringExt;
 
 use super::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
 use crate::crypto;
-use crate::storage::models;
 use crate::protocols::smtp;
 use crate::storage;
 use crate::sync;
@@ -228,7 +227,7 @@ pub async fn sync_account(
 pub async fn send_email(
     db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
-    request: models::email::SendEmailRequest,
+    request: storage::SendEmailRequest,
 ) -> Result<String, String> {
     let db = db_state.clone_conn();
 

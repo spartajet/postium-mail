@@ -10,8 +10,8 @@
 //! 支持常见邮件服务商的自动配置，也支持自定义服务器设置。
 
 use super::KeyringState;
-use crate::storage::models;
 use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
+use crate::storage;
 
 /// 测试账号配置的 IMAP 连接
 ///
@@ -41,7 +41,7 @@ use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
 /// # 示例
 /// ```rust,no_run
 /// use crate::command::connection::test_account_connection;
-/// use crate::models::account::CreateAccountRequest;
+/// use crate::storage::CreateAccountRequest;
 /// use std::default::Default;
 ///
 /// let account = CreateAccountRequest {
@@ -57,7 +57,7 @@ use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
 #[tauri::command]
 pub async fn test_account_connection(
     _keyring_state: tauri::State<'_, KeyringState>,
-    account: models::account::CreateAccountRequest,
+    account: storage::CreateAccountRequest,
 ) -> Result<ConnectionTestResult, String> {
     let password = account.password.clone();
 

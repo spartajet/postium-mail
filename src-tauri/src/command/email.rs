@@ -16,7 +16,6 @@
 //! - `limit`: 每页数量，建议 20-50
 
 use super::DatabaseState;
-use crate::storage::models;
 use crate::storage;
 
 /// 分页获取邮件列表
@@ -109,7 +108,7 @@ pub async fn list_emails(
 pub async fn get_email(
     state: tauri::State<'_, DatabaseState>,
     id: i32,
-) -> Result<models::email::EmailDetail, String> {
+) -> Result<storage::EmailDetail, String> {
     let db = state.clone_conn();
     storage::EmailRepository::get_detail(&db, id)
         .await

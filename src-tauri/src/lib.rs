@@ -150,10 +150,10 @@ pub mod sync; // 公开以支持测试
 
 // 重新导出关键类型
 pub use auth::AuthManager;
-pub use storage::database::init_database;
 pub use engine::FlowEngine;
 pub use error::{MailError, Result};
 pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
+pub use storage::database::init_database;
 pub use sync::SyncManager; // 用于测试
 
 use tauri::menu::{Menu, MenuItem};

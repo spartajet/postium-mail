@@ -8,7 +8,6 @@
 //! - 删除账号
 
 use super::{DatabaseState, KeyringState};
-use crate::storage::models;
 use crate::storage;
 
 /// 添加新的邮件账号
@@ -31,7 +30,7 @@ use crate::storage;
 /// # 示例
 /// ```rust,no_run
 /// use crate::command::account::add_account;
-/// use crate::models::account::CreateAccountRequest;
+/// use crate::storage::CreateAccountRequest;
 /// use std::default::Default;
 ///
 /// let account = CreateAccountRequest {
@@ -53,14 +52,12 @@ use crate::storage;
 pub async fn add_account(
     db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
-    account: models::account::CreateAccountRequest,
-) -> Result<models::account::AccountDto, String> {
+    account: storage::CreateAccountRequest,
+) -> Result<storage::AccountDto, String> {
     let db = db_state.clone_conn();
     let app_handle = &keyring_state.app_handle;
 
-    let request = storage::CreateAccountRequest::from(account);
-
-    storage::AccountRepository::create(&db, app_handle, request)
+    storage::AccountRepository::create(&db, app_handle, account)
         .await
         .map(|a| a.into())
         .map_err(|e| e.to_string())
@@ -82,7 +79,7 @@ pub async fn add_account(
 #[tauri::command]
 pub async fn list_accounts(
     state: tauri::State<'_, DatabaseState>,
-) -> Result<Vec<models::account::AccountDto>, String> {
+) -> Result<Vec<storage::AccountDto>, String> {
     let db = state.clone_conn();
     let accounts = storage::AccountRepository::get_all(&db)
         .await
@@ -106,7 +103,7 @@ pub async fn list_accounts(
 pub async fn get_account(
     state: tauri::State<'_, DatabaseState>,
     id: i32,
-) -> Result<Option<models::account::AccountDto>, String> {
+) -> Result<Option<storage::AccountDto>, String> {
     let db = state.clone_conn();
     match storage::AccountRepository::get_by_id(&db, id).await {
         Ok(Some(account)) => Ok(Some(account.into())),
@@ -141,8 +138,8 @@ pub async fn update_account(
     db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
     id: i32,
-    account: models::account::CreateAccountRequest,
-) -> Result<models::account::AccountDto, String> {
+    account: storage::CreateAccountRequest,
+) -> Result<storage::AccountDto, String> {
     let db = db_state.clone_conn();
     let app_handle = &keyring_state.app_handle;
 

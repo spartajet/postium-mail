@@ -1,6 +1,6 @@
-//! 邮件数据访问层
+//! 邮件服务层
 //!
-//! 提供邮件的 CRUD 操作和邮件列表查询功能。
+//! 包含邮件相关的 DTO 类型定义和数据访问逻辑。
 //!
 //! # 核心功能
 //!
@@ -9,125 +9,134 @@
 //! - **批量操作**: 批量删除、移动到文件夹
 //! - **统计功能**: 按文件夹统计邮件数量和未读数
 //! - **同步支持**: 从 IMAP 同步邮件数据的辅助方法
-//!
-//! # 数据模型
-//!
-//! ## Email 表结构
-//!
-//! | 字段 | 类型 | 说明 |
-//! |------|------|------|
-//! | id | INTEGER | 主键 |
-//! | account_id | INTEGER | 所属账号 ID |
-//! | folder | TEXT | 文件夹名称 |
-//! | uid | INTEGER | IMAP UID |
-//! | subject | TEXT | 邮件主题 |
-//! | sender_name | TEXT | 发件人名称 |
-//! | sender_email | TEXT | 发件人邮箱 |
-//! | body_text | TEXT | 纯文本正文 |
-//! | body_html | TEXT | HTML 正文 |
-//! | is_read | BOOLEAN | 是否已读 |
-//! | is_starred | BOOLEAN | 是否星标 |
-//! | is_draft | BOOLEAN | 是否草稿 |
-//! | sent_at | TIMESTAMP | 发送时间 |
-//! | received_at | TIMESTAMP | 接收时间 |
-//!
-//! # 分页查询
-//!
-//! 邮件列表支持分页查询：
-//!
-//! ```text
-//! page: 页码（从 0 开始）
-//! page_size: 每页数量（默认 50）
-//! total: 总邮件数
-//! total_pages: 总页数
-//! ```
-//!
-//! # 特殊文件夹
-//!
-//! ## 星标文件夹
-//!
-//! `folder = "starred"` 是虚拟文件夹，查询所有 `is_starred = true` 的邮件：
-//!
-//! ```rust,no_run
-//! # use crate::storage::EmailRepository;
-//! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! // 获取星标邮件
-//! let response = EmailRepository::list(&db, account_id, "starred", 0, 50).await?;
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! # 同步辅助方法
-//!
-//! 这些方法专用于 IMAP 同步：
-//!
-//! - `save_email_from_imap`: 保存从 IMAP 获取的邮件
-//! - `email_exists_by_uid`: 检查 UID 是否已存在
-//! - `update_email_status`: 更新从 IMAP 同步的邮件状态
-//! - `delete_all_by_folder`: 清空文件夹所有邮件
-//!
-//! # 使用示例
-//!
-//! ## 获取邮件列表
-//!
-//! ```rust,no_run
-//! # use crate::storage::EmailRepository;
-//! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! let response = EmailRepository::list(
-//!     &db,
-//!     account_id,
-//!     "inbox",    // 文件夹
-//!     0,          // 页码
-//!     50,         // 每页数量
-//! ).await?;
-//!
-//! println!("邮件总数: {}", response.total);
-//! println!("总页数: {}", response.total_pages);
-//! for email in response.items {
-//!     println!("{}: {}", email.subject, email.sender_email);
-//! }
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 更新已读状态
-//!
-//! ```rust,no_run
-//! # use crate::storage::EmailRepository;
-//! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! EmailRepository::update_read_status(&db, email_id, true).await?;
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 切换星标
-//!
-//! ```rust,no_run
-//! # use crate::storage::EmailRepository;
-//! # async fn example() -> anyhow::Result<()> {
-//! # let db = todo!();
-//! let is_starred = EmailRepository::toggle_star(&db, email_id).await?;
-//! println!("星标状态: {}", is_starred);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! # 性能优化
-//!
-//! - 使用索引加速查询（account_id, folder, is_read, is_starred）
-//! - 分页查询避免一次加载大量数据
-//! - 附件数量通过批量查询获取，减少数据库往返
 
-use sea_orm::ActiveModelTrait;
-use sea_orm::{
-    ColumnTrait, Condition, DbConn, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, DbConn, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, StorageError};
 use crate::storage::models::{attachment, email};
+
+// ============================================================================
+// DTO 类型定义
+// ============================================================================
+
+/// 邮件地址
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAddress {
+    pub email: String,
+    pub name: Option<String>,
+}
+
+/// 附件信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentInfo {
+    pub id: i32,
+    pub filename: String,
+    pub content_type: Option<String>,
+    pub size: i64,
+    pub path: Option<String>,
+}
+
+/// 邮件详情
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailDetail {
+    pub id: i32,
+    pub account_id: i32,
+    pub folder: String,
+    pub uid: Option<i32>,
+    pub message_id: Option<String>,
+    pub subject: Option<String>,
+    pub sender_name: Option<String>,
+    pub sender_email: String,
+    pub recipients: Vec<EmailAddress>,
+    pub cc: Vec<EmailAddress>,
+    pub bcc: Vec<EmailAddress>,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_draft: bool,
+    pub sent_at: i64,
+    pub received_at: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub attachments: Vec<AttachmentInfo>,
+}
+
+/// 邮件列表项（用于列表展示）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailListItem {
+    pub id: i32,
+    pub account_id: i32,
+    pub folder: String,
+    pub subject: Option<String>,
+    pub sender_name: Option<String>,
+    pub sender_email: String,
+    pub snippet: Option<String>,
+    pub has_attachment: bool,
+    pub attachment_count: i32,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_draft: bool,
+    pub sent_at: i64,
+    pub received_at: i64,
+}
+
+/// 邮件列表响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailListResponse {
+    /// 邮件列表
+    #[serde(rename = "emails")]
+    pub items: Vec<EmailListItem>,
+    /// 总邮件数
+    pub total: u64,
+    /// 总页数
+    pub total_pages: u64,
+    /// 当前页码
+    pub page: u64,
+    /// 每页大小
+    #[serde(rename = "page_size")]
+    pub page_size: u64,
+}
+
+/// 发送邮件请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendEmailRequest {
+    pub account_id: i32,
+    pub to: Vec<EmailAddress>,
+    pub cc: Vec<EmailAddress>,
+    pub bcc: Vec<EmailAddress>,
+    pub subject: String,
+    pub body_html: String,
+    pub body_text: Option<String>,
+    pub attachments: Vec<String>,
+    pub in_reply_to: Option<String>,
+}
+
+/// 邮件搜索参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailSearchParams {
+    pub query: String,
+    pub account_id: Option<i32>,
+    pub folder: Option<String>,
+    pub is_read: Option<bool>,
+    pub is_starred: Option<bool>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// 搜索结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub email_id: i32,
+    pub subject: Option<String>,
+    pub snippet: String,
+    pub score: f64,
+}
+
+// ============================================================================
+// Repository 实现
+// ============================================================================
 
 /// 邮件仓库
 ///
@@ -186,11 +195,11 @@ impl EmailRepository {
         // 获取附件数量
         let attachment_counts = Self::get_attachment_counts(db, &email_ids).await?;
 
-        let items: Vec<email::EmailListItem> = emails
+        let items: Vec<EmailListItem> = emails
             .into_iter()
             .map(|e| {
                 let attachment_count = attachment_counts.get(&e.id).copied().unwrap_or(0);
-                email::EmailListItem {
+                EmailListItem {
                     id: e.id,
                     account_id: e.account_id,
                     folder: e.folder,
@@ -222,7 +231,7 @@ impl EmailRepository {
     }
 
     /// 获取邮件详情（含附件）
-    pub async fn get_detail(db: &DbConn, id: i32) -> Result<email::EmailDetail> {
+    pub async fn get_detail(db: &DbConn, id: i32) -> Result<EmailDetail> {
         let email_model = email::Entity::find_by_id(id)
             .one(db)
             .await
@@ -237,26 +246,26 @@ impl EmailRepository {
             .map_err(|e| StorageError::Database(format!("获取附件失败: {}", e)))?;
 
         // 解析收件人
-        let recipients: Vec<email::EmailAddress> =
+        let recipients: Vec<EmailAddress> =
             serde_json::from_str(&email_model.recipient_emails).unwrap_or_default();
 
         // 解析抄送
-        let cc: Vec<email::EmailAddress> = email_model
+        let cc: Vec<EmailAddress> = email_model
             .cc_emails
             .as_ref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
         // 解析密送
-        let bcc: Vec<email::EmailAddress> = email_model
+        let bcc: Vec<EmailAddress> = email_model
             .bcc_emails
             .as_ref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
 
-        let attachment_infos: Vec<email::AttachmentInfo> = attachments
+        let attachment_infos: Vec<AttachmentInfo> = attachments
             .into_iter()
-            .map(|a| email::AttachmentInfo {
+            .map(|a| AttachmentInfo {
                 id: a.id,
                 filename: a.filename,
                 content_type: a.content_type,
@@ -265,7 +274,7 @@ impl EmailRepository {
             })
             .collect();
 
-        Ok(email::EmailDetail {
+        Ok(EmailDetail {
             id: email_model.id,
             account_id: email_model.account_id,
             folder: email_model.folder,
@@ -292,13 +301,13 @@ impl EmailRepository {
 
     /// 更新已读状态
     pub async fn update_read_status(db: &DbConn, id: i32, is_read: bool) -> Result<()> {
-        let email = email::Entity::find_by_id(id)
+        let email_model = email::Entity::find_by_id(id)
             .one(db)
             .await
             .map_err(|e| StorageError::Database(format!("获取邮件失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("邮件不存在".to_string()))?;
 
-        let mut active_email: email::ActiveModel = email.into();
+        let mut active_email: email::ActiveModel = email_model.into();
         active_email.is_read = Set(is_read);
         active_email.updated_at = Set(chrono::Utc::now().timestamp());
 
@@ -312,15 +321,15 @@ impl EmailRepository {
 
     /// 切换星标状态
     pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool> {
-        let email = email::Entity::find_by_id(id)
+        let email_model = email::Entity::find_by_id(id)
             .one(db)
             .await
             .map_err(|e| StorageError::Database(format!("获取邮件失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("邮件不存在".to_string()))?;
 
-        let new_starred = !email.is_starred;
+        let new_starred = !email_model.is_starred;
 
-        let mut active_email: email::ActiveModel = email.into();
+        let mut active_email: email::ActiveModel = email_model.into();
         active_email.is_starred = Set(new_starred);
         active_email.updated_at = Set(chrono::Utc::now().timestamp());
 
@@ -354,13 +363,13 @@ impl EmailRepository {
 
     /// 移动邮件到文件夹
     pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<()> {
-        let email = email::Entity::find_by_id(id)
+        let email_model = email::Entity::find_by_id(id)
             .one(db)
             .await
             .map_err(|e| StorageError::Database(format!("获取邮件失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("邮件不存在".to_string()))?;
 
-        let mut active_email: email::ActiveModel = email.into();
+        let mut active_email: email::ActiveModel = email_model.into();
         active_email.folder = Set(folder.to_string());
         active_email.updated_at = Set(chrono::Utc::now().timestamp());
 
@@ -499,7 +508,7 @@ impl EmailRepository {
         is_read: Option<bool>,
         is_starred: Option<bool>,
     ) -> Result<()> {
-        let email = email::Entity::find()
+        let email_model = email::Entity::find()
             .filter(
                 Condition::all()
                     .add(email::Column::AccountId.eq(account_id))
@@ -511,7 +520,7 @@ impl EmailRepository {
             .map_err(|e| StorageError::Database(format!("获取邮件失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("邮件不存在".to_string()))?;
 
-        let mut active_email: email::ActiveModel = email.into();
+        let mut active_email: email::ActiveModel = email_model.into();
 
         if let Some(read) = is_read {
             active_email.is_read = Set(read);
@@ -590,19 +599,33 @@ impl EmailRepository {
     }
 }
 
-/// 邮件列表响应
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EmailListResponse {
-    /// 邮件列表（重命名为 emails 以匹配前端期望）
-    #[serde(rename = "emails")]
-    pub items: Vec<email::EmailListItem>,
-    /// 总邮件数
-    pub total: u64,
-    /// 总页数
-    pub total_pages: u64,
-    /// 当前页码
-    pub page: u64,
-    /// 每页大小（重命名为 page_size 以匹配前端期望）
-    #[serde(rename = "page_size")]
-    pub page_size: u64,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_email_address() {
+        let addr = EmailAddress {
+            email: "test@example.com".to_string(),
+            name: Some("Test User".to_string()),
+        };
+        assert_eq!(addr.email, "test@example.com");
+        assert_eq!(addr.name, Some("Test User".to_string()));
+    }
+
+    #[test]
+    fn test_send_email_request_default() {
+        let req = SendEmailRequest {
+            account_id: 1,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Test".to_string(),
+            body_html: "<p>Test</p>".to_string(),
+            body_text: None,
+            attachments: vec![],
+            in_reply_to: None,
+        };
+        assert_eq!(req.subject, "Test");
+    }
 }
