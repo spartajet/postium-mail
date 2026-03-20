@@ -4,7 +4,7 @@
 //! OAuth 2.0、密码认证
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
 
 impl OutlookProvider {
     /// Outlook 默认客户端 ID
@@ -135,6 +135,18 @@ impl MailProvider for OutlookProvider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["outlook.com", "hotmail.com", "live.com", "msn.com"]
+    }
+
+    fn folder_mapping(&self) -> StandardFolder {
+        StandardFolder {
+            inbox: vec!["收件箱".to_string(), "INBOX".to_string()],
+            sent: vec!["已发送".to_string(), "Sent".to_string(), "Sent Items".to_string()],
+            drafts: vec!["草稿".to_string(), "Drafts".to_string()],
+            spam: vec!["垃圾邮件".to_string(), "Junk".to_string(), "Junk Email".to_string()],
+            trash: vec!["已删除邮件".to_string(), "Deleted".to_string(), "Deleted Items".to_string(), "Trash".to_string()],
+            archive: vec!["归档".to_string(), "Archive".to_string()],
+            starred: vec![],
+        }
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {

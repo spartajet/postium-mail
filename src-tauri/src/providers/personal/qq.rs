@@ -3,7 +3,7 @@
 //! 支持 qq.com、foxmail.com 等腾讯邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
 
 /// QQ 邮箱个人邮件服务商
 pub struct QqMailProvider;
@@ -78,6 +78,18 @@ impl MailProvider for QqMailProvider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["qq.com", "foxmail.com"]
+    }
+
+    fn folder_mapping(&self) -> StandardFolder {
+        StandardFolder {
+            inbox: vec!["INBOX".to_string(), "收件箱".to_string()],
+            sent: vec!["Sent".to_string(), "已发送".to_string()],
+            drafts: vec!["Drafts".to_string(), "草稿箱".to_string()],
+            spam: vec!["Spam".to_string(), "Junk".to_string(), "垃圾邮件".to_string()],
+            trash: vec!["Trash".to_string(), "Deleted".to_string(), "已删除".to_string()],
+            archive: vec!["Archive".to_string(), "归档".to_string()],
+            starred: vec![],
+        }
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
