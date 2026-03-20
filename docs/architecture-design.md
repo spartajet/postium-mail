@@ -153,7 +153,7 @@ src-tauri/src/
 │   │   ├── mod.rs
 │   │   ├── account.rs      - 账号实体模型
 │   │   ├── email.rs        - 邮件实体模型
-│   │   ├── folder.rs       - 文件夹实体模型
+│   │   ├── folder_sync_state.rs - 文件夹同步状态模型 (m009 新增)
 │   │   ├── attachment.rs   - 附件实体模型
 │   │   ├── sync_state.rs   - 同步状态模型
 │   │   └── sync_error.rs   - 同步错误模型
@@ -166,7 +166,9 @@ src-tauri/src/
 │   │   ├── m005_20250315_add_imap_metadata.rs
 │   │   ├── m006_20250315_add_sync_operations.rs
 │   │   ├── m007_20250317_add_account_types.rs
-│   │   └── m008_20250317_add_modseq_support.rs
+│   │   ├── m008_20250317_add_modseq_support.rs
+│   │   ├── m009_20250321_create_folder_sync_states.rs
+│   │   └── m010_20250321_drop_folders_table.rs
 │   ├── accounts.rs          - 账号存储
 │   ├── emails.rs            - 邮件存储
 │   ├── folders.rs           - 文件夹存储
@@ -429,8 +431,15 @@ pub struct SmtpSender {
 **存储模块职责**:
 - `accounts` - 账号 CRUD 操作
 - `emails` - 邮件 CRUD 操作
-- `folders` - 文件夹 CRUD 操作
+- `folder_sync_state` - 文件夹同步状态管理 (m009 新增)
+  - 只存储 IMAP 元数据 (uidvalidity, uidnext, highest_modseq)
+  - 不存储文件夹配置 (由 `provider.folder_mapping()` 提供)
 - `database` - 数据库连接管理
+
+**架构变更** (2026-03-21):
+- `folders` 表已删除 (m010 迁移)
+- 文件夹配置由 `MailProvider::folder_mapping()` 动态提供
+- `folder_sync_states` 表只存储同步状态，不存储文件夹配置
 
 技术栈:
 - SQLite (通过 sea-orm)
@@ -595,7 +604,8 @@ export const useSyncStore = defineStore('sync', () => {
 │    │                                                                │
 │    ├─→ protocols/imap - AsyncImapClient::connect()                 │
 │    │                                                                │
-│    ├─→ sync/FolderManager - sync_folders()                         │
+│    ├─→ sync/FolderManager - update_sync_states()                    │
+│    │     (更新 IMAP 元数据: uidvalidity, uidnext, highest_modseq)    │
 │    │                                                                │
 │    ├─→ sync/DeltaSync - sync_incremental()                         │
 │    │       │                                                        │
@@ -704,5 +714,6 @@ Postium Mail.app/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 1.2.0 | 2026-03-21 | 记录文件夹架构重构：删除 folders 表，使用 provider.folder_mapping() |
 | 1.1.0 | 2026-03-19 | 更新架构结构，记录 services 层完全迁移 |
 | 1.0.0 | 2026-03-19 | 初始版本，整合 FlowEngine 架构设计 |
