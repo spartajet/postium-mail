@@ -333,13 +333,23 @@ impl SyncManager {
             supports_condstore
         );
 
-        // 2. 获取服务器所有 UID 列表
-        let server_uids = imap_client.list_uids(folder, 10000).await.map_err(|e| {
+        // 2. 获取服务器 UID 列表（默认只同步最近3个月的邮件）
+        // 计算3个月前的日期
+        let three_months_ago = chrono::Utc::now() - chrono::Duration::days(90);
+        let date_since = three_months_ago.format("%d-%b-%Y").to_string(); // IMAP 日期格式：01-Jan-2025
+
+        tracing::info!(
+            "使用 SINCE 命令获取最近3个月的邮件: folder={}, since={}",
+            folder,
+            date_since
+        );
+
+        let server_uids = imap_client.list_uids_since(folder, &date_since).await.map_err(|e| {
             MailError::Internal(format!("获取服务器 UID 列表失败: {}", e))
         })?;
 
         tracing::info!(
-            "文件夹 {} 服务器邮件数: {}",
+            "文件夹 {} 最近3个月的邮件数: {}",
             folder,
             server_uids.len()
         );
