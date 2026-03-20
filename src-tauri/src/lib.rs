@@ -139,8 +139,6 @@
 mod command;
 pub mod config;
 mod crypto;
-pub mod database; // 公开以支持测试
-
 // 新增模块
 pub mod auth; // 公开以支持测试
 pub mod engine;
@@ -152,7 +150,7 @@ pub mod sync; // 公开以支持测试
 
 // 重新导出关键类型
 pub use auth::AuthManager;
-pub use database::init_database;
+pub use storage::database::init_database;
 pub use engine::FlowEngine;
 pub use error::{MailError, Result};
 pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
@@ -350,11 +348,12 @@ pub fn run() {
 
             // ========== 数据库和服务初始化 ==========
             tauri::async_runtime::block_on(async move {
-                let db = database::establish_connection()
+                use sea_orm::DbConn;
+                let db: DbConn = storage::database::establish_connection()
                     .await
                     .expect("无法连接到数据库");
 
-                database::init_database(&db)
+                storage::database::init_database(&db)
                     .await
                     .expect("数据库初始化失败");
 

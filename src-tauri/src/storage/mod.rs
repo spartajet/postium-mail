@@ -205,7 +205,7 @@ pub use accounts::{AccountRepository, CreateAccountRequest, UpdateAccountRequest
 pub use cache::{
     CacheManager, CounterCache, EmailContentCache, FolderListCache, MemoryCache,
 };
-pub use database::{DatabaseConnection, Repository};
+pub use database::{DatabaseConnection, Repository, establish_connection, init_database};
 pub use emails::{EmailListResponse, EmailRepository};
 pub use folders::FolderRepository;
 pub use models::{account, attachment, email, folder, folder_sync_state, sync_error, sync_state};
