@@ -112,7 +112,7 @@ impl OAuthHandler {
 
         // 4. 构建 URL 参数
         let scope = oauth_config.scopes.join(" ");
-        let mut params = vec![
+        let params = vec![
             ("client_id", oauth_config.client_id.as_str()),
             ("response_type", "code"),
             ("redirect_uri", oauth_config.redirect_uri.as_str()),
@@ -122,10 +122,9 @@ impl OAuthHandler {
             ("code_challenge_method", "S256"),
         ];
 
-        // 如果有 tenant_id，添加到参数中
-        if let Some(ref tenant_id) = oauth_config.tenant_id {
-            params.push(("tenant", tenant_id.as_str()));
-        }
+        // 注意：tenant_id 不应该作为查询参数传递
+        // 它已经包含在 auth_url 和 token_url 的路径中了
+        // 例如：https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
 
         // 5. 构建授权 URL
         let auth_url = format!(
@@ -138,11 +137,14 @@ impl OAuthHandler {
                 .join("&")
         );
 
-        tracing::info!(
-            "生成 OAuth 授权 URL: provider={}, state={}",
-            provider.provider_id(),
-            state
-        );
+        // 打印 OAuth 配置和授权 URL（用于调试）
+        tracing::info!("========== OAuth 授权 URL 生成 ==========");
+        tracing::info!("Provider: {}", provider.provider_id());
+        tracing::info!("Client ID: {}", oauth_config.client_id);
+        tracing::info!("Redirect URI: {}", oauth_config.redirect_uri);
+        tracing::info!("State: {}", state);
+        tracing::info!("Auth URL: {}", auth_url);
+        tracing::info!("========================================");
 
         Ok(AuthorizationContext {
             auth_url,
@@ -183,6 +185,13 @@ impl OAuthHandler {
             .take(state)
             .ok_or(OAuthError::InvalidGrant)?;
 
+        // 打印 verifier 信息（用于调试）
+        tracing::info!("========== PKCE Verifier 检索 ==========");
+        tracing::info!("State: {}", state);
+        tracing::info!("Verifier (前20字符): {}", &code_verifier.chars().take(20).collect::<String>());
+        tracing::info!("Verifier 长度: {}", code_verifier.len());
+        tracing::info!("====================================");
+
         // 2. 获取 OAuth 配置
         let oauth_config = provider.oauth_config().ok_or_else(|| {
             OAuthError::NetworkError("服务商不支持 OAuth".to_string())
@@ -201,6 +210,37 @@ impl OAuthHandler {
         if let Some(ref client_secret) = oauth_config.client_secret {
             params.push(("client_secret", client_secret));
         }
+
+        // 打印请求参数（用于调试）
+        tracing::info!("========== OAuth Token 请求 ==========");
+        tracing::info!("URL: {}", oauth_config.token_url);
+        tracing::info!("Provider: {}", provider.provider_id());
+        tracing::info!("Client ID: {}", oauth_config.client_id);
+        tracing::info!("Client Secret: {}", oauth_config.client_secret.as_ref().map(|s| "***").unwrap_or("None (Public Client)"));
+        tracing::info!("Redirect URI: {}", oauth_config.redirect_uri);
+        tracing::info!("Code (前50字符): {}", &code.chars().take(50).collect::<String>());
+        tracing::info!("Code 长度: {}", code.len());
+        tracing::info!("Verifier 长度: {}", code_verifier.len());
+        tracing::info!("Grant Type: authorization_code");
+
+        // 打印所有参数
+        for (key, value) in &params {
+            let value_preview = if *key == "code" || *key == "code_verifier" {
+                format!("{} (长度: {})", &value.chars().take(20).collect::<String>(), value.len())
+            } else {
+                value.to_string()
+            };
+            tracing::info!("  {}: {}", key, value_preview);
+        }
+        tracing::info!("====================================");
+
+        // 构建表单数据用于调试
+        let form_body = params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, url_encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        tracing::info!("实际表单数据: {}", form_body);
 
         // 4. 发送 HTTP POST 请求
         let client = reqwest::Client::new();

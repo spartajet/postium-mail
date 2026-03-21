@@ -19,6 +19,19 @@ pub struct OAuthConfig {
     pub token_url: String,
 }
 
+/// 获取 OAuth 回调端口
+pub fn get_oauth_callback_port() -> u16 {
+    std::env::var("POSTIUM_OAUTH_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(36279) // 默认端口
+}
+
+/// 生成 redirect_uri (HTTP localhost)
+pub fn generate_redirect_uri(port: u16) -> String {
+    format!("http://localhost:{}/callback", port)
+}
+
 /// 从环境变量加载OAuth配置（Microsoft/Outlook）
 pub fn load_microsoft_oauth_config() -> Result<OAuthConfig> {
     dotenv::dotenv().ok(); // 尝试加载.env文件，失败也没关系
@@ -26,8 +39,11 @@ pub fn load_microsoft_oauth_config() -> Result<OAuthConfig> {
     let client_id =
         std::env::var("MICROSOFT_CLIENT_ID").unwrap_or_else(|_| "your-client-id-here".to_string());
     let tenant = std::env::var("MICROSOFT_TENANT").unwrap_or_else(|_| "common".to_string());
+
+    // 使用 HTTP localhost redirect_uri
+    let port = get_oauth_callback_port();
     let redirect_uri = std::env::var("MICROSOFT_REDIRECT_URI")
-        .unwrap_or_else(|_| "postium-mail://oauth/callback".to_string());
+        .unwrap_or_else(|_| generate_redirect_uri(port));
 
     let scopes_str = std::env::var("MICROSOFT_SCOPES")
         .unwrap_or_else(|_| {
@@ -69,8 +85,11 @@ pub fn load_google_oauth_config() -> Result<OAuthConfig> {
     dotenv::dotenv().ok();
 
     let client_id = std::env::var("GOOGLE_CLIENT_ID").unwrap_or_else(|_| "".to_string());
+
+    // 使用 HTTP localhost redirect_uri
+    let port = get_oauth_callback_port();
     let redirect_uri = std::env::var("GOOGLE_REDIRECT_URI")
-        .unwrap_or_else(|_| "postium-mail://oauth/callback".to_string());
+        .unwrap_or_else(|_| generate_redirect_uri(port));
 
     // Google 不需要 tenant，使用空字符串
     let tenant = String::new();

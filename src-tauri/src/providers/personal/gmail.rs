@@ -3,8 +3,11 @@
 //! 支持 Gmail 个人邮箱
 //! OAuth 2.0、密码认证、应用专用密码
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    SmtpServerConfig, StandardFolder,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
 
 impl GmailProvider {
     /// Gmail 默认客户端 ID
@@ -12,12 +15,13 @@ impl GmailProvider {
     /// 注册地址: https://console.cloud.google.com/
     /// 应用类型: Desktop app
     /// 授权重定向 URI: postium-mail://oauth/callback
-    const DEFAULT_CLIENT_ID: &str = "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
+    const DEFAULT_CLIENT_ID: &str =
+        "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
 
     /// Gmail 默认重定向 URI
     ///
     /// 使用自定义 Deep Link 方案
-    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
+    const DEFAULT_REDIRECT_URI: &str = "com.spartajet.postium-mail:/oauth/callback";
 
     /// Gmail 默认授权端点
     const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -49,12 +53,18 @@ pub struct GmailProvider;
 impl GmailProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
+        // 使用动态生成的 HTTP localhost redirect_uri
+        let port = crate::config::get_oauth_callback_port();
+        let redirect_uri = crate::config::generate_redirect_uri(port);
+
+        tracing::info!("Gmail OAuth 配置: redirect_uri = {}", redirect_uri);
+
         OAuthConfig {
             client_id: Self::DEFAULT_CLIENT_ID.to_string(),
             client_secret: None, // 桌面应用不需要 client_secret
             auth_url: Self::DEFAULT_AUTH_URL.to_string(),
             token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            redirect_uri,
             scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
             pkce_enabled: true,
             tenant_id: None,
@@ -77,10 +87,7 @@ impl MailProvider for GmailProvider {
     }
 
     fn auth_types(&self) -> Vec<AuthType> {
-        vec![
-            AuthType::OAuth2,
-            AuthType::Password,
-        ]
+        vec![AuthType::OAuth2, AuthType::Password]
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -130,22 +137,10 @@ impl MailProvider for GmailProvider {
     fn folder_mapping(&self) -> StandardFolder {
         StandardFolder {
             inbox: vec!["INBOX".to_string()],
-            sent: vec![
-                "Sent".to_string(),
-                "[Gmail]/Sent Mail".to_string(),
-            ],
-            drafts: vec![
-                "Drafts".to_string(),
-                "[Gmail]/Drafts".to_string(),
-            ],
-            spam: vec![
-                "Spam".to_string(),
-                "[Gmail]/Spam".to_string(),
-            ],
-            trash: vec![
-                "Trash".to_string(),
-                "[Gmail]/Trash".to_string(),
-            ],
+            sent: vec!["Sent".to_string(), "[Gmail]/Sent Mail".to_string()],
+            drafts: vec!["Drafts".to_string(), "[Gmail]/Drafts".to_string()],
+            spam: vec!["Spam".to_string(), "[Gmail]/Spam".to_string()],
+            trash: vec!["Trash".to_string(), "[Gmail]/Trash".to_string()],
             archive: vec!["[Gmail]/All Mail".to_string()],
         }
     }

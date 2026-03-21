@@ -52,9 +52,15 @@ impl GmailOAuthService {
     ///
     /// 这是推荐的方式，使用预配置的 Gmail OAuth 凭证。
     pub fn with_defaults() -> Result<Self> {
+        // 使用动态生成的 HTTP localhost redirect_uri
+        let port = crate::config::get_oauth_callback_port();
+        let redirect_uri = crate::config::generate_redirect_uri(port);
+
+        tracing::info!("GmailOAuthService: redirect_uri = {}", redirect_uri);
+
         Ok(Self {
             client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            redirect_uri,
             scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
         })
     }
@@ -83,8 +89,12 @@ impl GmailOAuthService {
         let client_id =
             env::var("GOOGLE_CLIENT_ID").unwrap_or_else(|_| Self::DEFAULT_CLIENT_ID.to_string());
 
+        // 使用动态生成的 HTTP localhost redirect_uri 作为默认值
+        let port = crate::config::get_oauth_callback_port();
+        let default_redirect_uri = crate::config::generate_redirect_uri(port);
+
         let redirect_uri = env::var("GOOGLE_REDIRECT_URI")
-            .unwrap_or_else(|_| Self::DEFAULT_REDIRECT_URI.to_string());
+            .unwrap_or_else(|_| default_redirect_uri);
 
         let scopes_str =
             env::var("GOOGLE_SCOPES").unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));

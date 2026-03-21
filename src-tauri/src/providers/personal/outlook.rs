@@ -11,18 +11,12 @@ impl OutlookProvider {
     ///
     /// 注册地址: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
     /// 应用类型: Public client (desktop)
-    /// 授权重定向 URI: postium-mail://oauth/callback
     const DEFAULT_CLIENT_ID: &str = "67acce3b-a85a-40c1-be02-44d954282442";
 
     /// Outlook 默认租户 ID
     ///
     /// "common" 表示允许使用个人账号和企业账号
     const DEFAULT_TENANT: &str = "common";
-
-    /// Outlook 默认重定向 URI
-    ///
-    /// 使用自定义 Deep Link 方案
-    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
 
     /// Outlook 默认授权端点（使用 common 租户）
     const DEFAULT_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
@@ -39,6 +33,7 @@ impl OutlookProvider {
         "https://outlook.office.com/IMAP.AccessAsUser.All",
         "https://outlook.office.com/SMTP.Send",
         "offline_access",
+        "openid",
     ];
 
     /// Outlook IMAP 服务器配置
@@ -56,12 +51,18 @@ pub struct OutlookProvider;
 impl OutlookProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
+        // 使用动态生成的 HTTP localhost redirect_uri
+        let port = crate::config::get_oauth_callback_port();
+        let redirect_uri = crate::config::generate_redirect_uri(port);
+
+        tracing::info!("Outlook OAuth 配置: redirect_uri = {}", redirect_uri);
+
         OAuthConfig {
             client_id: Self::DEFAULT_CLIENT_ID.to_string(),
             client_secret: None, // 桌面应用不需要 client_secret
             auth_url: Self::DEFAULT_AUTH_URL.to_string(),
             token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            redirect_uri,
             scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
             pkce_enabled: true,
             tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
