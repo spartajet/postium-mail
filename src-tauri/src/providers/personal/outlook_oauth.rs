@@ -114,8 +114,7 @@ impl OutlookOAuthService {
         let port = crate::config::get_oauth_callback_port();
         let default_redirect_uri = crate::config::generate_redirect_uri(port);
 
-        let redirect_uri = env::var("MICROSOFT_REDIRECT_URI")
-            .unwrap_or_else(|_| default_redirect_uri);
+        let redirect_uri = env::var("MICROSOFT_REDIRECT_URI").unwrap_or(default_redirect_uri);
 
         let scopes_str =
             env::var("MICROSOFT_SCOPES").unwrap_or_else(|_| Self::DEFAULT_SCOPES.join(" "));

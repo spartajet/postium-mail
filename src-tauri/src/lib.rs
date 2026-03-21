@@ -218,10 +218,7 @@ fn handle_oauth_http_callback(
         // 如果有错误，标记会话失败
         if let Some(err) = error {
             tracing::warn!("OAuth 授权失败: {}", err);
-            let error_msg = error_description
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(&err);
+            let error_msg = error_description.as_deref().unwrap_or(&err);
             let _ = session_manager
                 .set_session_error(&session_id, error_msg.to_string())
                 .await;
@@ -308,7 +305,10 @@ async fn exchange_and_create_account(
     // 打印接收到的参数（用于调试）
     tracing::info!("========== 交换 OAuth Token ==========");
     tracing::info!("Email: {}", email);
-    tracing::info!("Code (前20字符): {}", &code.chars().take(20).collect::<String>());
+    tracing::info!(
+        "Code (前20字符): {}",
+        &code.chars().take(20).collect::<String>()
+    );
     tracing::info!("Code 长度: {}", code.len());
     tracing::info!("State: {}", state);
     tracing::info!("====================================");
