@@ -53,21 +53,28 @@ pub struct GmailProvider;
 impl GmailProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        // 使用动态生成的 HTTP localhost redirect_uri
-        let port = crate::config::get_oauth_callback_port();
-        let redirect_uri = crate::config::generate_redirect_uri(port);
+        // 从环境变量加载配置（支持 client_secret）
+        match OAuthConfig::from_env_for_provider("gmail") {
+            Ok(config) => config,
+            Err(_) => {
+                // 回退到硬编码配置
+                tracing::warn!("使用 Gmail 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
+                let port = crate::config::get_oauth_callback_port();
+                let redirect_uri = crate::config::generate_redirect_uri(port);
 
-        tracing::info!("Gmail OAuth 配置: redirect_uri = {}", redirect_uri);
+                tracing::info!("Gmail OAuth 配置: redirect_uri = {}", redirect_uri);
 
-        OAuthConfig {
-            client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-            client_secret: None, // 桌面应用不需要 client_secret
-            auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-            token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-            redirect_uri,
-            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-            pkce_enabled: true,
-            tenant_id: None,
+                OAuthConfig {
+                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
+                    client_secret: None, // 硬编码默认值
+                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
+                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
+                    redirect_uri,
+                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+                    pkce_enabled: true,
+                    tenant_id: None,
+                }
+            }
         }
     }
 }

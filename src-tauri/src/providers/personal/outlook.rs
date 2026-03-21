@@ -51,21 +51,26 @@ pub struct OutlookProvider;
 impl OutlookProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        // 使用动态生成的 HTTP localhost redirect_uri
-        let port = crate::config::get_oauth_callback_port();
-        let redirect_uri = crate::config::generate_redirect_uri(port);
+        match OAuthConfig::from_env_for_provider("outlook") {
+            Ok(config) => config,
+            Err(_) => {
+                tracing::warn!("使用 Outlook 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
+                let port = crate::config::get_oauth_callback_port();
+                let redirect_uri = crate::config::generate_redirect_uri(port);
 
-        tracing::info!("Outlook OAuth 配置: redirect_uri = {}", redirect_uri);
+                tracing::info!("Outlook OAuth 配置: redirect_uri = {}", redirect_uri);
 
-        OAuthConfig {
-            client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-            client_secret: None, // 桌面应用不需要 client_secret
-            auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-            token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-            redirect_uri,
-            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-            pkce_enabled: true,
-            tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
+                OAuthConfig {
+                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
+                    client_secret: None, // Microsoft 不需要
+                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
+                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
+                    redirect_uri,
+                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+                    pkce_enabled: true,
+                    tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
+                }
+            }
         }
     }
 }

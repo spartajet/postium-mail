@@ -227,7 +227,7 @@ impl OAuthConfig {
         // 将 config::OAuthConfig 转换为 traits::OAuthConfig
         Ok(Self {
             client_id: config.client_id,
-            client_secret: None, // 公共客户端不需要 secret
+            client_secret: config.client_secret, // 从配置文件读取（不再硬编码 None）
             auth_url: config.auth_url,
             token_url: config.token_url,
             redirect_uri: config.redirect_uri,
