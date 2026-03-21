@@ -162,7 +162,10 @@ use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-use command::{AuthManagerState, DatabaseState, FlowEngineState, KeyringState, OAuthFlowResult, OAuthSessionManagerState, ProviderPoolState};
+use command::{
+    AuthManagerState, DatabaseState, FlowEngineState, KeyringState, OAuthFlowResult,
+    OAuthSessionManagerState, ProviderPoolState,
+};
 
 /// 处理 OAuth Deep Link 回调
 fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
@@ -228,12 +231,15 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
             Err(e) => {
                 tracing::error!("验证 OAuth 会话失败: {}", e);
                 // 发射错误事件
-                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
-                    session_id: String::new(),
-                    status: "error".to_string(),
-                    account: None,
-                    error: Some(format!("无效的会话: {}", e)),
-                });
+                let _ = app_handle.emit(
+                    "oauth-flow-complete",
+                    OAuthFlowResult {
+                        session_id: String::new(),
+                        status: "error".to_string(),
+                        account: None,
+                        error: Some(format!("无效的会话: {}", e)),
+                    },
+                );
                 return;
             }
         };
@@ -243,17 +249,23 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
         // 如果有错误，标记会话失败
         if let Some(err) = error {
             tracing::warn!("OAuth 授权失败: {}", err);
-            let error_msg = error_description.as_ref().map(|s| s.as_str()).unwrap_or(&err);
+            let error_msg = error_description
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or(&err);
             let _ = session_manager
                 .set_session_error(&session_id, error_msg.to_string())
                 .await;
 
-            let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
-                session_id: session_id.clone(),
-                status: "error".to_string(),
-                account: None,
-                error: error_description.or(Some(err)),
-            });
+            let _ = app_handle.emit(
+                "oauth-flow-complete",
+                OAuthFlowResult {
+                    session_id: session_id.clone(),
+                    status: "error".to_string(),
+                    account: None,
+                    error: error_description.or(Some(err)),
+                },
+            );
             return;
         }
 
@@ -280,12 +292,15 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
                     .await;
 
                 // 发射成功事件
-                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
-                    session_id,
-                    status: "success".to_string(),
-                    account: Some(account),
-                    error: None,
-                });
+                let _ = app_handle.emit(
+                    "oauth-flow-complete",
+                    OAuthFlowResult {
+                        session_id,
+                        status: "success".to_string(),
+                        account: Some(account),
+                        error: None,
+                    },
+                );
             }
             Err(e) => {
                 tracing::error!("OAuth 流程失败: {}", e);
@@ -296,12 +311,15 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
                     .await;
 
                 // 发射错误事件
-                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
-                    session_id,
-                    status: "error".to_string(),
-                    account: None,
-                    error: Some(e),
-                });
+                let _ = app_handle.emit(
+                    "oauth-flow-complete",
+                    OAuthFlowResult {
+                        session_id,
+                        status: "error".to_string(),
+                        account: None,
+                        error: Some(e),
+                    },
+                );
             }
         }
     });
@@ -338,18 +356,18 @@ async fn exchange_and_create_account(
 
     // 构建账号创建请求
     let account_req = crate::storage::CreateAccountRequest {
-        name: auth_result.display_name.unwrap_or_else(|| {
-            email.split('@')
-                .next()
-                .unwrap_or("用户")
-                .to_string()
-        }),
+        name: auth_result
+            .display_name
+            .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string()),
         email: auth_result.email.clone(),
         provider: provider.provider_id().to_string(),
         password: String::new(),
         imap_host: Some(imap_config.host),
         imap_port: Some(imap_config.port as i32),
-        imap_ssl: Some(matches!(imap_config.ssl, providers::SslMode::Implicit | providers::SslMode::StartTls)),
+        imap_ssl: Some(matches!(
+            imap_config.ssl,
+            providers::SslMode::Implicit | providers::SslMode::StartTls
+        )),
         smtp_host: Some(smtp_config.host),
         smtp_port: Some(smtp_config.port as i32),
         smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
@@ -362,13 +380,10 @@ async fn exchange_and_create_account(
     };
 
     // 创建账号
-    let account = crate::storage::AccountRepository::create(
-        &db,
-        &keyring_state.app_handle,
-        account_req,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let account =
+        crate::storage::AccountRepository::create(&db, &keyring_state.app_handle, account_req)
+            .await
+            .map_err(|e| e.to_string())?;
 
     // 迁移 Token
     let token_manager = auth_manager.token_manager();
@@ -589,13 +604,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // 账号管理
-            command::add_account,
+            // command::add_account,
             command::list_accounts,
             command::get_account,
-            command::update_account,
+            // command::update_account,
             command::delete_account,
-            command::test_account_connection,
-            command::test_email_connection,
+            // command::test_account_connection,
+            // command::test_email_connection,
             // 服务商检测
             command::detect_provider,
             command::list_providers,
@@ -606,6 +621,8 @@ pub fn run() {
             command::refresh_oauth_token,
             command::start_oauth_flow,
             command::cancel_oauth_flow,
+            // 统一认证
+            command::start_auth_command,
             // 邮件操作
             command::list_emails,
             command::get_email,

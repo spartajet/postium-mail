@@ -324,3 +324,53 @@ export interface ApiResponse<T> {
   total?: number;
   error?: string;
 }
+
+// ============================================================
+// 统一认证接口类型
+// ============================================================
+
+/**
+ * 服务器配置
+ */
+export interface ServerConfig {
+  host: string;
+  port: number;
+  ssl: boolean;
+}
+
+/**
+ * 统一认证信息
+ */
+export type AuthInfo =
+  | {
+      type: "ImapSmtpConfig";
+      email: string;
+      password: string;
+      imapConfig: ServerConfig;
+      smtpConfig: ServerConfig;
+      name?: string;
+      color?: string;
+    }
+  | {
+      type: "OauthConfig";
+      email: string;
+      name?: string;
+      color?: string;
+    };
+
+/**
+ * 统一认证响应
+ */
+export type AuthResponse =
+  | { status: "Pending"; sessionId: string; authUrl: string }
+  | {
+      status: "PasswordAuthSuccess";
+      email: string;
+      password: string;
+      displayName?: string;
+      provider: string;
+      imapConfig: ServerConfig;
+      smtpConfig: ServerConfig;
+    }
+  | { status: "Success"; account: Account }
+  | { status: "Error"; message: string };

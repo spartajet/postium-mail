@@ -5,6 +5,7 @@
 #![allow(deprecated)]
 
 mod account;
+mod auth;
 mod connection;
 mod email;
 mod flow_engine;
@@ -14,7 +15,8 @@ mod provider;
 mod sync;
 
 pub use account::*;
-pub use connection::*;
+pub use auth::*;
+// pub use connection::*;
 pub use email::*;
 pub use flow_engine::*;
 pub use oauth::*;
@@ -22,7 +24,7 @@ pub use provider::*;
 pub use sync::*;
 
 // 导出 OAuth 相关类型供 lib.rs 使用
-pub use oauth::{OAuthFlowResult};
+pub use oauth::OAuthFlowResult;
 
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex as StdMutex};

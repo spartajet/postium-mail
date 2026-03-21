@@ -16,6 +16,7 @@
 //! | m008 | 2025-03-17 | 添加 MODSEQ 支持（CONDSTORE） |
 //! | m009 | 2025-03-21 | 创建 folder_sync_states 表（分离同步状态） |
 //! | m010 | 2025-03-21 | 删除 folders 表（已废弃） |
+//! | m011 | 2025-03-21 | 删除 offline_operations 表（修复外键约束错误） |
 //!
 //! # 迁移顺序
 //!
@@ -97,4 +98,5 @@ pub mod m007_20250317_add_account_types;
 pub mod m008_20250317_add_modseq_support;
 pub mod m009_20250321_create_folder_sync_states;
 pub mod m010_20250321_drop_folders_table;
+pub mod m011_20250321_drop_offline_operations;
 
