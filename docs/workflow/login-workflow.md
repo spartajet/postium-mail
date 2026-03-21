@@ -58,15 +58,32 @@
 
 | 组件 | 文件路径 |
 |------|----------|
-| 前端添加账号弹窗 | `src/components/common/AddAccountModal.vue` |
-| 前端账号 Store | `src/stores/account.ts` |
-| 后端账号命令 | `src-tauri/src/command/account.rs` |
-| 后端 OAuth 命令 | `src-tauri/src/command/oauth.rs` |
-| 后端连接测试 | `src-tauri/src/command/connection.rs` |
-| 认证管理器 | `src-tauri/src/auth/auth_manager.rs` |
+| **前端** | |
+| 添加账号弹窗 | `src/components/common/AddAccountModal.vue` |
+| 账号 Store | `src/stores/account.ts` |
+| OAuth 辅助工具 | `src/utils/oauthHelper.ts` |
+| **后端命令** | |
+| 账号命令 | `src-tauri/src/command/account.rs` |
+| 认证命令 | `src-tauri/src/command/auth.rs` ⭐ |
+| OAuth 命令 | `src-tauri/src/command/oauth.rs` |
+| 连接测试 | `src-tauri/src/command/connection.rs` |
+| **认证模块** | |
+| 认证管理器 | `src-tauri/src/auth/auth_manager.rs` ⭐ |
+| OAuth 处理器 | `src-tauri/src/auth/oauth_handler.rs` |
+| Token 管理器 | `src-tauri/src/auth/token_manager.rs` |
+| 密码认证 | `src-tauri/src/auth/password_auth.rs` |
+| **OAuth 会话** | |
+| 会话管理器 | `src-tauri/src/auth/oauth_session.rs` ⭐ |
+| HTTP 回调服务器 | `src-tauri/src/auth/oauth_http_server.rs` ⭐ |
+| **配置** | |
+| OAuth 配置加载 | `src-tauri/src/config.rs` ⭐ |
+| 配置模板 | `.env.example` ⭐ |
+| **存储** | |
 | 同步管理器 | `src-tauri/src/sync/sync_manager.rs` |
 | 邮件处理器 | `src-tauri/src/sync/mail_processor.rs` |
-| 账号仓储 | `src-tauri/src/storage/accounts.rs` |
+| 账号仓储 | `src-tauri/src/storage/service/account.rs` |
+
+⭐ 标记表示本次重构新增或重大修改的文件
 
 ---
 
@@ -218,44 +235,71 @@ command/account.rs::list_accounts()
    ▼
 1. 打开添加账号对话框
    │
-   ├─ 选择服务商 (Gmail / Outlook)
+   ├─ 选择服务商 (Gmail / Outlook / Google Workspace / Microsoft 365)
    ├─ 选择认证方式 (OAuth 2.0)
    │
    ▼
 2. 点击"使用 XXX 账号授权"
    │
-   ├─ AddAccountModal.vue::startOAuthLogin()
-   │  └─ showOAuthModal.value = true
+   ├─ AddAccountModal.vue::handleOAuthLogin()
+   │  └─ OAuthHelper.startLogin(provider)
    │
    ▼
-3. OAuth 弹窗
+3. 启动 OAuth 会话
    │
-   ├─ OAuthLoginModal.vue
-   │  ├─ 调用 get_oauth_auth_url
-   │  ├─ 在浏览器中打开授权页面
-   │  └─ 用户授权后获取 code 和 state
-   │
-   ▼
-4. 回调处理
-   │
-   ├─ deep-link-handler 接收回调
-   │  └─ invoke('exchange_oauth_code', { code, state })
+   ├─ invoke('start_oauth_session', { provider })
+   │  └─ auth/start_oauth_session()
+   │     └─ auth_manager.start_oauth_session(email, provider)
+   │        ├─ 创建 OAuthSession (生成 session_id)
+   │        ├─ 启动 HTTP 回调服务器 (localhost:36279)
+   │        ├─ 生成授权 URL (带 state 和 redirect_uri)
+   │        └─ 返回 { auth_url, session_id }
    │
    ▼
-5. 交换授权码
+4. 打开授权页面
    │
-   ├─ command/oauth.rs::exchange_oauth_code()
-   │  ├─ auth_manager.authenticate_oauth(email, code, state)
-   │  │  ├─ oauth_handler.exchange_code(provider, code, state)
-   │  │  │  ├─ 向服务商发送 POST 请求
-   │  │  │  ├─ 获取 access_token, refresh_token, id_token
-   │  │  │  └─ TokenManager::store_token(account_id, token)
-   │  │  └─ 解析 id_token 获取用户信息
-   │  ├─ 创建账号记录
-   │  └─ TokenManager::migrate_token_account(0, account.id)
+   ├─ 前端打开浏览器到 auth_url
+   │  └─ 用户在浏览器中完成授权
    │
    ▼
-6. 完成添加
+5. 回调处理
+   │
+   ├─ 用户授权后，OAuth 提供商重定向到
+   │  http://localhost:36279/callback?code=xxx&state=xxx
+   │
+   ├─ oauth_http_server.rs 接收回调
+   │  ├─ 解析查询参数 (code, state, error)
+   │  └─ 通过 Tauri 事件发送回调
+   │     └─ app_handle.emit("oauth-http-callback", { code, state, error })
+   │
+   ▼
+6. 处理 OAuth 回调
+   │
+   ├─ auth/process_oauth_callback()
+   │  └─ auth_manager.process_oauth_callback(session_id, code, state)
+   │     ├─ 验证 session 和 state
+   │     ├─ 交换授权码获取 tokens
+   │     │  └─ oauth_handler.exchange_code(provider, code, redirect_uri)
+   │     │     ├─ POST 请求到 token endpoint
+   │     │     ├─ 获取 access_token, refresh_token, expires_in, id_token
+   │     │     └─ 解析 id_token 获取用户信息 (email, name)
+   │     ├─ 创建账号记录
+   │     │  └─ AccountRepository::create()
+   │     ├─ 存储 OAuth tokens
+   │     │  └─ token_manager.store_token(account_id, token_response)
+   │     ├─ 清理 OAuthSession
+   │     └─ 发送完成事件
+   │        └─ emit("oauth-flow-complete", { session_id, status, account })
+   │
+   ▼
+7. 前端接收完成事件
+   │
+   ├─ oauthHelper.ts::listenCallback()
+   │  └─ listen('oauth-flow-complete', (event) => { ... })
+   │     └─ 返回 Account 或抛出错误
+   │
+   ▼
+8. 完成添加
    │
    ├─ 返回 AccountDto
    ├─ accountStore.accounts.value.push(account)
@@ -263,96 +307,167 @@ command/account.rs::list_accounts()
    └─ 关闭对话框
 ```
 
+### 配置说明
+
+**OAuth 配置文件**: `.env.example`
+
+```bash
+# Google Gmail（需要 client_secret）
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:36279/callback
+
+# Microsoft Outlook（公共客户端，不需要 client_secret）
+MICROSOFT_CLIENT_ID=your-microsoft-client-id
+MICROSOFT_CLIENT_SECRET=
+MICROSOFT_TENANT=common
+MICROSOFT_REDIRECT_URI=http://localhost:36279/callback
+```
+
+**配置加载**:
+- 从 `src-tauri/.env` 文件加载（如果存在）
+- 支持 Google/Microsoft 各自的 `client_secret` 配置
+- Microsoft 作为公共客户端不需要 `client_secret`
+- Google 作为桌面应用必须提供 `client_secret`
+
 ### 函数调用栈
 
 #### 前端（Vue）
 
 ```typescript
-// 1. 获取授权 URL
-accountStore.getOAuthAuthUrl(provider)
+// 1. 启动 OAuth 登录
+OAuthHelper.startLogin(provider, timeout)
   → invoke<string>('get_oauth_auth_url', { provider })
-  → // 返回 auth_url
+  → const authUrl = await result
+  → const accountPromise = this.listenCallback(timeout)
+  → openInBrowser(authUrl)  // 使用默认浏览器打开
+  → await accountPromise  // 等待流程完成
 
-// 2. 交换授权码
-accountStore.exchangeOAuthCode(code, state)
-  → invoke<AccountDto>('exchange_oauth_code', { code, state })
-  → const account = dtoToAccount(dto)
-  → accounts.value.push(account)
-  → currentAccount.value = account
+// 2. 监听 OAuth 回调
+OAuthHelper.listenCallback(timeout)
+  → listen<OAuthFlowResultPayload>('oauth-flow-complete', (event) => {
+      const payload = event.payload
+      if (payload.status === 'success') {
+          resolve(payload.account)
+      } else {
+          reject(new Error(payload.error))
+      }
+  })
 
-// 3. OAuthLoginModal.vue
-OAuthLoginModal.vue::mounted()
-  → emit('get-auth-url')
-  → accountStore.getOAuthAuthUrl(provider)
-  → // 打开浏览器窗口
-  → open::that(auth_url)
+// 3. 回调事件结构
+interface OAuthFlowResultPayload {
+  session_id: string
+  status: 'success' | 'error'
+  account?: Account
+  error?: string
+}
 
-// 4. 接收回调
-deep-link-handler::handleOAuthCallback()
-  → const params = new URL(url).searchParams
-  → const code = params.get('code')
-  → const state = params.get('state')
-  → accountStore.exchangeOAuthCode(code, state)
+// 4. 刷新 Token
+OAuthHelper.refreshTokens(accountId)
+  → invoke('refresh_oauth_token', { accountId })
+  → accountStore.fetchAccounts()
+
+// 5. 验证 Token
+OAuthHelper.validateToken(accountId)
+  → invoke<boolean>('validate_oauth_token', { accountId })
 ```
 
 #### 后端（Rust）
 
 ```rust
-// 1. 获取授权 URL
-command/oauth.rs::get_oauth_auth_url()
-  → auth_manager.get_oauth_url(&email)
-     → provider_pool.detect_provider(&email)
-     → oauth_handler.get_authorization_url(provider)
-        → // 生成 state
-        → let state = generate_random_state()
-        → // 构建授权 URL
-        → let auth_url = format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
-            client_id, redirect_uri, scope, state
-        )
-        → AuthorizationContext { auth_url, state }
+// ==================== 命令层 ====================
 
-// 2. 验证 Token
-command/oauth.rs::validate_oauth_token()
-  → match provider.as_str() {
-        "google" => {
-            client.get("https://www.googleapis.com/oauth2/v3/userinfo")
-                .bearer_auth(&token)
-                .send()
-        }
-        "microsoft" => {
-            client.get("https://graph.microsoft.com/v1.0/me")
-                .bearer_auth(&token)
-                .send()
-        }
+// 1. 启动 OAuth 会话
+command/auth.rs::start_oauth_session()
+  → auth_manager.start_oauth_session(email, provider)
+     → oauth_session_manager.create_session(email, provider)
+        → 生成唯一 session_id
+        → 生成 state 参数
+        → 生成 code_verifier (PKCE)
+        → OAuthSession { session_id, email, provider, state, code_verifier, ... }
+     → oauth_http_server.start()
+        → 绑定 127.0.0.1:36279
+        → 监听 /callback 路径
+     → 获取 OAuth 配置
+        → load_oauth_config_for_provider(provider)
+        → OAuthConfig { client_id, client_secret, redirect_uri, scopes, ... }
+     → 构建授权 URL
+        → auth_url = format!("{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+            auth_url, client_id, redirect_uri, scope, state, code_challenge)
+     → 返回 { auth_url, session_id }
+
+// 2. 处理 OAuth 回调
+command/auth.rs::process_oauth_callback()
+  → auth_manager.process_oauth_callback(session_id, code, state)
+     → oauth_session_manager.get_session(session_id)
+     → 验证 state 参数
+     → 获取 OAuth 配置
+        → load_oauth_config_for_provider(session.provider)
+     → 交换授权码
+        → oauth_handler.exchange_code(session.provider, code, session.code_verifier, config)
+           → POST { token_url }
+             → form = [
+                   ("code", code),
+                   ("grant_type", "authorization_code"),
+                   ("redirect_uri", redirect_uri),
+                   ("client_id", client_id),
+                   ("client_secret", client_secret),  // Google 需要，Microsoft 为 None
+                   ("code_verifier", code_verifier),  // PKCE
+               ]
+           → TokenResponse { access_token, refresh_token, expires_in, id_token, ... }
+     → 解析用户信息
+        → jwt_handler.decode_id_token(id_token)
+        → Userinfo { email, name, picture, ... }
+     → 检测服务商
+        → provider_pool.detect_provider(&email)
+     → 创建账号
+        → AccountRepository::create(&db, app_handle, account_req)
+     → 存储 Token
+        → token_manager.store_token(account_id, &token_response)
+     → 删除会话
+        → oauth_session_manager.remove_session(session_id)
+     → 停止 HTTP 服务器
+        → oauth_http_server.stop()
+     → 发送完成事件
+        → emit("oauth-flow-complete", { session_id, status: "success", account })
+
+// ==================== HTTP 回调服务器 ====================
+
+// 3. HTTP 回调处理
+oauth_http_server.rs::handle_request()
+  → if path == "/callback" && method == GET:
+     → 解析查询参数
+        → code = query_params.get("code")
+        → state = query_params.get("state")
+        → error = query_params.get("error")
+     → 发送事件到主线程
+        → app_handle.emit("oauth-http-callback", { code, state, error })
+     → 返回 HTML 页面（成功/失败提示）
+
+// ==================== 辅助函数 ====================
+
+// 4. 配置加载
+config.rs::load_oauth_config_for_provider(provider)
+  → match provider {
+        "gmail" => load_google_oauth_config()
+        "googleworkspace" => load_google_workspace_oauth_config()
+        "outlook" => load_microsoft_oauth_config()
+        "microsoft365" => load_microsoft365_oauth_config()
     }
+  → 从环境变量加载 (.env 文件)
+  → OAuthConfig { client_id, client_secret, redirect_uri, scopes, ... }
 
-// 3. 交换授权码
-command/oauth.rs::exchange_oauth_code()
-  → auth_manager.authenticate_oauth(&email, &code, &state)
-     → provider_pool.detect_provider(&email)
-     → oauth_handler.exchange_code(provider, code, state)
-        → // POST 请求到 token endpoint
-        → client.post(token_url)
-            .form(&[
-                ("code", code),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("redirect_uri", redirect_uri),
-                ("grant_type", "authorization_code"),
-            ])
-            .send()
-        → TokenResponse { access_token, refresh_token, expires_in, id_token, ... }
-     → // 存储 Token
-     → token_manager.store_token(0, &token_response).await
-     → // 解析 id_token
-     → AuthResult { email, display_name, id_token, expires_at, ... }
-  → // 检测服务商
-  → provider_pool.detect_provider(&email)
-  → // 创建账号
-  → AccountRepository::create(&db, app_handle, account_req)
-  → // 迁移 Token
-  → token_manager.migrate_token_account(0, account.id)
+// 5. Token 刷新
+command/auth.rs::refresh_oauth_token()
+  → token_manager.get_refresh_token(account_id)
+  → POST { token_url }
+    → form = [
+          ("refresh_token", refresh_token),
+          ("client_id", client_id),
+          ("client_secret", client_secret),
+          ("grant_type", "refresh_token"),
+      ]
+  → 更新存储的 token
 ```
 
 ---
@@ -365,11 +480,12 @@ command/oauth.rs::exchange_oauth_code()
 
 ```rust
 pub struct AuthManager {
-    oauth_handler: Arc<OAuthHandler>,      // OAuth 处理
-    token_manager: Arc<TokenManager>,      // Token 管理
-    password_auth: Arc<PasswordAuth>,      // 密码认证
-    enterprise_auth: Arc<EnterpriseAuth>,  // 企业认证
-    provider_pool: Arc<ProviderPool>,      // 服务商池
+    oauth_handler: Arc<OAuthHandler>,         // OAuth 处理
+    token_manager: Arc<RwLock<TokenManager>>, // Token 管理
+    password_auth: Arc<PasswordAuth>,         // 密码认证
+    enterprise_auth: Arc<EnterpriseAuth>,     // 企业认证
+    oauth_session_manager: Arc<OAuthSessionManager>, // OAuth 会话管理
+    provider_pool: Arc<ProviderPool>,         // 服务商池
 }
 ```
 
@@ -377,11 +493,74 @@ pub struct AuthManager {
 
 | 方法 | 说明 |
 |------|------|
-| `get_oauth_url(email)` | 获取 OAuth 授权 URL |
-| `authenticate_oauth(email, code, state)` | OAuth 认证，交换授权码 |
+| `start_oauth_session(email, provider)` | 启动 OAuth 会话，创建 HTTP 回调服务器 |
+| `process_oauth_callback(session_id, code, state)` | 处理 OAuth 回调，交换授权码 |
 | `refresh_token(account_id, email)` | 刷新 OAuth Token |
+| `validate_token(account_id)` | 验证 Token 是否有效 |
 | `get_imap_auth(account_id, email, auth_type)` | 获取 IMAP 认证信息 |
 | `get_smtp_auth(account_id, email, auth_type)` | 获取 SMTP 认证信息 |
+
+**统一认证流程:**
+
+```
+AuthManager 作为统一入口
+  ├─ 密码认证 → password_auth.authenticate()
+  ├─ OAuth 认证 → start_oauth_session() + process_oauth_callback()
+  └─ Token 刷新 → token_manager.refresh_token()
+```
+
+### OAuthSessionManager (会话管理器)
+
+位置: `src-tauri/src/auth/oauth_session.rs`
+
+```rust
+pub struct OAuthSessionManager {
+    sessions: Arc<RwLock<HashMap<String, OAuthSession>>>,
+}
+
+pub struct OAuthSession {
+    session_id: String,      // 会话 ID
+    email: String,           // 用户邮箱
+    provider: String,        // 服务商
+    state: String,           // OAuth state 参数
+    code_verifier: String,   // PKCE code verifier
+    created_at: i64,         // 创建时间
+    expires_at: i64,         // 过期时间（5分钟）
+}
+```
+
+**职责:**
+- 管理活跃的 OAuth 会话
+- 生成和验证 state 参数
+- 生成 PKCE code_verifier
+- 清理过期会话
+
+### OAuthHttpServer (HTTP 回调服务器)
+
+位置: `src-tauri/src/auth/oauth_http_server.rs`
+
+```rust
+pub struct OAuthHttpServer {
+    port: u16,                    // 监听端口 (36279)
+    running: Arc<Mutex<bool>>,   // 运行状态
+    app_handle: AppHandle,       // Tauri 句柄
+}
+```
+
+**功能:**
+- 监听 `http://localhost:36279/callback`
+- 解析 OAuth 回调参数 (code, state, error)
+- 通过 Tauri 事件发送回调到主线程
+- 返回用户友好的 HTML 页面（成功/失败提示）
+
+**配置端口:**
+```bash
+# 默认端口
+POSTIUM_OAUTH_PORT=36279
+
+# 或在代码中配置
+config.rs::get_oauth_callback_port() -> 36279
+```
 
 ### SyncManager (同步管理器)
 
@@ -651,9 +830,52 @@ interface SyncResult {
 |------|----------|----------|
 | 添加账号失败 | IMAP 连接失败 | 检查服务器配置、端口、SSL |
 | OAuth 授权失败 | Token 无效 | 检查系统时间、重新授权 |
+| OAuth 回调超时 | HTTP 回调服务器未启动 | 检查端口 36279 是否被占用 |
+| Google Token 交换失败 | client_secret 未配置 | 检查 `.env` 文件是否配置 `GOOGLE_CLIENT_SECRET` |
+| Microsoft Token 失败 | client_secret 不应为空 | 确保 `.env` 中 `MICROSOFT_CLIENT_SECRET` 为空 |
+| 回调页面显示失败 | 授权被用户拒绝 | 重新进行授权流程 |
 | 同步无邮件 | 文件夹未选择 | 检查 folder 配置 |
 | 密码错误 | Keyring 读取失败 | 检查密钥链权限 |
 | Token 过期 | 超过有效期 | 自动刷新或重新授权 |
+
+**OAuth 配置检查清单:**
+
+```bash
+# 1. 检查 .env 文件是否存在
+ls -la src-tauri/.env
+
+# 2. 检查配置是否正确加载
+# 启动应用时查看日志
+========== Google OAuth 配置加载 ==========
+  client_id: 123456789-xxx.apps.googleusercontent.com
+  client_secret: *** (已设置)
+  redirect_uri: http://localhost:36279/callback
+==========================================
+
+# 3. 检查端口是否被占用
+# Windows
+netstat -ano | findstr :36279
+
+# Linux/macOS
+lsof -i :36279
+
+# 4. 手动测试回调服务器
+# 浏览器访问
+http://localhost:36279/callback?code=test&state=test
+```
+
+**日志调试:**
+
+```bash
+# 启用详细日志
+RUST_LOG=postium_mail::auth=debug,postium_mail::oauth=debug npm run tauri dev
+
+# 关键日志点
+[oauth_session]    - OAuth 会话创建/清理
+[oauth_http_server] - HTTP 回调服务器
+[auth_manager]     - 认证流程
+[token_manager]     - Token 存储/刷新
+```
 
 ---
 
@@ -766,4 +988,51 @@ pub struct StandardFolder {
 
 ---
 
-*最后更新: 2026-03-21*
+## OAuth 架构变更说明
+
+### v2.0 重构 (2026-03-22)
+
+**重大架构变化:**
+
+1. **从 Deep Link 改为 HTTP localhost 回调**
+   - 旧方案: 使用自定义协议 `postium-mail://oauth/callback`
+   - 新方案: 使用 HTTP 服务器 `http://localhost:36279/callback`
+   - 优势: 避免协议注册问题，更标准的 OAuth 流程
+
+2. **引入 OAuthSession 管理**
+   - 集中管理 OAuth 流程状态
+   - 支持并发 OAuth 流程
+   - 自动清理过期会话
+
+3. **client_secret 可配置**
+   - 支持 Google 和 Microsoft 不同的 client_secret 需求
+   - 通过 `.env` 文件配置，避免硬编码
+   - Microsoft 公共客户端不需要 client_secret
+   - Google 桌面应用必须提供 client_secret
+
+4. **统一认证入口**
+   - 所有认证相关命令移至 `command/auth.rs`
+   - AuthManager 作为统一认证入口点
+   - 简化前端调用逻辑
+
+**向后兼容性:**
+
+- 旧的 `exchange_oauth_code` 命令仍保留（已废弃）
+- 建议使用新的 `start_oauth_session` + `process_oauth_callback` 流程
+- 前端已更新为使用 `OAuthHelper.startLogin()`
+
+**迁移指南:**
+
+```typescript
+// 旧方式（已废弃）
+const authUrl = await invoke('get_oauth_auth_url', { provider })
+const account = await invoke('exchange_oauth_code', { code, state })
+
+// 新方式（推荐）
+const account = await OAuthHelper.startLogin(provider)
+```
+
+---
+
+*最后更新: 2026-03-22*
+*更新内容: OAuth 架构重构（HTTP localhost 回调）*
