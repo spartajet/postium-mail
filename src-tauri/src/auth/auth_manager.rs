@@ -7,12 +7,12 @@ use std::sync::Arc;
 use base64::Engine;
 use tauri::AppHandle;
 
-use crate::providers::{ProviderPool, AuthType};
-use crate::error::{MailError, Result};
-use crate::auth::oauth_handler::{OAuthHandler, AuthorizationContext};
-use crate::auth::token_manager::TokenManager;
-use crate::auth::password_auth::PasswordAuth;
 use crate::auth::enterprise_auth::EnterpriseAuth;
+use crate::auth::oauth_handler::{AuthorizationContext, OAuthHandler};
+use crate::auth::password_auth::PasswordAuth;
+use crate::auth::token_manager::TokenManager;
+use crate::error::{MailError, Result};
+use crate::providers::{AuthType, ProviderPool};
 
 /// 认证凭证
 #[derive(Debug, Clone)]
@@ -111,7 +111,7 @@ impl AuthManager {
     /// let manager = AuthManager::new(&app_handle)?;
     /// ```
     pub fn new(app_handle: &AppHandle) -> Result<Self> {
-        let provider_pool = Arc::new(ProviderPool::new());
+        let provider_pool = Arc::new(ProviderPool::default());
         let oauth_handler = Arc::new(OAuthHandler::new());
         let token_manager = Arc::new(TokenManager::new(app_handle)?);
         let password_auth = Arc::new(PasswordAuth::new(app_handle)?);
@@ -257,17 +257,20 @@ impl AuthManager {
     /// ```rust,ignore
     /// let result = manager.authenticate_password("user@example.com", "password").await?;
     /// ```
-    pub async fn authenticate_password(
-        &self,
-        email: &str,
-        password: &str,
-    ) -> Result<AuthResult> {
+    pub async fn authenticate_password(&self, email: &str, password: &str) -> Result<AuthResult> {
         // 1. 检测服务商
         let provider = self.provider_pool.detect_provider(email).await?;
         let provider_id = provider.provider_id().to_string();
 
-        // 2. 验证密码（可选）
-        // 暂时跳过实际验证，直接存储
+        // 2. 验证密码（通过 IMAP 连接测试）
+        let state = self
+            .validate_credentials_for_password(email, password)
+            .await?;
+
+        // 如果验证失败，返回错误
+        if state != AuthState::Authenticated {
+            return Err(MailError::Internal(format!("密码认证失败: {:?}", state)));
+        }
 
         // 3. 存储密码
         // 注意：account_id 需要外部设置，这里先使用临时值
@@ -448,10 +451,7 @@ impl AuthManager {
     /// let accounts = vec![(1, "user1@example.com"), (2, "user2@example.com")];
     /// let refreshed = manager.refresh_expiring_tokens(accounts).await?;
     /// ```
-    pub async fn refresh_expiring_tokens(
-        &self,
-        accounts: Vec<(i32, String)>,
-    ) -> Result<Vec<i32>> {
+    pub async fn refresh_expiring_tokens(&self, accounts: Vec<(i32, String)>) -> Result<Vec<i32>> {
         let mut refreshed = Vec::new();
         let total = accounts.len();
 
@@ -548,9 +548,7 @@ impl AuthManager {
                     .await?;
 
                 // 3. 生成 XOAUTH2 字符串
-                let xoauth2 = self
-                    .oauth_handler
-                    .generate_xoauth2(email, &access_token);
+                let xoauth2 = self.oauth_handler.generate_xoauth2(email, &access_token);
 
                 Ok(ImapAuthInfo::OAuth {
                     email: email.to_string(),
@@ -640,9 +638,7 @@ impl AuthManager {
                     .await?;
 
                 // 3. 生成 XOAUTH2 字符串
-                let xoauth2 = self
-                    .oauth_handler
-                    .generate_xoauth2(email, &access_token);
+                let xoauth2 = self.oauth_handler.generate_xoauth2(email, &access_token);
 
                 Ok(SmtpAuthInfo::OAuth {
                     email: email.to_string(),
@@ -724,9 +720,9 @@ impl AuthManager {
         }
 
         // 解码 payload
-        let payload = parts.get(1).ok_or_else(|| {
-            MailError::Internal("JWT token 缺少 payload".to_string())
-        })?;
+        let payload = parts
+            .get(1)
+            .ok_or_else(|| MailError::Internal("JWT token 缺少 payload".to_string()))?;
 
         let payload_json = self.base64_url_decode(payload)?;
 
@@ -736,7 +732,7 @@ impl AuthManager {
 
         // 提取 email（支持多种字段名）
         let email = claims
-            .get("upn")      // Microsoft User Principal Name
+            .get("upn") // Microsoft User Principal Name
             .or_else(|| claims.get("email"))
             .or_else(|| claims.get("unique_name"))
             .and_then(|v| v.as_str())
@@ -780,8 +776,7 @@ impl AuthManager {
             .decode(&input_standard)
             .map_err(|e| MailError::Internal(format!("Base64 解码失败: {}", e)))?;
 
-        String::from_utf8(bytes)
-            .map_err(|e| MailError::Internal(format!("UTF-8 转换失败: {}", e)))
+        String::from_utf8(bytes).map_err(|e| MailError::Internal(format!("UTF-8 转换失败: {}", e)))
     }
 }
 

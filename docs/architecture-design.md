@@ -29,6 +29,94 @@ Postium Mail 是一款基于 Tauri + Vue 3 的跨平台桌面邮件客户端，�
 - **可扩展性**: 支持动态添加邮件服务商和协议扩展
 - **类型安全**: 充分利用 Rust 的类型系统保证安全
 
+### 前后端职责划分
+
+#### 前端职责（Vue Components）
+
+1. **UI 交互**
+   - 表单展示和用户交互
+   - 加载状态、错误提示等用户反馈
+   - 页面路由和导航
+
+2. **数据格式校验**
+   - 邮箱格式验证（如是否包含 @ 符号）
+   - 必填字段非空检查
+   - 基本的数据类型校验（字符串长度、数字范围等）
+
+3. **调用后端 API**
+   - 通过 Tauri invoke 调用后端命令
+   - 处理 API 返回结果并更新 UI
+
+#### 后端职责（Rust Commands）
+
+1. **业务逻辑**
+   - 认证和授权（OAuth、密码验证）
+   - 服务商检测和配置获取
+   - 邮件同步和管理
+
+2. **数据验证**
+   - 业务规则验证（如密码强度、账号唯一性）
+   - 与外部服务交互验证（IMAP 连接测试、OAuth token 验证）
+
+3. **数据处理和存储**
+   - 数据库操作（CRUD）
+   - 密钥链管理（凭证存储）
+   - 文件系统操作
+
+#### 职责划分示例
+
+##### ✅ 正确示例
+
+**前端**：
+```typescript
+// 只做格式校验
+if (!email.value || !email.value.includes('@')) {
+  showError('请输入有效的邮箱地址')
+  return
+}
+
+// 调用后端
+const provider = await invoke('detect_provider', { email: email.value })
+```
+
+**后端**：
+```rust
+#[tauri::command]
+pub async fn detect_provider(email: String) -> Result<ProviderDetectionResult, String> {
+    // 业务逻辑：检测服务商、获取配置
+    let provider = provider_pool.detect_provider(&email).await?;
+    Ok(ProviderDetectionResult {
+        provider_id: provider.provider_id().to_string(),
+        auth_types: provider.auth_types(),
+        // ...
+    })
+}
+```
+
+##### ❌ 错误示例
+
+**前端不应该**：
+```typescript
+// ❌ 前端不应验证 OAuth token
+const isValid = await invoke('validate_oauth_token', { token })
+
+// ❌ 前端不应测试 IMAP 连接
+await invoke('test_email_connection', { email, password })
+
+// ❌ 前端不应判断服务商类型
+const provider = email.includes('gmail') ? 'gmail' : 'custom'
+
+// ❌ 前端不应存储敏感信息
+localStorage.setItem('password', password)
+```
+
+#### 原则说明
+
+1. **前端轻量化**：前端只负责展示和基本格式校验，不处理业务逻辑
+2. **后端集中化**：所有业务逻辑、验证、外部服务交互都在后端处理
+3. **安全性**：敏感信息（密码、token）永远不经过前端处理
+4. **可测试性**：后端业务逻辑可以独立测试，不依赖前端
+
 ---
 
 ## 架构设计

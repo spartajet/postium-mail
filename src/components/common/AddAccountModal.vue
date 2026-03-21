@@ -331,111 +331,53 @@ async function handleSubmit() {
   success.value = ''
 
   try {
-    // 基础验证
+    // === 前端职责：基本格式校验 ===
+
+    // 1. 验证账号名称
     if (!form.value.name.trim()) {
       error.value = '请输入账号名称'
       console.log('[AddAccountModal] 验证失败：账号名称为空')
       return
     }
 
+    // 2. 验证邮箱地址格式
     if (!form.value.email.trim() || form.value.email.startsWith('@')) {
       error.value = '请输入完整的邮箱地址'
       console.log('[AddAccountModal] 验证失败：邮箱地址不完整')
       return
     }
 
-    console.log('[AddAccountModal] 基础验证通过')
-
-    // OAuth 模式：检查 token，如果没有则自动触发授权
-    if (form.value.authType === AuthType.OAuth2) {
-      console.log('[AddAccountModal] 处理OAuth模式')
-
-      if (!oauthToken.value) {
-        console.log('[AddAccountModal] 没有OAuth token，触发授权')
-        // 自动触发 OAuth 授权
-        startOAuthLogin()
-        return
-      }
-
-      console.log('[AddAccountModal] 有OAuth token，开始验证')
-
-      // 有 token，验证是否有效
-      try {
-        syncProgress.value = {
-          stage: 'authenticating',
-          currentStep: 1,
-          totalSteps: 3,
-          message: '验证授权信息...',
-          percentage: 20,
-        }
-
-        console.log('[AddAccountModal] 调用 validate_oauth_token')
-        const isValid = await invoke('validate_oauth_token', {
-          provider: oauthProvider.value,
-          token: oauthToken.value.access_token,
-        })
-
-        console.log('[AddAccountModal] validate_oauth_token 结果:', isValid)
-
-        if (!isValid) {
-          // token 无效，重新授权
-          error.value = '授权已过期，请重新授权'
-          syncProgress.value.stage = 'idle'
-          startOAuthLogin()
-          return
-        }
-      } catch (e: any) {
-        console.error('[AddAccountModal] validate_oauth_token 出错:', e)
-        error.value = `授权验证失败：${e}`
-        syncProgress.value.stage = 'idle'
-        return
-      }
+    // 3. 邮箱格式基本校验（前端只检查是否包含 @ 和 .）
+    const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+    if (!emailRegex.test(form.value.email)) {
+      error.value = '请输入有效的邮箱地址'
+      console.log('[AddAccountModal] 验证失败：邮箱格式无效')
+      return
     }
 
-    // 密码模式：验证连接
-    if (form.value.authType === AuthType.Password) {
-      console.log('[AddAccountModal] 处理密码模式')
-
-      if (!form.value.password.trim()) {
-        error.value = '请输入密码'
-        console.log('[AddAccountModal] 验证失败：密码为空')
-        return
-      }
-
-      try {
-        syncProgress.value = {
-          stage: 'validating',
-          currentStep: 1,
-          totalSteps: 3,
-          message: '验证邮箱连接...',
-          percentage: 20,
-        }
-
-        console.log('[AddAccountModal] 调用 test_email_connection')
-        await invoke('test_email_connection', {
-          email: form.value.email,
-          password: form.value.password,
-          provider: form.value.provider,
-          imapHost: isCustom.value ? form.value.imapHost : null,
-          imapPort: isCustom.value ? form.value.imapPort : null,
-          imapSsl: isCustom.value ? form.value.imapSsl : null,
-          smtpHost: isCustom.value ? form.value.smtpHost : null,
-          smtpPort: isCustom.value ? form.value.smtpPort : null,
-          smtpSsl: isCustom.value ? form.value.smtpSsl : null,
-        })
-
-        console.log('[AddAccountModal] test_email_connection 成功')
-      } catch (e: any) {
-        console.error('[AddAccountModal] test_email_connection 出错:', e)
-        error.value = `连接验证失败：${e}`
-        syncProgress.value.stage = 'idle'
-        return
-      }
+    // 4. OAuth 模式：检查 token 是否存在
+    if (form.value.authType === AuthType.OAuth2 && !oauthToken.value) {
+      error.value = '请先完成 OAuth 授权'
+      console.log('[AddAccountModal] 验证失败：缺少 OAuth token')
+      startOAuthLogin()
+      return
     }
 
-    console.log('[AddAccountModal] 验证完成，开始创建账号并同步')
+    // 5. 密码模式：检查密码是否填写
+    if (form.value.authType === AuthType.Password && !form.value.password.trim()) {
+      error.value = '请输入密码'
+      console.log('[AddAccountModal] 验证失败：密码为空')
+      return
+    }
 
-    // 创建账号并同步
+    console.log('[AddAccountModal] 前端格式校验通过')
+
+    // === 调用后端创建账号（所有业务逻辑在后端处理） ===
+    // 后端会通过 AuthManager 统一处理：
+    // - OAuth token 验证
+    // - 密码验证（IMAP 连接测试）
+    // - 服务商配置获取
+    // - 账号创建
     await createAccountAndSync()
   } catch (e: any) {
     console.error('[AddAccountModal] handleSubmit 全局错误:', e)

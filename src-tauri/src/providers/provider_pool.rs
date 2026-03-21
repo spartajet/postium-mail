@@ -50,10 +50,17 @@ pub struct ProviderPool {
 impl Default for ProviderPool {
     fn default() -> Self {
         use super::enterprise::{CustomProvider, GoogleWorkspaceProvider, Microsoft365Provider};
+        use super::personal::{
+            AolMailProvider, ChinaMailProvider, CmccMailProvider, Cn21MailProvider,
+            GmxMailProvider, ICloudProvider, Mail163Provider, MailComProvider, Net263MailProvider,
+            QqMailProvider, SohuMailProvider, TomMailProvider, YandexMailProvider,
+            ZohoMailProvider,
+        };
         use super::personal::{GmailProvider, OutlookProvider, SinaMailProvider, YahooProvider};
-        use super::personal::{AolMailProvider, ChinaMailProvider, CmccMailProvider, Cn21MailProvider, GmxMailProvider, ICloudProvider, MailComProvider, Mail163Provider, Net263MailProvider, QqMailProvider, SohuMailProvider, TomMailProvider, YandexMailProvider, ZohoMailProvider};
 
-        let mut pool = Self::new();
+        let mut pool = Self {
+            providers: Vec::new(),
+        };
 
         // 个人邮箱服务商
         pool.register(Box::new(GmailProvider));
@@ -87,12 +94,6 @@ impl Default for ProviderPool {
 }
 
 impl ProviderPool {
-    pub fn new() -> Self {
-        Self {
-            providers: Vec::new(),
-        }
-    }
-
     /// 注册服务商
     pub fn register(&mut self, provider: Box<dyn MailProvider>) {
         self.providers.push(provider);
@@ -401,7 +402,7 @@ mod tests {
     #[tokio::test]
     async fn test_provider_pool_detection() {
         init_tracing();
-        let mut pool = ProviderPool::new();
+        let mut pool = ProviderPool::default();
 
         let provider = Box::new(MockProvider {
             id: "test",
