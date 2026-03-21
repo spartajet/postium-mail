@@ -158,9 +158,15 @@ impl PasswordAuth {
             username
         );
 
-        // TODO: 实现实际的 IMAP 连接测试
-        // 暂时返回 true，后续可以通过 IMAP 客户端连接测试
-        Ok(true)
+        // 使用 IMAP test_connection 验证密码
+        use crate::protocols::imap::{test_connection, ImapAuth};
+
+        let auth = ImapAuth::Password(password.to_string());
+        let result = test_connection(host, port, username, auth)
+            .await
+            .map_err(|e| MailError::Internal(format!("IMAP 连接测试失败: {}", e)))?;
+
+        Ok(result.success)
     }
 
     /// 检查密码是否存在

@@ -9,9 +9,10 @@
 //! 这些命令用于在用户添加或编辑账号配置后验证连接是否正常。
 //! 支持常见邮件服务商的自动配置，也支持自定义服务器设置。
 
-use super::KeyringState;
-use crate::protocols::imap::{test_connection, ImapAuth, ConnectionTestResult};
+use super::AuthManagerState;
+use crate::protocols::imap::ConnectionTestResult;
 use crate::storage;
+use crate::auth::AuthState;
 
 /// 测试账号配置的 IMAP 连接
 ///
@@ -56,28 +57,29 @@ use crate::storage;
 /// ```
 #[tauri::command]
 pub async fn test_account_connection(
-    _keyring_state: tauri::State<'_, KeyringState>,
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
     account: storage::CreateAccountRequest,
 ) -> Result<ConnectionTestResult, String> {
-    let password = account.password.clone();
+    let auth_manager = auth_manager_state.clone_manager();
 
-    let host = account
-        .imap_host
-        .clone()
-        .unwrap_or_else(|| match account.provider.as_str() {
-            "gmail" => "imap.gmail.com".to_string(),
-            "outlook" | "hotmail" => "outlook.office365.com".to_string(),
-            "icloud" => "imap.mail.me.com".to_string(),
-            "yahoo" => "imap.mail.yahoo.com".to_string(),
-            _ => "imap.example.com".to_string(),
-        });
-
-    let port = account.imap_port.unwrap_or(993);
-    let auth = ImapAuth::Password(password);
-
-    test_connection(&host, port as u16, &account.email, auth)
+    // 使用 AuthManager 验证凭据
+    let state = auth_manager
+        .validate_credentials_for_password(&account.email, &account.password)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // 转换 AuthState 到 ConnectionTestResult
+    Ok(ConnectionTestResult {
+        success: state == AuthState::Authenticated,
+        connect_time: 0,
+        login_time: 0,
+        email_count: 0,
+        error: if state == AuthState::Authenticated {
+            None
+        } else {
+            Some("认证失败".to_string())
+        },
+    })
 }
 
 /// 测试自定义邮箱配置的连接
@@ -141,30 +143,28 @@ pub async fn test_account_connection(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn test_email_connection(
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
     email: String,
     password: String,
-    provider: String,
-    imap_host: Option<String>,
-    imap_port: Option<u16>,
+    _provider: String,
+    _imap_host: Option<String>,
+    _imap_port: Option<u16>,
     _imap_ssl: Option<bool>,
     _smtp_host: Option<String>,
     _smtp_port: Option<u16>,
     _smtp_ssl: Option<bool>,
 ) -> Result<(), String> {
-    let host = imap_host.unwrap_or_else(|| match provider.as_str() {
-        "gmail" => "imap.gmail.com".to_string(),
-        "outlook" | "hotmail" => "outlook.office365.com".to_string(),
-        "icloud" => "imap.mail.me.com".to_string(),
-        "yahoo" => "imap.mail.yahoo.com".to_string(),
-        _ => "imap.example.com".to_string(),
-    });
+    let auth_manager = auth_manager_state.clone_manager();
 
-    let port = imap_port.unwrap_or(993);
-    let auth = ImapAuth::Password(password);
-
-    test_connection(&host, port, &email, auth)
+    // 使用 AuthManager 验证凭据
+    let state = auth_manager
+        .validate_credentials_for_password(&email, &password)
         .await
-        .map_err(|e| format!("IMAP 连接失败: {}", e))?;
+        .map_err(|e| e.to_string())?;
+
+    if state != AuthState::Authenticated {
+        return Err("IMAP 连接失败: 认证失败".to_string());
+    }
 
     Ok(())
 }
