@@ -21,9 +21,14 @@ pub use oauth::*;
 pub use provider::*;
 pub use sync::*;
 
+// 导出 OAuth 相关类型供 lib.rs 使用
+pub use oauth::{OAuthFlowResult};
+
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
+
+use crate::auth::OAuthSessionManager;
 
 /// 全局数据库连接状态
 pub struct DatabaseState(pub Arc<StdMutex<DbConn>>);
@@ -76,5 +81,16 @@ impl ProviderPoolState {
     /// 克隆 ProviderPool 实例
     pub fn clone_pool(&self) -> Arc<crate::providers::ProviderPool> {
         Arc::clone(&self.0)
+    }
+}
+
+/// OAuthSessionManager 状态
+///
+/// 管理 OAuth 会话管理器的全局单例
+pub struct OAuthSessionManagerState(pub Arc<OAuthSessionManager>);
+
+impl Clone for OAuthSessionManagerState {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
     }
 }

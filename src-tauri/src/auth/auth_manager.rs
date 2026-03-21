@@ -9,6 +9,7 @@ use tauri::AppHandle;
 
 use crate::auth::enterprise_auth::EnterpriseAuth;
 use crate::auth::oauth_handler::{AuthorizationContext, OAuthHandler};
+use crate::auth::oauth_session::OAuthSessionManager;
 use crate::auth::password_auth::PasswordAuth;
 use crate::auth::token_manager::TokenManager;
 use crate::error::{MailError, Result};
@@ -85,6 +86,7 @@ pub enum AuthState {
 /// - 密码认证流程
 /// - Token 刷新
 /// - 批量刷新
+/// - OAuth 会话管理
 pub struct AuthManager {
     /// OAuth 处理器
     oauth_handler: Arc<OAuthHandler>,
@@ -96,6 +98,8 @@ pub struct AuthManager {
     enterprise_auth: Arc<EnterpriseAuth>,
     /// 服务商池
     provider_pool: Arc<ProviderPool>,
+    /// OAuth 会话管理器
+    session_manager: Arc<OAuthSessionManager>,
 }
 
 impl AuthManager {
@@ -117,12 +121,19 @@ impl AuthManager {
         let password_auth = Arc::new(PasswordAuth::new(app_handle)?);
         let enterprise_auth = Arc::new(EnterpriseAuth::new());
 
+        // 创建 OAuth 会话管理器（10分钟超时）
+        let session_manager = Arc::new(OAuthSessionManager::new(600));
+
+        // 启动后台清理任务
+        Arc::clone(&session_manager).spawn_cleanup_task();
+
         Ok(Self {
             oauth_handler,
             token_manager,
             password_auth,
             enterprise_auth,
             provider_pool,
+            session_manager,
         })
     }
 
@@ -692,6 +703,11 @@ impl AuthManager {
     /// 获取企业认证处理器
     pub fn enterprise_auth(&self) -> &EnterpriseAuth {
         &self.enterprise_auth
+    }
+
+    /// 获取 OAuth 会话管理器
+    pub fn session_manager(&self) -> Arc<OAuthSessionManager> {
+        Arc::clone(&self.session_manager)
     }
 
     /// 从 JWT ID Token 中解析用户信息

@@ -162,7 +162,7 @@ use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
 
-use command::{AuthManagerState, DatabaseState, FlowEngineState, KeyringState, ProviderPoolState};
+use command::{AuthManagerState, DatabaseState, FlowEngineState, KeyringState, OAuthFlowResult, OAuthSessionManagerState, ProviderPoolState};
 
 /// 处理 OAuth Deep Link 回调
 fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
@@ -207,27 +207,177 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
         let _ = window.show();
     }
 
-    let emit_result = if let Some(err) = error {
-        app.emit(
-            "oauth-deep-link-callback",
-            serde_json::json!({
-                "error": err,
-                "errorDescription": error_description.unwrap_or_default()
-            }),
-        )
-    } else {
-        app.emit(
-            "oauth-deep-link-callback",
-            serde_json::json!({
-                "code": code,
-                "state": state
-            }),
-        )
+    // 获取状态并克隆 Arc（确保 async block 中拥有所有权）
+    let session_manager = std::sync::Arc::clone(&app.state::<OAuthSessionManagerState>().0);
+    let auth_manager = app.state::<AuthManagerState>().clone_manager();
+    // 从 State<'_, DatabaseState> 中提取并克隆内部的 Arc
+    let db_arc = std::sync::Arc::clone(&app.state::<DatabaseState>().0);
+    let db_state = command::DatabaseState(db_arc);
+    let app_handle = app.clone();
+
+    // KeyringState 包含 AppHandle，可以直接克隆
+    let keyring_state = command::KeyringState {
+        app_handle: app_handle.clone(),
     };
 
-    if let Err(e) = emit_result {
-        tracing::error!("发射 OAuth Deep Link 事件失败: {}", e);
-    }
+    // 在异步运行时中处理
+    tauri::async_runtime::spawn(async move {
+        // 验证会话
+        let session = match session_manager.verify_and_get_session(&state).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("验证 OAuth 会话失败: {}", e);
+                // 发射错误事件
+                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
+                    session_id: String::new(),
+                    status: "error".to_string(),
+                    account: None,
+                    error: Some(format!("无效的会话: {}", e)),
+                });
+                return;
+            }
+        };
+
+        let session_id = session.session_id.clone();
+
+        // 如果有错误，标记会话失败
+        if let Some(err) = error {
+            tracing::warn!("OAuth 授权失败: {}", err);
+            let error_msg = error_description.as_ref().map(|s| s.as_str()).unwrap_or(&err);
+            let _ = session_manager
+                .set_session_error(&session_id, error_msg.to_string())
+                .await;
+
+            let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
+                session_id: session_id.clone(),
+                status: "error".to_string(),
+                account: None,
+                error: error_description.or(Some(err)),
+            });
+            return;
+        }
+
+        // 交换 token 并创建账号
+        let email = session.email.clone();
+
+        // 使用现有的 exchange_oauth_code 逻辑
+        match exchange_and_create_account(
+            db_state,
+            keyring_state,
+            auth_manager,
+            email.clone(),
+            code,
+            state,
+        )
+        .await
+        {
+            Ok(account) => {
+                tracing::info!("OAuth 流程成功创建账号: {}", account.email);
+
+                // 更新会话状态
+                let _ = session_manager
+                    .set_session_account_id(&session_id, account.id)
+                    .await;
+
+                // 发射成功事件
+                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
+                    session_id,
+                    status: "success".to_string(),
+                    account: Some(account),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                tracing::error!("OAuth 流程失败: {}", e);
+
+                // 更新会话状态
+                let _ = session_manager
+                    .set_session_error(&session_id, e.clone())
+                    .await;
+
+                // 发射错误事件
+                let _ = app_handle.emit("oauth-flow-complete", OAuthFlowResult {
+                    session_id,
+                    status: "error".to_string(),
+                    account: None,
+                    error: Some(e),
+                });
+            }
+        }
+    });
+}
+
+/// 交换 OAuth 授权码并创建账号（从 exchange_oauth_code 提取的逻辑）
+async fn exchange_and_create_account(
+    db_state: command::DatabaseState,
+    keyring_state: command::KeyringState,
+    auth_manager: std::sync::Arc<crate::auth::AuthManager>,
+    email: String,
+    code: String,
+    state: String,
+) -> std::result::Result<crate::storage::AccountDto, String> {
+    use crate::providers;
+
+    let db = db_state.clone_conn();
+
+    // 使用 AuthManager 进行 OAuth 认证
+    let auth_result = auth_manager
+        .authenticate_oauth(&email, &code, &state)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 获取服务商配置
+    let provider_pool = auth_manager.provider_pool();
+    let provider = provider_pool
+        .detect_provider(&email)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let imap_config = provider.imap_config(&email);
+    let smtp_config = provider.smtp_config(&email);
+
+    // 构建账号创建请求
+    let account_req = crate::storage::CreateAccountRequest {
+        name: auth_result.display_name.unwrap_or_else(|| {
+            email.split('@')
+                .next()
+                .unwrap_or("用户")
+                .to_string()
+        }),
+        email: auth_result.email.clone(),
+        provider: provider.provider_id().to_string(),
+        password: String::new(),
+        imap_host: Some(imap_config.host),
+        imap_port: Some(imap_config.port as i32),
+        imap_ssl: Some(matches!(imap_config.ssl, providers::SslMode::Implicit | providers::SslMode::StartTls)),
+        smtp_host: Some(smtp_config.host),
+        smtp_port: Some(smtp_config.port as i32),
+        smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
+        color: Some("#0078D4".to_string()),
+        auth_type: Some("oauth2".to_string()),
+        oauth_provider: Some(provider.provider_id().to_string()),
+        oauth_token: auth_result.id_token,
+        oauth_refresh_token: Some(String::new()),
+        oauth_expires_at: auth_result.expires_at,
+    };
+
+    // 创建账号
+    let account = crate::storage::AccountRepository::create(
+        &db,
+        &keyring_state.app_handle,
+        account_req,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // 迁移 Token
+    let token_manager = auth_manager.token_manager();
+    token_manager
+        .migrate_token_account(0, account.id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(account.into())
 }
 
 /// 初始化 tracing 日志系统
@@ -377,6 +527,9 @@ pub fn run() {
                 // 创建 ProviderPool（注册所有默认服务商）
                 let provider_pool = std::sync::Arc::new(providers::ProviderPool::default());
 
+                // 获取 SessionManager 的引用（在 move auth_manager 之前）
+                let session_manager = auth_manager.session_manager();
+
                 // 创建 SyncManager（使用 clone）
                 let sync_manager = std::sync::Arc::new(sync::SyncManager::new(
                     db_arc.clone(),
@@ -396,6 +549,8 @@ pub fn run() {
                 // 注册 AuthManagerState 和 ProviderPoolState
                 app.manage(AuthManagerState(auth_manager));
                 app.manage(ProviderPoolState(provider_pool));
+                // 注册 OAuthSessionManagerState（使用之前克隆的 session_manager）
+                app.manage(command::OAuthSessionManagerState(session_manager));
 
                 // 启动 FlowEngine
                 {
@@ -449,6 +604,8 @@ pub fn run() {
             command::get_oauth_auth_url,
             command::exchange_oauth_code,
             command::refresh_oauth_token,
+            command::start_oauth_flow,
+            command::cancel_oauth_flow,
             // 邮件操作
             command::list_emails,
             command::get_email,
