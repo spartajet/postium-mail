@@ -8,11 +8,11 @@ use std::sync::Arc;
 use rand::Rng;
 use tokio::sync::RwLock;
 
-use crate::providers::{
-    MailProvider, OAuthConfig,
-    PkceVerifierStore, OAuthTokenResponse, generate_xoauth2_string, validate_access_token,
-};
 use crate::error::{OAuthError, Result};
+use crate::providers::{
+    generate_xoauth2_string, validate_access_token, MailProvider, OAuthConfig, OAuthTokenResponse,
+    PkceVerifierStore,
+};
 
 /// URL 编码（用于 OAuth 参数）
 fn url_encode(value: &str) -> String {
@@ -91,9 +91,9 @@ impl OAuthHandler {
         provider: &dyn MailProvider,
     ) -> Result<AuthorizationContext> {
         // 1. 获取 OAuth 配置
-        let oauth_config = provider.oauth_config().ok_or_else(|| {
-            OAuthError::NetworkError("服务商不支持 OAuth".to_string())
-        })?;
+        let oauth_config = provider
+            .oauth_config()
+            .ok_or_else(|| OAuthError::NetworkError("服务商不支持 OAuth".to_string()))?;
 
         oauth_config.validate()?;
 
@@ -112,7 +112,7 @@ impl OAuthHandler {
 
         // 4. 构建 URL 参数
         let scope = oauth_config.scopes.join(" ");
-        let params = vec![
+        let params = [
             ("client_id", oauth_config.client_id.as_str()),
             ("response_type", "code"),
             ("redirect_uri", oauth_config.redirect_uri.as_str()),
@@ -188,14 +188,17 @@ impl OAuthHandler {
         // 打印 verifier 信息（用于调试）
         tracing::info!("========== PKCE Verifier 检索 ==========");
         tracing::info!("State: {}", state);
-        tracing::info!("Verifier (前20字符): {}", &code_verifier.chars().take(20).collect::<String>());
+        tracing::info!(
+            "Verifier (前20字符): {}",
+            &code_verifier.chars().take(20).collect::<String>()
+        );
         tracing::info!("Verifier 长度: {}", code_verifier.len());
         tracing::info!("====================================");
 
         // 2. 获取 OAuth 配置
-        let oauth_config = provider.oauth_config().ok_or_else(|| {
-            OAuthError::NetworkError("服务商不支持 OAuth".to_string())
-        })?;
+        let oauth_config = provider
+            .oauth_config()
+            .ok_or_else(|| OAuthError::NetworkError("服务商不支持 OAuth".to_string()))?;
 
         // 3. 构建请求体
         let mut params = vec![
@@ -216,9 +219,19 @@ impl OAuthHandler {
         tracing::info!("URL: {}", oauth_config.token_url);
         tracing::info!("Provider: {}", provider.provider_id());
         tracing::info!("Client ID: {}", oauth_config.client_id);
-        tracing::info!("Client Secret: {}", oauth_config.client_secret.as_ref().map(|s| "***").unwrap_or("None (Public Client)"));
+        tracing::info!(
+            "Client Secret: {}",
+            oauth_config
+                .client_secret
+                .as_ref()
+                .map(|s| "***")
+                .unwrap_or("None (Public Client)")
+        );
         tracing::info!("Redirect URI: {}", oauth_config.redirect_uri);
-        tracing::info!("Code (前50字符): {}", &code.chars().take(50).collect::<String>());
+        tracing::info!(
+            "Code (前50字符): {}",
+            &code.chars().take(50).collect::<String>()
+        );
         tracing::info!("Code 长度: {}", code.len());
         tracing::info!("Verifier 长度: {}", code_verifier.len());
         tracing::info!("Grant Type: authorization_code");
@@ -226,7 +239,11 @@ impl OAuthHandler {
         // 打印所有参数
         for (key, value) in &params {
             let value_preview = if *key == "code" || *key == "code_verifier" {
-                format!("{} (长度: {})", &value.chars().take(20).collect::<String>(), value.len())
+                format!(
+                    "{} (长度: {})",
+                    &value.chars().take(20).collect::<String>(),
+                    value.len()
+                )
             } else {
                 value.to_string()
             };
@@ -269,10 +286,7 @@ impl OAuthHandler {
             .await
             .map_err(|e| OAuthError::RefreshFailed(format!("解析响应失败: {}", e)))?;
 
-        tracing::info!(
-            "OAuth 授权码交换成功: provider={}",
-            provider.provider_id()
-        );
+        tracing::info!("OAuth 授权码交换成功: provider={}", provider.provider_id());
 
         Ok(token_response)
     }
@@ -301,9 +315,9 @@ impl OAuthHandler {
         refresh_token: &str,
     ) -> Result<OAuthTokenResponse> {
         // 1. 获取 OAuth 配置
-        let oauth_config = provider.oauth_config().ok_or_else(|| {
-            OAuthError::NetworkError("服务商不支持 OAuth".to_string())
-        })?;
+        let oauth_config = provider
+            .oauth_config()
+            .ok_or_else(|| OAuthError::NetworkError("服务商不支持 OAuth".to_string()))?;
 
         // 2. 构建刷新请求
         let mut params = vec![
@@ -344,10 +358,7 @@ impl OAuthHandler {
             .await
             .map_err(|e| OAuthError::RefreshFailed(format!("解析响应失败: {}", e)))?;
 
-        tracing::info!(
-            "Token 刷新成功: provider={}",
-            provider.provider_id()
-        );
+        tracing::info!("Token 刷新成功: provider={}", provider.provider_id());
 
         Ok(token_response)
     }
@@ -384,8 +395,7 @@ impl OAuthHandler {
     /// - `Ok(())` - Token 格式有效
     /// - `Err(message)` - Token 格式无效
     pub fn validate_access_token(&self, access_token: &str) -> Result<()> {
-        validate_access_token(access_token)
-            .map_err(OAuthError::RefreshFailed)?;
+        validate_access_token(access_token).map_err(OAuthError::RefreshFailed)?;
         Ok(())
     }
 
@@ -444,10 +454,7 @@ mod tests {
         let handler = OAuthHandler::new();
         let provider = GmailProvider;
 
-        let context = handler
-            .get_authorization_url(&provider)
-            .await
-            .unwrap();
+        let context = handler.get_authorization_url(&provider).await.unwrap();
 
         assert!(!context.auth_url.is_empty());
         assert!(!context.state.is_empty());
@@ -471,9 +478,9 @@ mod tests {
         let xoauth2 = handler.generate_xoauth2("user@example.com", "test_access_token");
 
         // 验证 base64 编码
-        assert!(xoauth2.chars().all(|c| {
-            c.is_alphanumeric() || c == '+' || c == '/' || c == '='
-        }));
+        assert!(xoauth2
+            .chars()
+            .all(|c| { c.is_alphanumeric() || c == '+' || c == '/' || c == '=' }));
 
         // 验证包含用户名
         assert!(xoauth2.contains("dXNlcj1")); // "user=" 的 base64 编码
@@ -502,10 +509,7 @@ mod tests {
         let provider = GmailProvider;
 
         // 生成授权 URL
-        let context = handler
-            .get_authorization_url(&provider)
-            .await
-            .unwrap();
+        let context = handler.get_authorization_url(&provider).await.unwrap();
 
         // 验证 PKCE verifier 存储
         let retrieved = handler.pkce_store.take(&context.state);
@@ -534,10 +538,7 @@ mod tests {
         let handler = OAuthHandler::new();
         let provider = GmailProvider;
 
-        let context = handler
-            .get_authorization_url(&provider)
-            .await
-            .unwrap();
+        let context = handler.get_authorization_url(&provider).await.unwrap();
 
         // 验证所有字段都不为空
         assert!(!context.auth_url.is_empty());

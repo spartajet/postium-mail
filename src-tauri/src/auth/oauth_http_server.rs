@@ -148,7 +148,10 @@ impl OAuthHttpServer {
         let mut running = self.running.lock().await;
         *running = false;
         // 连接到服务器以解除 accept() 阻塞
-        if let Err(_) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", self.port)).await {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", self.port))
+            .await
+            .is_err()
+        {
             // 忽略连接错误
         }
     }
@@ -205,7 +208,10 @@ async fn handle_request(
 
     // 打印详细的回调参数（用于调试）
     tracing::info!("========== OAuth HTTP 回调 ==========");
-    tracing::info!("Code (前20字符): {}", &code.chars().take(20).collect::<String>());
+    tracing::info!(
+        "Code (前20字符): {}",
+        &code.chars().take(20).collect::<String>()
+    );
     tracing::info!("Code 长度: {}", code.len());
     tracing::info!("State: {}", state);
     tracing::info!("Error: {:?}", error);
@@ -270,15 +276,14 @@ async fn handle_request(
         )
     } else {
         // 成功页面
-        format!(
-            r##"
+        r##"
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>认证成功</title>
     <style>
-        body {{
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
             justify-content: center;
@@ -287,8 +292,8 @@ async fn handle_request(
             margin: 0;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-        }}
-        .container {{
+        }
+        .container {
             text-align: center;
             padding: 50px;
             background: rgba(255, 255, 255, 0.15);
@@ -297,34 +302,34 @@ async fn handle_request(
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
             max-width: 500px;
             margin: 20px;
-        }}
-        .icon {{
+        }
+        .icon {
             font-size: 64px;
             margin-bottom: 20px;
             animation: checkmark 0.6s ease-in-out;
-        }}
-        @keyframes checkmark {{
-            0% {{ transform: scale(0); opacity: 0; }}
-            50% {{ transform: scale(1.2); }}
-            100% {{ transform: scale(1); opacity: 1; }}
-        }}
-        h1 {{
+        }
+        @keyframes checkmark {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        h1 {
             margin: 0 0 16px 0;
             font-size: 28px;
             font-weight: 600;
-        }}
-        .message {{
+        }
+        .message {
             margin: 0 0 12px 0;
             font-size: 16px;
             opacity: 0.95;
             line-height: 1.5;
-        }}
-        .sub-message {{
+        }
+        .sub-message {
             margin: 0 0 32px 0;
             font-size: 14px;
             opacity: 0.85;
-        }}
-        .info {{
+        }
+        .info {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
             padding: 16px;
@@ -332,12 +337,12 @@ async fn handle_request(
             font-size: 13px;
             line-height: 1.6;
             opacity: 0.9;
-        }}
-        .countdown {{
+        }
+        .countdown {
             font-size: 12px;
             opacity: 0.7;
             margin-top: 20px;
-        }}
+        }
     </style>
 </head>
 <body>
@@ -359,21 +364,21 @@ async fn handle_request(
         let countdown = 5;
         const countdownEl = document.getElementById('countdown');
 
-        function updateCountdown() {{
-            if (countdown > 0) {{
+        function updateCountdown() {
+            if (countdown > 0) {
                 countdownEl.textContent = '窗口将在 ' + countdown + ' 秒后自动关闭';
                 countdown--;
                 setTimeout(updateCountdown, 1000);
-            }} else {{
-                try {{
+            } else {
+                try {
                     window.close();
                     // 如果无法关闭，显示手动关闭提示
                     countdownEl.textContent = '请点击上方按钮手动关闭窗口';
-                }} catch (e) {{
+                } catch (e) {
                     console.log('无法自动关闭窗口:', e);
-                }}
-            }}
-        }}
+                }
+            }
+        }
 
         // 开始倒计时
         setTimeout(updateCountdown, 1000);
@@ -381,7 +386,7 @@ async fn handle_request(
 </body>
 </html>
             "##
-        )
+        .to_string()
     };
 
     Ok(Response::builder()

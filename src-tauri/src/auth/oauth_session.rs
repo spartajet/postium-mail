@@ -121,6 +121,12 @@ pub struct OAuthSessionManager {
     session_timeout: i64,
 }
 
+impl Default for OAuthSessionManager {
+    fn default() -> Self {
+        Self::new(600)
+    }
+}
+
 impl OAuthSessionManager {
     /// 创建新的会话管理器
     ///
@@ -132,11 +138,6 @@ impl OAuthSessionManager {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             session_timeout,
         }
-    }
-
-    /// 创建默认配置的会话管理器（10 分钟超时）
-    pub fn default() -> Self {
-        Self::new(600)
     }
 
     /// 创建新的 OAuth 会话
