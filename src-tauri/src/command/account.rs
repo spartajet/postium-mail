@@ -7,81 +7,81 @@
 //! - 更新账号配置
 //! - 删除账号
 
-use super::{DatabaseState, KeyringState, AuthManagerState};
+use super::{DatabaseState, KeyringState};
 use crate::storage;
 
-/// 添加新的邮件账号
-///
-/// 创建一个新的邮件账号，保存到数据库，并在系统密钥链中存储密码。
-///
-/// # 参数
-/// * `db_state` - 数据库连接状态
-/// * `keyring_state` - 密钥链状态，用于安全存储密码
-/// * `account` - 账号创建请求，包含邮箱地址、服务器配置等信息
-///
-/// # 返回
-/// 成功时返回创建的账号对象（AccountDto），失败时返回错误信息字符串
-///
-/// # 错误处理
-/// - 如果邮箱格式无效，返回验证错误
-/// - 如果连接服务器失败，返回连接错误
-/// - 如果数据库操作失败，返回数据库错误
-///
-/// # 示例
-/// ```rust,no_run
-/// use crate::command::account::add_account;
-/// use crate::storage::CreateAccountRequest;
-/// use std::default::Default;
-///
-/// let account = CreateAccountRequest {
-///     name: "我的邮箱".to_string(),
-///     email: "user@example.com".to_string(),
-///     provider: "gmail".to_string(),
-///     imap_host: Some("imap.gmail.com".to_string()),
-///     imap_port: Some(993),
-///     imap_ssl: Some(true),
-///     smtp_host: Some("smtp.gmail.com".to_string()),
-///     smtp_port: Some(465),
-///     smtp_ssl: Some(true),
-///     password: "app_password".to_string(),
-///     ..Default::default()
-/// };
-/// let result = add_account(db_state, keyring_state, account).await;
-/// ```
-#[tauri::command]
-pub async fn add_account(
-    db_state: tauri::State<'_, DatabaseState>,
-    keyring_state: tauri::State<'_, KeyringState>,
-    auth_manager_state: tauri::State<'_, AuthManagerState>,
-    account: storage::CreateAccountRequest,
-) -> Result<storage::AccountDto, String> {
-    let db = db_state.clone_conn();
-    let auth_manager = auth_manager_state.clone_manager();
-    let app_handle = &keyring_state.app_handle;
+// /// 添加新的邮件账号
+// ///
+// /// 创建一个新的邮件账号，保存到数据库，并在系统密钥链中存储密码。
+// ///
+// /// # 参数
+// /// * `db_state` - 数据库连接状态
+// /// * `keyring_state` - 密钥链状态，用于安全存储密码
+// /// * `account` - 账号创建请求，包含邮箱地址、服务器配置等信息
+// ///
+// /// # 返回
+// /// 成功时返回创建的账号对象（AccountDto），失败时返回错误信息字符串
+// ///
+// /// # 错误处理
+// /// - 如果邮箱格式无效，返回验证错误
+// /// - 如果连接服务器失败，返回连接错误
+// /// - 如果数据库操作失败，返回数据库错误
+// ///
+// /// # 示例
+// /// ```rust,no_run
+// /// use crate::command::account::add_account;
+// /// use crate::storage::CreateAccountRequest;
+// /// use std::default::Default;
+// ///
+// /// let account = CreateAccountRequest {
+// ///     name: "我的邮箱".to_string(),
+// ///     email: "user@example.com".to_string(),
+// ///     provider: "gmail".to_string(),
+// ///     imap_host: Some("imap.gmail.com".to_string()),
+// ///     imap_port: Some(993),
+// ///     imap_ssl: Some(true),
+// ///     smtp_host: Some("smtp.gmail.com".to_string()),
+// ///     smtp_port: Some(465),
+// ///     smtp_ssl: Some(true),
+// ///     password: "app_password".to_string(),
+// ///     ..Default::default()
+// /// };
+// /// let result = add_account(db_state, keyring_state, account).await;
+// /// ```
+// #[tauri::command]
+// pub async fn add_account(
+//     db_state: tauri::State<'_, DatabaseState>,
+//     keyring_state: tauri::State<'_, KeyringState>,
+//     auth_manager_state: tauri::State<'_, AuthManagerState>,
+//     account: storage::CreateAccountRequest,
+// ) -> Result<storage::AccountDto, String> {
+//     let db = db_state.clone_conn();
+//     let auth_manager = auth_manager_state.clone_manager();
+//     let app_handle = &keyring_state.app_handle;
 
-    // 判断认证类型
-    let auth_type = account.auth_type.clone().unwrap_or_else(|| {
-        if account.oauth_token.is_some() {
-            "oauth2".to_string()
-        } else {
-            "password".to_string()
-        }
-    });
+//     // 判断认证类型
+//     let auth_type = account.auth_type.clone().unwrap_or_else(|| {
+//         if account.oauth_token.is_some() {
+//             "oauth2".to_string()
+//         } else {
+//             "password".to_string()
+//         }
+//     });
 
-    // 密码认证：通过 AuthManager（如果前端已测试连接，这里会再次验证）
-    if auth_type == "password" || auth_type == "app_password" {
-        let _result = auth_manager
-            .authenticate_password(&account.email, &account.password)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+//     // 密码认证：通过 AuthManager（如果前端已测试连接，这里会再次验证）
+//     if auth_type == "password" || auth_type == "app_password" {
+//         let _result = auth_manager
+//             .authenticate_password(&account.email, &account.password)
+//             .await
+//             .map_err(|e| e.to_string())?;
+//     }
 
-    // 创建账号记录
-    storage::AccountRepository::create(&db, app_handle, account)
-        .await
-        .map(|a| a.into())
-        .map_err(|e| e.to_string())
-}
+//     // 创建账号记录
+//     storage::AccountRepository::create(&db, app_handle, account)
+//         .await
+//         .map(|a| a.into())
+//         .map_err(|e| e.to_string())
+// }
 
 /// 列出所有邮件账号
 ///
@@ -132,67 +132,67 @@ pub async fn get_account(
     }
 }
 
-/// 更新账号配置
-///
-/// 更新指定账号的配置信息，如名称、服务器配置等。
-/// 如果提供了新的密码，会在密钥链中更新存储的密码。
-///
-/// # 参数
-/// * `db_state` - 数据库连接状态
-/// * `keyring_state` - 密钥链状态
-/// * `id` - 要更新的账号 ID
-/// * `account` - 包含更新字段的账号请求
-///
-/// # 返回
-/// 成功时返回更新后的账号对象，失败时返回错误信息字符串
-///
-/// # 错误处理
-/// - 如果账号 ID 不存在，返回"账号未找到"错误
-/// - 如果新的服务器配置无法连接，返回连接错误
-///
-/// # 注意
-/// - 未在请求中提供的字段将保持不变
-/// - 同步设置（sync_enabled）暂不支持更新
-#[tauri::command]
-pub async fn update_account(
-    db_state: tauri::State<'_, DatabaseState>,
-    keyring_state: tauri::State<'_, KeyringState>,
-    auth_manager_state: tauri::State<'_, AuthManagerState>,
-    id: i32,
-    account: storage::CreateAccountRequest,
-) -> Result<storage::AccountDto, String> {
-    let db = db_state.clone_conn();
-    let app_handle = &keyring_state.app_handle;
+// /// 更新账号配置
+// ///
+// /// 更新指定账号的配置信息，如名称、服务器配置等。
+// /// 如果提供了新的密码，会在密钥链中更新存储的密码。
+// ///
+// /// # 参数
+// /// * `db_state` - 数据库连接状态
+// /// * `keyring_state` - 密钥链状态
+// /// * `id` - 要更新的账号 ID
+// /// * `account` - 包含更新字段的账号请求
+// ///
+// /// # 返回
+// /// 成功时返回更新后的账号对象，失败时返回错误信息字符串
+// ///
+// /// # 错误处理
+// /// - 如果账号 ID 不存在，返回"账号未找到"错误
+// /// - 如果新的服务器配置无法连接，返回连接错误
+// ///
+// /// # 注意
+// /// - 未在请求中提供的字段将保持不变
+// /// - 同步设置（sync_enabled）暂不支持更新
+// #[tauri::command]
+// pub async fn update_account(
+//     db_state: tauri::State<'_, DatabaseState>,
+//     keyring_state: tauri::State<'_, KeyringState>,
+//     auth_manager_state: tauri::State<'_, AuthManagerState>,
+//     id: i32,
+//     account: storage::CreateAccountRequest,
+// ) -> Result<storage::AccountDto, String> {
+//     let db = db_state.clone_conn();
+//     let app_handle = &keyring_state.app_handle;
 
-    // 如果提供了新密码，验证并更新
-    if !account.password.is_empty() {
-        let auth_manager = auth_manager_state.clone_manager();
-        let _result = auth_manager
-            .authenticate_password(&account.email, &account.password)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+//     // 如果提供了新密码，验证并更新
+//     if !account.password.is_empty() {
+//         let auth_manager = auth_manager_state.clone_manager();
+//         let _result = auth_manager
+//             .authenticate_password(&account.email, &account.password)
+//             .await
+//             .map_err(|e| e.to_string())?;
+//     }
 
-    // 构建更新请求
-    let request = storage::UpdateAccountRequest {
-        name: Some(account.name),
-        email: Some(account.email),
-        provider: Some(account.provider),
-        imap_host: account.imap_host,
-        imap_port: account.imap_port,
-        imap_ssl: account.imap_ssl,
-        smtp_host: account.smtp_host,
-        smtp_port: account.smtp_port,
-        smtp_ssl: account.smtp_ssl,
-        color: account.color,
-        sync_enabled: None, // TODO: 从 request 中获取
-    };
+//     // 构建更新请求
+//     let request = storage::UpdateAccountRequest {
+//         name: Some(account.name),
+//         email: Some(account.email),
+//         provider: Some(account.provider),
+//         imap_host: account.imap_host,
+//         imap_port: account.imap_port,
+//         imap_ssl: account.imap_ssl,
+//         smtp_host: account.smtp_host,
+//         smtp_port: account.smtp_port,
+//         smtp_ssl: account.smtp_ssl,
+//         color: account.color,
+//         sync_enabled: None, // TODO: 从 request 中获取
+//     };
 
-    storage::AccountRepository::update(&db, id, request)
-        .await
-        .map(|a| a.into())
-        .map_err(|e| e.to_string())
-}
+//     storage::AccountRepository::update(&db, id, request)
+//         .await
+//         .map(|a| a.into())
+//         .map_err(|e| e.to_string())
+// }
 
 /// 删除邮件账号
 ///

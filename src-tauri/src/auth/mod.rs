@@ -155,5 +155,9 @@ mod password_auth;
 mod token_manager;
 
 // 重新导出主要类型
-pub use auth_manager::{AuthManager, AuthState, ImapAuthInfo};
+pub use auth_manager::{
+    AuthManager, AuthState, ImapAuthInfo,
+    // 统一认证接口
+    AuthInfo, ServerConfig, AuthResponse,
+};
 pub use oauth_session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};

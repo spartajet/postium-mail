@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted, onMounted } from "vue";
-import { useUIStore, useAccountStore, useEmailStore } from "@/stores";
+import { useUIStore, useAccountStore } from "@/stores";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -15,27 +15,23 @@ import {
     NAlert,
     NRadioGroup,
     NRadio,
-    NProgress,
-    NCard,
     NCollapse,
     NCollapseItem,
-    NSpin,
 } from "naive-ui";
 import {
     extractAutoFillInfo,
     parseEmail,
     detectProviderFromEmail,
 } from "@/utils/emailHelper";
-import { AccountType, AuthType } from "@/types";
+import {
+    AccountType,
+    AuthType,
+    type AuthInfo,
+    type AuthResponse,
+} from "@/types";
 
 const uiStore = useUIStore();
 const accountStore = useAccountStore();
-const emailStore = useEmailStore();
-
-const emit = defineEmits<{
-    (e: "update:show", value: boolean): void;
-    (e: "success"): void;
-}>();
 
 const providerOptions = [
     { label: "Gmail", value: "gmail" },
@@ -50,7 +46,7 @@ const show = computed(() => uiStore.modals.addAccount);
 const form = ref({
     name: "",
     email: "",
-    provider: "gmail",
+    provider: "imap",
     password: "",
     accountType: AccountType.Personal,
     authType: AuthType.Password,
@@ -119,24 +115,6 @@ function updateEnterprisePreview() {
     }
 }
 
-// 进度状态
-const syncProgress = ref({
-    stage: "idle" as
-        | "idle"
-        | "authenticating"
-        | "validating"
-        | "syncing"
-        | "completed"
-        | "error",
-    currentStep: 0,
-    totalSteps: 3,
-    message: "",
-    percentage: 0,
-});
-
-// 事件监听器清理
-let unlistenProgress: (() => void) | null = null;
-
 const isCustom = computed(() => form.value.provider === "imap");
 const canUseOAuth = computed(() => {
     return (
@@ -148,6 +126,37 @@ const canUseOAuth = computed(() => {
 const isEnterprise = computed(
     () => form.value.accountType === AccountType.Enterprise,
 );
+
+// 按钮文本：根据认证类型显示不同的验证按钮文本
+const verifyButtonText = computed(() => {
+    if (form.value.authType === AuthType.OAuth2) {
+        return "验证OAuth";
+    }
+    return "验证密码";
+});
+
+// 是否可以提交验证
+const canSubmit = computed(() => {
+    // 基本验证
+    if (!form.value.name.trim() || !form.value.email.trim()) {
+        return false;
+    }
+    if (form.value.email.startsWith("@")) {
+        return false;
+    }
+    // 密码认证需要填写密码
+    if (
+        form.value.authType === AuthType.Password &&
+        !form.value.password.trim()
+    ) {
+        return false;
+    }
+    // OAuth 等待中不能重复提交
+    if (waitingForOAuth.value) {
+        return false;
+    }
+    return true;
+});
 
 // 监听 provider 变化，自动设置邮箱前缀
 watch(
@@ -317,19 +326,6 @@ watch(show, (newShow) => {
         isProviderManuallySet.value = false;
         isAuthTypeManuallySet.value = false;
         lastValidEmail.value = "";
-        // 重置进度状态
-        syncProgress.value = {
-            stage: "idle",
-            currentStep: 0,
-            totalSteps: 3,
-            message: "",
-            percentage: 0,
-        };
-        // 清理事件监听器
-        if (unlistenProgress) {
-            unlistenProgress();
-            unlistenProgress = null;
-        }
     } else {
         // 打开时，重置为默认状态
         isProviderManuallySet.value = false;
@@ -341,14 +337,6 @@ watch(show, (newShow) => {
         setTimeout(() => {
             isInitializing.value = false;
         }, 100);
-    }
-});
-
-// 组件销毁时清理监听器
-onUnmounted(() => {
-    if (unlistenProgress) {
-        unlistenProgress();
-        unlistenProgress = null;
     }
 });
 
@@ -389,315 +377,125 @@ function handleEmailBlur() {
     }
 }
 
-async function handleSubmit() {
-    console.log("[AddAccountModal] handleSubmit 开始");
-    console.log("[AddAccountModal] 表单数据:", {
-        name: form.value.name,
-        email: form.value.email,
-        provider: form.value.provider,
-        authType: form.value.authType,
-        waitingForOAuth: waitingForOAuth.value,
-    });
+// 统一认证处理函数
+async function handleVerify() {
+    console.log("[AddAccountModal] handleVerify 开始");
+    console.log("[AddAccountModal] 认证类型:", form.value.authType);
 
     error.value = "";
     success.value = "";
-
-    try {
-        // === 前端职责：基本格式校验 ===
-
-        // 1. 验证账号名称
-        if (!form.value.name.trim()) {
-            error.value = "请输入账号名称";
-            console.log("[AddAccountModal] 验证失败：账号名称为空");
-            return;
-        }
-
-        // 2. 验证邮箱地址格式
-        if (!form.value.email.trim() || form.value.email.startsWith("@")) {
-            error.value = "请输入完整的邮箱地址";
-            console.log("[AddAccountModal] 验证失败：邮箱地址不完整");
-            return;
-        }
-
-        // 3. 邮箱格式基本校验（前端只检查是否包含 @ 和 .）
-        const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-        if (!emailRegex.test(form.value.email)) {
-            error.value = "请输入有效的邮箱地址";
-            console.log("[AddAccountModal] 验证失败：邮箱格式无效");
-            return;
-        }
-
-        // 4. OAuth 模式：检查是否正在等待授权
-        if (form.value.authType === AuthType.OAuth2 && waitingForOAuth.value) {
-            error.value = "请先完成 OAuth 授权或等待授权完成";
-            console.log("[AddAccountModal] 验证失败：OAuth 授权进行中");
-            return;
-        }
-
-        // 5. 密码模式：检查密码是否填写
-        if (
-            form.value.authType === AuthType.Password &&
-            !form.value.password.trim()
-        ) {
-            error.value = "请输入密码";
-            console.log("[AddAccountModal] 验证失败：密码为空");
-            return;
-        }
-
-        console.log("[AddAccountModal] 前端格式校验通过");
-
-        // === 调用后端创建账号（所有业务逻辑在后端处理） ===
-        // 后端会通过 AuthManager 统一处理：
-        // - OAuth token 验证
-        // - 密码验证（IMAP 连接测试）
-        // - 服务商配置获取
-        // - 账号创建
-        await createAccountAndSync();
-    } catch (e: any) {
-        console.error("[AddAccountModal] handleSubmit 全局错误:", e);
-        error.value = `操作失败：${e?.message || String(e)}`;
-        syncProgress.value.stage = "idle";
-        loading.value = false;
-    }
-}
-
-async function createAccountAndSync() {
-    console.log("[AddAccountModal] createAccountAndSync 开始");
     loading.value = true;
 
     try {
-        syncProgress.value = {
-            stage: "syncing",
-            currentStep: 2,
-            totalSteps: 3,
-            message: "正在创建账号...",
-            percentage: 40,
-        };
-
-        const accountData: any = {
-            name: form.value.name,
-            email: form.value.email,
-            provider: form.value.provider,
-            color: form.value.color,
-            accountType: form.value.accountType,
-            authType: form.value.authType,
-        };
-
-        console.log("[AddAccountModal] 准备账号数据:", {
-            ...accountData,
-            authType: form.value.authType,
-            isCustom: isCustom.value,
-        });
-
-        // 注意：OAuth 模式下，账号已由后端自动创建
-        // 前端只处理密码认证模式
-        if (form.value.authType === AuthType.OAuth2) {
-            error.value = "OAuth 模式下账号已自动创建，请刷新账号列表查看";
-            console.log("[AddAccountModal] OAuth 模式，跳过手动创建");
+        // 基本格式校验
+        if (!form.value.name.trim()) {
+            error.value = "请输入账号名称";
+            loading.value = false;
             return;
         }
 
-        // 密码认证模式
-        console.log("[AddAccountModal] 使用密码认证");
-        accountData.password = form.value.password;
-
-        if (isCustom.value) {
-            console.log("[AddAccountModal] 自定义服务器配置");
-            accountData.imap_host = form.value.imapHost;
-            accountData.imap_port = form.value.imapPort;
-            accountData.imap_ssl = form.value.imapSsl;
-            accountData.smtp_host = form.value.smtpHost;
-            accountData.smtp_port = form.value.smtpPort;
-            accountData.smtp_ssl = form.value.smtpSsl;
+        if (!form.value.email.trim() || form.value.email.startsWith("@")) {
+            error.value = "请输入完整的邮箱地址";
+            loading.value = false;
+            return;
         }
 
-        // 企业邮箱配置
-        if (isEnterprise.value) {
-            console.log("[AddAccountModal] 企业邮箱配置");
-            accountData.enterprise_tenant_id =
-                form.value.enterpriseTenantId || null;
-            accountData.enterprise_domain = form.value.enterpriseDomain || null;
+        const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+        if (!emailRegex.test(form.value.email)) {
+            error.value = "请输入有效的邮箱地址";
+            loading.value = false;
+            return;
         }
 
-        // 1. 检查邮箱是否已存在于本地列表
-        const existingAccount = accountStore.accounts.find(
-            (a) => a.email === form.value.email,
-        );
-        if (existingAccount) {
-            throw new Error(
-                `邮箱地址 ${form.value.email} 已存在于账号列表中（账号名：${existingAccount.name}）。请先在设置中删除旧账号，或使用不同的邮箱地址。`,
-            );
+        // 根据 authType 构建 AuthInfo
+        let authInfo: AuthInfo;
+
+        if (form.value.authType === AuthType.OAuth2) {
+            // OAuth 认证
+            authInfo = {
+                type: "OauthConfig",
+                email: form.value.email,
+                name: form.value.name || undefined,
+                color: form.value.color,
+            };
+        } else {
+            // 密码认证
+            if (!form.value.password.trim()) {
+                error.value = "请输入密码";
+                loading.value = false;
+                return;
+            }
+
+            // 始终传递 IMAP 和 SMTP 配置
+            // - 如果是自定义服务器，使用用户配置的值
+            // - 如果是标准提供商，传递表单值（后端会根据空值自动检测提供商配置）
+            authInfo = {
+                type: "ImapSmtpConfig",
+                email: form.value.email,
+                password: form.value.password,
+                name: form.value.name || undefined,
+                color: form.value.color,
+                imapConfig: {
+                    host: form.value.imapHost,
+                    port: form.value.imapPort,
+                    ssl: form.value.imapSsl,
+                },
+                smtpConfig: {
+                    host: form.value.smtpHost,
+                    port: form.value.smtpPort,
+                    ssl: form.value.smtpSsl,
+                },
+            };
         }
 
-        // 2. 创建账号
-        console.log("[AddAccountModal] 调用 add_account");
-        const accountResult = (await invoke("add_account", {
-            account: accountData,
-        })) as { id: number };
-        const accountId = accountResult.id;
-
-        console.log("[AddAccountModal] 账号创建成功, ID:", accountId);
-
-        // 3. 刷新账号列表（从后端获取最新数据，避免重复添加）
-        await accountStore.fetchAccounts();
-
-        // 3.1 切换到新创建的账号
-        accountStore.selectAccountById(String(accountId));
-
-        // 3.2 重置加载状态
-        loading.value = false;
-
-        // 4. 立即关闭对话框并返回成功
-        syncProgress.value = {
-            stage: "idle",
-            currentStep: 3,
-            totalSteps: 3,
-            message: "账号已添加，正在后台同步...",
-            percentage: 100,
-        };
-
-        // 5. 注册同步进度监听器（用于状态栏显示）
-        console.log("[AddAccountModal] 注册同步进度监听器（用于状态栏）");
-        await listenToSyncProgress(accountId);
-
-        // 6. 关闭对话框（通过 uiStore 而不是 emit）
-        uiStore.closeAddAccountModal();
-
-        // 7. 触发后台同步（不等待完成）
-        console.log("[AddAccountModal] 触发后台同步, accountId:", accountId);
-        invoke("sync_account_with_progress", { accountId })
-            .then(async () => {
-                console.log("[AddAccountModal] 后台同步完成");
-                // 确保当前账号是正确的
-                console.log(
-                    "[AddAccountModal] 当前账号:",
-                    accountStore.currentAccount?.email,
-                    accountStore.currentAccount?.id,
-                );
-                // 刷新邮件列表
-                await emailStore.fetchEmails();
-                console.log(
-                    "[AddAccountModal] 邮件列表已刷新, 邮件数量:",
-                    emailStore.emails.length,
-                );
-            })
-            .catch((error) => {
-                console.error("[AddAccountModal] 后台同步失败:", error);
-            });
-
-        console.log(
-            "[AddAccountModal] 账号添加成功，对话框已关闭，同步在后台进行",
-        );
-    } catch (e: any) {
-        console.error("[AddAccountModal] createAccountAndSync 出错:", e);
-        console.error("[AddAccountModal] 错误详情:", {
-            message: e?.message,
-            stack: e?.stack,
-            string: String(e),
-            json: JSON.stringify(e),
+        console.log("[AddAccountModal] 调用 start_auth_command");
+        console.log("[AddAccountModal] authInfo:", JSON.stringify(authInfo, null, 2));
+        const response = await invoke<AuthResponse>("start_auth_command", {
+            authInfo,
         });
 
-        syncProgress.value = {
-            stage: "error",
-            currentStep: 0,
-            totalSteps: 3,
-            message: "",
-            percentage: 0,
-        };
+        console.log("[AddAccountModal] 认证响应:", response);
 
-        // 提供更详细的错误信息
-        let errorMessage = "创建账号失败";
-        if (typeof e === "string") {
-            errorMessage = e;
-        } else if (e?.message) {
-            errorMessage = e.message;
-        } else if (e?.toString) {
-            errorMessage = e.toString();
+        // 处理响应
+        if (response.status === "Pending") {
+            // OAuth 需要等待授权
+            waitingForOAuth.value = true;
+            oauthSessionId.value = response.sessionId;
+            loading.value = false;
+            // 浏览器已自动打开授权页面
+        } else if (response.status === "Success") {
+            // 认证成功，账号已创建
+            await handleAuthSuccess(response.account);
+        } else if (response.status === "Error") {
+            // 认证失败
+            error.value = response.message;
+            loading.value = false;
         }
-
-        error.value = errorMessage;
+    } catch (e: any) {
+        console.error("[AddAccountModal] 认证失败:", e);
+        error.value = e?.message || String(e) || "认证失败，请重试";
         loading.value = false;
     }
 }
 
-async function listenToSyncProgress(accountId: number) {
-    const eventName = `sync-progress-${accountId}`;
+// 处理认证成功
+async function handleAuthSuccess(account: any) {
+    console.log("[AddAccountModal] 认证成功:", account);
 
-    // 保存 unlisten 函数以便后续清理
-    unlistenProgress = await listen(eventName, (event: any) => {
-        const progress = event.payload as {
-            stage: string;
-            current: number;
-            total: number;
-            message: string;
-        };
+    // 刷新账号列表
+    await accountStore.fetchAccounts();
 
-        // 计算：如果 total 为 0，显示不确定进度（50%）
-        const hasTotal = progress.total > 0;
-        const percentage = hasTotal
-            ? Math.floor((progress.current / progress.total) * 100)
-            : 50; // 不确定进度时显示 50%
-        const currentStep = hasTotal
-            ? Math.floor((progress.current / progress.total) * 3) + 1
-            : 2;
+    // 设置为当前账号
+    accountStore.selectAccountById(String(account.id));
 
-        syncProgress.value = {
-            stage: "syncing",
-            currentStep,
-            totalSteps: 3,
-            message: progress.message,
-            percentage,
-        };
+    // 显示成功消息
+    success.value = "账号添加成功！";
 
-        if (progress.stage === "completed") {
-            // 同步完成
-            syncProgress.value.stage = "completed";
-            syncProgress.value.percentage = 100;
-            syncProgress.value.message = "同步完成！";
-
-            setTimeout(async () => {
-                // 刷新账号列表
-                await accountStore.fetchAccounts();
-                // 刷新邮件列表
-                await emailStore.fetchEmails();
-                emit("success");
-                uiStore.closeAddAccountModal();
-                resetForm();
-                loading.value = false;
-                if (unlistenProgress) {
-                    unlistenProgress();
-                    unlistenProgress = null;
-                }
-            }, 1000);
-        } else if (progress.stage === "error") {
-            // 同步出错
-            syncProgress.value.stage = "error";
-            error.value = progress.message;
-            loading.value = false;
-            if (unlistenProgress) {
-                unlistenProgress();
-                unlistenProgress = null;
-            }
-        }
-    });
-}
-
-// 辅助函数：获取阶段标题
-function getStageTitle(stage: string): string {
-    switch (stage) {
-        case "authenticating":
-            return "正在验证授权";
-        case "validating":
-            return "正在验证连接";
-        case "syncing":
-            return "正在同步";
-        case "completed":
-            return "完成";
-        case "error":
-            return "失败";
-        default:
-            return "准备中";
-    }
+    // 关闭弹窗
+    setTimeout(() => {
+        uiStore.closeAddAccountModal();
+        resetForm();
+    }, 1000);
 }
 
 function resetForm() {
@@ -725,65 +523,10 @@ function resetForm() {
     waitingForOAuth.value = false;
     oauthError.value = null;
     oauthSessionId.value = "";
-    // 重置进度状态
-    syncProgress.value = {
-        stage: "idle",
-        currentStep: 0,
-        totalSteps: 3,
-        message: "",
-        percentage: 0,
-    };
     // 重置自动判断相关状态
     isProviderManuallySet.value = false;
     isAuthTypeManuallySet.value = false;
     lastValidEmail.value = "";
-}
-
-// 启动 OAuth 授权流程
-async function startOAuthLogin() {
-    console.log("[AddAccountModal] startOAuthLogin 被调用");
-    console.log("[AddAccountModal] 邮箱:", form.value.email);
-
-    if (!form.value.email) {
-        error.value = "请先输入邮箱地址";
-        return;
-    }
-
-    try {
-        waitingForOAuth.value = true;
-        oauthError.value = null;
-        loading.value = true;
-
-        console.log("[AddAccountModal] 调用 start_oauth_flow");
-
-        // 调用后端启动 OAuth 流程
-        const result = await invoke<{
-            session_id: string;
-            auth_url: string;
-        }>("start_oauth_flow", {
-            email: form.value.email,
-        });
-
-        console.log("[AddAccountModal] OAuth 流程已启动");
-        console.log(
-            "[AddAccountModal] 会话ID:",
-            result.session_id.substring(0, 20) + "...",
-        );
-        console.log(
-            "[AddAccountModal] 授权URL:",
-            result.auth_url.substring(0, 100) + "...",
-        );
-
-        oauthSessionId.value = result.session_id;
-
-        // 浏览器已自动打开授权页面
-        loading.value = false;
-    } catch (e) {
-        console.error("[AddAccountModal] 启动 OAuth 流程失败:", e);
-        oauthError.value = String(e);
-        waitingForOAuth.value = false;
-        loading.value = false;
-    }
 }
 
 // 处理 OAuth 流程完成事件
@@ -806,26 +549,21 @@ async function handleOAuthFlowComplete(payload: {
     if (payload.status === "success" && payload.account) {
         console.log("[AddAccountModal] OAuth 授权成功:", payload.account);
 
-        // 自动填充表单
-        form.value.name = payload.account.name;
-        form.value.email = payload.account.email;
-        form.value.provider = payload.account.provider;
-
-        // 显示成功消息
-        success.value = "OAuth 授权成功！账号已自动创建";
-        oauthError.value = null;
-
         // 刷新账号列表
         await accountStore.fetchAccounts();
 
-        // 关闭弹窗
+        // 设置为当前账号
+        accountStore.selectAccountById(String(payload.account.id));
+
+        // 显示成功消息并关闭弹窗
+        success.value = "OAuth 授权成功！账号已添加";
+
         setTimeout(() => {
             uiStore.closeAddAccountModal();
             resetForm();
-        }, 1500);
+        }, 1000);
     } else {
         console.error("[AddAccountModal] OAuth 授权失败:", payload.error);
-        oauthError.value = payload.error || "授权失败";
         error.value = payload.error || "OAuth 授权失败";
     }
 }
@@ -865,12 +603,6 @@ onUnmounted(() => {
         unlistenOAuthFlow();
         console.log("[AddAccountModal] OAuth 流程完成监听器已清理");
     }
-
-    // 清理同步进度事件监听器
-    if (unlistenProgress) {
-        unlistenProgress();
-        console.log("[AddAccountModal] 同步进度监听器已清理");
-    }
 });
 </script>
 
@@ -884,7 +616,7 @@ onUnmounted(() => {
         :mask-closable="!loading"
         :close-on-esc="!loading"
     >
-        <NForm @submit.prevent="handleSubmit">
+        <NForm>
             <!-- 账号名称 -->
             <NFormItem label="账号名称" path="name" :show-require-mark="true">
                 <NInput
@@ -935,61 +667,6 @@ onUnmounted(() => {
                     <NRadio :value="AuthType.OAuth2">OAuth 2.0 授权</NRadio>
                 </NRadioGroup>
             </NFormItem>
-
-            <!-- OAuth 登录按钮 -->
-            <template v-if="canUseOAuth && form.authType === AuthType.OAuth2">
-                <!-- OAuth 等待状态 -->
-                <template v-if="waitingForOAuth">
-                    <NFormItem>
-                        <div class="oauth-waiting">
-                            <NSpin :size="24" />
-                            <div class="oauth-waiting-text">
-                                <p class="oauth-title">等待授权完成...</p>
-                                <p class="oauth-desc">
-                                    请在浏览器中完成账号登录。授权完成后将自动返回应用。
-                                </p>
-                            </div>
-                        </div>
-                    </NFormItem>
-
-                    <!-- OAuth 错误提示 -->
-                    <NAlert v-if="oauthError" type="error">
-                        {{ oauthError }}
-                        <template #header>授权失败</template>
-                        <div class="retry-link">
-                            <a @click="startOAuthLogin">点击重试</a>
-                        </div>
-                    </NAlert>
-                </template>
-
-                <!-- OAuth 授权按钮 -->
-                <template v-else>
-                    <NFormItem>
-                        <NButton
-                            type="primary"
-                            @click="startOAuthLogin"
-                            :disabled="loading || !form.email"
-                            block
-                        >
-                            使用
-                            {{
-                                form.provider === "gmail"
-                                    ? "Google"
-                                    : "Microsoft"
-                            }}
-                            账号授权
-                        </NButton>
-                    </NFormItem>
-
-                    <!-- OAuth 成功提示 -->
-                    <NAlert
-                        v-if="success && success.includes('OAuth')"
-                        type="success"
-                        :title="success"
-                    >
-                    </NAlert>
-                </template>
-            </template>
 
             <!-- 密码输入 -->
             <NFormItem
@@ -1170,67 +847,26 @@ onUnmounted(() => {
                 {{ error }}
             </div>
 
-            <!-- 进度显示 -->
-            <div v-if="syncProgress.stage !== 'idle'" class="sync-progress">
-                <NCard :bordered="false" class="progress-card">
-                    <div class="progress-header">
-                        <span class="progress-title">{{
-                            getStageTitle(syncProgress.stage)
-                        }}</span>
-                        <span class="progress-percentage"
-                            >{{ syncProgress.percentage }}%</span
-                        >
-                    </div>
-
-                    <NProgress
-                        type="line"
-                        :percentage="syncProgress.percentage"
-                        :processing="syncProgress.stage === 'syncing'"
-                        :style="{ marginBottom: '12px' }"
-                    />
-
-                    <div class="progress-message">
-                        {{ syncProgress.message }}
-                    </div>
-
-                    <div
-                        v-if="syncProgress.stage === 'syncing'"
-                        class="progress-steps"
-                    >
-                        <div
-                            v-for="(step, index) in [
-                                '验证账号',
-                                '创建记录',
-                                '同步邮件',
-                            ]"
-                            :key="step"
-                            class="progress-step"
-                            :class="{
-                                active: index + 1 === syncProgress.currentStep,
-                            }"
-                        >
-                            {{ step }}
-                        </div>
-                    </div>
-                </NCard>
-            </div>
+            <!-- OAuth 等待提示 -->
+            <NAlert v-if="waitingForOAuth" type="info" title="等待授权">
+                已在浏览器中打开授权页面，请完成授权...
+            </NAlert>
 
             <!-- 操作按钮 -->
             <div class="form-actions">
                 <NButton
                     @click="uiStore.closeAddAccountModal"
-                    :disabled="loading || waitingForOAuth"
+                    :disabled="loading"
                 >
                     取消
                 </NButton>
-                <!-- OAuth 模式下不显示添加按钮，因为账号会自动创建 -->
                 <NButton
-                    v-if="form.authType !== AuthType.OAuth2"
                     type="primary"
-                    attr-type="submit"
                     :loading="loading"
+                    :disabled="!canSubmit"
+                    @click="handleVerify"
                 >
-                    添加
+                    {{ verifyButtonText }}
                 </NButton>
             </div>
         </NForm>
@@ -1277,57 +913,6 @@ onUnmounted(() => {
     margin-bottom: 16px;
 }
 
-.sync-progress {
-    margin: 16px 0;
-}
-
-.progress-card {
-    background: var(--bg-secondary);
-}
-
-.progress-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-}
-
-.progress-title {
-    font-weight: 500;
-    font-size: 14px;
-}
-
-.progress-percentage {
-    font-size: 14px;
-    color: var(--text-secondary);
-}
-
-.progress-message {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-top: 8px;
-}
-
-.progress-steps {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.progress-step {
-    font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: var(--bg-tertiary);
-    color: var(--text-tertiary);
-    transition: all 0.2s;
-}
-
-.progress-step.active {
-    background: var(--primary-bg);
-    color: var(--primary-fg);
-}
-
 .enterprise-preview {
     padding: 12px;
     background: var(--bg-secondary);
@@ -1341,47 +926,5 @@ onUnmounted(() => {
 
 .enterprise-preview strong {
     color: var(--text-primary);
-}
-
-/* OAuth 等待状态样式 */
-.oauth-waiting {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-}
-
-.oauth-waiting-text {
-    flex: 1;
-    text-align: left;
-}
-
-.oauth-title {
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.oauth-desc {
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    margin: 0;
-}
-
-.retry-link {
-    margin-top: 8px;
-}
-
-.retry-link a {
-    color: var(--primary-color);
-    cursor: pointer;
-    text-decoration: underline;
-}
-
-.retry-link a:hover {
-    color: var(--primary-color-hover);
 }
 </style>

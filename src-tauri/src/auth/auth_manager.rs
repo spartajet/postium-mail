@@ -78,6 +78,95 @@ pub enum AuthState {
     ReauthorizationRequired,
 }
 
+/// 统一认证信息枚举
+///
+/// 用于前端向后端传递认证配置，根据类型自动选择合适的认证方式
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum AuthInfo {
+    /// IMAP/SMTP 密码配置
+    ImapSmtpConfig {
+        /// 邮箱地址
+        email: String,
+        /// 密码
+        password: String,
+        /// IMAP 服务器配置（host 为空时自动检测）
+        #[serde(rename = "imapConfig")]
+        imap_config: ServerConfig,
+        /// SMTP 服务器配置（host 为空时自动检测）
+        #[serde(rename = "smtpConfig")]
+        smtp_config: ServerConfig,
+        /// 账号显示名称（可选）
+        name: Option<String>,
+        /// 颜色（可选）
+        color: Option<String>,
+    },
+    /// OAuth 配置
+    OauthConfig {
+        /// 邮箱地址
+        email: String,
+        /// 账号显示名称（可选）
+        name: Option<String>,
+        /// 颜色（可选）
+        color: Option<String>,
+    },
+}
+
+/// 服务器配置
+///
+/// 用于 IMAP/SMTP 服务器设置
+/// 当 host 为空字符串时，后端会自动检测提供商配置
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ServerConfig {
+    /// 服务器主机名（空字符串表示自动检测）
+    pub host: String,
+    /// 服务器端口
+    pub port: u16,
+    /// 是否使用 SSL/TLS
+    pub ssl: bool,
+}
+
+/// 统一认证响应
+///
+/// 返回给前端的认证结果，根据认证类型返回不同的响应格式
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status")]
+pub enum AuthResponse {
+    /// OAuth 需要等待用户授权
+    Pending {
+        /// 会话 ID
+        session_id: String,
+        /// 授权 URL
+        auth_url: String,
+    },
+    /// 密码认证验证成功（包含创建账号所需的信息）
+    PasswordAuthSuccess {
+        /// 邮箱地址
+        email: String,
+        /// 密码
+        password: String,
+        /// 显示名称
+        display_name: Option<String>,
+        /// 服务商 ID
+        provider: String,
+        /// IMAP 配置
+        imap_config: ServerConfig,
+        /// SMTP 配置
+        smtp_config: ServerConfig,
+    },
+    /// 认证成功（账号已创建，用于 OAuth 回调后）
+    Success {
+        /// 创建的账号信息
+        account: crate::storage::AccountDto,
+    },
+    /// 认证失败
+    Error {
+        /// 错误信息
+        message: String,
+    },
+}
+
 /// 认证管理器
 ///
 /// 负责：
@@ -166,6 +255,150 @@ impl AuthManager {
         tracing::info!("生成 OAuth 授权 URL: email={}", email);
 
         Ok(context)
+    }
+
+    /// 统一认证入口（仅用于 OAuth）
+    ///
+    /// 根据认证信息类型，自动路由到合适的认证方式：
+    /// - OAuth: 启动授权流程，返回会话 ID 和授权 URL
+    /// - 密码: 密码认证请直接使用 `authenticate_password` 方法
+    ///
+    /// # 参数
+    ///
+    /// * `auth_info` - 认证信息（仅支持 OAuth）
+    ///
+    /// # 返回
+    ///
+    /// - OAuth: 返回会话 ID 和授权 URL
+    /// - 密码: 返回错误（提示使用 authenticate_password）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let auth_info = AuthInfo::OauthConfig {
+    ///     email: "user@example.com".to_string(),
+    ///     name: None,
+    ///     color: None,
+    /// };
+    /// let response = manager.start_auth(auth_info).await?;
+    /// ```
+    pub async fn start_auth(&self, auth_info: &AuthInfo) -> Result<AuthResponse> {
+        match auth_info {
+            AuthInfo::OauthConfig { email, .. } => {
+                // OAuth 认证流程
+                self.start_oauth_auth(email).await
+            }
+            AuthInfo::ImapSmtpConfig {
+                email,
+                password,
+                imap_config,
+                smtp_config,
+                ..
+            } => {
+                // 密码认证流程：确定配置并验证
+                self.start_password_auth(email, password, imap_config, smtp_config)
+                    .await
+            }
+        }
+    }
+
+    /// 启动密码认证
+    ///
+    /// 确定最终配置，验证凭证，返回验证结果和配置
+    async fn start_password_auth(
+        &self,
+        email: &str,
+        password: &str,
+        imap_config: &ServerConfig,
+        smtp_config: &ServerConfig,
+    ) -> Result<AuthResponse> {
+        // 1. 检测提供商
+        let provider = self
+            .provider_pool
+            .detect_provider(email)
+            .await
+            .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
+        let provider_id = provider.provider_id().to_string();
+
+        // 2. 确定最终配置
+        let imap_config_final = if !imap_config.host.is_empty() {
+            imap_config.clone()
+        } else {
+            let cfg = provider.imap_config(email);
+            ServerConfig {
+                host: cfg.host,
+                port: cfg.port,
+                ssl: matches!(
+                    cfg.ssl,
+                    crate::providers::SslMode::Implicit | crate::providers::SslMode::StartTls
+                ),
+            }
+        };
+
+        let smtp_config_final = if !smtp_config.host.is_empty() {
+            smtp_config.clone()
+        } else {
+            let cfg = provider.smtp_config(email);
+            ServerConfig {
+                host: cfg.host,
+                port: cfg.port,
+                ssl: matches!(cfg.ssl, crate::providers::SslMode::StartTls),
+            }
+        };
+
+        // 3. 验证凭证
+        let auth_result = self
+            .authenticate_password(email, password, &imap_config_final, &smtp_config_final)
+            .await
+            .map_err(|e| MailError::Internal(format!("密码认证失败: {}", e)))?;
+
+        // 4. 返回验证成功信息（不创建账号）
+        Ok(AuthResponse::PasswordAuthSuccess {
+            email: auth_result.email.clone(),
+            password: password.to_string(),
+            display_name: auth_result.display_name.clone(),
+            provider: provider_id,
+            imap_config: imap_config_final,
+            smtp_config: smtp_config_final,
+        })
+    }
+
+    /// 启动 OAuth 认证
+    ///
+    /// 创建 OAuth 会话，生成授权 URL，并在浏览器中打开授权页面
+    ///
+    /// # 参数
+    ///
+    /// * `email` - 邮箱地址
+    ///
+    /// # 返回
+    ///
+    /// 返回会话 ID 和授权 URL
+    async fn start_oauth_auth(&self, email: &str) -> Result<AuthResponse> {
+        // 1. 生成授权 URL 和 state
+        let context = self.get_oauth_url(email).await?;
+
+        // 2. 检测服务商并创建会话
+        let provider = self.provider_pool.detect_provider(email).await?;
+        let session_id = self
+            .session_manager
+            .create_session(provider.provider_id(), email, &context.state)
+            .await?;
+
+        // 3. 在浏览器中打开授权页面
+        tauri_plugin_opener::open_url(&context.auth_url, None::<&str>)
+            .map_err(|e| MailError::Internal(format!("无法打开浏览器: {}", e)))?;
+
+        tracing::info!(
+            "启动 OAuth 认证: session_id={}, email={}",
+            session_id,
+            email
+        );
+
+        Ok(AuthResponse::Pending {
+            session_id,
+            auth_url: context.auth_url,
+        })
     }
 
     /// OAuth 认证
@@ -266,16 +499,32 @@ impl AuthManager {
     /// # 示例
     ///
     /// ```rust,ignore
-    /// let result = manager.authenticate_password("user@example.com", "password").await?;
+    /// let imap_config = ServerConfig {
+    ///     host: "imap.example.com".to_string(),
+    ///     port: 993,
+    ///     ssl: true,
+    /// };
+    /// let smtp_config = ServerConfig {
+    ///     host: "smtp.example.com".to_string(),
+    ///     port: 587,
+    ///     ssl: true,
+    /// };
+    /// let result = manager.authenticate_password("user@example.com", "password", &imap_config, &smtp_config).await?;
     /// ```
-    pub async fn authenticate_password(&self, email: &str, password: &str) -> Result<AuthResult> {
-        // 1. 检测服务商
+    pub async fn authenticate_password(
+        &self,
+        email: &str,
+        password: &str,
+        imap_config: &ServerConfig,
+        smtp_config: &ServerConfig,
+    ) -> Result<AuthResult> {
+        // 1. 根据配置检测提供商（用于获取 provider_id）
         let provider = self.provider_pool.detect_provider(email).await?;
         let provider_id = provider.provider_id().to_string();
 
-        // 2. 验证密码（通过 IMAP 连接测试）
+        // 2. 使用提供的 IMAP 配置验证密码
         let state = self
-            .validate_credentials_for_password(email, password)
+            .validate_credentials_for_password(email, password, imap_config)
             .await?;
 
         // 如果验证失败，返回错误
@@ -293,7 +542,12 @@ impl AuthManager {
         // 提取显示名称（从 email 的用户名部分）
         let display_name = email.split('@').next().map(|s| s.to_string());
 
-        tracing::info!("密码认证成功: email={}, provider={}", email, provider_id);
+        tracing::info!(
+            "密码认证成功: email={}, provider={}, imap_server={}",
+            email,
+            provider_id,
+            imap_config.host
+        );
 
         Ok(AuthResult {
             account_id: None,
@@ -314,6 +568,7 @@ impl AuthManager {
     ///
     /// * `email` - 邮箱地址
     /// * `password` - 密码
+    /// * `imap_config` - IMAP 服务器配置
     ///
     /// # 返回
     ///
@@ -322,19 +577,20 @@ impl AuthManager {
     /// # 示例
     ///
     /// ```rust,ignore
-    /// let state = manager.validate_credentials_for_password("user@example.com", "password").await?;
+    /// let state = manager.validate_credentials_for_password(
+    ///     "user@example.com",
+    ///     "password",
+    ///     &ServerConfig { host: "imap.example.com".to_string(), port: 993, ssl: true }
+    /// ).await?;
     /// assert_eq!(state, AuthState::Authenticated);
     /// ```
     pub async fn validate_credentials_for_password(
         &self,
         email: &str,
         password: &str,
+        imap_config: &ServerConfig,
     ) -> Result<AuthState> {
-        // 1. 检测服务商获取 IMAP 配置
-        let provider = self.provider_pool.detect_provider(email).await?;
-        let imap_config = provider.imap_config(email);
-
-        // 2. 使用 PasswordAuth 验证
+        // 使用 PasswordAuth 验证
         let valid = self
             .password_auth
             .validate_password(&imap_config.host, imap_config.port, email, password)

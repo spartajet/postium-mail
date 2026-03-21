@@ -221,6 +221,11 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
         .await
         .map_err(|e| StorageError::Database(format!("运行迁移 m010 失败: {}", e)))?;
 
+    // 删除 offline_operations 表（修复外键约束错误）
+    m::m011_20250321_drop_offline_operations::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m011 失败: {}", e)))?;
+
     Ok(())
 }
 
