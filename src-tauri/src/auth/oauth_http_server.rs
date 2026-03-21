@@ -270,14 +270,15 @@ async fn handle_request(
         )
     } else {
         // 成功页面
-        r#"
+        format!(
+            r##"
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>OAuth 认证成功</title>
+    <title>认证成功</title>
     <style>
-        body {
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
             justify-content: center;
@@ -286,48 +287,101 @@ async fn handle_request(
             margin: 0;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-        }
-        .container {
+        }}
+        .container {{
             text-align: center;
-            padding: 40px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
+            padding: 50px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 24px;
+            backdrop-filter: blur(20px);
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        }
-        h1 { margin-bottom: 20px; }
-        p { margin-bottom: 30px; opacity: 0.9; }
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+            max-width: 500px;
+            margin: 20px;
+        }}
+        .icon {{
+            font-size: 64px;
+            margin-bottom: 20px;
+            animation: checkmark 0.6s ease-in-out;
+        }}
+        @keyframes checkmark {{
+            0% {{ transform: scale(0); opacity: 0; }}
+            50% {{ transform: scale(1.2); }}
+            100% {{ transform: scale(1); opacity: 1; }}
+        }}
+        h1 {{
+            margin: 0 0 16px 0;
+            font-size: 28px;
+            font-weight: 600;
+        }}
+        .message {{
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            opacity: 0.95;
+            line-height: 1.5;
+        }}
+        .sub-message {{
+            margin: 0 0 32px 0;
+            font-size: 14px;
+            opacity: 0.85;
+        }}
+        .info {{
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 24px 0;
+            font-size: 13px;
+            line-height: 1.6;
+            opacity: 0.9;
+        }}
+        .countdown {{
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 20px;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>✓ 认证成功</h1>
-        <p>正在返回应用...</p>
-        <div class="spinner"></div>
+        <div class="icon">✓</div>
+        <h1>认证成功</h1>
+        <p class="message">您的账号已成功添加</p>
+        <p class="sub-message">现在可以返回应用继续操作</p>
+
+        <div class="info">
+            💡 提示：此窗口可以关闭了<br>
+            应用已经收到您的账号信息
+        </div>
+
+        <p class="countdown" id="countdown"></p>
     </div>
     <script>
-        // 3秒后自动关闭窗口
-        setTimeout(function() {
-            window.close();
-        }, 3000);
+        // 尝试自动关闭窗口（对通过 window.open 打开的窗口有效）
+        let countdown = 5;
+        const countdownEl = document.getElementById('countdown');
+
+        function updateCountdown() {{
+            if (countdown > 0) {{
+                countdownEl.textContent = '窗口将在 ' + countdown + ' 秒后自动关闭';
+                countdown--;
+                setTimeout(updateCountdown, 1000);
+            }} else {{
+                try {{
+                    window.close();
+                    // 如果无法关闭，显示手动关闭提示
+                    countdownEl.textContent = '请点击上方按钮手动关闭窗口';
+                }} catch (e) {{
+                    console.log('无法自动关闭窗口:', e);
+                }}
+            }}
+        }}
+
+        // 开始倒计时
+        setTimeout(updateCountdown, 1000);
     </script>
 </body>
 </html>
-        "#
-        .to_string()
+            "##
+        )
     };
 
     Ok(Response::builder()

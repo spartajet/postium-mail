@@ -19,13 +19,23 @@ import { useAccountStore } from '@/stores/account'
 import { ErrorHandler } from './errorHandler'
 
 /**
- * OAuth 回调事件载荷
+ * OAuth 回调事件载荷（旧版 deep-link）
  */
 interface OAuthCallbackPayload {
   code?: string
   state?: string
   error?: string
   errorDescription?: string
+}
+
+/**
+ * OAuth 流程完成事件载荷（新版 HTTP localhost）
+ */
+interface OAuthFlowResultPayload {
+  session_id: string
+  status: 'success' | 'error'
+  account?: Account
+  error?: string
 }
 
 /**
@@ -139,20 +149,20 @@ export class OAuthHelper {
       }, timeout)
 
       // 监听回调事件
-      listen<OAuthCallbackPayload>('oauth-deep-link-callback', (event) => {
+      listen<OAuthFlowResultPayload>('oauth-flow-complete', (event) => {
         if (isResolved) return
 
         const payload = event.payload
-        console.log('[OAuthHelper] 收到 OAuth 回调:', payload)
+        console.log('[OAuthHelper] 收到 OAuth 流程完成事件:', payload)
 
         clearTimeout(timeoutId)
         isResolved = true
 
         // 处理错误
-        if (payload.error) {
+        if (payload.status === 'error') {
           const error = ErrorHandler.createError(
             'OAUTH_ERROR',
-            payload.errorDescription || 'OAuth 授权失败',
+            payload.error || 'OAuth 授权失败',
             'medium' as any,
             false
           )
@@ -161,14 +171,13 @@ export class OAuthHelper {
         }
 
         // 处理成功
-        if (payload.code && payload.state) {
-          this.exchangeCode(payload.code, payload.state)
-            .then(resolve)
-            .catch(reject)
+        if (payload.status === 'success' && payload.account) {
+          console.log('[OAuthHelper] OAuth 登录成功:', payload.account)
+          resolve(payload.account)
         } else {
           const error = ErrorHandler.createError(
             'OAUTH_ERROR',
-            'OAuth 回调参数无效',
+            'OAuth 流程返回无效状态',
             'medium' as any,
             false
           )
