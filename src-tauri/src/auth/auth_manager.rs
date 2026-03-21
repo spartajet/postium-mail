@@ -292,6 +292,47 @@ impl AuthManager {
         })
     }
 
+    /// 验证密码凭据（连接测试）
+    ///
+    /// 用于添加账号前的连接测试。
+    ///
+    /// # 参数
+    ///
+    /// * `email` - 邮箱地址
+    /// * `password` - 密码
+    ///
+    /// # 返回
+    ///
+    /// 返回认证状态
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let state = manager.validate_credentials_for_password("user@example.com", "password").await?;
+    /// assert_eq!(state, AuthState::Authenticated);
+    /// ```
+    pub async fn validate_credentials_for_password(
+        &self,
+        email: &str,
+        password: &str,
+    ) -> Result<AuthState> {
+        // 1. 检测服务商获取 IMAP 配置
+        let provider = self.provider_pool.detect_provider(email).await?;
+        let imap_config = provider.imap_config(email);
+
+        // 2. 使用 PasswordAuth 验证
+        let valid = self
+            .password_auth
+            .validate_password(&imap_config.host, imap_config.port, email, password)
+            .await?;
+
+        if valid {
+            Ok(AuthState::Authenticated)
+        } else {
+            Ok(AuthState::Failed)
+        }
+    }
+
     /// 刷新 Token
     ///
     /// # 参数

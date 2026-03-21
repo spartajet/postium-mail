@@ -423,11 +423,42 @@ impl AccountRepository {
         Ok(())
     }
 
-    /// 删除账号（包括 Keyring 凭证）
+    /// 删除账号（包括 Keyring 凭证和相关数据）
     pub async fn delete(db: &DbConn, app_handle: &AppHandle, id: i32) -> Result<()> {
         let existing = Self::get_by_id(db, id)
             .await?
             .ok_or_else(|| StorageError::NotFound("账号不存在".to_string()))?;
+
+        // 手动清理相关数据，避免外键约束问题
+        use sea_orm::EntityTrait;
+
+        // 1. 删除该账号的所有邮件（级联删除附件）
+        use crate::storage::models::email;
+        let _ = email::Entity::delete_many()
+            .filter(email::Column::AccountId.eq(id))
+            .exec(db)
+            .await;
+
+        // 2. 删除该账号的文件夹同步状态
+        use crate::storage::models::folder_sync_state;
+        let _ = folder_sync_state::Entity::delete_many()
+            .filter(folder_sync_state::Column::AccountId.eq(id))
+            .exec(db)
+            .await;
+
+        // 3. 删除该账号的同步状态记录
+        use crate::storage::models::sync_state;
+        let _ = sync_state::Entity::delete_many()
+            .filter(sync_state::Column::AccountId.eq(id))
+            .exec(db)
+            .await;
+
+        // 4. 删除该账号的同步错误记录
+        use crate::storage::models::sync_error;
+        let _ = sync_error::Entity::delete_many()
+            .filter(sync_error::Column::AccountId.eq(id))
+            .exec(db)
+            .await;
 
         // 清理 Keyring 凭证
         let keyring = app_handle.keyring();
@@ -443,6 +474,8 @@ impl AccountRepository {
             .exec(db)
             .await
             .map_err(|e| StorageError::Database(format!("删除账号失败: {}", e)))?;
+
+        tracing::info!("账号删除成功: id={}, email={}", id, existing.email);
 
         Ok(())
     }

@@ -7,7 +7,7 @@
 //! - 更新账号配置
 //! - 删除账号
 
-use super::{DatabaseState, KeyringState};
+use super::{DatabaseState, KeyringState, AuthManagerState};
 use crate::storage;
 
 /// 添加新的邮件账号
@@ -52,11 +52,31 @@ use crate::storage;
 pub async fn add_account(
     db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
     account: storage::CreateAccountRequest,
 ) -> Result<storage::AccountDto, String> {
     let db = db_state.clone_conn();
+    let auth_manager = auth_manager_state.clone_manager();
     let app_handle = &keyring_state.app_handle;
 
+    // 判断认证类型
+    let auth_type = account.auth_type.clone().unwrap_or_else(|| {
+        if account.oauth_token.is_some() {
+            "oauth2".to_string()
+        } else {
+            "password".to_string()
+        }
+    });
+
+    // 密码认证：通过 AuthManager（如果前端已测试连接，这里会再次验证）
+    if auth_type == "password" || auth_type == "app_password" {
+        let _result = auth_manager
+            .authenticate_password(&account.email, &account.password)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // 创建账号记录
     storage::AccountRepository::create(&db, app_handle, account)
         .await
         .map(|a| a.into())
@@ -137,11 +157,21 @@ pub async fn get_account(
 pub async fn update_account(
     db_state: tauri::State<'_, DatabaseState>,
     keyring_state: tauri::State<'_, KeyringState>,
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
     id: i32,
     account: storage::CreateAccountRequest,
 ) -> Result<storage::AccountDto, String> {
     let db = db_state.clone_conn();
     let app_handle = &keyring_state.app_handle;
+
+    // 如果提供了新密码，验证并更新
+    if !account.password.is_empty() {
+        let auth_manager = auth_manager_state.clone_manager();
+        let _result = auth_manager
+            .authenticate_password(&account.email, &account.password)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
 
     // 构建更新请求
     let request = storage::UpdateAccountRequest {
