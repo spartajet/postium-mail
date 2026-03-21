@@ -238,7 +238,7 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
 /// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
 fn init_tracing() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO) // 默认级别
+        .with_max_level(tracing::Level::DEBUG) // 默认级别
         .with_target(false) // 显示模块路径，便于调试
         .with_thread_ids(false) // 线程ID通常不需要
         .with_file(true) // 不显示文件名，减少日志冗余
@@ -441,6 +441,9 @@ pub fn run() {
             command::delete_account,
             command::test_account_connection,
             command::test_email_connection,
+            // 服务商检测
+            command::detect_provider,
+            command::list_providers,
             // OAuth
             command::validate_oauth_token,
             command::get_oauth_auth_url,
@@ -454,7 +457,6 @@ pub fn run() {
             command::toggle_star,
             command::delete_emails,
             command::move_email_to_folder,
-            command::get_standard_folders,
             // 同步
             command::sync_account,
             command::sync_account_with_progress,

@@ -8,16 +8,17 @@ mod account;
 mod connection;
 mod email;
 mod flow_engine;
-mod folder;
+
 mod oauth;
+mod provider;
 mod sync;
 
 pub use account::*;
 pub use connection::*;
 pub use email::*;
 pub use flow_engine::*;
-pub use folder::*;
 pub use oauth::*;
+pub use provider::*;
 pub use sync::*;
 
 use sea_orm::DbConn;
