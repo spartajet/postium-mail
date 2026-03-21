@@ -19,9 +19,35 @@
 //! 4. 调用 `exchange_oauth_code` 交换授权码，创建账号
 //! 5. 后续可使用 `refresh_oauth_token` 刷新令牌
 
-use super::{AuthManagerState, DatabaseState, KeyringState};
+use super::{AuthManagerState, DatabaseState, KeyringState, OAuthSessionManagerState};
+use crate::auth::OAuthSessionStatus;
 use crate::storage;
 use crate::providers;
+use serde::{Deserialize, Serialize};
+
+/// 启动 OAuth 流程响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartOAuthFlowResponse {
+    /// 会话 ID
+    pub session_id: String,
+    /// 授权 URL（已通过系统浏览器打开）
+    pub auth_url: String,
+}
+
+/// OAuth 流程完成事件
+///
+/// 后端处理完 Deep Link 回调后发射此事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthFlowResult {
+    /// 会话 ID
+    pub session_id: String,
+    /// 流程状态: "success" | "error"
+    pub status: String,
+    /// 创建的账号（成功时）
+    pub account: Option<storage::AccountDto>,
+    /// 错误信息（失败时）
+    pub error: Option<String>,
+}
 
 /// 验证 OAuth 令牌的有效性
 ///
@@ -330,4 +356,115 @@ pub async fn refresh_oauth_token(
     tracing::info!("成功刷新 OAuth token");
 
     Ok(token)
+}
+
+/// 启动 OAuth 流程
+///
+/// 创建 OAuth 会话、生成授权 URL，并在系统浏览器中打开授权页面。
+///
+/// # 参数
+/// * `auth_manager_state` - AuthManager 状态
+/// * `session_manager_state` - OAuthSessionManager 状态
+/// * `email` - 用户邮箱地址，用于自动检测服务商
+///
+/// # 返回
+/// 成功时返回会话信息和授权 URL
+///
+/// # 流程
+/// 1. 检测服务商并生成授权 URL
+/// 2. 创建 OAuth 会话（记录 state 和过期时间）
+/// 3. 在系统浏览器中打开授权页面
+/// 4. 用户授权后，Deep Link 回调将触发后续流程
+///
+/// # 示例
+/// ```rust,no_run
+/// use crate::command::oauth::start_oauth_flow;
+///
+/// let result = start_oauth_flow(
+///     auth_manager_state,
+///     session_manager_state,
+///     "user@gmail.com".to_string(),
+/// ).await?;
+///
+/// println!("会话 ID: {}", result.session_id);
+/// // 浏览器已自动打开授权页面
+/// ```
+#[tauri::command]
+pub async fn start_oauth_flow(
+    auth_manager_state: tauri::State<'_, AuthManagerState>,
+    session_manager_state: tauri::State<'_, OAuthSessionManagerState>,
+    email: String,
+) -> Result<StartOAuthFlowResponse, String> {
+    let auth_manager = auth_manager_state.clone_manager();
+    let session_manager = &session_manager_state.0;
+
+    // 1. 生成授权 URL 和 state
+    let context = auth_manager
+        .get_oauth_url(&email)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2. 创建会话
+    let provider = auth_manager
+        .provider_pool()
+        .detect_provider(&email)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let session_id = session_manager
+        .create_session(provider.provider_id(), &email, &context.state)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 3. 在浏览器打开 URL
+    tauri_plugin_opener::open_url(&context.auth_url, None::<&str>)
+        .map_err(|e| format!("无法打开浏览器: {}", e))?;
+
+    tracing::info!(
+        "启动 OAuth 流程: session_id={}, email={}, provider={}",
+        session_id,
+        email,
+        provider.provider_id()
+    );
+
+    Ok(StartOAuthFlowResponse {
+        session_id,
+        auth_url: context.auth_url,
+    })
+}
+
+/// 取消 OAuth 流程
+///
+/// 标记指定的 OAuth 会话为失败状态。
+///
+/// # 参数
+/// * `session_manager_state` - OAuthSessionManager 状态
+/// * `session_id` - 会话 ID
+///
+/// # 示例
+/// ```rust,no_run
+/// use crate::command::oauth::cancel_oauth_flow;
+///
+/// cancel_oauth_flow(session_manager_state, "uuid-xxx".to_string()).await?;
+/// ```
+#[tauri::command]
+pub async fn cancel_oauth_flow(
+    session_manager_state: tauri::State<'_, OAuthSessionManagerState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session_manager = &session_manager_state.0;
+
+    session_manager
+        .update_session_status(&session_id, OAuthSessionStatus::Failed)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    session_manager
+        .set_session_error(&session_id, "用户取消授权".to_string())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tracing::info!("取消 OAuth 流程: session_id={}", session_id);
+
+    Ok(())
 }
