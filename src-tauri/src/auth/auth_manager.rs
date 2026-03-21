@@ -9,6 +9,7 @@ use tauri::AppHandle;
 
 use crate::auth::enterprise_auth::EnterpriseAuth;
 use crate::auth::oauth_handler::{AuthorizationContext, OAuthHandler};
+use crate::auth::oauth_http_server::OAuthHttpServer;
 use crate::auth::oauth_session::OAuthSessionManager;
 use crate::auth::password_auth::PasswordAuth;
 use crate::auth::token_manager::TokenManager;
@@ -189,6 +190,8 @@ pub struct AuthManager {
     provider_pool: Arc<ProviderPool>,
     /// OAuth 会话管理器
     session_manager: Arc<OAuthSessionManager>,
+    /// OAuth HTTP 回调服务器
+    http_server: Arc<OAuthHttpServer>,
 }
 
 impl AuthManager {
@@ -216,6 +219,12 @@ impl AuthManager {
         // 启动后台清理任务
         Arc::clone(&session_manager).spawn_cleanup_task();
 
+        // 初始化 OAuth HTTP 服务器（但不启动）
+        let port = crate::config::get_oauth_callback_port();
+        let http_server = Arc::new(OAuthHttpServer::new(port, app_handle.clone()));
+
+        tracing::info!("OAuth HTTP 服务器创建成功，将在异步运行时中启动");
+
         Ok(Self {
             oauth_handler,
             token_manager,
@@ -223,6 +232,7 @@ impl AuthManager {
             enterprise_auth,
             provider_pool,
             session_manager,
+            http_server,
         })
     }
 
@@ -1049,6 +1059,28 @@ impl AuthManager {
             .map_err(|e| MailError::Internal(format!("Base64 解码失败: {}", e)))?;
 
         String::from_utf8(bytes).map_err(|e| MailError::Internal(format!("UTF-8 转换失败: {}", e)))
+    }
+
+    /// 获取当前使用的 redirect_uri
+    ///
+    /// 返回 HTTP localhost 形式的回调 URL
+    pub fn get_redirect_uri(&self) -> String {
+        self.http_server.get_callback_url()
+    }
+
+    /// 获取 HTTP 服务器引用
+    ///
+    /// 供命令层检查服务器状态
+    pub fn get_http_server(&self) -> &Arc<OAuthHttpServer> {
+        &self.http_server
+    }
+
+    /// 优雅关闭
+    ///
+    /// 停止 HTTP 服务器并清理资源
+    pub async fn shutdown(&self) {
+        self.http_server.stop().await;
+        tracing::info!("OAuth HTTP 服务器已停止");
     }
 }
 

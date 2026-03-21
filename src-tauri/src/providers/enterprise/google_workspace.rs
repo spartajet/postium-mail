@@ -85,12 +85,18 @@ impl GoogleWorkspaceProvider {
 
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
+        // 使用动态生成的 HTTP localhost redirect_uri
+        let port = crate::config::get_oauth_callback_port();
+        let redirect_uri = crate::config::generate_redirect_uri(port);
+
+        tracing::info!("GoogleWorkspace OAuth 配置: redirect_uri = {}", redirect_uri);
+
         OAuthConfig {
             client_id: Self::DEFAULT_CLIENT_ID.to_string(),
             client_secret: None, // 桌面应用不需要 client_secret
             auth_url: Self::DEFAULT_AUTH_URL.to_string(),
             token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-            redirect_uri: Self::DEFAULT_REDIRECT_URI.to_string(),
+            redirect_uri,
             scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
             pkce_enabled: true,
             tenant_id: None,

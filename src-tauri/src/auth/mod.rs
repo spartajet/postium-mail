@@ -150,6 +150,7 @@
 mod auth_manager;
 mod enterprise_auth;
 mod oauth_handler;
+mod oauth_http_server;
 mod oauth_session;
 mod password_auth;
 mod token_manager;
@@ -160,4 +161,5 @@ pub use auth_manager::{
     // 统一认证接口
     AuthInfo, ServerConfig, AuthResponse,
 };
+pub use oauth_http_server::OAuthHttpServer;
 pub use oauth_session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};

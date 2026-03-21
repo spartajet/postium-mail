@@ -159,64 +159,33 @@ pub use sync::SyncManager; // 用于测试
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Listener, Manager};
-use tauri_plugin_deep_link::DeepLinkExt;
-use url::Url;
 
 use command::{
     AuthManagerState, DatabaseState, FlowEngineState, KeyringState, OAuthFlowResult,
     OAuthSessionManagerState, ProviderPoolState,
 };
 
-/// 处理 OAuth Deep Link 回调
-fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
-    tracing::info!("收到 Deep Link: {}", url);
-
-    let parsed_url = match Url::parse(url) {
-        Ok(u) => u,
-        Err(e) => {
-            tracing::error!("解析 Deep Link URL 失败: {}", e);
-            return;
-        }
-    };
-
-    let host = parsed_url.host_str().unwrap_or("");
-    let path = parsed_url.path();
-
-    if host != "oauth" || path != "/callback" {
-        tracing::warn!("忽略非 OAuth Deep Link: host={}, path={}", host, path);
-        return;
-    }
-
-    let query_params: std::collections::HashMap<String, String> = parsed_url
-        .query_pairs()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-
-    let code = query_params.get("code").cloned().unwrap_or_default();
-    let state = query_params.get("state").cloned().unwrap_or_default();
-    let error = query_params.get("error").cloned();
-    let error_description = query_params.get("error_description").cloned();
-
-    tracing::info!(
-        "OAuth Deep Link 参数: code={}, state={}, error={:?}",
-        if code.is_empty() { "无" } else { "有" },
-        if state.is_empty() { "无" } else { "有" },
-        error
-    );
-
-    if let Some(window) = app.get_webview_window("main") {
+/// 处理 OAuth HTTP 回调
+fn handle_oauth_http_callback(
+    app_handle: tauri::AppHandle,
+    code: String,
+    state: String,
+    error: Option<String>,
+    error_description: Option<String>,
+) {
+    // 显示主窗口并聚焦
+    if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.set_focus();
         let _ = window.unminimize();
         let _ = window.show();
     }
 
     // 获取状态并克隆 Arc（确保 async block 中拥有所有权）
-    let session_manager = std::sync::Arc::clone(&app.state::<OAuthSessionManagerState>().0);
-    let auth_manager = app.state::<AuthManagerState>().clone_manager();
+    let session_manager = std::sync::Arc::clone(&app_handle.state::<OAuthSessionManagerState>().0);
+    let auth_manager = app_handle.state::<AuthManagerState>().clone_manager();
     // 从 State<'_, DatabaseState> 中提取并克隆内部的 Arc
-    let db_arc = std::sync::Arc::clone(&app.state::<DatabaseState>().0);
+    let db_arc = std::sync::Arc::clone(&app_handle.state::<DatabaseState>().0);
     let db_state = command::DatabaseState(db_arc);
-    let app_handle = app.clone();
 
     // KeyringState 包含 AppHandle，可以直接克隆
     let keyring_state = command::KeyringState {
@@ -325,7 +294,7 @@ fn handle_oauth_deep_link(app: &tauri::AppHandle, url: &str) {
     });
 }
 
-/// 交换 OAuth 授权码并创建账号（从 exchange_oauth_code 提取的逻辑）
+/// 交换 OAuth 授权码并创建账号
 async fn exchange_and_create_account(
     db_state: command::DatabaseState,
     keyring_state: command::KeyringState,
@@ -335,6 +304,14 @@ async fn exchange_and_create_account(
     state: String,
 ) -> std::result::Result<crate::storage::AccountDto, String> {
     use crate::providers;
+
+    // 打印接收到的参数（用于调试）
+    tracing::info!("========== 交换 OAuth Token ==========");
+    tracing::info!("Email: {}", email);
+    tracing::info!("Code (前20字符): {}", &code.chars().take(20).collect::<String>());
+    tracing::info!("Code 长度: {}", code.len());
+    tracing::info!("State: {}", state);
+    tracing::info!("====================================");
 
     let db = db_state.clone_conn();
 
@@ -421,12 +398,9 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             tracing::info!("单实例检测：收到参数 {:?}", args);
 
-            for arg in args {
-                if arg.starts_with("postium-mail://") {
-                    tracing::info!("单实例转发 Deep Link: {}", arg);
-                    handle_oauth_deep_link(app, &arg);
-                    return;
-                }
+            // 如果有 URL 参数，可能是其他应用尝试打开链接
+            if !args.is_empty() {
+                tracing::info!("单实例收到参数: {:?}", args);
             }
 
             if let Some(window) = app.get_webview_window("main") {
@@ -437,7 +411,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_keyring::init())
         .setup(|app| {
             // ========== 系统托盘初始化 ==========
@@ -494,22 +467,26 @@ pub fn run() {
 
             tracing::info!("系统托盘初始化完成");
 
-            // ========== Deep Link 事件处理器 ==========
-            let app_handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    handle_oauth_deep_link(&app_handle, url.as_str());
+            // ========== OAuth HTTP 回调事件监听器 ==========
+            let app_handle_for_callback = app.handle().clone();
+            app.listen("oauth-http-callback", move |event| {
+                let payload = event.payload();
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(payload) {
+                    let code = data["code"].as_str().unwrap_or("").to_string();
+                    let state = data["state"].as_str().unwrap_or("").to_string();
+                    let error = data["error"].as_str().map(|s| s.to_string());
+                    let error_description =
+                        data["error_description"].as_str().map(|s| s.to_string());
+
+                    handle_oauth_http_callback(
+                        app_handle_for_callback.clone(),
+                        code,
+                        state,
+                        error,
+                        error_description,
+                    );
                 }
             });
-
-            #[cfg(target_os = "windows")]
-            {
-                if let Err(e) = app.deep_link().register("postium-mail") {
-                    tracing::warn!("注册 Deep Link 协议失败: {}", e);
-                } else {
-                    tracing::info!("Deep Link 协议注册成功");
-                }
-            }
 
             // ========== 数据库和服务初始化 ==========
             tauri::async_runtime::block_on(async move {
@@ -539,6 +516,16 @@ pub fn run() {
                     auth::AuthManager::new(app.handle()).expect("无法创建 AuthManager"),
                 );
 
+                // 启动 OAuth HTTP 服务器（在异步运行时中）
+                {
+                    let http_server = auth_manager.get_http_server();
+                    if let Err(e) = http_server.start().await {
+                        tracing::error!("OAuth HTTP 服务器启动失败: {}", e);
+                    } else {
+                        tracing::info!("OAuth HTTP 服务器启动成功");
+                    }
+                }
+
                 // 创建 ProviderPool（注册所有默认服务商）
                 let provider_pool = std::sync::Arc::new(providers::ProviderPool::default());
 
@@ -562,6 +549,7 @@ pub fn run() {
                 app.manage(FlowEngineState(flow_engine_state.clone()));
 
                 // 注册 AuthManagerState 和 ProviderPoolState
+                let auth_manager_for_cleanup = auth_manager.clone();
                 app.manage(AuthManagerState(auth_manager));
                 app.manage(ProviderPoolState(provider_pool));
                 // 注册 OAuthSessionManagerState（使用之前克隆的 session_manager）
@@ -577,13 +565,15 @@ pub fn run() {
                     }
                 }
 
-                // ========== FlowEngine 优雅关闭 ==========
-                // 监听应用退出事件，停止 FlowEngine
+                // ========== FlowEngine 和 AuthManager 优雅关闭 ==========
+                // 监听应用退出事件，停止 FlowEngine 和 AuthManager
                 let _ = app.listen("tauri://destroy", move |_| {
                     let engine_state = flow_engine_state.clone();
+                    let auth_manager = auth_manager_for_cleanup.clone();
                     tauri::async_runtime::block_on(async move {
                         use tokio::time::{timeout, Duration};
 
+                        // 停止 FlowEngine
                         tracing::info!("正在停止 FlowEngine...");
                         let engine_guard = engine_state.lock().await;
                         let stop_result =
@@ -594,6 +584,11 @@ pub fn run() {
                             Ok(Err(e)) => tracing::error!("FlowEngine 停止失败: {}", e),
                             Err(_) => tracing::warn!("FlowEngine 停止超时，将强制退出"),
                         }
+                        drop(engine_guard); // 释放锁
+
+                        // 停止 AuthManager (包括 OAuth HTTP 服务器)
+                        tracing::info!("正在停止 AuthManager...");
+                        auth_manager.shutdown().await;
                     });
                 });
 
