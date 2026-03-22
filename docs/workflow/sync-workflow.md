@@ -1,884 +1,218 @@
-# 邮件同步流程文档
 
-本文档详细记录了邮件同步的完整流程，包括增量同步、变更检测、文件夹管理等核心逻辑。
-
+# 邮件同步流程文档 (优化版)
+本文档详细记录了邮件同步的完整流程，基于“能力探测”与“状态驱动”架构，实现了对现代邮箱（支持 CONDSTORE）与传统邮箱（如 163）的统一兼容。
 ---
-
 ## 目录
-
 1. [同步架构概述](#同步架构概述)
-2. [完整同步流程](#完整同步流程)
-3. [增量同步机制](#增量同步机制)
-4. [变更检测](#变更检测)
-5. [文件夹管理](#文件夹管理)
-6. [邮件处理](#邮件处理)
-7. [前后端交互](#前后端交互)
+2. [同步核心状态](#同步核心状态)
+3. [完整同步流程](#完整同步流程)
+4. [增量同步机制](#增量同步机制)
+5. [变更检测策略](#变更检测策略)
+6. [文件夹管理](#文件夹管理)
+7. [邮件处理](#邮件处理)
 8. [调试指南](#调试指南)
-
 ---
-
 ## 同步架构概述
-
 ### 系统组件
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         前端 (Vue 3)                            │
-│  ┌──────────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   SyncStore      │  │ AccountStore │  │   EmailStore     │  │
-│  └────────┬─────────┘  └──────┬───────┘  └──────────────────┘  │
-│           │                   │                                  │
-└───────────┼───────────────────┼──────────────────────────────────┘
-            │ Tauri IPC          │
-            ▼                   ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      后端 (Rust/Tauri)                          │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                    SyncManager                           │  │
-│  │  ┌────────────────────────────────────────────────────┐  │  │
-│  │  │    AuthManager (统一认证)  │    ProviderPool       │  │  │
-│  │  │    ├─ OAuth2 认证         │    └─ 服务商配置       │  │  │
-│  │  │    └─ 密码认证            │                        │  │  │
-│  │  └────────────────────────────────────────────────────┘  │  │
-│  │  ┌────────────────────────────────────────────────────┐  │  │
-│  │  │     ChangeDetector  │   DeltaSync                │  │  │
-│  │  └────────────────────────────────────────────────────┘  │  │
-│  │  ┌────────────────────────────────────────────────────┐  │  │
-│  │  │    FolderManager   │   MailProcessor            │  │  │
-│  │  └────────────────────────────────────────────────────┘  │  │
-│  │  ┌────────────────────────────────────────────────────┐  │  │
-│  │  │ SyncStateManager   │   IMAP Client    │ Database  │  │  │
-│  │  └────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 关键文件位置
-
-| 组件 | 文件路径 |
-|------|----------|
-| 同步管理器 | `src-tauri/src/sync/sync_manager.rs` |
-| 增量同步 | `src-tauri/src/sync/delta_sync.rs` |
-| 变更检测 | `src-tauri/src/sync/change_detector.rs` |
-| 文件夹管理 | `src-tauri/src/sync/folder_manager.rs` |
-| 邮件处理 | `src-tauri/src/sync/mail_processor.rs` |
-| 同步状态管理 | `src-tauri/src/sync/sync_state.rs` |
-| 认证管理 | `src-tauri/src/auth/mod.rs` |
-| 同步命令 | `src-tauri/src/command/sync.rs` |
-| 前端同步 Store | `src/stores/sync.ts` |
-| 文件夹同步状态模型 | `src-tauri/src/storage/models/folder_sync_state.rs` |
-
+*(保持原有架构，重点增强了 ChangeDetector 和 SyncStateManager 的职责)*
+- **SyncManager**: 总调度器，负责判断同步类型（首次/增量）。
+- **ChangeDetector**: 变更检测核心，根据能力选择 `CondstoreStrategy` 或 `FallbackStrategy`。
+- **SyncStateManager**: 管理“同步锚点”(`UIDVALIDITY`, `LastUID`, `ModSeq`)。
+- **IMAP Client**: 封装底层指令，提供 `fetch_new_emails`, `fetch_flags_diff` 等高级接口。
 ---
-
+## 同步核心状态
+每个文件夹的同步状态由以下锚点决定：
+| 字段 | 类型 | 说明 | 作用 |
+| :--- | :--- | :--- | :--- |
+| `uidvalidity` | i64 | 邮箱唯一标识 | **一致性守门员**。若服务器值变化，必须重置本地数据。 |
+| `last_uid` | i32 | 上次同步的最大UID | **新邮件游标**。用于计算 `last_uid + 1:*` 获取新邮件。 |
+| `highest_modseq` | i64 | 最高修改序列号 | **变更游标**。仅 CONDSTORE 模式使用，用于获取变更。 |
+| `is_first_sync` | bool | 是否首次同步 | 标记是否需要执行全量索引构建。 |
+---
 ## 完整同步流程
-
 ### 流程图
-
+```mermaid
+graph TD
+    Start[用户触发/定时任务] --> Connect[连接并认证]
+    Connect --> Capa{探测能力}
+    Capa --> RecordCapa[记录 supports_condstore]
+    
+    RecordCapa --> ListFolders[LIST 获取文件夹结构]
+    ListFolders --> LoopFolders[遍历文件夹]
+    
+    LoopFolders --> SelectBox[SELECT Folder]
+    SelectBox --> CheckValid{UIDVALIDITY 一致?}
+    
+    %% 灾难恢复分支
+    CheckValid -- "不一致" --> ResetLocal[清空本地该文件夹数据]
+    ResetLocal --> SetFirstSync[标记为首次同步]
+    
+    %% 正常分支
+    CheckValid -- "一致" --> CheckHistory{本地有历史锚点?}
+    CheckHistory -- "无" --> SetFirstSync
+    CheckHistory -- "有" --> SetDelta[标记为增量同步]
+    
+    %% 同步执行
+    SetFirstSync --> ExecFirst[执行首次同步策略]
+    SetDelta --> ExecDelta[执行增量同步策略]
+    
+    %% 策略详情
+    ExecFirst --> Step1[UID FETCH 1:* FLAGS]
+    Step1 --> Step2[构建本地索引]
+    Step2 --> Step3[更新 last_uid, modseq]
+    
+    ExecDelta --> StepA[获取新邮件]
+    StepA --> StepB[获取变更/删除]
+    StepB --> StepC[更新 last_uid, modseq]
+    
+    %% 结束
+    Step3 --> SaveState[持久化锚点]
+    StepC --> SaveState
+    SaveState --> EndLoop{还有文件夹?}
+    EndLoop -- 是 --> LoopFolders
+    EndLoop -- 否 --> Finish[同步完成]
 ```
-用户触发同步
-   │
-   ▼
-1. 前端调用 syncStore.syncAccount(accountId)
-   │
-   ├─ startListening(accountId) - 监听进度事件
-   ├─ invoke('sync_account_with_progress', { accountId })
-   │
-   ▼
-2. 后端接收命令 (command/sync.rs)
-   │
-   ├─ 创建 SyncManager
-   └─ sync_manager.sync_account(account_id)
-   │
-   ▼
-3. 连接到 IMAP 服务器
-   │
-   ├─ 获取账号信息
-   ├─ 检测服务商
-   ├─ 获取 IMAP 配置
-   ├─ 获取认证信息 (AuthManager)
-   └─ imap_client.connect()
-   │
-   ▼
-4. 更新文件夹同步状态
-   │
-   ├─ imap_client.list_folders_with_attributes()
-   │  └─ 获取 IMAP 文件夹列表和 Special-Use 属性
-   │
-   ├─ folder_manager.update_sync_states()
-   │  └─ 更新 folder_sync_states 表
-   │     ├─ 插入新文件夹记录
-   │     └─ 更新已存在记录的 synced_at
-   │
-   ▼
-5. 对每个文件夹执行增量同步
-   │
-   ├─ 发送进度事件 (syncing_emails)
-   ├─ sync_folder_internal()
-   │  │
-   │  ├─ 5.0 获取文件夹元数据
-   │  │      └─ imap_client.fetch_folder_metadata(folder)
-   │  │      └─ 返回 { uidvalidity, uidnext, highest_modseq }
-   │  │
-   │  ├─ 5.0.1 更新元数据到数据库
-   │  │      └─ folder_manager.update_folder_metadata(account_id, folder, ...)
-   │  │
-   │  ├─ 5.1 检查 CONDSTORE 支持
-   │  │      └─ imap_client.check_condstore_support()
-   │  │
-   │  ├─ 5.2 获取服务器 UID 列表
-   │  │      └─ imap_client.list_uids_since(folder, date_since)
-   │  │      └─ 默认获取最近3个月的邮件
-   │  │
-   │  ├─ 5.3 CONDSTORE 增量同步
-   │  │      └─ imap_client.search_modified_since(last_modseq)
-   │  │      └─ 返回修改的 UID 列表
-   │  │
-   │  ├─ 5.4 变更检测
-   │  │      └─ change_detector.detect_changes()
-   │  │      └─ 对比本地和服务器 UID
-   │  │      └─ 检测新增、修改、删除
-   │  │
-   │  ├─ 5.5 获取邮件内容
-   │  │      └─ imap_client.fetch_email(folder, uid)
-   │  │      └─ 对新邮件和修改的邮件
-   │  │
-   ├─ 5.6 批量处理邮件
-   │  │      └─ mail_processor.process_mails()
-   │  │      └─ 保存或更新到数据库
-   │  │
-   ├─ 5.7 删除已移除的邮件
-   │  │      └─ mail_processor.delete_mails()
-   │  │
-   └─ 5.8 更新同步状态
-      └─ sync_state_manager.update_sync_completed()
-```
-
-### 函数调用栈
-
-#### 前端（Vue + TypeScript）
-
-```typescript
-// 1. 用户触发同步
-syncStore.syncAccount(accountId, accountEmail)
-  → startListening(accountId)
-     → listen(`sync-progress-${accountId}`, handleProgressEvent)
-  → invoke('sync_account_with_progress', { accountId })
-
-// 2. 处理进度事件
-syncStore.handleProgressEvent(accountId, progress)
-  → 根据 progress.stage 更新状态
-  → 计算进度百分比
-  → 更新 syncStatuses
-
-// 3. 完成后
-syncStore.syncAccount()
-  → await invoke('sync_account_with_progress', ...)
-  → const status = this.syncStatuses.get(accountId)
-  → addToHistory(accountId, accountEmail, result)
-```
-
-#### 后端（Rust）
-
+### 函数调用栈 (Rust)
 ```rust
-// 1. 命令入口
-command/sync.rs::sync_account_with_progress()
-  → sync_manager = SyncManager::new(db, app_handle, auth_manager, provider_pool)
-  → sync_manager.sync_account(account_id)
-     → 返回 SyncResult
-
-// 2. 同步管理器
-sync/sync_manager.rs::sync_account()
-  → // 1. 获取账号信息
-  → storage::AccountRepository::get_by_id(&db, account_id)
-
-  → // 2. 检测服务商
-  → provider_pool.detect_provider(&account.email)
-
-  → // 3. 连接 IMAP（使用 AuthManager 统一认证）
-  → connect_imap(account_id, &imap_config, &account.email, &account.auth_type)
-     → auth_manager.get_imap_auth(account_id, email, &auth_type)
-        → 返回 ImapAuthInfo 枚举:
-           - ImapAuthInfo::Password { username, password }
-           - ImapAuthInfo::OAuth { email, xoauth2 }
-     → AsyncImapClient::connect(host, port, email, imap_auth)
-
-  → // 4. 获取并更新文件夹元数据
-  → imap_client.list_folders_with_attributes()
-  → folder_manager.update_sync_states(account_id, &folder_infos)
-     → 更新 uidvalidity, uidnext, highest_modseq
-
-  → // 5. 同步每个文件夹
-  → for folder_info in folder_infos:
-      → sync_folder_internal(account_id, &folder_info.name, &mut imap_client)
-         → fetch_folder_metadata(folder)
-         → folder_manager.update_folder_metadata()
-         → check_condstore_support()
-         → list_uids_since(folder, &date_since)
-         → search_modified_since(last_modseq)
-         → sync_folder(account_id, folder, server_uids, imap_client, ...)
-            → change_detector.detect_changes()
-            → imap_client.fetch_email(folder, uid)
-            → mail_processor.process_mails()
-            → mail_processor.delete_mails()
-            → sync_state_manager.update_sync_completed()
-
-  → // 6. 发送完成事件
-  → emit_progress(account_id, SyncProgress { stage: Completed, ... })
+// 1. 入口
+sync_manager.sync_account(account_id)
+  -> // 2. 连接与探测
+     connect_imap(...)
+     check_condstore_support() -> bool (存储为 context.supports_condstore)
+     
+  -> // 3. 遍历文件夹
+     for folder in list_folders():
+       // 决策逻辑
+       let server_meta = select_folder(folder) // 获取 UIDVALIDITY, HIGHESTMODSEQ
+       let local_state = sync_state_manager.get(account_id, folder)
+       
+       // 灾难检测
+       if local_state.uidvalidity != server_meta.uidvalidity {
+           reset_local_data(folder);
+           sync_mode = FirstSync;
+       } else if local_state.is_empty() {
+           sync_mode = FirstSync;
+       } else {
+           sync_mode = DeltaSync;
+       }
+       match sync_mode {
+           FirstSync => execute_first_sync(...),
+           DeltaSync => execute_delta_sync(...),
+       }
 ```
-
 ---
-
 ## 增量同步机制
-
-### 同步策略
-
+### 策略模式
 ```rust
 pub enum SyncStrategy {
-    Condstore,  // 使用 MODSEQ 增量同步
-    UidSearch,  // 使用 UID 搜索对比
-    FullSync,    // 完整同步
+    Condstore,  // 支持 CONDSTORE (Gmail, Outlook)
+    Fallback,   // 不支持 (163, QQ邮箱老服务器)
 }
 ```
-
-### CONDSTORE 策略
-
-```
-支持 CONDSTORE 的服务器:
-  1. SELECT folder (CONDSTORE)
-  2. 获取 HIGHESTMODSEQ
-  3. SEARCH MODSEQ <last_modseq>:*
-  4. 只获取修改的邮件
-
-优势:
-  - 只下载变更的邮件
-  - 减少网络流量
-  - 提高同步速度
-```
-
-### UID 搜索策略
-
-```
-不支持 CONDSTORE 的服务器:
-  1. SEARCH SINCE <date>
-  2. 获取所有 UID 列表
-  3. 对比本地 UID 检测变更
-
-变更检测:
-  - 新邮件: 服务器有，本地没有
-  - 删除邮件: 本地有，服务器没有
-  - 标志变更: 对比标志状态
-```
-
-### 时间窗口
-
-```rust
-// 默认同步最近3个月的邮件
-let three_months_ago = chrono::Utc::now() - chrono::Duration::days(90);
-let date_since = format_imap_date(three_months_ago);
-
-// IMAP SINCE 格式: dd-MMM-yyyy (RFC 3501)
-// 示例: "20-Dec-2025"
-// 注意：必须使用英文月份缩写，不能使用本地化月份名称
-
-fn format_imap_date(datetime: chrono::DateTime<chrono::Utc>) -> String {
-    const MONTH_NAMES: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    ];
-    let day = datetime.day();
-    let month = MONTH_NAMES[datetime.month() as usize - 1];
-    let year = datetime.year();
-    format!("{:02}-{}-{}", day, month, year)
-}
-```
-
+### 1. 首次同步
+**目标**：以最小流量建立完整的 UID 索引。
+*   **步骤 1：获取全量索引**
+    *   指令：`UID FETCH 1:* (FLAGS)`
+    *   说明：只拉取 UID 和 Flags。对于 10 万封邮件，数据量仅约 5MB，速度快且流量小。
+*   **步骤 2：数据入库**
+    *   批量插入本地数据库，标记 `is_read`, `is_starred`。
+    *   *注意*：此时**不**拉取邮件正文或 Envelope。
+*   **步骤 3：按需拉取元数据**
+    *   指令：`UID FETCH <最新的N个UID> (ENVELOPE BODYSTRUCTURE)`
+    *   说明：仅更新用户可见的最新邮件的详情。
+*   **步骤 4：保存锚点**
+    *   保存 `UIDVALIDITY`，`last_uid` (当前最大UID)，`highest_modseq` (如果支持)。
+### 2. 增量同步
+**目标**：只同步差异。
+#### 步骤 A：获取新邮件 (通用逻辑)
+无论是否支持 CONDSTORE，都使用 UID 连续性特性：
+*   **指令**：`UID FETCH <last_uid + 1>:* (FLAGS ENVELOPE BODYSTRUCTURE)`
+*   **优势**：精准获取所有新邮件，无遗漏，无需按时间搜索。
+#### 步骤 B：变更与删除检测 (分流逻辑)
+**策略一：支持 CONDSTORE**
+*   **获取变更**：`UID FETCH 1:* (FLAGS) (CHANGEDSINCE <last_modseq>)`
+    *   返回所有 Flags 变更的邮件（如未读变已读）。
+*   **处理删除**：
+    *   若支持 `QRESYNC`：解析 `VANISHED` 响应。
+    *   若不支持：比对本地 UID 列表与服务器 UID 列表（或仅比对 EXISTS 数量，若数量减少再扫描）。
+**策略二：不支持 CONDSTORE (Fallback)**
+*   **获取全量 Flags**：`UID FETCH 1:* (FLAGS)`
+    *   虽然范围是 `1:*`，但只请求 Flags，数据量极小。
+*   **本地比对算法**：
+    *   `server_map`: 服务器返回的 {UID: Flags}
+    *   `local_map`: 本地数据库的 {UID: Flags}
+    *   **更新**：`server_map` 与 `local_map` 不一致的项目。
+    *   **删除**：存在于 `local_map` 但不存在于 `server_map` 的 UID。
 ---
-
 ## 变更检测
-
-### EmailFlags 结构
-
+### ChangeDetector 接口实现
 ```rust
-pub struct EmailFlags {
-    pub seen: bool,       // \Seen - 已读
-    pub flagged: bool,    // \Flagged - 已标记
-    pub answered: bool,   // \Answered - 已回复
-    pub draft: bool,      // \Draft - 草稿
-    pub deleted: bool,    // \Deleted - 已删除
-    pub recent: bool,     // \Recent - 最近（只读）
+impl ChangeDetector {
+    pub async fn detect(&self, strategy: SyncStrategy) -> Result<ChangeSet> {
+        match strategy {
+            SyncStrategy::Condstore => {
+                // 使用 CHANGEDSINCE 指令
+                let changes = self.imap.fetch_changed_since(self.last_modseq)?;
+                // 服务器返回什么就改什么
+                Ok(ChangeSet::from_server_response(changes))
+            },
+            SyncStrategy::Fallback => {
+                // 1. 拉取全量 Flags
+                let server_flags = self.imap.fetch_all_flags()?;
+                // 2. 获取本地所有 UID
+                let local_uids = self.db.get_all_uids()?;
+                
+                let mut changes = ChangeSet::new();
+                
+                // 计算删除
+                for uid in local_uids.difference(&server_flags.keys().collect()) {
+                    changes.deleted.push(*uid);
+                }
+                
+                // 计算变更
+                for (uid, flags) in server_flags {
+                    if self.db.is_flags_different(uid, flags) {
+                        changes.modified.push(uid);
+                    }
+                }
+                Ok(changes)
+            }
+        }
+    }
 }
 ```
-
-### 变更检测类型
-
-```rust
-pub enum ChangeType {
-    NewEmail { uid: u32 },
-    FlagsChanged { uid: u32, old_flags: Vec<String>, new_flags: Vec<String> },
-    EmailDeleted { uid: u32 },
-}
-```
-
-### 检测流程
-
-```
-detect_changes(server_uids, last_sync_uid, supports_condstore)
-  │
-  ├─ 1. 检测新邮件
-  │  ├─ 获取本地 UID 列表
-  │  ├─ 过滤出服务器有但本地没有的 UID
-  │  └─ 进一步按 last_sync_uid 过滤
-  │
-  ├─ 2. 检测删除的邮件
-  │  ├─ 获取本地 UID 列表
-  │  └─ 计算差集 (本地 - 服务器)
-  │
-  └─ 3. 检测标志变更
-     ├─ 获取本地标志
-     ├─ 获取服务器标志
-     └─ 对比标志差异
-```
-
-### 差集计算
-
-```rust
-// UidSet 工具
-local_set.difference(&server_set)
-  → 返回 local 有但 server 没有的 UID
-
-// 应用场景: 检测删除邮件
-let deleted_emails = local_set.difference(&server_set)
-```
-
 ---
-
 ## 文件夹管理
-
-> **架构变更** (2026-03-21):
-> - `folders` 表已删除，不再存储文件夹配置
-> - 文件夹配置由 `provider.folder_mapping()` 动态提供
-> - `folder_sync_states` 表只存储 IMAP 同步元数据
-
-### StandardFolder 结构
-
+*(架构保持不变，强调 UIDVALIDITY 的处理)*
+### 文件夹同步状态更新逻辑
 ```rust
-/// 标准文件夹映射 - 由各服务商实现
-///
-/// 注意：starred（星标邮件）字段已移除，
-/// 星标邮件应通过邮件的 \Flagged 标志识别
-pub struct StandardFolder {
-    pub inbox: Vec<String>,      // 收件箱 IMAP 名称
-    pub sent: Vec<String>,       // 已发送 IMAP 名称
-    pub drafts: Vec<String>,     // 草稿箱 IMAP 名称
-    pub spam: Vec<String>,       // 垃圾邮件 IMAP 名称
-    pub trash: Vec<String>,      // 已删除 IMAP 名称
-    pub archive: Vec<String>,    // 归档 IMAP 名称
-}
-
-impl StandardFolder {
-    /// 从 IMAP 文件夹名称查找标准类型
-    pub fn find_standard_type(&self, imap_name: &str) -> &str {
-        // 返回 "inbox", "sent", "drafts", "spam", "trash", "archive" 或 "other"
+pub fn update_sync_state(meta: &FolderMetadata, local_state: &mut FolderSyncState) {
+    // 1. 核心校验：如果 UIDVALIDITY 变化，视为邮箱重置
+    if local_state.uidvalidity != meta.uidvalidity {
+        log::warn!("UIDVALIDITY changed! Reset required.");
+        local_state.reset(); // 重置 last_uid, modseq 等
+        local_state.uidvalidity = meta.uidvalidity;
     }
+    
+    // 2. 更新最新状态
+    local_state.uidnext = meta.uidnext;
+    local_state.highest_modseq = meta.highest_modseq; // 可能为 None
 }
 ```
-
-### Special-Use 文件夹类型
-
-```rust
-pub enum SpecialUse {
-    Inbox,      // 收件箱 (\Inbox)
-    Drafts,     // 草稿箱 (\Drafts)
-    Sent,       // 已发送 (\Sent)
-    Trash,      // 垃圾箱 (\Trash)
-    Junk,       // 垃圾邮件 (\Junk)
-    Important,  // 重要邮件 (\Important)
-    Archive,    // 归档 (\Archive)
-    All,        // 全部邮件 (\All)
-    Flagged,    // 标记邮件 (\Flagged)
-    Normal,     // 普通文件夹
-}
-```
-
-### 文件夹同步状态更新
-
-```
-update_sync_states(account_id, folder_infos)
-  │
-  ├─ 1. 遍历服务器文件夹列表
-  │
-  ├─ 2. 对每个文件夹执行 upsert
-  │  ├─ 如果 folder_sync_states 已存在该记录:
-  │  │  └─ 更新 uidvalidity, uidnext, highest_modseq, synced_at
-  │  └─ 如果不存在:
-  │     └─ 插入新记录 (account_id, imap_name, ...)
-  │
-  └─ 3. 返回更新结果
-     └─ SyncStateUpdateResult { updated }
-```
-
-### 服务商文件夹映射示例
-
-**Gmail**:
-```rust
-fn folder_mapping(&self) -> StandardFolder {
-    StandardFolder {
-        inbox: vec!["INBOX"],
-        sent: vec!["[Gmail]/Sent Mail"],
-        drafts: vec!["[Gmail]/Drafts"],
-        spam: vec!["[Gmail]/Spam"],
-        trash: vec!["[Gmail]/Trash"],
-        archive: vec!["[Gmail]/All Mail"],
-    }
-}
-```
-
-**163/QQ 邮箱**:
-```rust
-fn folder_mapping(&self) -> StandardFolder {
-    StandardFolder {
-        inbox: vec!["INBOX"],
-        sent: vec!["已发送邮件", "Sent"],
-        drafts: vec!["草稿箱", "Drafts"],
-        spam: vec!["垃圾邮件", "Spam"],
-        trash: vec!["已删除邮件", "Trash"],
-        archive: vec!["归档", "Archive"],
-    }
-}
-```
-
-### FolderSyncState 表结构
-
-> **架构变更说明** (2026-03-21):
-> - `folders` 表已删除
-> - `folder_sync_states` 表只存储 IMAP 同步元数据
-> - 文件夹配置由 `provider.folder_mapping()` 动态提供
-> - 不再存储 `standard_name`、`total_count`、`unread_count` 等字段
-
-```sql
-CREATE TABLE folder_sync_states (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id INTEGER NOT NULL,
-    imap_name TEXT NOT NULL,          -- IMAP 文件夹原始名称
-    uidvalidity INTEGER,              -- IMAP UIDVALIDITY
-    uidnext INTEGER,                  -- IMAP UIDNEXT
-    highest_modseq INTEGER,           -- CONDSTORE HIGHESTMODSEQ
-    synced_at INTEGER,                -- 最后同步时间
-    created_at INTEGER,
-    updated_at INTEGER,
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
-    UNIQUE(account_id, imap_name)     -- 每个账号的文件夹名称唯一
-);
-```
-
-**字段说明**：
-- `imap_name`: IMAP 服务器的文件夹名称（如 `[Gmail]/Sent Mail`、`收件箱`）
-- `uidvalidity`: 用于检测文件夹是否重建
-- `uidnext`: 预期的下一个 UID
-- `highest_modseq`: CONDSTORE 最高修改序列号
-- **不存储**:
-  - 标准化名称 → 通过 `folder_mapping().find_standard_type(imap_name)` 动态获取
-  - 邮件数量 → 从 `emails` 表统计
-  - 文件夹属性 → 使用 RFC 6154 Special-Use 或名称推断
-
 ---
-
 ## 邮件处理
-
-### 处理流程
-
-```
-process_mails(account_id, folder, mails)
-  │
-  ├─ for each mail in mails:
-  │
-  ├─ 1. 检查邮件是否已存在
-  │  └─ check_mail_exists(account_id, folder, uid)
-  │
-  ├─ 2a. 如果已存在
-  │     └─ update_mail_flags()
-  │        └─ 更新 is_read, is_starred, is_draft
-  │
-  └─ 2b. 如果不存在
-        └─ insert 新邮件
-           ├─ 设置基本信息 (uid, folder, subject, ...)
-           ├─ 设置发件人/收件人
-           ├─ 设置正文 (body_text, body_html)
-           ├─ 设置标志 (is_read, is_starred, ...)
-           └─ 设置时间戳 (sent_at, received_at)
-```
-
-### EmailData → MailData 转换
-
-```rust
-from_imap_email(email_data, folder)
-  → 标准化文件夹名称
-  → 提取发件人名称和邮箱
-  → 序列化收件人列表 (JSON)
-  → 解析 IMAP 标志
-  → 转换时间戳
-```
-
-### 批量处理结果
-
-```rust
-pub struct MailProcessResult {
-    pub success_count: usize,   // 成功处理数
-    pub failed_count: usize,    // 失败数
-    pub skipped_count: usize,   // 跳过数（已存在）
-    pub total_count: usize,     // 总数
-}
-```
-
+### 处理逻辑优化
+1. **批量写入**：对于首次同步的大量 Flags，使用事务批量插入。
+2. **懒加载**：邮件正文 (`body_text`, `body_html`) 严格遵循“用户点击时下载”原则。
+3. **删除处理**：
+   - 物理删除：从本地数据库移除记录。
+   - 逻辑删除：保留记录但标记为 deleted (视客户端 UI 需求而定，通常建议直接移除以保持与服务器一致)。
 ---
-
-## 前后端交互
-
-### 事件系统
-
-```typescript
-// 后端发送事件（使用 Tauri emit）
-app_handle.emit(&format!("sync-progress-{}", account_id), progress)
-
-// 前端监听事件
-listen(`sync-progress-${accountId}`, (event) => {
-    const progress = event.payload
-    // 更新进度条
-})
-```
-
-### SyncProgress 事件
-
-```typescript
-interface SyncProgressEvent {
-  account_id: number
-  stage: 'connecting' | 'syncing_folders' | 'syncing_emails' | 'completed' | 'error'
-  folder?: string           // 当前处理的文件夹
-  current: number           // 当前进度
-  total: number             // 总数
-  message: string           // 状态消息
-}
-```
-
-### 阶段转换
-
-```
-前端 stage 映射:
-  - 'connecting' → stage = 'syncing'
-  - 'syncing_folders' → stage = 'syncing'
-  - 'syncing_emails' → stage = 'syncing'
-  - 'completed' → stage = 'completed'
-  - 'error' → stage = 'error'
-
-状态管理:
-  - syncingAccounts: Set<number>  // 正在同步的账号 ID 集合
-  - syncStatuses: Map<number, SyncStatus>  // 每个账号的同步状态
-```
-
-### 命令接口
-
-| 命令 | 说明 | 返回值 |
-|------|------|--------|
-| `sync_account_with_progress` | 带进度的同步（用户触发） | `()` |
-| `sync_account` | 简化版同步（后台任务） | `usize` (邮件总数) |
-| `trigger_sync` | 触发一次性同步 | `()` |
-| `send_email` | 发送邮件 | `String` (Message-ID) |
-
----
-
-## 调试指南
-
-### 前端调试
-
-1. **查看同步状态**
-   ```javascript
-   // 在浏览器控制台
-   const syncStore = useSyncStore()
-   console.log('同步状态:', syncStore.syncStatuses)
-   console.log('同步中账号:', Array.from(syncStore.syncingAccounts))
-   console.log('同步历史:', syncStore.recentHistory)
-   ```
-
-2. **监听进度事件**
-   ```javascript
-   // 手动监听事件
-   import { listen } from '@tauri-apps/api/event'
-
-   listen('sync-progress-1', (event) => {
-       console.log('进度事件:', event.payload)
-   })
-   ```
-
-3. **触发同步**
-   ```javascript
-   const syncStore = useSyncStore()
-   await syncStore.syncAccount(accountId, accountEmail)
-   ```
-
-### 后端调试
-
-1. **启用详细日志**
-   ```bash
-   # Windows PowerShell
-   $env:RUST_LOG="sync=debug,imap=debug,auth=debug"; npm run tauri dev
-
-   # Linux/macOS
-   RUST_LOG=sync=debug,imap=debug,auth=debug npm run tauri dev
-   ```
-
-2. **关键日志模块**
-   ```
-   [sync::sync_manager]      - 同步流程
-   [sync::change_detector]   - 变更检测
-   [sync::mail_processor]    - 邮件处理
-   [sync::folder_manager]    - 文件夹管理
-   [sync::sync_state]        - 同步状态
-   [auth]                    - 认证管理
-   [imap]                    - IMAP 协议
-   ```
-
-3. **数据库查询**
-   ```sql
-   -- 查看文件夹同步状态
-   SELECT fs.imap_name, fs.uidvalidity, fs.uidnext, fs.highest_modseq, fs.synced_at
-   FROM folder_sync_states fs
-   WHERE fs.account_id = 1;
-
-   -- 查看邮件统计
-   SELECT folder, COUNT(*) as count,
-          SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread,
-          SUM(CASE WHEN is_starred = 1 THEN 1 ELSE 0 END) as starred
-   FROM emails
-   WHERE account_id = 1
-   GROUP BY folder;
-
-   -- 查看最近同步的邮件
-   SELECT uid, subject, sender_email, sent_at, is_read, is_starred
-   FROM emails
-   WHERE account_id = 1
-   ORDER BY updated_at DESC
-   LIMIT 10;
-   ```
-
-### 常见问题排查
-
-| 问题 | 可能原因 | 排查方法 |
+## 常见问题排查
+| 问题 | 可能原因 | 解决方案 |
 |------|----------|----------|
-| 同步无邮件 | 时间窗口过小 | 检查 date_since 设置（默认90天） |
-| 邮件重复 | UID 列表错误 | 检查 check_mail_exists 逻辑 |
-| 标志未更新 | 变更检测失败 | 检查 EmailFlags 解析和对比 |
-| 同步卡住 | IMAP 连接超时 | 检查网络和服务器状态 |
-| 文件夹错误 | Special-Use 推断失败 | 检查 provider.folder_mapping() |
-| 认证失败 | OAuth token 过期 | 检查 AuthManager 的 token 刷新 |
-| 密码未找到 | 密钥链未存储 | 检查 keyring 存储逻辑 |
-
-### 认证流程
-
+| 同步速度慢 | 不支持 CONDSTORE 且邮件极多 | 优化 `Fallback` 策略的本地比对算法，使用 Hash 比对而非逐条查询。 |
+| 邮件“死而复生” | UIDVALIDITY 处理错误 | 检查 SELECT 响应是否正确更新了本地状态。 |
+| 标志不同步 | 163 邮箱未执行 Fallback 流程 | 检查 CAPABILITY 解析是否正确识别为 `Fallback` 模式。 |
+| 新邮件延迟 | 仅依赖 IDLE 而未轮询 | 对于不支持 IDLE 的服务器，确保开启后台定时轮询。 |
 ```
-AuthManager::get_imap_auth(account_id, email, auth_type)
-  │
-  ├─ auth_type = AuthType::Password
-  │  └─ 从 keyring 获取密码
-  │     → ImapAuthInfo::Password { username, password }
-  │
-  └─ auth_type = AuthType::OAuth2
-     └─ 从 OAuth session 获取 access_token
-        → ImapAuthInfo::OAuth { email, xoauth2 }
-
-ImapAuthInfo → ImapAuth 转换:
-  - Password → ImapAuth::Password(password)
-  - OAuth → ImapAuth::OAuth2 { email, access_token }
-```
-
-### IMAP 调试
-
-```bash
-# 手动测试 IMAP 连接
-openssl sconnect -crlf imap.gmail.com:993
-
-# 登录测试
-# . LOGIN user@example.com password
-# . SELECT INBOX
-# . LIST "" *
-# . SEARCH SINCE 20-Dec-2025
-# . FETCH 1 (BODY.PEEK[])
-```
-
----
-
-## 附录：数据结构
-
-### ImapAuthInfo (认证)
-
-> **统一认证枚举** - 由 AuthManager 提供
-
-```rust
-pub enum ImapAuthInfo {
-    /// 密码认证
-    Password {
-        username: String,
-        password: String,
-    },
-    /// OAuth2 认证 (XOAUTH2)
-    OAuth {
-        email: String,
-        xoauth2: String,  // base64 格式的 OAuth2 token
-    },
-}
-```
-
-### SyncProgress (后端)
-
-```rust
-pub struct SyncProgress {
-    pub stage: SyncStage,
-    pub folder: Option<String>,
-    pub current: usize,
-    pub total: usize,
-    pub message: String,
-}
-
-pub enum SyncStage {
-    Connecting,
-    SyncingFolders,
-    SyncingEmails,
-    Completed,
-    Error,
-}
-```
-
-### SyncResult (后端)
-
-```rust
-pub struct SyncResult {
-    pub total_synced: usize,
-    pub folders_synced: usize,
-    pub errors: usize,
-    pub duration_ms: u64,
-}
-```
-
-### DeltaSyncResult (后端)
-
-```rust
-pub struct DeltaSyncResult {
-    pub strategy_used: SyncStrategy,
-    pub new_emails: usize,
-    pub modified_emails: usize,
-    pub deleted_emails: usize,
-    pub flags_changed: usize,
-    pub duration_ms: u64,
-}
-```
-
-### ChangeDetectionResult (后端)
-
-```rust
-pub struct ChangeDetectionResult {
-    pub new_emails: Vec<u32>,
-    pub modified_emails: Vec<u32>,
-    pub deleted_emails: Vec<u32>,
-}
-```
-
-### SyncStateUpdateResult (后端)
-
-> **新增**: 替代旧的 `FolderSyncResult`
->
-> 只返回更新的同步状态数量，不再创建文件夹记录
-
-```rust
-pub struct SyncStateUpdateResult {
-    pub updated: usize,  // 更新的同步状态数量
-}
-```
-
-### SyncStateManager (后端)
-
-```rust
-/// 同步状态管理器
-///
-/// 管理文件夹的同步状态，包括：
-/// - highest_modseq: CONDSTORE 最高修改序列号
-/// - last_sync_uid: 上次同步的最高 UID
-/// - last_sync_at: 上次同步时间
-/// - sync_count: 同步邮件数量
-/// - error_count: 错误计数
-pub struct SyncStateManager {
-    db: Arc<DbConn>,
-}
-
-impl SyncStateManager {
-    /// 创建或更新同步状态
-    pub async fn upsert(
-        &self,
-        account_id: i32,
-        folder: &str,
-        last_sync_uid: Option<i32>,
-        highest_uid: Option<i32>,
-        sync_count: i32,
-        is_first_sync: bool,
-    ) -> Result<sync_state::Model>;
-
-    /// 更新同步完成状态
-    pub async fn update_sync_completed(
-        &self,
-        account_id: i32,
-        folder: &str,
-        sync_count: i32,
-    ) -> Result<()>;
-
-    /// 更新 highest_modseq (CONDSTORE)
-    pub async fn update_highest_modseq(
-        &self,
-        account_id: i32,
-        folder: &str,
-        highest_modseq: i64,
-    ) -> Result<()>;
-
-    /// 记录同步错误
-    pub async fn record_error(
-        &self,
-        account_id: i32,
-        folder: &str,
-        error_message: &str,
-    ) -> Result<()>;
-}
-```
-
-### FolderSyncStateDto (服务层)
-
-```rust
-/// 文件夹同步状态传输对象
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FolderSyncStateDto {
-    pub id: i32,
-    pub account_id: i32,
-    pub imap_name: String,
-    pub uidvalidity: Option<i64>,
-    pub uidnext: Option<i64>,
-    pub highest_modseq: Option<i64>,
-    pub synced_at: Option<i64>,
-}
-```
-
-### StandardFolder 枚举 (服务层)
-
-```rust
-/// 标准文件夹类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StandardFolder {
-    Inbox,   // 收件箱
-    Sent,    // 已发送
-    Drafts,  // 草稿箱
-    Spam,    // 垃圾邮件
-    Trash,   // 已删除
-    Archive, // 归档
-}
-```
-
-> **注意**：星标邮件（Starred）不是单独的文件夹类型，而是通过邮件的 `\Flagged` 标志识别。
-
----
-
-*最后更新: 2026-03-22*
