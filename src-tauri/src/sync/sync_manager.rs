@@ -126,6 +126,9 @@ impl SyncManager {
             .await
             .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
 
+        // 2.1 获取服务商文件夹映射（用于识别文件夹类型）
+        let folder_mapping = provider.folder_mapping();
+
         // 3. 获取 IMAP 配置
         let imap_config = provider.imap_config(&account.email);
 
@@ -153,10 +156,10 @@ impl SyncManager {
 
         tracing::info!("获取到 {} 个文件夹", folder_infos.len());
 
-        // 7. 更新文件夹同步状态（不再同步文件夹，只更新状态）
+        // 7. 更新文件夹同步状态（包含类型识别）
         let sync_state_result = self
             .folder_manager
-            .update_sync_states(account_id, &folder_infos)
+            .update_sync_states_with_types(account_id, &folder_infos, &folder_mapping)
             .await?;
 
         tracing::info!(

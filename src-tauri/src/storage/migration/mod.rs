@@ -100,4 +100,5 @@ pub mod m009_20250321_create_folder_sync_states;
 pub mod m010_20250321_drop_folders_table;
 pub mod m011_20250321_drop_offline_operations;
 pub mod m012_20250322_add_email_flags;
+pub mod m013_20250323_add_folder_type;
 

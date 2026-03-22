@@ -181,11 +181,75 @@ use super::auth::ImapAuth;
 use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
 use crate::providers::generate_xoauth2_string;
 use anyhow::{anyhow, Result};
+use async_imap::Authenticator;
 use chrono::Datelike;
 use futures::TryStreamExt;
 use std::time::Instant;
 use tokio::net::TcpStream;
 use tracing::instrument;
+
+/// XOAUTH2 认证器
+///
+/// 实现 async-imap 的 Authenticator trait，用于 OAuth2 认证
+pub struct XOAuth2Authenticator {
+    /// 用户邮箱
+    email: String,
+    /// OAuth2 访问令牌
+    access_token: String,
+    /// 是否已发送初始响应
+    initial_response_sent: bool,
+}
+
+impl XOAuth2Authenticator {
+    /// 创建新的 XOAUTH2 认证器
+    pub fn new(email: String, access_token: String) -> Self {
+        Self {
+            email,
+            access_token,
+            initial_response_sent: false,
+        }
+    }
+}
+
+impl Authenticator for XOAuth2Authenticator {
+    type Response = String;
+
+    /// 处理服务器挑战
+    ///
+    /// XOAUTH2 认证流程：
+    /// 1. 客户端发送初始响应（base64 编码的 auth 字符串）
+    /// 2. 如果认证成功，服务器返回 OK
+    /// 3. 如果认证失败，服务器发送挑战（包含错误信息），客户端应发送空响应
+    fn process(&mut self, challenge: &[u8]) -> Self::Response {
+        // 如果这是初始请求（challenge 为空），发送认证字符串
+        if challenge.is_empty() && !self.initial_response_sent {
+            self.initial_response_sent = true;
+
+            // 构造 XOAUTH2 字符串
+            // 格式: base64("user=" + email + "\x01auth=Bearer " + token + "\x01\x01")
+            let auth_string = format!(
+                "user={}\x01auth=Bearer {}\x01\x01",
+                self.email, self.access_token
+            );
+
+            tracing::debug!("XOAUTH2: 发送初始认证响应");
+
+            // Base64 编码
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(&auth_string)
+        } else {
+            // 服务器发送了挑战（通常是认证失败的错误信息）
+            // 根据规范，我们应该发送空响应来终止认证
+            tracing::warn!(
+                "XOAUTH2: 收到服务器挑战: {:?}",
+                String::from_utf8_lossy(challenge)
+            );
+
+            // 发送空响应以终止认证流程
+            String::new()
+        }
+    }
+}
 
 /// 异步 IMAP 客户端会话
 pub struct AsyncImapClient {
@@ -323,7 +387,7 @@ impl AsyncImapClient {
         // 对于Microsoft Exchange/Outlook，更好的方法是使用SASL IR (SASL Initial Response)
         // 但async-imap可能不支持
 
-        tracing::warn!("OAuth2 IMAP认证需要特殊处理，当前实现可能需要改进");
+        // tracing::warn!("OAuth2 IMAP认证需要特殊处理，当前实现可能需要改进");
 
         // 临时解决方案：尝试使用一个占位实现
         // 在实际应用中，你需要：
@@ -331,17 +395,22 @@ impl AsyncImapClient {
         // 2. 或手动实现SASL认证流程
         // 3. 或使用其他支持OAuth2的IMAP库
 
-        // 这里我们返回一个错误，指示需要实现OAuth2认证
-        Err(anyhow!(
-            "OAuth2 IMAP认证需要进一步实现。请考虑：\n\
-            1. 升级async-imap到支持SASL的版本\n\
-            2. 手动实现IMAP AUTHENTICATE命令\n\
-            3. 使用支持OAuth2的其他IMAP库"
-        ))
+        // 使用 async-imap 的 authenticate 方法
+        // XOAUTH2 认证器实现
+        let authenticator = XOAuth2Authenticator::new(_email.to_string(), xoauth2_str.to_string());
 
-        // 如果async-imap支持authenticate方法，正确的实现应该是：
-        // client.authenticate("XOAUTH2", xoauth2_str).await
-        //     .map_err(|(e, _)| anyhow!("IMAP OAuth2登录失败: {}", e))
+        tracing::info!("使用 XOAUTH2 进行 IMAP 认证: {}", _email);
+
+        match _client.authenticate("XOAUTH2", authenticator).await {
+            Ok(session) => {
+                tracing::info!("IMAP OAuth2 认证成功");
+                Ok(session)
+            }
+            Err((e, _)) => {
+                tracing::error!("IMAP OAuth2 认证失败: {}", e);
+                Err(anyhow!("IMAP OAuth2 认证失败: {}", e))
+            }
+        }
     }
 
     /// 异步列出服务器上的所有文件夹及其属性（RFC 6154）
