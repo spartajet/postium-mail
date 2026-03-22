@@ -27,17 +27,15 @@ pub mod imap_flags {
 }
 
 /// 邮件标志状态
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EmailFlags {
-    pub seen: bool,       // \Seen
-    pub flagged: bool,    // \Flagged
-    pub answered: bool,   // \Answered
-    pub draft: bool,      // \Draft
-    pub deleted: bool,    // \Deleted
-    pub recent: bool,     // \Recent (只读)
+    pub seen: bool,     // \Seen
+    pub flagged: bool,  // \Flagged
+    pub answered: bool, // \Answered
+    pub draft: bool,    // \Draft
+    pub deleted: bool,  // \Deleted
+    pub recent: bool,   // \Recent (只读)
 }
-
 
 impl EmailFlags {
     /// 从 IMAP flag 字符串列表解析
@@ -89,10 +87,10 @@ impl EmailFlags {
         Self {
             seen: email.is_read,
             flagged: email.is_starred,
-            answered: false, // 数据库中没有此字段
+            answered: email.is_answered,
             draft: email.is_draft,
-            deleted: false,  // 数据库中没有此字段
-            recent: false,   // \Recent 是只读的
+            deleted: email.is_deleted,
+            recent: false, // \Recent 是只读的
         }
     }
 
@@ -103,7 +101,7 @@ impl EmailFlags {
             && self.answered == other.answered
             && self.draft == other.draft
             && self.deleted == other.deleted
-            // recent 不参与比较（只读标志）
+        // recent 不参与比较（只读标志）
     }
 }
 
@@ -312,13 +310,12 @@ impl ChangeDetector {
         server_uids_with_flags: &[(u32, Vec<String>)],
     ) -> Result<Vec<u32>> {
         // 1. 提取 UID 列表
-        let uids: Vec<u32> = server_uids_with_flags
-            .iter()
-            .map(|(uid, _)| *uid)
-            .collect();
+        let uids: Vec<u32> = server_uids_with_flags.iter().map(|(uid, _)| *uid).collect();
 
         // 2. 批量获取本地标志
-        let local_flags_map = self.get_local_flags_batch(account_id, folder, &uids).await?;
+        let local_flags_map = self
+            .get_local_flags_batch(account_id, folder, &uids)
+            .await?;
 
         // 3. 对比每个邮件的标志
         let mut changed_uids = Vec::new();
@@ -341,11 +338,7 @@ impl ChangeDetector {
                 }
             } else {
                 // 本地没有此邮件，可能已删除或未同步
-                tracing::warn!(
-                    "本地未找到邮件: uid={}, folder={}",
-                    uid,
-                    folder
-                );
+                tracing::warn!("本地未找到邮件: uid={}, folder={}", uid, folder);
             }
         }
 
@@ -395,7 +388,7 @@ impl ChangeDetector {
     /// 从数据库查询指定文件夹的所有邮件 UID
     async fn get_local_uids(&self, account_id: i32, folder: &str) -> Result<Vec<u32>> {
         use crate::storage::models::email;
-        use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         // 查询数据库：SELECT uid FROM emails WHERE account_id = ? AND folder = ?
         let emails = email::Entity::find()
@@ -430,7 +423,7 @@ impl ChangeDetector {
         uid: u32,
     ) -> Result<Option<EmailFlags>> {
         use crate::storage::models::email;
-        use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         // 查询数据库
         let emails = email::Entity::find()
@@ -457,7 +450,7 @@ impl ChangeDetector {
         uids: &[u32],
     ) -> Result<HashMap<u32, EmailFlags>> {
         use crate::storage::models::email;
-        use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
         // 查询数据库
         let uid_i32: Vec<i32> = uids.iter().map(|&uid| uid as i32).collect();

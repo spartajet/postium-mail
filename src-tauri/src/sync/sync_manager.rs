@@ -321,13 +321,43 @@ impl SyncManager {
             folder
         );
 
-        // 1. 获取并更新文件夹 IMAP 元数据（uidvalidity, uidnext, highest_modseq）
+        // 1. 获取文件夹 IMAP 元数据（uidvalidity, uidnext, highest_modseq）
         let metadata = imap_client.fetch_folder_metadata(folder).await.map_err(|e| {
             tracing::warn!("获取文件夹元数据失败: {}, 跳过元数据更新", e);
             // 元数据获取失败不应阻断同步流程
             crate::error::MailError::Internal(format!("获取文件夹元数据失败: {}", e))
         });
 
+        // 2. 检测 UIDVALIDITY 变化
+        let mut needs_full_resync = false;
+        if let Ok(ref meta) = &metadata {
+            let uidvalidity_changed = self.folder_manager
+                .check_uidvalidity_changed(account_id, folder, meta.uidvalidity)
+                .await
+                .unwrap_or(false);
+
+            if uidvalidity_changed {
+                tracing::warn!(
+                    "检测到 UIDVALIDITY 变化: folder={}, server_uidvalidity={}",
+                    folder,
+                    meta.uidvalidity
+                );
+
+                // 重置本地同步状态
+                self.folder_manager
+                    .reset_sync_state(account_id, folder)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("重置同步状态失败: {}", e);
+                        e
+                    })?;
+
+                needs_full_resync = true;
+                tracing::info!("已重置文件夹同步状态，将进行完整同步: folder={}", folder);
+            }
+        }
+
+        // 3. 更新文件夹元数据
         if let Ok(meta) = metadata {
             self.folder_manager
                 .update_folder_metadata(

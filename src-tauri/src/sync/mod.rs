@@ -191,7 +191,7 @@
 //! - 网络不稳定时会自动重试
 //! - 某些操作（如删除）不可逆，请谨慎处理
 
-mod change_detector;
+pub mod change_detector;
 mod delta_sync;
 mod folder_manager;
 mod mail_processor;

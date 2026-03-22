@@ -388,6 +388,8 @@ impl MailProcessor {
                 is_read: Set(mail_data.flags.seen),
                 is_starred: Set(mail_data.flags.flagged),
                 is_draft: Set(mail_data.flags.draft),
+                is_answered: Set(mail_data.flags.answered),
+                is_deleted: Set(mail_data.flags.deleted),
                 sent_at: Set(mail_data.sent_at),
                 received_at: Set(mail_data.received_at),
                 ..Default::default()
@@ -445,6 +447,8 @@ impl MailProcessor {
             mail_active.is_read = Set(mail_data.flags.seen);
             mail_active.is_starred = Set(mail_data.flags.flagged);
             mail_active.is_draft = Set(mail_data.flags.draft);
+            mail_active.is_answered = Set(mail_data.flags.answered);
+            mail_active.is_deleted = Set(mail_data.flags.deleted);
             mail_active.updated_at = Set(chrono::Utc::now().timestamp());
 
             mail_active
@@ -453,12 +457,14 @@ impl MailProcessor {
                 .map_err(|e| MailError::Internal(format!("更新邮件标志失败: {}", e)))?;
 
             tracing::debug!(
-                "更新邮件标志: account_id={}, folder={}, uid={}, seen={}, starred={}",
+                "更新邮件标志: account_id={}, folder={}, uid={}, seen={}, starred={}, answered={}, deleted={}",
                 account_id,
                 folder,
                 mail_data.uid,
                 mail_data.flags.seen,
-                mail_data.flags.flagged
+                mail_data.flags.flagged,
+                mail_data.flags.answered,
+                mail_data.flags.deleted
             );
         }
 
