@@ -87,6 +87,7 @@ mod tests {
             synced_at: Some(1234567890),
             created_at: Some(1234567890),
             updated_at: Some(1234567890),
+            folder_type: Some("".to_string()),
         };
 
         let dto = FolderSyncStateDto::from(model);
@@ -97,7 +98,13 @@ mod tests {
     #[test]
     fn test_standard_folder() {
         assert_eq!(StandardFolder::Inbox.as_str(), "inbox");
-        assert_eq!(StandardFolder::from_folder_name("inbox"), StandardFolder::Inbox);
-        assert_eq!(StandardFolder::from_folder_name("custom"), StandardFolder::Custom("custom".to_string()));
+        assert_eq!(
+            StandardFolder::from_folder_name("inbox"),
+            StandardFolder::Inbox
+        );
+        assert_eq!(
+            StandardFolder::from_folder_name("custom"),
+            StandardFolder::Custom("custom".to_string())
+        );
     }
 }
