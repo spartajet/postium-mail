@@ -4,6 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
+use crate::providers::StandardFolder;
 use crate::storage::models::folder_sync_state;
 use sea_orm::{ActiveModelTrait, ActiveValue, DbConn, EntityTrait, Set, ColumnTrait, QueryFilter};
 use std::sync::Arc;
@@ -102,6 +103,109 @@ impl FolderManager {
 
         tracing::info!(
             "文件夹同步状态更新完成: account_id={}, updated={}",
+            account_id,
+            updated_count
+        );
+
+        Ok(SyncStateUpdateResult {
+            updated: updated_count,
+        })
+    }
+
+    /// 更新文件夹同步状态（包含类型识别）
+    ///
+    /// 与 `update_sync_states` 类似，但额外根据服务商的文件夹映射识别每个文件夹的标准类型，
+    /// 并将 `folder_type` 存储到数据库。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder_infos` - 从 IMAP 服务器获取的文件夹信息列表
+    /// * `folder_mapping` - 服务商特定的文件夹名称映射
+    ///
+    /// # 返回
+    ///
+    /// 返回更新结果
+    pub async fn update_sync_states_with_types(
+        &self,
+        account_id: i32,
+        folder_infos: &[ImapFolderInfo],
+        folder_mapping: &StandardFolder,
+    ) -> Result<SyncStateUpdateResult> {
+        tracing::info!(
+            "开始更新文件夹同步状态（含类型识别）: account_id={}, count={}",
+            account_id,
+            folder_infos.len()
+        );
+
+        let mut updated_count = 0;
+
+        for info in folder_infos {
+            // 识别文件夹类型
+            let folder_type = folder_mapping.find_standard_type(&info.name);
+            tracing::debug!(
+                "识别文件夹类型: imap_name={}, folder_type={}",
+                info.name,
+                folder_type
+            );
+
+            // 使用 upsert（插入或更新）
+            let existing_state = folder_sync_state::Entity::find()
+                .filter(folder_sync_state::Column::AccountId.eq(account_id))
+                .filter(folder_sync_state::Column::ImapName.eq(&info.name))
+                .one(self.db.as_ref())
+                .await?;
+
+            let now = chrono::Utc::now().timestamp();
+
+            if let Some(existing) = existing_state {
+                // 更新现有记录
+                let mut active: folder_sync_state::ActiveModel = existing.into();
+                active.folder_type = Set(Some(folder_type.to_string()));
+                active.synced_at = Set(Some(now));
+                active.updated_at = Set(Some(now));
+
+                active.update(self.db.as_ref()).await
+                    .map_err(|e| MailError::Internal(format!("更新文件夹同步状态失败: {}", e)))?;
+
+                tracing::debug!(
+                    "更新文件夹同步状态: account_id={}, imap_name={}, folder_type={}",
+                    account_id,
+                    info.name,
+                    folder_type
+                );
+
+                updated_count += 1;
+            } else {
+                // 创建新记录
+                let active = folder_sync_state::ActiveModel {
+                    id: ActiveValue::NotSet,
+                    account_id: Set(account_id),
+                    imap_name: Set(info.name.clone()),
+                    folder_type: Set(Some(folder_type.to_string())),
+                    uidvalidity: Set(None),
+                    uidnext: Set(None),
+                    highest_modseq: Set(None),
+                    synced_at: Set(Some(now)),
+                    ..Default::default()
+                };
+
+                active.insert(self.db.as_ref()).await
+                    .map_err(|e| MailError::Internal(format!("创建文件夹同步状态失败: {}", e)))?;
+
+                tracing::debug!(
+                    "创建文件夹同步状态: account_id={}, imap_name={}, folder_type={}",
+                    account_id,
+                    info.name,
+                    folder_type
+                );
+
+                updated_count += 1;
+            }
+        }
+
+        tracing::info!(
+            "文件夹同步状态更新完成（含类型识别）: account_id={}, updated={}",
             account_id,
             updated_count
         );
@@ -212,6 +316,30 @@ impl FolderManager {
             .await?;
 
         Ok(states)
+    }
+
+    /// 获取指定类型的文件夹列表
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder_type` - 文件夹类型（inbox, sent, drafts, spam, trash, archive, other）
+    ///
+    /// # 返回
+    ///
+    /// 返回匹配类型的文件夹 IMAP 名称列表
+    pub async fn get_folders_by_type(
+        &self,
+        account_id: i32,
+        folder_type: &str,
+    ) -> Result<Vec<String>> {
+        let states = folder_sync_state::Entity::find()
+            .filter(folder_sync_state::Column::AccountId.eq(account_id))
+            .filter(folder_sync_state::Column::FolderType.eq(folder_type))
+            .all(self.db.as_ref())
+            .await?;
+
+        Ok(states.into_iter().map(|s| s.imap_name).collect())
     }
 
     /// 检测 UIDVALIDITY 变化

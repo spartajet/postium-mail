@@ -9,6 +9,8 @@ pub struct Model {
     pub id: i32,
     pub account_id: i32,
     pub imap_name: String,
+    /// 文件夹标准类型: inbox, sent, drafts, spam, trash, archive, other
+    pub folder_type: Option<String>,
     pub uidvalidity: Option<i64>,
     pub uidnext: Option<i64>,
     pub highest_modseq: Option<i64>,

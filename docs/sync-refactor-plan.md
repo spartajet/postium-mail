@@ -14,12 +14,14 @@
 
 ### 已完成 ✅
 
-| Phase | 描述 | 綆认 |
+| Phase | 描述 | 确认 |
 |-------|------|------|
-| Phase 1 | Email 模型扩展 | ✅ 添加 `is_answered`/`is_deleted` 字段，| Phase 2 | 能力探测集成 | ✅ 已集成到 `sync_manager.rs` |
+| Phase 1 | Email 模型扩展 | ✅ 添加 `is_answered`/`is_deleted` 字段 |
+| Phase 2 | 能力探测集成 | ✅ 已集成到 `sync_manager.rs` |
 | Phase 3 | UIDVALIDITY 处理 | ✅ 添加检测和重置方法 |
 | Phase 4 | Flags 批量更新方法 | ✅ 实现 `batch_update_flags()` |
 | Phase 5 | change_detector 适配 | ✅ 更新 `from_email_model()` |
+| Phase 6 | 文件夹类型识别 | ✅ 添加 `folder_type` 字段和映射集成 |
 
 ### 待实现 ❌
 
@@ -124,9 +126,11 @@ if uidvalidity_changed {
 | `src-tauri/src/storage/migration/m012_20250322_add_email_flags.rs` | 新增迁移 | ✅ 完成 |
 | `src-tauri/src/sync/change_detector.rs` | 适配 flags 字段 | ✅ 完成 |
 | `src-tauri/src/sync/mail_processor.rs` | 设置新字段 | ✅ 完成 |
-| `src-tauri/src/sync/sync_manager.rs` | 集成能力探测、UIDVALIDITY | ✅ 完成 |
-| `src-tauri/src/sync/folder_manager.rs` | UIDVALIDITY 检测/重置 | ✅ 完成 |
+| `src-tauri/src/sync/sync_manager.rs` | 集成能力探测、UIDVALIDITY、folder_mapping | ✅ 完成 |
+| `src-tauri/src/sync/folder_manager.rs` | UIDVALIDITY 检测/重置、folder_type | ✅ 完成 |
 | `src-tauri/src/storage/service/email.rs` | batch_update_flags | ✅ 完成 |
+| `src-tauri/src/storage/models/folder_sync_state.rs` | 添加 folder_type 字段 | ✅ 完成 |
+| `src-tauri/src/storage/migration/m013_20250323_add_folder_type.rs` | 新增迁移 | ✅ 完成 |
 
 ---
 
@@ -170,6 +174,13 @@ cargo test --package postium-mail --lib sync::
 ---
 
 ## 完成记录
+
+- **2025-03-23**: Phase 6 完成（文件夹类型识别）
+  - 添加 `folder_type` 字段到 `folder_sync_state.rs` 模型
+  - 创建数据库迁移 m013_20250323_add_folder_type
+  - 在 `folder_manager.rs` 添加 `update_sync_states_with_types()` 和 `get_folders_by_type()` 方法
+  - 在 `sync_manager.rs` 集成 `provider.folder_mapping()` 获取文件夹映射
+  - 同步时自动识别文件夹类型（inbox/sent/drafts/spam/trash/archive/other）
 
 - **2025-03-22**: Phase 1-3, 5 完成
   - 添加 `is_answered` 和 `is_deleted` 字段到 Email 模型
