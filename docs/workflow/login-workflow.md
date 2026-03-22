@@ -9,10 +9,11 @@
 1. [概述](#概述)
 2. [密码认证流程](#密码认证流程)
 3. [OAuth 认证流程](#oauth-认证流程)
-4. [后端组件详解](#后端组件详解)
-5. [前端组件详解](#前端组件详解)
-6. [同步流程](#同步流程)
-7. [调试指南](#调试指南)
+4. [OAuth Token 刷新机制](#oauth-token-刷新机制)
+5. [后端组件详解](#后端组件详解)
+6. [前端组件详解](#前端组件详解)
+7. [同步流程](#同步流程)
+8. [调试指南](#调试指南)
 
 ---
 
@@ -469,6 +470,308 @@ command/auth.rs::refresh_oauth_token()
       ]
   → 更新存储的 token
 ```
+
+---
+
+## OAuth Token 刷新机制
+
+### 概述
+
+OAuth Token 刷新由 **TokenManager** 和 **AuthManager** 协同完成：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Token 刷新架构                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────────────┐      ┌─────────────────┐                 │
+│   │   AuthManager   │─────▶│   TokenManager  │                 │
+│   │  (刷新执行者)    │      │  (状态管理器)    │                 │
+│   └────────┬────────┘      └────────┬────────┘                 │
+│            │                        │                           │
+│            │ 刷新 token             │ 读取/缓存 token           │
+│            ▼                        ▼                           │
+│   ┌─────────────────┐      ┌─────────────────┐                 │
+│   │  OAuthHandler   │      │    Keyring      │                 │
+│   │ (OAuth API 调用) │      │  (安全存储)      │                 │
+│   └─────────────────┘      └─────────────────┘                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### TokenManager (Token 状态管理器)
+
+位置: `src-tauri/src/auth/token_manager.rs`
+
+```rust
+pub struct TokenManager {
+    keyring: Keyring,                           // 安全存储
+    token_metadata: HashMap<i32, TokenMetadata>, // 内存元数据缓存
+    access_token_cache: HashMap<i32, CachedToken>, // access_token 缓存
+}
+
+/// Token 元数据（内存缓存）
+pub struct TokenMetadata {
+    account_id: i32,
+    provider: String,
+    expires_at: i64,        // 过期时间戳
+    refresh_count: i32,     // 刷新次数
+}
+
+/// 缓存的 access_token
+pub struct CachedToken {
+    token: String,
+    cached_at: i64,         // 缓存时间
+}
+```
+
+**关键常量:**
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `DEFAULT_EXPIRY_THRESHOLD` | 300s | 提前 5 分钟判定即将过期 |
+| `ACCESS_TOKEN_CACHE_TTL` | 300s | access_token 缓存有效期 5 分钟 |
+
+**关键方法:**
+
+| 方法 | 说明 |
+|------|------|
+| `store_token(account_id, token_response)` | 存储 OAuth tokens 到 Keyring |
+| `get_refresh_token(account_id)` | 获取 refresh_token |
+| `get_access_token(account_id, refresh_fn)` | 获取 access_token（带自动刷新） |
+| `is_token_expiring_soon(account_id)` | 检查 token 是否即将过期 |
+| `get_expiring_accounts(within_seconds)` | 获取即将过期的账号列表 |
+
+### AuthManager (刷新执行器)
+
+位置: `src-tauri/src/auth/auth_manager.rs`
+
+```rust
+impl AuthManager {
+    /// 刷新单个账号的 token
+    pub async fn refresh_token(&self, account_id: i32, email: &str) -> Result<()>
+
+    /// 批量刷新即将过期的 tokens
+    pub async fn refresh_expiring_tokens(
+        &self,
+        accounts: Vec<(i32, String)>
+    ) -> Result<Vec<i32>>
+
+    /// 获取 IMAP 认证信息（按需刷新）
+    pub async fn get_imap_auth(
+        &self,
+        account_id: i32,
+        email: &str,
+        auth_type: &AuthType
+    ) -> Result<ImapAuthInfo>
+}
+```
+
+### 按需刷新流程
+
+当 IMAP/SMTP 连接需要认证时，触发按需刷新：
+
+```
+SyncManager.sync_account(account_id)
+   │
+   ├─ auth_manager.get_imap_auth(account_id, email, auth_type)
+   │     │
+   │     ├─ if OAuth 账号:
+   │     │     │
+   │     │     ├─ token_manager.get_access_token(account_id, refresh_fn)
+   │     │     │     │
+   │     │     │     ├─ 检查 access_token_cache
+   │     │     │     │     └─ 如果缓存有效 (< 5分钟): 直接返回
+   │     │     │     │
+   │     │     │     ├─ 检查 token_metadata
+   │     │     │     │     └─ 如果即将过期 (< 5分钟): 调用 refresh_fn
+   │     │     │     │
+   │     │     │     ├─ 从 Keyring 读取 refresh_token
+   │     │     │     │
+   │     │     │     ├─ oauth_handler.refresh_access_token(provider, refresh_token)
+   │     │     │     │     └─ POST 到 token endpoint
+   │     │     │     │
+   │     │     │     ├─ 更新 Keyring 存储
+   │     │     │     ├─ 更新 token_metadata
+   │     │     │     ├─ 缓存 access_token (5分钟)
+   │     │     │     └─ 返回 access_token
+   │     │     │
+   │     │     └─ 返回 ImapAuthInfo::OAuth { access_token }
+   │     │
+   │     └─ if 密码账号:
+   │           └─ 从 Keyring 读取密码
+   │           └─ 返回 ImapAuthInfo::Password { password }
+   │
+   └─ 使用 ImapAuthInfo 连接 IMAP 服务器
+```
+
+### access_token 缓存机制
+
+为减少不必要的刷新请求，TokenManager 实现了 access_token 缓存：
+
+```rust
+/// access_token 缓存配置
+const ACCESS_TOKEN_CACHE_TTL: i64 = 300; // 5 分钟
+
+impl TokenManager {
+    pub async fn get_access_token<F, Fut>(
+        &self,
+        account_id: i32,
+        refresh_fn: F,
+    ) -> Result<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<TokenResponse>>,
+    {
+        // 1. 检查缓存
+        if let Some(cached) = self.access_token_cache.get(&account_id) {
+            let now = Utc::now().timestamp();
+            if now - cached.cached_at < ACCESS_TOKEN_CACHE_TTL {
+                return Ok(cached.token.clone());
+            }
+        }
+
+        // 2. 缓存失效，执行刷新
+        let token_response = refresh_fn().await?;
+
+        // 3. 更新缓存
+        self.access_token_cache.insert(account_id, CachedToken {
+            token: token_response.access_token.clone(),
+            cached_at: Utc::now().timestamp(),
+        });
+
+        Ok(token_response.access_token)
+    }
+}
+```
+
+**缓存效果:**
+- 短时间内多次连接 IMAP（如同步多个文件夹）只触发一次刷新
+- 减少 OAuth provider 的 API 调用
+- 降低因频繁刷新导致的限流风险
+
+### 批量刷新机制
+
+对于后台定时任务或应用启动时，可批量刷新多个账号：
+
+```rust
+impl AuthManager {
+    /// 批量刷新即将过期的 tokens
+    pub async fn refresh_expiring_tokens(
+        &self,
+        accounts: Vec<(i32, String)>,  // (account_id, email)
+    ) -> Result<Vec<i32>>              // 返回成功刷新的账号 ID
+    {
+        let mut refreshed = Vec::new();
+
+        for (account_id, email) in accounts {
+            // 检查是否即将过期
+            if self.token_manager.is_token_expiring_soon(account_id).await? {
+                match self.refresh_token(account_id, &email).await {
+                    Ok(()) => {
+                        refreshed.push(account_id);
+                        tracing::info!("Token 刷新成功: account_id={}", account_id);
+                    }
+                    Err(e) => {
+                        tracing::error!("Token 刷新失败: account_id={}, error={}", account_id, e);
+                    }
+                }
+            }
+        }
+
+        Ok(refreshed)
+    }
+}
+```
+
+**使用场景:**
+
+```rust
+// 应用启动时预刷新
+async fn on_app_ready(auth_manager: Arc<AuthManager>, account_repo: Arc<AccountRepository>) {
+    let accounts = account_repo.get_all_oauth_accounts().await?;
+    let refreshed = auth_manager.refresh_expiring_tokens(accounts).await?;
+    tracing::info!("启动时预刷新了 {} 个账号的 token", refreshed.len());
+}
+
+// 后台定时刷新（每 4 小时）
+async fn start_background_refresh(auth_manager: Arc<AuthManager>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(4 * 60 * 60));
+
+    loop {
+        interval.tick().await;
+        // 获取即将过期（未来 1 小时内）的账号
+        let expiring = auth_manager.token_manager
+            .get_expiring_accounts(3600).await?;
+
+        if !expiring.is_empty() {
+            auth_manager.refresh_expiring_tokens(expiring).await?;
+        }
+    }
+}
+```
+
+### Token 过期检测
+
+```rust
+impl TokenManager {
+    /// 检查 token 是否即将过期
+    pub async fn is_token_expiring_soon(&self, account_id: i32) -> Result<bool> {
+        let metadata = self.token_metadata.get(&account_id)
+            .ok_or_else(|| MailError::NotFound("Token 元数据不存在".into()))?;
+
+        let now = Utc::now().timestamp();
+        let threshold = DEFAULT_EXPIRY_THRESHOLD; // 5 分钟
+
+        Ok(metadata.expires_at - now < threshold)
+    }
+
+    /// 获取指定时间内即将过期的账号
+    pub async fn get_expiring_accounts(&self, within_seconds: i64) -> Result<Vec<(i32, String)>> {
+        let now = Utc::now().timestamp();
+        let mut expiring = Vec::new();
+
+        for (account_id, metadata) in &self.token_metadata {
+            if metadata.expires_at - now < within_seconds {
+                expiring.push((*account_id, metadata.provider.clone()));
+            }
+        }
+
+        Ok(expiring)
+    }
+}
+```
+
+### 刷新失败处理
+
+当 token 刷新失败时，系统会：
+
+1. **记录错误日志** - 便于排查问题
+2. **标记账号状态** - 提示用户重新授权
+3. **前端通知** - 显示 token 过期提醒
+
+```rust
+// 前端监听 token 过期事件
+listen('oauth-token-expired', (event) => {
+    const { account_id, email } = event.payload
+    // 显示重新授权提示
+    showReauthDialog(account_id, email)
+})
+```
+
+### 总结
+
+| 组件 | 职责 |
+|------|------|
+| **TokenManager** | Token 存储、内存缓存、过期检测、access_token 缓存 |
+| **AuthManager** | 执行刷新、批量刷新协调、获取认证信息 |
+| **OAuthHandler** | OAuth API 调用、token 交换 |
+| **Keyring** | 安全存储 refresh_token |
+
+**刷新策略:**
+- **按需刷新**: 连接时检查并刷新（通过 `get_imap_auth()`）
+- **预刷新**: 启动时/定时批量刷新即将过期的 token
+- **缓存优化**: access_token 缓存 5 分钟，减少重复刷新
 
 ---
 
@@ -970,6 +1273,10 @@ CREATE INDEX idx_folder_sync_states_synced_at ON folder_sync_states(synced_at);
 各服务商通过 `MailProvider::folder_mapping()` 方法声明其标准文件夹：
 
 ```rust
+/// 标准文件夹映射
+///
+/// 注意：starred（星标邮件）字段已移除，
+/// 星标邮件应通过邮件的 \Flagged 标志识别
 pub struct StandardFolder {
     pub inbox: Vec<String>,      // 收件箱 IMAP 名称列表
     pub sent: Vec<String>,       // 已发送 IMAP 名称列表
@@ -977,14 +1284,13 @@ pub struct StandardFolder {
     pub spam: Vec<String>,       // 垃圾邮件 IMAP 名称列表
     pub trash: Vec<String>,      // 已删除 IMAP 名称列表
     pub archive: Vec<String>,    // 归档 IMAP 名称列表
-    pub starred: Vec<String>,    // 星标邮件 IMAP 名称列表
 }
 ```
 
 **示例服务商映射**：
 - **Gmail**: `archive` → `["[Gmail]/All Mail"]`
 - **Outlook**: `inbox` → `["收件箱", "INBOX"]`
-- **163/QQ**: `sent` → `["已发送", "Sent"]`
+- **163/QQ**: `sent` → `["已发送邮件", "Sent"]`
 
 ---
 
@@ -1035,4 +1341,4 @@ const account = await OAuthHelper.startLogin(provider)
 ---
 
 *最后更新: 2026-03-22*
-*更新内容: OAuth 架构重构（HTTP localhost 回调）*
+*更新内容: OAuth 架构重构（HTTP localhost 回调）、Token 刷新机制文档*
