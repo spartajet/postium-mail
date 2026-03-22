@@ -42,20 +42,6 @@
         "ssl": true
       }
     },
-    "outlook": {
-      "email": "guoxiaozhong1990@outlook.com",
-      "password": "htodkopamokatgzv",
-      "imap": {
-        "host": "outlook.office365.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp-mail.outlook.com",
-        "port": 587,
-        "ssl": true
-      }
-    },
     "yahoo": {
       "email": "your_email@yahoo.com",
       "password": "your_yahoo_app_password",
