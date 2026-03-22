@@ -22,6 +22,12 @@
 //! | is_read | bool | 是否已读 | false |
 //! | is_starred | bool | 是否星标 | false |
 //! | is_draft | bool | 是否草稿 | false |
+//! | is_answered | bool | 是否已回复 | false |
+//! | is_deleted | bool | 是否已删除 | false |
+//! | is_answered | bool | 是否已回复 | false |
+//! | is_deleted | bool | 是否已删除 | false |
+//! | is_answered | bool | 是否已回复 | false |
+//! | is_deleted | bool | 是否已删除 | false |
 //! | sent_at | i64 | 发送时间 | - |
 //! | received_at | i64 | 接收时间 | - |
 //!
@@ -77,14 +83,21 @@ pub struct Model {
     pub subject: Option<String>,
     pub sender_name: Option<String>,
     pub sender_email: String,
-    pub recipient_emails: String,            // JSON 数组
-    pub cc_emails: Option<String>,           // JSON 数组
-    pub bcc_emails: Option<String>,          // JSON 数组
+    pub recipient_emails: String,   // JSON 数组
+    pub cc_emails: Option<String>,  // JSON 数组
+    pub bcc_emails: Option<String>, // JSON 数组
     pub body_text: Option<String>,
     pub body_html: Option<String>,
+    /// 是否已读 （对应 IMAP \Seen 标志）
     pub is_read: bool,
+    /// 是否已收藏（对应 IMAP \Flagged 标志）
     pub is_starred: bool,
+    /// 是否为草稿（对应 IMAP \Draft 标志）
     pub is_draft: bool,
+    /// 是否已回复（对应 IMAP \Answered 标志）
+    pub is_answered: bool,
+    /// 是否已删除（对应 IMAP \Deleted 标志）
+    pub is_deleted: bool,
     pub sent_at: i64,
     pub received_at: i64,
     pub created_at: i64,
@@ -123,6 +136,8 @@ impl ActiveModelBehavior for ActiveModel {
             is_read: ActiveValue::Set(false),
             is_starred: ActiveValue::Set(false),
             is_draft: ActiveValue::Set(false),
+            is_answered: ActiveValue::Set(false),
+            is_deleted: ActiveValue::Set(false),
             ..ActiveModelTrait::default()
         }
     }

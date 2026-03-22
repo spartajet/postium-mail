@@ -213,6 +213,80 @@ impl FolderManager {
 
         Ok(states)
     }
+
+    /// 检测 UIDVALIDITY 变化
+    ///
+    /// 当服务器的 UIDVALIDITY 与本地存储的不同时，表示邮箱已被重置，
+    /// 需要清除本地邮件并重新进行完整同步。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `imap_name` - IMAP 文件夹名称
+    /// * `server_uidvalidity` - 服务器返回的 UIDVALIDITY
+    ///
+    /// # 返回
+    ///
+    /// 返回 `true` 表示需要重置，`false` 表示 UIDVALIDITY 未变化
+    pub async fn check_uidvalidity_changed(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        server_uidvalidity: u64,
+    ) -> Result<bool> {
+        if let Some(local_state) = self.get_sync_state(account_id, imap_name).await? {
+            if let Some(local_uidvalidity) = local_state.uidvalidity {
+                let local_uidvalidity = local_uidvalidity as u64;
+                if local_uidvalidity != server_uidvalidity {
+                    tracing::warn!(
+                        "UIDVALIDITY 变化: account_id={}, folder={}, local={}, server={}",
+                        account_id,
+                        imap_name,
+                        local_uidvalidity,
+                        server_uidvalidity
+                    );
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// 重置文件夹同步状态
+    ///
+    /// 当 UIDVALIDITY 变化时调用，清除本地同步状态以便进行完整同步。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `imap_name` - IMAP 文件夹名称
+    pub async fn reset_sync_state(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+    ) -> Result<()> {
+        tracing::info!(
+            "重置文件夹同步状态: account_id={}, folder={}",
+            account_id,
+            imap_name
+        );
+
+        if let Some(existing) = self.get_sync_state(account_id, imap_name).await? {
+            let mut active: folder_sync_state::ActiveModel = existing.into();
+            // 重置同步状态
+            active.uidvalidity = Set(None);
+            active.uidnext = Set(None);
+            active.highest_modseq = Set(None);
+            active.synced_at = Set(None);
+            active.updated_at = Set(Some(chrono::Utc::now().timestamp()));
+
+            active.update(self.db.as_ref()).await
+                .map_err(|e| MailError::Internal(format!("重置同步状态失败: {}", e)))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// 同步状态更新结果

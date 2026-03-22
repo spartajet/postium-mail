@@ -11,10 +11,12 @@
 //! - **同步支持**: 从 IMAP 同步邮件数据的辅助方法
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, DbConn, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::prelude::Expr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, StorageError};
 use crate::storage::models::{attachment, email};
+use crate::sync::change_detector::EmailFlags;
 
 // ============================================================================
 // DTO 类型定义
@@ -571,6 +573,70 @@ impl EmailRepository {
         }
 
         Ok(emails.len())
+    }
+
+    /// 批量更新邮件标志
+    ///
+    /// 根据邮件 UID 批量更新邮件的标志状态（已读、星标、已回复、已删除）。
+    /// 这是一个高效的方法，避免逐个邮件更新时的多次数据库操作。
+    ///
+    /// # 参数
+    ///
+    /// * `db` - 数据库连接
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `updates` - 更新列表，    ///   格式: `(uid, EmailFlags)` 或 `(uid, seen, flagged, answered, deleted, draft)`
+    ///
+    /// # 返回
+    ///
+    /// 返回更新的邮件数量
+    pub async fn batch_update_flags(
+        db: &DbConn,
+        account_id: i32,
+        folder: &str,
+        updates: &[(u32, EmailFlags)],
+    ) -> Result<usize> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+
+        let mut updated_count = 0;
+        let now = chrono::Utc::now().timestamp();
+
+        for (uid, flags) in updates {
+            // 构建更新
+            let result = email::Entity::update_many()
+                .filter(email::Column::AccountId.eq(account_id))
+                .filter(email::Column::Folder.eq(folder))
+                .filter(email::Column::Uid.eq(*uid as i32))
+                .col_expr(email::Column::IsRead, Expr::val(flags.seen))
+                .col_expr(email::Column::IsStarred, Expr::val(flags.flagged))
+                .col_expr(email::Column::IsAnswered, Expr::val(flags.answered))
+                .col_expr(email::Column::IsDraft, Expr::val(flags.draft))
+                .col_expr(email::Column::IsDeleted, Expr::val(flags.deleted))
+                .col_expr(email::Column::UpdatedAt, Expr::val(now))
+                .exec(db)
+                .await
+                .map_err(|e| {
+                    tracing::warn!(
+                        "批量更新邮件标志失败: uid={}, error={}",
+                        uid,
+                        e
+                    );
+                    StorageError::Database(format!("批量更新邮件标志失败: uid={}, error={}", uid, e))
+                })?;
+
+            updated_count += 1;
+        }
+
+        tracing::debug!(
+            "批量更新邮件标志完成: account_id={}, folder={}, updated_count={}",
+            account_id,
+            folder,
+            updated_count
+        );
+
+        Ok(updated_count)
     }
 
     // ========== 辅助方法 ==========
