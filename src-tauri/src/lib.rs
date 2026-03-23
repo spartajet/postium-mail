@@ -379,8 +379,23 @@ async fn exchange_and_create_account(
 /// - `RUST_LOG=debug` - 显示 DEBUG 及以上级别（开发调试用）
 /// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
 fn init_tracing() {
+    // 配置日志过滤器，屏蔽第三方 crate 的冗余日志
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new("debug")
+                // 过滤 keyring 相关 crate 的日志
+                .add_directive("keyring=error".parse().unwrap())
+                .add_directive("tauri_plugin_keyring=error".parse().unwrap())
+                .add_directive("secret_service=error".parse().unwrap())
+                .add_directive("windows=error".parse().unwrap())
+                .add_directive("windows_sys=error".parse().unwrap())
+                .add_directive("tokio_native_tls=warn".parse().unwrap())
+                .add_directive("native_tls=warn".parse().unwrap())
+                .add_directive("async_imap=warn".parse().unwrap())
+        });
+
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // 默认级别
+        .with_env_filter(env_filter)
         .with_target(false) // 显示模块路径，便于调试
         .with_thread_ids(false) // 线程ID通常不需要
         .with_file(true) // 不显示文件名，减少日志冗余
