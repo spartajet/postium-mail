@@ -122,23 +122,50 @@ impl SyncManager {
             .map_err(|e| MailError::Internal(format!("获取账号信息失败: {}", e)))?
             .ok_or_else(|| MailError::Internal(format!("账号 {} 不存在", account_id)))?;
 
-        // 2. 检测服务商
+        tracing::debug!(
+            "账号信息: email={}, auth_type={}, provider={}",
+            account.email,
+            account.auth_type,
+            account.provider
+        );
+
+        // 2. 获取服务商（从账号的 provider 字段）
         let provider = self
             .provider_pool
-            .detect_provider(&account.email)
-            .await
-            .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
+            .find_provider_by_id(&account.provider)
+            .ok_or_else(|| MailError::Internal(format!("未找到服务商: {}", account.provider)))?;
+
+        tracing::info!("使用账号服务商: {} (provider_id={})", provider.provider_name(), account.provider);
 
         // 2.1 获取服务商文件夹映射（用于识别文件夹类型）
         let folder_mapping = provider.folder_mapping();
 
+        tracing::debug!(
+            "文件夹映射: inbox={:?}, sent={:?}, drafts={:?}, spam={:?}, trash={:?}, archive={:?}",
+            folder_mapping.inbox,
+            folder_mapping.sent,
+            folder_mapping.drafts,
+            folder_mapping.spam,
+            folder_mapping.trash,
+            folder_mapping.archive
+        );
+
         // 3. 获取 IMAP 配置
         let imap_config = provider.imap_config(&account.email);
+
+        tracing::debug!(
+            "IMAP 配置: host={}, port={}, ssl={:?}",
+            imap_config.host,
+            imap_config.port,
+            imap_config.ssl
+        );
 
         // 4. 连接到 IMAP 服务器
         let mut imap_client = self
             .connect_imap(account_id, &imap_config, &account.email, &account.auth_type)
             .await?;
+
+        tracing::info!("IMAP 连接成功");
 
         // 5. 发送文件夹同步开始事件
         let _ = self.emit_progress(
@@ -160,6 +187,17 @@ impl SyncManager {
 
         tracing::info!("获取到 {} 个文件夹", folder_infos.len());
 
+        // 输出每个文件夹的详细信息
+        for (idx, folder) in folder_infos.iter().enumerate() {
+            tracing::debug!(
+                "文件夹 [{}]: name={}, standard_name={}, special_use={:?}",
+                idx + 1,
+                folder.name,
+                folder.standard_name,
+                folder.special_use
+            );
+        }
+
         // 7. 更新文件夹同步状态（包含类型识别）
         let sync_state_result = self
             .folder_manager
@@ -175,6 +213,8 @@ impl SyncManager {
         let mut total_synced = 0;
         let mut sync_errors = 0;
 
+        tracing::info!("开始同步 {} 个文件夹", folder_infos.len());
+
         for (idx, folder_info) in folder_infos.iter().enumerate() {
             // 更新进度
             let _ = self.emit_progress(
@@ -186,6 +226,13 @@ impl SyncManager {
                     total: folder_infos.len(),
                     message: format!("正在同步 {}...", folder_info.name),
                 },
+            );
+
+            tracing::debug!(
+                "开始同步文件夹 [{}/{}]: {}",
+                idx + 1,
+                folder_infos.len(),
+                folder_info.name
             );
 
             // 同步单个文件夹

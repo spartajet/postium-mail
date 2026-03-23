@@ -226,6 +226,16 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
         .await
         .map_err(|e| StorageError::Database(format!("运行迁移 m012 失败: {}", e)))?;
 
+    // 删除 offline_operations 表（修复 folders 外键错误）
+    m::m011_20250321_drop_offline_operations::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m011 失败: {}", e)))?;
+
+    // 添加文件夹类型字段
+    m::m013_20250323_add_folder_type::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m013 失败: {}", e)))?;
+
     Ok(())
 }
 
