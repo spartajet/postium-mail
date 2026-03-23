@@ -1,0 +1,10 @@
+D:\Rust\postium-mail\migration\target\debug\deps\writeable-0f9a0a03fb9347c3.d: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\cmp.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\impls.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\ops.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\parts_write_adapter.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\try_writeable.rs
+
+D:\Rust\postium-mail\migration\target\debug\deps\libwriteable-0f9a0a03fb9347c3.rmeta: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\cmp.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\impls.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\ops.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\parts_write_adapter.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\try_writeable.rs
+
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\lib.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\cmp.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\impls.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\ops.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\parts_write_adapter.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\writeable-0.6.2\src\try_writeable.rs:

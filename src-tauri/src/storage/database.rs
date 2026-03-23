@@ -8,7 +8,7 @@
 //! - **健康检查**: 数据库连接健康状态检测
 //! - **连接配置**: 可配置的连接参数（超时、连接数等）
 //! - **Repository Trait**: 统一的数据库访问抽象
-//! - **数据库迁移**: 自动运行迁移脚本
+//! - **数据库迁移**: 使用 SeaORM 官方迁移系统
 //!
 //! # 连接池配置
 //!
@@ -94,6 +94,7 @@
 //! - 生产环境应考虑数据库备份策略
 
 use sea_orm::{ConnectOptions, Database, DbConn, DbErr};
+use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -167,85 +168,15 @@ pub async fn establish_connection() -> std::result::Result<DbConn, DbErr> {
 
 /// 初始化数据库
 ///
-/// 运行所有迁移脚本
+/// 使用 SeaORM 官方迁移系统运行所有待执行的迁移。
+/// 迁移状态自动记录在 `seaql_migrations` 表中。
 pub async fn init_database(db: &DbConn) -> Result<()> {
-    use crate::storage::migration as m;
-
-    // 先运行初始化脚本
-    m::m001_20250314_init::initialize(db)
+    // 使用官方 Migrator
+    migration::Migrator::up(db, None)
         .await
-        .map_err(|e| StorageError::Database(format!("初始化数据库失败: {}", e)))?;
+        .map_err(|e| StorageError::Database(format!("运行迁移失败: {}", e)))?;
 
-    // 然后运行迁移（为现有数据库添加新字段）
-    m::m002_20250314_add_oauth_fields::run_migrations(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m002 失败: {}", e)))?;
-
-    // 添加同步相关表
-    m::m003_20250315_add_sync_tables::add_sync_tables(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m003 失败: {}", e)))?;
-
-    // 删除敏感字段（密码和 token 迁移到 Stronghold）
-    m::m004_20250315_remove_sensitive_fields::run_migrations(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m004 失败: {}", e)))?;
-
-    // 添加 IMAP 元数据字段
-    m::m005_20250315_add_imap_metadata::add_imap_metadata(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m005 失败: {}", e)))?;
-
-    // 添加离线操作和同步元数据表
-    m::m006_20250315_add_sync_operations::add_sync_operations(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m006 失败: {}", e)))?;
-
-    // 添加账号类型支持（个人/企业）
-    m::m007_20250317_add_account_types::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m007 失败: {}", e)))?;
-
-    // 添加 MODSEQ 支持（CONDSTORE 扩展）
-    m::m008_20250317_add_modseq_support::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m008 失败: {}", e)))?;
-
-    // 创建 folder_sync_states 表（分离同步状态）
-    m::m009_20250321_create_folder_sync_states::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m009 失败: {}", e)))?;
-
-    // 删除 folders 表（已废弃）
-    m::m010_20250321_drop_folders_table::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m010 失败: {}", e)))?;
-
-    // 添加邮件标志字段（is_answered, is_deleted）
-    m::m012_20250322_add_email_flags::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m012 失败: {}", e)))?;
-
-    // 删除 offline_operations 表（修复 folders 外键错误）
-    m::m011_20250321_drop_offline_operations::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m011 失败: {}", e)))?;
-
-    // 添加文件夹类型字段
-    m::m013_20250323_add_folder_type::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m013 失败: {}", e)))?;
-
-    // 合并 sync_states 表到 folder_sync_states
-    m::m014_20250323_merge_sync_states::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m014 失败: {}", e)))?;
-
-    // 删除 sync_states 表（表合并完成）
-    m::m015_20250323_drop_sync_states_table::migrate(db)
-        .await
-        .map_err(|e| StorageError::Database(format!("运行迁移 m015 失败: {}", e)))?;
-
+    tracing::info!("数据库迁移完成");
     Ok(())
 }
 

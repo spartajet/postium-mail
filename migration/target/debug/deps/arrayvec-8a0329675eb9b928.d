@@ -1,0 +1,11 @@
+D:\Rust\postium-mail\migration\target\debug\deps\arrayvec-8a0329675eb9b928.d: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec_impl.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\array_string.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\char.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\errors.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\utils.rs
+
+D:\Rust\postium-mail\migration\target\debug\deps\libarrayvec-8a0329675eb9b928.rmeta: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec_impl.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\array_string.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\char.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\errors.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\utils.rs
+
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\lib.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec_impl.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\arrayvec.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\array_string.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\char.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\errors.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\arrayvec-0.7.6\src\utils.rs:

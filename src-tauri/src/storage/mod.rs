@@ -193,7 +193,6 @@
 
 pub mod cache;
 pub mod database;
-pub mod migration;
 pub mod models;
 pub mod search;
 pub mod service;
