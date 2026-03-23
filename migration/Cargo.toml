@@ -1,0 +1,33 @@
+[package]
+name = "migration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "migration"
+path = "src/lib.rs"
+
+[[bin]]
+name = "migration"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = ["dep:clap"]
+
+[dependencies]
+async-trait = "0.1"
+sea-orm = { version = "2.0.0-rc.37", features = [
+  "macros",
+  "runtime-tokio-rustls",
+  "sqlx-sqlite"
+] }
+sea-orm-migration = "2.0.0-rc.37"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI 依赖（可选）
+clap = { version = "4", features = ["derive"], optional = true }

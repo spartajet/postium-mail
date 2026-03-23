@@ -88,6 +88,13 @@ mod tests {
             created_at: Some(1234567890),
             updated_at: Some(1234567890),
             folder_type: Some("".to_string()),
+            last_sync_uid: todo!(),
+            highest_uid: todo!(),
+            total_emails: todo!(),
+            sync_count: todo!(),
+            is_first_sync: todo!(),
+            error_count: todo!(),
+            last_error: todo!(),
         };
 
         let dto = FolderSyncStateDto::from(model);

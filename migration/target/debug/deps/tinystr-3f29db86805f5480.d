@@ -1,0 +1,12 @@
+D:\Rust\postium-mail\migration\target\debug\deps\tinystr-3f29db86805f5480.d: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\macros.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ascii.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\asciibyte.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\error.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\int_ops.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\unvalidated.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ule.rs
+
+D:\Rust\postium-mail\migration\target\debug\deps\libtinystr-3f29db86805f5480.rmeta: C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\lib.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\macros.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ascii.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\asciibyte.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\error.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\int_ops.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\unvalidated.rs C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ule.rs
+
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\lib.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\macros.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ascii.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\asciibyte.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\error.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\int_ops.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\unvalidated.rs:
+C:\Users\guo\.cargo\registry\src\mirrors.ustc.edu.cn-38d0e5eb5da2abae\tinystr-0.8.2\src\ule.rs:
