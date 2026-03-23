@@ -275,7 +275,7 @@ impl ProviderPool {
     }
 
     /// 根据 ID 查找服务商
-    fn find_provider_by_id(&self, id: &str) -> Option<Box<dyn MailProvider>> {
+    pub fn find_provider_by_id(&self, id: &str) -> Option<Box<dyn MailProvider>> {
         for provider in &self.providers {
             if provider.provider_id() == id {
                 return Some(provider.box_clone());
