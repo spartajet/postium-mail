@@ -47,6 +47,12 @@ pub struct SyncResult {
     pub duration_ms: u64,
 }
 
+/// 服务器能力（每个账号只探测一次）
+#[derive(Clone, Debug)]
+struct ServerCapabilities {
+    supports_condstore: bool,
+}
+
 /// 同步管理器
 ///
 /// 负责协调所有同步组件，管理同步流程
@@ -132,7 +138,11 @@ impl SyncManager {
             .find_provider_by_id(&account.provider)
             .ok_or_else(|| MailError::Internal(format!("未找到服务商: {}", account.provider)))?;
 
-        tracing::info!("使用账号服务商: {} (provider_id={})", provider.provider_name(), account.provider);
+        tracing::info!(
+            "使用账号服务商: {} (provider_id={})",
+            provider.provider_name(),
+            account.provider
+        );
 
         // 2.1 获取服务商文件夹映射（用于识别文件夹类型）
         let folder_mapping = provider.folder_mapping();
@@ -164,6 +174,15 @@ impl SyncManager {
 
         tracing::info!("IMAP 连接成功");
 
+        // 4.1 探测服务器能力（每个账号只探测一次）
+        let server_capabilities = ServerCapabilities {
+            supports_condstore: imap_client.check_condstore_support().await.unwrap_or(false),
+        };
+        tracing::info!(
+            "服务器能力: CONDSTORE={}",
+            server_capabilities.supports_condstore
+        );
+
         // 5. 发送文件夹同步开始事件
         let _ = self.emit_progress(
             account_id,
@@ -189,7 +208,11 @@ impl SyncManager {
         folders_to_sync.sort();
         folders_to_sync.dedup();
 
-        tracing::info!("从 provider 获取到 {} 个标准文件夹: {:?}", folders_to_sync.len(), folders_to_sync);
+        tracing::info!(
+            "从 provider 获取到 {} 个标准文件夹: {:?}",
+            folders_to_sync.len(),
+            folders_to_sync
+        );
 
         // 7. 对每个标准文件夹执行同步
         let mut total_synced = 0;
@@ -219,7 +242,12 @@ impl SyncManager {
 
             // 同步单个文件夹
             match self
-                .sync_folder_internal(account_id, folder_name, &mut imap_client)
+                .sync_folder_internal(
+                    account_id,
+                    folder_name,
+                    &mut imap_client,
+                    &server_capabilities,
+                )
                 .await
             {
                 Ok(result) => {
@@ -359,6 +387,7 @@ impl SyncManager {
         account_id: i32,
         folder: &str,
         imap_client: &mut AsyncImapClient,
+        capabilities: &ServerCapabilities,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::debug!(
             "开始同步文件夹: account_id={}, folder={}",
@@ -375,6 +404,7 @@ impl SyncManager {
                 // 元数据获取失败不应阻断同步流程
                 crate::error::MailError::Internal(format!("获取文件夹元数据失败: {}", e))
             });
+        tracing::info!("获取文件夹元数据成功: {:?}", metadata);
 
         // 2. 检测 UIDVALIDITY 变化
         let mut needs_full_resync = false;
@@ -384,6 +414,11 @@ impl SyncManager {
                 .check_uidvalidity_changed(account_id, folder, meta.uidvalidity)
                 .await
                 .unwrap_or(false);
+            tracing::info!(
+                "UIDVALIDITY 变化: folder={}, uidvalidity_changed={}",
+                folder,
+                uidvalidity_changed
+            );
 
             if uidvalidity_changed {
                 tracing::warn!(
@@ -440,7 +475,7 @@ impl SyncManager {
             );
             false
         } else {
-            imap_client.check_condstore_support().await.unwrap_or(false)
+            capabilities.supports_condstore
         };
 
         tracing::info!(
@@ -451,39 +486,41 @@ impl SyncManager {
         );
 
         // 3. 获取服务器 UID 列表
-        // 如果需要全量同步，获取所有邮件；否则只获取最近3个月
+        // 全量同步：获取所有邮件
+        // 增量同步：使用 last_sync_uid 获取新邮件
         let server_uids = if needs_full_resync {
             // UIDVALIDITY 变化，需要获取所有邮件进行全量比对
-            tracing::info!(
-                "UIDVALIDITY 变化，获取所有邮件进行全量同步: folder={}",
-                folder
-            );
+            tracing::info!("全量同步，获取所有邮件: folder={}", folder);
             // 全量同步：使用非常大的 limit 来获取所有邮件
             imap_client
                 .list_uids(folder, 100000_usize)
                 .await
                 .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?
         } else {
-            // 正常同步：只获取最近3个月的邮件
-            // 计算3个月前的日期
-            // 注意：IMAP SINCE 命令需要英文月份缩写（RFC 3501）
-            // 格式：dd-MMM-yyyy（如 20-Dec-2025）
-            let three_months_ago = chrono::Utc::now() - chrono::Duration::days(90);
-            let date_since = format_imap_date(three_months_ago);
+            // 增量同步：使用 last_sync_uid 获取新邮件
+            let last_sync_uid = self
+                .folder_manager
+                .get_sync_state(account_id, folder)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|s| s.last_sync_uid)
+                .map(|v| v as u32)
+                .unwrap_or(0);
 
             tracing::info!(
-                "使用 SINCE 命令获取最近3个月的邮件: folder={}, since={}",
-                folder,
-                date_since
+                "增量同步，获取 UID > {} 的邮件: folder={}",
+                last_sync_uid,
+                folder
             );
 
             imap_client
-                .list_uids_since(folder, &date_since)
+                .list_uids_after(folder, last_sync_uid)
                 .await
                 .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?
         };
 
-        tracing::info!("文件夹 {} 最近3个月的邮件数: {}", folder, server_uids.len());
+        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
 
         // 4. CONDSTORE 增量同步（如果支持）
         let (condstore_modified_uids, highest_modseq) =
@@ -701,7 +738,18 @@ impl SyncManager {
             }
         }
 
-        // 5. 返回同步结果
+        // 5. 更新 last_sync_uid（使用服务器 UID 中的最大值）
+        if let Some(&max_uid) = server_uids.iter().max() {
+            if let Err(e) = self
+                .folder_manager
+                .update_last_sync_uid(account_id, folder, max_uid as i32)
+                .await
+            {
+                tracing::warn!("更新 last_sync_uid 失败: {}", e);
+            }
+        }
+
+        // 6. 返回同步结果
         Ok(crate::sync::delta_sync::DeltaSyncResult {
             strategy_used: crate::sync::delta_sync::SyncStrategy::UidSearch,
             new_emails: new_emails_count,

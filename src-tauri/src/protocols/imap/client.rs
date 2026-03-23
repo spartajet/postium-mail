@@ -494,7 +494,7 @@ impl AsyncImapClient {
     }
 
     /// 获取文件夹 IMAP 元数据（UIDVALIDITY, UIDNEXT 等）
-    /// 使用 STATUS 命令获取文件夹元数据而不选中文件夹
+    /// 使用 EXAMINE 命令（只读模式）获取正确的 UIDNEXT 值
     pub async fn fetch_folder_metadata(
         &mut self,
         folder: &str,
@@ -506,28 +506,42 @@ impl AsyncImapClient {
             .as_mut()
             .ok_or_else(|| anyhow!("IMAP 未连接"))?;
 
-        // 使用 STATUS 命令获取文件夹元数据
-        // 请求: MESSAGES, RECENT, UIDNEXT, UIDVALIDITY, UNSEEN
-        let status_response = session
-            .status(folder, "(MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN)")
+        // 使用 EXAMINE 命令（只读模式）获取文件夹元数据
+        // 这会正确返回 UIDNEXT 和 UIDVALIDITY
+        // 注意：async-imap 的 status() 方法返回的 Mailbox.uid_next 始终为 None，
+        // 因为 STATUS 命令的响应格式与 SELECT/EXAMINE 不同
+        let mailbox = session
+            .examine(folder)
             .await
-            .map_err(|e| anyhow!("获取文件夹状态失败: {}", e))?;
+            .map_err(|e| anyhow!("获取文件夹元数据失败: {}", e))?;
 
-        // 从 Mailbox 对象解析状态信息
-        let mailbox = status_response;
+        // 详细日志：打印 Mailbox 结构的所有字段
+        tracing::info!(
+            "EXAMINE 返回的 Mailbox 结构: folder={}, exists={}, recent={}, uid_validity={:?}, uid_next={:?}, highest_modseq={:?}",
+            folder,
+            mailbox.exists,
+            mailbox.recent,
+            mailbox.uid_validity,
+            mailbox.uid_next,
+            mailbox.highest_modseq
+        );
 
-        // 处理 Option 类型的字段，允许服务器不返回某些字段
-        let uidvalidity = mailbox.uid_validity.map(|v| v as u64).unwrap_or(1); // 默认值为 1
+        let uidvalidity = mailbox.uid_validity.map(|v| v as u64).unwrap_or(1);
+        let uidnext = mailbox.uid_next.map(|v| v as u64).unwrap_or(1);
 
-        let uidnext = mailbox.uid_next.map(|v| v as u64).unwrap_or(1); // 默认值为 1
-
-        // 如果服务器未返回 UIDVALIDITY 或 UIDNEXT，记录警告
-        if mailbox.uid_validity.is_none() {
-            tracing::warn!("文件夹 {} 服务器未返回 UIDVALIDITY，使用默认值 1", folder);
+        // 关闭当前文件夹（返回未选中状态）
+        // 这样后续可以选中其他文件夹进行操作
+        if let Err(e) = session.close().await {
+            tracing::debug!("关闭文件夹 {} 失败（可忽略）: {}", folder, e);
         }
-        if mailbox.uid_next.is_none() {
-            tracing::warn!("文件夹 {} 服务器未返回 UIDNEXT，使用默认值 1", folder);
-        }
+
+        tracing::info!(
+            "文件夹元数据: folder={}, uidvalidity={}, uidnext={}, exists={}",
+            folder,
+            uidvalidity,
+            uidnext,
+            mailbox.exists
+        );
 
         Ok(FolderMetadata {
             uidvalidity,
@@ -535,7 +549,7 @@ impl AsyncImapClient {
             highest_modseq: None, // CONDSTORE 支持将在后续实现
             exists: mailbox.exists as u32,
             recent: mailbox.recent as u32,
-            unseen: None, // Mailbox 结构不直接提供 unseen，需要从其他途径获取
+            unseen: None,
         })
     }
 
