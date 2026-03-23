@@ -9,7 +9,7 @@ use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
 use crate::sync::{
     change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
-    mail_processor::MailProcessor, sync_state::SyncStateManager,
+    mail_processor::MailProcessor,
 };
 use chrono::Datelike; // 添加 Datelike trait来访问日期方法
 use sea_orm::DbConn;
@@ -59,7 +59,6 @@ pub struct SyncManager {
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
     change_detector: Arc<ChangeDetector>,
-    sync_state_manager: Arc<SyncStateManager>,
 }
 
 impl SyncManager {
@@ -74,7 +73,6 @@ impl SyncManager {
         let folder_manager = Arc::new(FolderManager::new(db.clone()));
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
         let change_detector = Arc::new(ChangeDetector::new(db.clone()));
-        let sync_state_manager = Arc::new(SyncStateManager::new(db.clone()));
 
         Self {
             db,
@@ -85,7 +83,6 @@ impl SyncManager {
             folder_manager,
             mail_processor,
             change_detector,
-            sync_state_manager,
         }
     }
 
@@ -179,80 +176,75 @@ impl SyncManager {
             },
         );
 
-        // 6. 同步文件夹列表
-        let folder_infos = imap_client
-            .list_folders_with_attributes()
-            .await
-            .map_err(|e| MailError::Internal(format!("获取文件夹列表失败: {}", e)))?;
+        // 6. 从 provider 获取需要同步的文件夹列表
+        let mut folders_to_sync: Vec<String> = Vec::new();
+        folders_to_sync.extend(folder_mapping.inbox.clone());
+        folders_to_sync.extend(folder_mapping.sent.clone());
+        folders_to_sync.extend(folder_mapping.drafts.clone());
+        folders_to_sync.extend(folder_mapping.spam.clone());
+        folders_to_sync.extend(folder_mapping.trash.clone());
+        folders_to_sync.extend(folder_mapping.archive.clone());
 
-        tracing::info!("获取到 {} 个文件夹", folder_infos.len());
+        // 去重（有些服务商可能用相同的名字表示不同类型）
+        folders_to_sync.sort();
+        folders_to_sync.dedup();
 
-        // 输出每个文件夹的详细信息
-        for (idx, folder) in folder_infos.iter().enumerate() {
-            tracing::debug!(
-                "文件夹 [{}]: name={}, standard_name={}, special_use={:?}",
-                idx + 1,
-                folder.name,
-                folder.standard_name,
-                folder.special_use
-            );
-        }
+        tracing::info!("从 provider 获取到 {} 个标准文件夹: {:?}", folders_to_sync.len(), folders_to_sync);
 
-        // 7. 更新文件夹同步状态（包含类型识别）
-        let sync_state_result = self
-            .folder_manager
-            .update_sync_states_with_types(account_id, &folder_infos, &folder_mapping)
-            .await?;
-
-        tracing::info!(
-            "文件夹同步状态更新完成: updated={}",
-            sync_state_result.updated
-        );
-
-        // 8. 对每个文件夹执行增量同步
+        // 7. 对每个标准文件夹执行同步
         let mut total_synced = 0;
         let mut sync_errors = 0;
 
-        tracing::info!("开始同步 {} 个文件夹", folder_infos.len());
+        tracing::info!("开始同步 {} 个标准文件夹", folders_to_sync.len());
 
-        for (idx, folder_info) in folder_infos.iter().enumerate() {
+        for (idx, folder_name) in folders_to_sync.iter().enumerate() {
             // 更新进度
             let _ = self.emit_progress(
                 account_id,
                 SyncProgress {
                     stage: SyncStage::SyncingEmails,
-                    folder: Some(folder_info.name.clone()),
+                    folder: Some(folder_name.clone()),
                     current: idx + 1,
-                    total: folder_infos.len(),
-                    message: format!("正在同步 {}...", folder_info.name),
+                    total: folders_to_sync.len(),
+                    message: format!("正在同步 {}...", folder_name),
                 },
             );
 
             tracing::debug!(
-                "开始同步文件夹 [{}/{}]: {}",
+                "开始同步标准文件夹 [{}/{}]: {}",
                 idx + 1,
-                folder_infos.len(),
-                folder_info.name
+                folders_to_sync.len(),
+                folder_name
             );
 
             // 同步单个文件夹
             match self
-                .sync_folder_internal(account_id, &folder_info.name, &mut imap_client)
+                .sync_folder_internal(account_id, folder_name, &mut imap_client)
                 .await
             {
                 Ok(result) => {
                     total_synced += result.total_changes();
                     tracing::info!(
                         "文件夹 {} 同步完成: new={}, modified={}, deleted={}",
-                        folder_info.name,
+                        folder_name,
                         result.new_emails,
                         result.modified_emails,
                         result.deleted_emails
                     );
                 }
                 Err(e) => {
-                    sync_errors += 1;
-                    tracing::error!("文件夹 {} 同步失败: {}", folder_info.name, e);
+                    // 如果文件夹不存在，记录警告但不计入错误
+                    let error_msg = e.to_string().to_lowercase();
+                    if error_msg.contains("mailbox")
+                        || error_msg.contains("not found")
+                        || error_msg.contains("nonexistent")
+                        || error_msg.contains("不存在")
+                    {
+                        tracing::warn!("文件夹不存在，跳过: {}", folder_name);
+                    } else {
+                        sync_errors += 1;
+                        tracing::error!("文件夹 {} 同步失败: {}", folder_name, e);
+                    }
                 }
             }
         }
@@ -274,14 +266,14 @@ impl SyncManager {
                 stage: SyncStage::Completed,
                 folder: None,
                 current: total_synced,
-                total: folder_infos.len(),
+                total: folders_to_sync.len(),
                 message: format!("同步完成，共处理 {} 封邮件", total_synced),
             },
         );
 
         Ok(SyncResult {
             total_synced,
-            folders_synced: folder_infos.len(),
+            folders_synced: folders_to_sync.len(),
             errors: sync_errors,
             duration_ms,
         })
@@ -701,7 +693,7 @@ impl SyncManager {
         if total_synced > 0 {
             // 更新同步完成状态
             if let Err(e) = self
-                .sync_state_manager
+                .folder_manager
                 .update_sync_completed(account_id, folder, total_synced as i32)
                 .await
             {

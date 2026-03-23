@@ -15,6 +15,14 @@ pub struct Model {
     pub uidnext: Option<i64>,
     pub highest_modseq: Option<i64>,
     pub synced_at: Option<i64>,
+    /// 同步进度字段（合并自 sync_states）
+    pub last_sync_uid: Option<i32>,   // 最后同步的 UID
+    pub highest_uid: Option<i32>,     // 文件夹最高 UID
+    pub total_emails: Option<i32>,    // 总邮件数
+    pub sync_count: i32,              // 已同步邮件数
+    pub is_first_sync: bool,          // 是否首次同步
+    pub error_count: i32,             // 连续错误次数
+    pub last_error: Option<String>,   // 最后错误信息
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
 }
