@@ -236,6 +236,16 @@ pub async fn init_database(db: &DbConn) -> Result<()> {
         .await
         .map_err(|e| StorageError::Database(format!("运行迁移 m013 失败: {}", e)))?;
 
+    // 合并 sync_states 表到 folder_sync_states
+    m::m014_20250323_merge_sync_states::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m014 失败: {}", e)))?;
+
+    // 删除 sync_states 表（表合并完成）
+    m::m015_20250323_drop_sync_states_table::migrate(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("运行迁移 m015 失败: {}", e)))?;
+
     Ok(())
 }
 

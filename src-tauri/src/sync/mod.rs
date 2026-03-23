@@ -53,10 +53,12 @@
 //!
 //! ## [`FolderManager`] - 文件夹管理器
 //!
-//! 管理邮件文件夹：
+//! 管理邮件文件夹和同步状态：
 //! - 文件夹列表获取
 //! - 特殊文件夹识别（收件箱、已发送等）
-//! - 文件夹同步状态管理
+//! - 文件夹同步状态管理（合并自 SyncStateManager）
+//! - IMAP 元数据管理（UIDVALIDITY, UIDNEXT, MODSEQ）
+//! - 同步进度跟踪（sync_count, error_count）
 //!
 //! ## [`MailProcessor`] - 邮件处理器
 //!
@@ -64,13 +66,6 @@
 //! - 邮件解析和验证
 //! - 数据库保存
 //! - 附件处理
-//!
-//! ## [`SyncStateManager`] - 同步状态管理
-//!
-//! 管理同步状态：
-//! - 同步状态跟踪
-//! - 状态持久化
-//! - 状态恢复
 //!
 //! # 同步流程
 //!
@@ -196,7 +191,6 @@ mod delta_sync;
 mod folder_manager;
 mod mail_processor;
 mod sync_manager;
-mod sync_state;
 mod sync_error;
 
 // 重新导出主要类型
@@ -205,5 +199,4 @@ pub use delta_sync::{DeltaSync, SyncStrategy, DeltaSyncResult};
 pub use change_detector::{ChangeDetector, ChangeType, ChangeDetectionResult, EmailFlags, UidSet};
 pub use folder_manager::{FolderManager, SyncStateUpdateResult};
 pub use mail_processor::{MailProcessor, MailData, MailProcessResult};
-pub use sync_state::SyncStateManager;
 pub use sync_error::SyncErrorManager;

@@ -6,8 +6,9 @@ use crate::error::{MailError, Result};
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
 use crate::providers::StandardFolder;
 use crate::storage::models::folder_sync_state;
-use sea_orm::{ActiveModelTrait, ActiveValue, DbConn, EntityTrait, Set, ColumnTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ActiveValue, DbConn, EntityTrait, Set, ColumnTrait, QueryFilter, sea_query::Expr, ExprTrait};
 use std::sync::Arc;
+use chrono::Utc;
 
 /// 文件夹同步状态管理器
 ///
@@ -412,6 +413,213 @@ impl FolderManager {
             active.update(self.db.as_ref()).await
                 .map_err(|e| MailError::Internal(format!("重置同步状态失败: {}", e)))?;
         }
+
+        Ok(())
+    }
+
+    // === 同步进度管理方法（合并自 SyncStateManager）===
+
+    /// 更新同步进度
+    ///
+    /// 在同步过程中调用，更新已同步邮件数量
+    pub async fn update_progress(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        synced_count: i32,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        folder_sync_state::Entity::update_many()
+            .filter(folder_sync_state::Column::AccountId.eq(account_id))
+            .filter(folder_sync_state::Column::ImapName.eq(imap_name))
+            .col_expr(
+                folder_sync_state::Column::SyncCount,
+                Expr::val(synced_count),
+            )
+            .col_expr(
+                folder_sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("更新同步进度失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 记录同步错误
+    ///
+    /// 增加错误计数并记录错误信息
+    pub async fn record_error(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        error_message: &str,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        folder_sync_state::Entity::update_many()
+            .filter(folder_sync_state::Column::AccountId.eq(account_id))
+            .filter(folder_sync_state::Column::ImapName.eq(imap_name))
+            .col_expr(
+                folder_sync_state::Column::ErrorCount,
+                Expr::col(folder_sync_state::Column::ErrorCount).add(1),
+            )
+            .col_expr(
+                folder_sync_state::Column::LastError,
+                Expr::val(error_message),
+            )
+            .col_expr(
+                folder_sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("记录同步错误失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 清除错误计数
+    ///
+    /// 成功同步后调用，清除错误计数和错误信息
+    pub async fn clear_errors(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp();
+
+        folder_sync_state::Entity::update_many()
+            .filter(folder_sync_state::Column::AccountId.eq(account_id))
+            .filter(folder_sync_state::Column::ImapName.eq(imap_name))
+            .col_expr(
+                folder_sync_state::Column::ErrorCount,
+                Expr::val(0),
+            )
+            .col_expr(
+                folder_sync_state::Column::LastError,
+                Expr::val(Option::<String>::None),
+            )
+            .col_expr(
+                folder_sync_state::Column::UpdatedAt,
+                Expr::val(now),
+            )
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("清除错误计数失败: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 检查是否需要首次同步
+    pub async fn needs_first_sync(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+    ) -> Result<bool> {
+        if let Some(state) = self.get_sync_state(account_id, imap_name).await? {
+            Ok(state.is_first_sync)
+        } else {
+            Ok(true)
+        }
+    }
+
+    /// 更新 last_sync_uid
+    pub async fn update_last_sync_uid(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        last_sync_uid: i32,
+    ) -> Result<()> {
+        if let Some(existing) = self.get_sync_state(account_id, imap_name).await? {
+            let mut active: folder_sync_state::ActiveModel = existing.into();
+            active.last_sync_uid = Set(Some(last_sync_uid));
+            active.updated_at = Set(Some(Utc::now().timestamp()));
+
+            active.update(self.db.as_ref()).await
+                .map_err(|e| MailError::Internal(format!("更新 last_sync_uid 失败: {}", e)))?;
+
+            tracing::debug!(
+                "更新 last_sync_uid: account_id={}, imap_name={}, uid={}",
+                account_id,
+                imap_name,
+                last_sync_uid
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 更新 highest_uid
+    pub async fn update_highest_uid(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        highest_uid: i32,
+    ) -> Result<()> {
+        if let Some(existing) = self.get_sync_state(account_id, imap_name).await? {
+            let mut active: folder_sync_state::ActiveModel = existing.into();
+            active.highest_uid = Set(Some(highest_uid));
+            active.updated_at = Set(Some(Utc::now().timestamp()));
+
+            active.update(self.db.as_ref()).await
+                .map_err(|e| MailError::Internal(format!("更新 highest_uid 失败: {}", e)))?;
+
+            tracing::debug!(
+                "更新 highest_uid: account_id={}, imap_name={}, uid={}",
+                account_id,
+                imap_name,
+                highest_uid
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 更新同步完成
+    ///
+    /// 同步完成后调用，更新同步数量、清除错误计数
+    pub async fn update_sync_completed(
+        &self,
+        account_id: i32,
+        imap_name: &str,
+        sync_count: i32,
+    ) -> Result<()> {
+        if let Some(existing) = self.get_sync_state(account_id, imap_name).await? {
+            let old_sync_count = existing.sync_count;
+            let total_sync_count = old_sync_count + sync_count;
+
+            let mut active: folder_sync_state::ActiveModel = existing.into();
+            active.sync_count = Set(total_sync_count);
+            active.error_count = Set(0); // 重置错误计数
+            active.last_error = Set(None);
+            active.updated_at = Set(Some(Utc::now().timestamp()));
+
+            active.update(self.db.as_ref()).await
+                .map_err(|e| MailError::Internal(format!("更新同步完成状态失败: {}", e)))?;
+
+            tracing::info!(
+                "同步完成: account_id={}, imap_name={}, count={}, total={}",
+                account_id,
+                imap_name,
+                sync_count,
+                total_sync_count
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 删除文件夹同步状态
+    pub async fn delete(&self, account_id: i32, imap_name: &str) -> Result<()> {
+        folder_sync_state::Entity::delete_many()
+            .filter(folder_sync_state::Column::AccountId.eq(account_id))
+            .filter(folder_sync_state::Column::ImapName.eq(imap_name))
+            .exec(self.db.as_ref())
+            .await
+            .map_err(|e| MailError::Internal(format!("删除文件夹同步状态失败: {}", e)))?;
 
         Ok(())
     }

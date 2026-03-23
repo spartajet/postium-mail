@@ -17,6 +17,10 @@
 //! | m009 | 2025-03-21 | 创建 folder_sync_states 表（分离同步状态） |
 //! | m010 | 2025-03-21 | 删除 folders 表（已废弃） |
 //! | m011 | 2025-03-21 | 删除 offline_operations 表（修复外键约束错误） |
+//! | m012 | 2025-03-22 | 添加邮件标志字段（is_answered, is_deleted） |
+//! | m013 | 2025-03-23 | 添加文件夹类型字段（folder_type） |
+//! | m014 | 2025-03-23 | 合并 sync_states 表到 folder_sync_states |
+//! | m015 | 2025-03-23 | 删除 sync_states 表（表合并完成） |
 //!
 //! # 迁移顺序
 //!
@@ -101,4 +105,6 @@ pub mod m010_20250321_drop_folders_table;
 pub mod m011_20250321_drop_offline_operations;
 pub mod m012_20250322_add_email_flags;
 pub mod m013_20250323_add_folder_type;
+pub mod m014_20250323_merge_sync_states;
+pub mod m015_20250323_drop_sync_states_table;
 
