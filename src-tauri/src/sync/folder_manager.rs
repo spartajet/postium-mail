@@ -513,19 +513,6 @@ impl FolderManager {
         Ok(())
     }
 
-    /// 检查是否需要首次同步
-    pub async fn needs_first_sync(
-        &self,
-        account_id: i32,
-        imap_name: &str,
-    ) -> Result<bool> {
-        if let Some(state) = self.get_sync_state(account_id, imap_name).await? {
-            Ok(state.is_first_sync)
-        } else {
-            Ok(true)
-        }
-    }
-
     /// 更新 last_sync_uid
     pub async fn update_last_sync_uid(
         &self,
