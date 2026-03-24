@@ -10,7 +10,7 @@ use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 use tokio::sync::RwLock;
 
-use crate::crypto::{OAuthToken, KEYRING_SERVICE, oauth_username};
+use crate::crypto::{KEYRING_SERVICE, OAuthToken, oauth_username};
 use crate::error::{MailError, Result, StorageError};
 
 /// Token 元数据（内存缓存）
@@ -181,9 +181,8 @@ impl TokenManager {
             })?;
 
         // 2. 反序列化
-        let token: OAuthToken = serde_json::from_str(&token_json).map_err(|e| {
-            MailError::Internal(format!("反序列化 token 失败: {}", e))
-        })?;
+        let token: OAuthToken = serde_json::from_str(&token_json)
+            .map_err(|e| MailError::Internal(format!("反序列化 token 失败: {}", e)))?;
 
         tracing::debug!("获取 OAuth token 成功: account_id={}", account_id);
 
@@ -263,10 +262,7 @@ impl TokenManager {
         let (provider, refresh_count) = {
             let cache = self.cache.read().await;
             if let Some(metadata) = cache.get(&account_id) {
-                (
-                    metadata.provider.clone(),
-                    metadata.refresh_count + 1,
-                )
+                (metadata.provider.clone(), metadata.refresh_count + 1)
             } else {
                 // 缓存未命中，从 Keyring 加载
                 let metadata = self.refresh_cache(account_id).await?;
@@ -381,7 +377,10 @@ impl TokenManager {
         };
 
         // 4. 更新缓存
-        self.cache.write().await.insert(account_id, metadata.clone());
+        self.cache
+            .write()
+            .await
+            .insert(account_id, metadata.clone());
 
         tracing::debug!("刷新缓存成功: account_id={}", account_id);
 
@@ -470,7 +469,10 @@ impl TokenManager {
     /// access_token 将被缓存 5 分钟（ACCESS_TOKEN_CACHE_TTL）
     pub async fn cache_access_token(&self, account_id: i32, access_token: String) {
         let expires_at = Utc::now().timestamp() + Self::ACCESS_TOKEN_CACHE_TTL;
-        self.access_token_cache.write().await.insert(account_id, (access_token, expires_at));
+        self.access_token_cache
+            .write()
+            .await
+            .insert(account_id, (access_token, expires_at));
         tracing::debug!(
             "缓存 access_token: account_id={}, expires_at={}",
             account_id,
@@ -514,11 +516,7 @@ impl TokenManager {
     ///     Ok(new_token)
     /// }).await?;
     /// ```
-    pub async fn get_access_token<F, Fut>(
-        &self,
-        account_id: i32,
-        refresh_fn: F,
-    ) -> Result<String>
+    pub async fn get_access_token<F, Fut>(&self, account_id: i32, refresh_fn: F) -> Result<String>
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<String>>,
@@ -530,9 +528,9 @@ impl TokenManager {
 
         // 2. 缓存未命中或已过期，调用刷新函数
         tracing::debug!("刷新 access_token: account_id={}", account_id);
-        let new_token = refresh_fn().await.map_err(|e| {
-            MailError::Internal(format!("刷新 access_token 失败: {}", e))
-        })?;
+        let new_token = refresh_fn()
+            .await
+            .map_err(|e| MailError::Internal(format!("刷新 access_token 失败: {}", e)))?;
 
         // 3. 缓存新 token（5 分钟）
         self.cache_access_token(account_id, new_token.clone()).await;
@@ -548,7 +546,11 @@ impl TokenManager {
     ///
     /// * `temp_account_id` - 临时账号 ID（通常为 0）
     /// * `new_account_id` - 新的账号 ID
-    pub async fn migrate_token_account(&self, temp_account_id: i32, new_account_id: i32) -> Result<()> {
+    pub async fn migrate_token_account(
+        &self,
+        temp_account_id: i32,
+        new_account_id: i32,
+    ) -> Result<()> {
         // 1. 从临时 ID 读取 token
         let temp_username = oauth_username(temp_account_id);
         let keyring = self.app_handle.keyring();
@@ -563,18 +565,26 @@ impl TokenManager {
             })?;
 
         // 2. 解析 token
-        let token: OAuthToken = serde_json::from_str(&token_json).map_err(|e| {
-            MailError::Internal(format!("反序列化 token 失败: {}", e))
-        })?;
+        let token: OAuthToken = serde_json::from_str(&token_json)
+            .map_err(|e| MailError::Internal(format!("反序列化 token 失败: {}", e)))?;
 
         // 3. 获取 provider（从缓存）
-        let provider = self.cache.read().await.get(&temp_account_id)
+        let provider = self
+            .cache
+            .read()
+            .await
+            .get(&temp_account_id)
             .map(|m| m.provider.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
         // 4. 存储到新 ID
-        self.store_oauth_token(new_account_id, &provider, &token.refresh_token, token.expires_at)
-            .await?;
+        self.store_oauth_token(
+            new_account_id,
+            &provider,
+            &token.refresh_token,
+            token.expires_at,
+        )
+        .await?;
 
         // 5. 删除临时 token
         keyring
@@ -597,23 +607,6 @@ impl TokenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
-
-    static TRACING_INIT: Once = Once::new();
-
-    fn init_tracing() {
-        TRACING_INIT.call_once(|| {
-            tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_test_writer()
-                .with_target(false)
-                .with_ansi(true)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init()
-                .ok();
-        });
-    }
 
     #[test]
     fn test_token_metadata_creation() {
@@ -725,10 +718,10 @@ mod tests {
 
         // 模拟账号列表
         let accounts = vec![
-            (1, now - 100),    // 已过期
-            (2, now + 100),    // 即将过期（< 300 秒）
-            (3, now + 200),    // 即将过期（< 300 秒）
-            (4, now + 1000),   // 未过期（> 300 秒）
+            (1, now - 100),  // 已过期
+            (2, now + 100),  // 即将过期（< 300 秒）
+            (3, now + 200),  // 即将过期（< 300 秒）
+            (4, now + 1000), // 未过期（> 300 秒）
         ];
 
         let threshold = 300;
@@ -837,7 +830,10 @@ mod tests {
         let now = Utc::now().timestamp();
 
         // 插入缓存
-        cache.write().await.insert(1, ("token".to_string(), now + 300));
+        cache
+            .write()
+            .await
+            .insert(1, ("token".to_string(), now + 300));
 
         // 清除缓存
         cache.write().await.remove(&1);
@@ -859,9 +855,18 @@ mod tests {
         let now = Utc::now().timestamp();
 
         // 插入多个账号的缓存
-        cache.write().await.insert(1, ("token1".to_string(), now + 300));
-        cache.write().await.insert(2, ("token2".to_string(), now + 300));
-        cache.write().await.insert(3, ("token3".to_string(), now + 300));
+        cache
+            .write()
+            .await
+            .insert(1, ("token1".to_string(), now + 300));
+        cache
+            .write()
+            .await
+            .insert(2, ("token2".to_string(), now + 300));
+        cache
+            .write()
+            .await
+            .insert(3, ("token3".to_string(), now + 300));
 
         // 验证数量
         let cache_guard = cache.read().await;

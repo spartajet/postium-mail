@@ -493,6 +493,7 @@ mod tests {
 
     #[test]
     fn test_change_detection_result_default() {
+        init_tracing();
         let result = ChangeDetectionResult::default();
         assert!(result.new_emails.is_empty());
         assert!(result.modified_emails.is_empty());

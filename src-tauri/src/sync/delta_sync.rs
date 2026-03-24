@@ -243,6 +243,7 @@ mod tests {
 
     #[test]
     fn test_sync_strategy_equality() {
+        init_tracing();
         assert_eq!(SyncStrategy::UidSearch, SyncStrategy::UidSearch);
         assert_ne!(SyncStrategy::UidSearch, SyncStrategy::FullSync);
     }

@@ -524,6 +524,7 @@ mod tests {
 
     #[test]
     fn test_mail_process_result_default() {
+        init_tracing();
         let result = MailProcessResult {
             success_count: 10,
             failed_count: 2,

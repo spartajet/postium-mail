@@ -5,15 +5,12 @@
 use crate::engine::notification_manager::NotificationManager;
 use crate::engine::task_scheduler::TaskScheduler;
 use crate::error::{MailError, Result};
-use crate::protocols::imap::AsyncImapClient;
 use crate::sync::SyncManager;
 use sea_orm::DbConn;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
-use tokio::sync::{RwLock, mpsc};
 use tracing::instrument;
 
 /// 流程引擎

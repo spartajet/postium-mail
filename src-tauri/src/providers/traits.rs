@@ -273,29 +273,6 @@ impl OAuthConfig {
     }
 }
 
-/// 服务商标识类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ProviderAccountType {
-    /// Gmail
-    Gmail,
-    /// Outlook / Hotmail
-    Outlook,
-    /// Yahoo Mail
-    Yahoo,
-    /// iCloud
-    ICloud,
-    /// 163 邮箱
-    Mail163,
-    /// QQ 邮箱
-    QqMail,
-    /// Microsoft 365
-    Microsoft365,
-    /// Google Workspace
-    GoogleWorkspace,
-    /// 自定义 IMAP/SMTP
-    Custom,
-}
-
 /// 服务商能力
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCapabilities {
@@ -495,8 +472,8 @@ pub trait MailProvider: Send + Sync {
 
     /// 生成 XOAUTH2 字符串
     fn generate_xoauth2(&self, email: &str, access_token: &str) -> String {
-        use base64::engine::general_purpose::STANDARD as BASE64;
         use base64::Engine;
+        use base64::engine::general_purpose::STANDARD as BASE64;
 
         let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token);
         BASE64.encode(auth_string)
@@ -583,8 +560,10 @@ mod tests {
         // 验证 XOAUTH2 字符串不为空且是 base64 编码
         assert!(!xoauth2.is_empty());
         // base64 编码应该只包含这些字符
-        assert!(xoauth2
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
+        assert!(
+            xoauth2
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '=')
+        );
     }
 }

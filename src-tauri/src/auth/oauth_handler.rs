@@ -2,14 +2,12 @@
 //!
 //! 处理 OAuth 2.0 授权流程，支持所有 OAuth 提供商
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use rand::Rng;
-use tokio::sync::RwLock;
 
 use crate::error::{OAuthError, Result};
-use crate::providers::{MailProvider, OAuthConfig, OAuthTokenResponse, PkceVerifierStore};
+use crate::providers::{MailProvider, OAuthTokenResponse, PkceVerifierStore};
 
 /// URL 编码（用于 OAuth 参数）
 fn url_encode(value: &str) -> String {
@@ -49,8 +47,8 @@ pub struct AuthorizationContext {
 pub struct OAuthHandler {
     /// PKCE 验证器存储
     pkce_store: Arc<PkceVerifierStore>,
-    /// Provider 配置缓存（避免重复解析）
-    provider_configs: Arc<RwLock<HashMap<String, OAuthConfig>>>,
+    // Provider 配置缓存（避免重复解析）
+    // provider_configs: Arc<RwLock<HashMap<String, OAuthConfig>>>,
 }
 
 impl OAuthHandler {
@@ -61,7 +59,7 @@ impl OAuthHandler {
     pub fn new() -> Self {
         Self {
             pkce_store: Arc::new(PkceVerifierStore::new()),
-            provider_configs: Arc::new(RwLock::new(HashMap::new())),
+            // provider_configs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -371,23 +369,6 @@ impl Default for OAuthHandler {
 mod tests {
     use super::*;
     use crate::providers::GmailProvider;
-    use std::sync::Once;
-
-    static TRACING_INIT: Once = Once::new();
-
-    fn init_tracing() {
-        TRACING_INIT.call_once(|| {
-            tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_test_writer()
-                .with_target(false)
-                .with_ansi(true)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init()
-                .ok();
-        });
-    }
 
     #[test]
     fn test_oauth_handler_new() {

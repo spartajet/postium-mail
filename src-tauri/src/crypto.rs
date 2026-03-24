@@ -20,10 +20,10 @@ pub fn oauth_username(account_id: i32) -> String {
     format!("oauth_{}", account_id)
 }
 
-/// 获取密钥存储路径描述（用于日志显示）
-pub fn get_vault_path() -> anyhow::Result<String> {
-    Ok("[操作系统原生密钥链]".to_string())
-}
+// /// 获取密钥存储路径描述（用于日志显示）
+// pub fn get_vault_path() -> anyhow::Result<String> {
+//     Ok("[操作系统原生密钥链]".to_string())
+// }
 
 #[cfg(test)]
 mod tests {
