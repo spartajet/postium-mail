@@ -4,9 +4,10 @@
 
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::error::{MailError, Result};
-use crate::protocols::imap::{AsyncImapClient, ImapAuth};
+use crate::protocols::imap::{AsyncImapClient, ImapAuth, three_months_ago_imap_format};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
+use crate::sync::SyncStrategy;
 use crate::sync::{
     change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
     mail_processor::MailProcessor,
@@ -377,6 +378,237 @@ impl SyncManager {
 
     /// 内部方法：同步单个文件夹
     ///
+    /// 全量同步文件夹
+    ///
+    /// 当 UIDVALIDITY 变化或首次同步时调用。获取所有邮件进行完整同步。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `imap_client` - IMAP 客户端引用
+    /// * `metadata` - 文件夹元数据（已在调用方获取）
+    ///
+    /// # 返回
+    ///
+    /// 返回同步结果
+    async fn sync_folder_full(
+        &self,
+        account_id: i32,
+        folder: &str,
+        imap_client: &mut AsyncImapClient,
+        metadata: &crate::protocols::imap::FolderMetadata,
+    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+        tracing::info!(
+            "全量同步文件夹: account_id={}, folder={}, uidvalidity={}",
+            account_id,
+            folder,
+            metadata.uidvalidity
+        );
+
+        // 1. 更新文件夹元数据（全量同步特有）
+        self.folder_manager
+            .update_folder_metadata(
+                account_id,
+                folder,
+                Some(metadata.uidvalidity),
+                Some(metadata.uidnext),
+                metadata.highest_modseq,
+            )
+            .await
+            .map_err(|e| {
+                tracing::warn!("更新文件夹元数据失败: {}", e);
+                e
+            })?;
+
+        tracing::debug!(
+            "文件夹元数据已更新: uidvalidity={}, uidnext={}, highest_modseq={:?}",
+            metadata.uidvalidity,
+            metadata.uidnext,
+            metadata.highest_modseq
+        );
+
+        // 2. 获取近三个月的邮件 UID
+        let date_since = three_months_ago_imap_format();
+        tracing::info!(
+            "全量同步，获取三个月内的邮件: folder={}, date_since={}",
+            folder,
+            date_since
+        );
+        let server_uids = imap_client
+            .list_uids_since(folder, &date_since)
+            .await
+            .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?;
+
+        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
+
+        // 3. 全量同步不使用 CONDSTORE
+        let (condstore_modified_uids, highest_modseq): (Option<Vec<u32>>, Option<u64>) =
+            (None, None);
+
+        // 4. 获取服务器标志（用于 UID 搜索降级）
+        let server_uids_with_flags: Vec<(u32, Vec<String>)> = if !server_uids.is_empty() {
+            if let Ok(uids_modseq) = imap_client.fetch_modseqs(&server_uids).await {
+                uids_modseq
+                    .into_iter()
+                    .map(|(uid, modseq)| {
+                        let flags = if modseq.is_some() {
+                            vec!["$MODSEQ".to_string()]
+                        } else {
+                            vec![]
+                        };
+                        (uid, flags)
+                    })
+                    .collect()
+            } else {
+                server_uids.iter().map(|&uid| (uid, vec![])).collect()
+            }
+        } else {
+            vec![]
+        };
+
+        // 5. 调用 sync_folder 进行实际同步
+        let result = self
+            .sync_folder(
+                account_id,
+                folder,
+                Some(&server_uids),
+                Some(&server_uids_with_flags),
+                Some(imap_client),
+                condstore_modified_uids.as_deref(),
+                highest_modseq,
+            )
+            .await?;
+
+        Ok(result)
+    }
+
+    /// 增量同步文件夹
+    ///
+    /// 在 UIDVALIDITY 未变化时调用，仅同步新增和修改的邮件。
+    ///
+    /// # 参数
+    ///
+    /// * `account_id` - 账号 ID
+    /// * `folder` - 文件夹名称
+    /// * `imap_client` - IMAP 客户端引用
+    /// * `capabilities` - 服务器能力信息（用于判断 CONDSTORE 支持）
+    /// * `metadata` - 文件夹元数据（已在调用方获取）
+    ///
+    /// # 返回
+    ///
+    /// 返回同步结果
+    async fn sync_folder_incremental(
+        &self,
+        account_id: i32,
+        folder: &str,
+        imap_client: &mut AsyncImapClient,
+        capabilities: &ServerCapabilities,
+        metadata: &crate::protocols::imap::FolderMetadata,
+    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+        tracing::info!(
+            "增量同步文件夹: account_id={}, folder={}",
+            account_id,
+            folder
+        );
+
+        // 1. 检查 CONDSTORE 支持
+        let supports_condstore = capabilities.supports_condstore;
+
+        tracing::info!("文件夹 {} CONDSTORE 支持: {}", folder, supports_condstore);
+
+        // 2. 获取本地 last_sync_uid
+        let last_sync_uid = self
+            .folder_manager
+            .get_sync_state(account_id, folder)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.last_sync_uid)
+            .map(|v| v as u32)
+            .unwrap_or(0);
+
+        tracing::info!(
+            "增量同步，获取 last UID > {} 的邮件: folder={}",
+            last_sync_uid,
+            folder
+        );
+
+        // 3. 获取新增邮件 UID 列表
+        let server_uids = imap_client
+            .list_uids_after(folder, last_sync_uid)
+            .await
+            .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?;
+
+        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
+
+        if server_uids.is_empty() {
+            tracing::info!("文件夹 {} 没有新邮件，跳过同步", folder);
+            return Ok(crate::sync::delta_sync::DeltaSyncResult {
+                strategy_used: SyncStrategy::UidSearch,
+                new_emails: 0,
+                modified_emails: 0,
+                deleted_emails: 0,
+                flags_changed: 0,
+                duration_ms: 0,
+            });
+        }
+
+        // 4. CONDSTORE 增量同步逻辑
+        let mut condstore_modified_uids = None;
+        let highest_modseq = None;
+
+        if supports_condstore && !server_uids.is_empty() {
+            match imap_client.search_modified_since(0).await {
+                Ok(modified_uids) => {
+                    tracing::info!("CONDSTORE 返回 {} 个变更邮件", modified_uids.len());
+                    condstore_modified_uids = Some(modified_uids);
+                    // TODO: 从 SyncState 获取上一次同步的 highest_modseq
+                }
+                Err(e) => {
+                    tracing::warn!("CONDSTORE 失败: {}, 降级到 UID 搜索", e);
+                }
+            }
+        }
+
+        // 5. 获取服务器标志（仅当 CONDSTORE 不可用时）
+        let server_uids_with_flags = if condstore_modified_uids.is_none() && !server_uids.is_empty()
+        {
+            if let Ok(uids_modseq) = imap_client.fetch_modseqs(&server_uids).await {
+                uids_modseq
+                    .into_iter()
+                    .map(|(uid, modseq)| {
+                        let flags = if modseq.is_some() {
+                            vec!["$MODSEQ".to_string()]
+                        } else {
+                            vec![]
+                        };
+                        (uid, flags)
+                    })
+                    .collect()
+            } else {
+                server_uids.iter().map(|&uid| (uid, vec![])).collect()
+            }
+        } else {
+            vec![]
+        };
+
+        // 6. 调用 sync_folder 进行实际同步
+        let result = self
+            .sync_folder(
+                account_id,
+                folder,
+                Some(&server_uids),
+                Some(&server_uids_with_flags),
+                Some(imap_client),
+                condstore_modified_uids.as_deref(),
+                highest_modseq,
+            )
+            .await?;
+
+        Ok(result)
+    }
+
     /// # 参数
     ///
     /// * `account_id` - 账号 ID
@@ -406,7 +638,7 @@ impl SyncManager {
             });
         tracing::info!("获取文件夹元数据成功: {:?}", metadata);
 
-        // 2. 检测 UIDVALIDITY 变化
+        // 2. 检测 UIDVALIDITY 变化，决定同步策略
         let mut needs_full_resync = false;
         if let Ok(meta) = &metadata {
             let uidvalidity_changed = self
@@ -441,154 +673,21 @@ impl SyncManager {
             }
         }
 
-        // 3. 更新文件夹元数据
-        if needs_full_resync && let Ok(meta) = metadata {
-            self.folder_manager
-                .update_folder_metadata(
-                    account_id,
-                    folder,
-                    Some(meta.uidvalidity),
-                    Some(meta.uidnext),
-                    meta.highest_modseq,
-                )
-                .await
-                .map_err(|e| {
-                    tracing::warn!("更新文件夹元数据失败: {}", e);
-                    // 元数据更新失败不应阻断同步流程
-                    e
-                })?;
-
-            tracing::debug!(
-                "文件夹元数据已更新: uidvalidity={}, uidnext={}, highest_modseq={:?}",
-                meta.uidvalidity,
-                meta.uidnext,
-                meta.highest_modseq
-            );
+        // 3. 根据同步策略调用相应方法
+        if let Ok(meta) = metadata {
+            if needs_full_resync {
+                self.sync_folder_full(account_id, folder, imap_client, &meta)
+                    .await
+            } else {
+                self.sync_folder_incremental(account_id, folder, imap_client, capabilities, &meta)
+                    .await
+            }
+        } else {
+            // 元数据获取失败，返回空结果
+            Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
+                crate::sync::delta_sync::SyncStrategy::UidSearch,
+            ))
         }
-
-        // 2. 检查 CONDSTORE 支持
-        // 如果 UIDVALIDITY 变化，跳过 CONDSTORE（因为 UID 已失效）
-        let supports_condstore = if needs_full_resync {
-            tracing::info!(
-                "UIDVALIDITY 变化，跳过 CONDSTORE 增量同步，强制全量比对: folder={}",
-                folder
-            );
-            false
-        } else {
-            capabilities.supports_condstore
-        };
-
-        tracing::info!(
-            "文件夹 {} CONDSTORE 支持: {} (needs_full_resync={})",
-            folder,
-            supports_condstore,
-            needs_full_resync
-        );
-
-        // 3. 获取服务器 UID 列表
-        // 全量同步：获取所有邮件
-        // 增量同步：使用 last_sync_uid 获取新邮件
-        let server_uids = if needs_full_resync {
-            // UIDVALIDITY 变化，需要获取所有邮件进行全量比对
-            tracing::info!("全量同步，获取所有邮件: folder={}", folder);
-            // 全量同步：使用非常大的 limit 来获取所有邮件
-            imap_client
-                .list_uids(folder, 100000_usize)
-                .await
-                .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?
-        } else {
-            // 增量同步：使用 last_sync_uid 获取新邮件
-            let last_sync_uid = self
-                .folder_manager
-                .get_sync_state(account_id, folder)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|s| s.last_sync_uid)
-                .map(|v| v as u32)
-                .unwrap_or(0);
-
-            tracing::info!(
-                "增量同步，获取 UID > {} 的邮件: folder={}",
-                last_sync_uid,
-                folder
-            );
-
-            imap_client
-                .list_uids_after(folder, last_sync_uid)
-                .await
-                .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?
-        };
-
-        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
-
-        // 4. CONDSTORE 增量同步（如果支持）
-        let (condstore_modified_uids, highest_modseq) =
-            if supports_condstore && !server_uids.is_empty() {
-                // TODO: 从 SyncState 获取上一次同步的 highest_modseq
-                // 临时实现：使用 0 表示获取所有变更
-                let last_modseq = 0u64;
-
-                // 尝试使用 SEARCH MODSEQ 获取变更的邮件
-                tracing::info!("尝试 SEARCH MODSEQ {}:*", last_modseq);
-
-                match imap_client.search_modified_since(last_modseq).await {
-                    Ok(modified_uids) => {
-                        tracing::info!("SEARCH MODSEQ 返回 {} 个变更邮件", modified_uids.len());
-
-                        // 获取当前的 HIGHESTMODSEQ（用于下次同步）
-                        // 注意：这需要重新 SELECT 文件夹才能获取
-                        let highest_modseq = None; // TODO: 从 SELECT 响应中获取
-
-                        (Some(modified_uids), highest_modseq)
-                    }
-                    Err(e) => {
-                        tracing::warn!("SEARCH MODSEQ 失败: {}, 降级到 UID 搜索", e);
-                        (None, None)
-                    }
-                }
-            } else {
-                (None, None)
-            };
-
-        // 5. 获取服务器标志（用于 UID 搜索降级）
-        let server_uids_with_flags: Vec<(u32, Vec<String>)> =
-            if condstore_modified_uids.is_none() && !server_uids.is_empty() {
-                // 不支持 CONDSTORE 或 CONDSTORE 失败，使用 UID 搜索模式
-                if let Ok(uids_modseq) = imap_client.fetch_modseqs(&server_uids).await {
-                    uids_modseq
-                        .into_iter()
-                        .map(|(uid, modseq)| {
-                            let flags = if modseq.is_some() {
-                                vec!["$MODSEQ".to_string()]
-                            } else {
-                                vec![]
-                            };
-                            (uid, flags)
-                        })
-                        .collect()
-                } else {
-                    server_uids.iter().map(|&uid| (uid, vec![])).collect()
-                }
-            } else {
-                // CONDSTORE 模式，不需要获取 flags
-                vec![]
-            };
-
-        // 6. 调用 sync_folder 进行增量同步（传递 IMAP 客户端和 CONDSTORE 数据）
-        let result = self
-            .sync_folder(
-                account_id,
-                folder,
-                Some(&server_uids),
-                Some(&server_uids_with_flags),
-                Some(imap_client),
-                condstore_modified_uids.as_deref(),
-                highest_modseq,
-            )
-            .await?;
-
-        Ok(result)
     }
 
     /// 同步单个文件夹

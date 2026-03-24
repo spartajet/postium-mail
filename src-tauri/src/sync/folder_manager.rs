@@ -398,10 +398,12 @@ impl FolderManager {
                     server_uidvalidity
                 );
                 return Ok(true);
+            } else {
+                return Ok(false);
             }
         }
 
-        Ok(false)
+        Ok(true)
     }
 
     /// 重置文件夹同步状态

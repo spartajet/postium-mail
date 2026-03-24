@@ -180,7 +180,7 @@
 use super::auth::ImapAuth;
 use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
 use crate::providers::generate_xoauth2_string;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_imap::Authenticator;
 use chrono::Datelike;
 use futures::TryStreamExt;
@@ -649,7 +649,7 @@ impl AsyncImapClient {
 
         // SEARCH ALL 获取所有邮件 UID（返回 Result<HashSet<Seq>>）
         let uids = session
-            .search("ALL")
+            .uid_search("ALL")
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
@@ -681,9 +681,9 @@ impl AsyncImapClient {
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
 
         // SEARCH UID <min_uid:* 获取大于指定 UID 的邮件（返回 Result<HashSet<Seq>>）
-        let search_cmd = format!("UID {}:*", min_uid + 1);
+        let search_cmd = format!("UID {}:{}", min_uid + 1, min_uid + 100000);
         let uids = session
-            .search(&search_cmd)
+            .uid_search(&search_cmd)
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
@@ -714,7 +714,7 @@ impl AsyncImapClient {
 
         // 获取所有邮件 UID
         let uids = session
-            .search("ALL")
+            .uid_search("ALL")
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
@@ -746,12 +746,12 @@ impl AsyncImapClient {
             .await
             .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
 
-        // 首先获取总邮件数（用于诊断）
-        let all_uids = session
-            .search("ALL")
-            .await
-            .map_err(|e| anyhow!("搜索所有邮件失败: {}", e))?;
-        tracing::info!("📊 文件夹总邮件数: {}", all_uids.len());
+        // // 首先获取总邮件数（用于诊断）
+        // let all_uids = session
+        //     .search("ALL")
+        //     .await
+        //     .map_err(|e| anyhow!("搜索所有邮件失败: {}", e))?;
+        // tracing::info!("📊 文件夹总邮件数: {}", all_uids.len());
 
         // 使用 SINCE 命令搜索指定日期之后的邮件
         // 注意：SINCE 命令的日期格式是 "01-Jan-2025"（不需要双引号，根据 RFC 3501）
@@ -759,31 +759,31 @@ impl AsyncImapClient {
         tracing::info!("📤 使用 IMAP 搜索命令: '{}'", search_cmd);
 
         let uids = session
-            .search(&search_cmd)
+            .uid_search(&search_cmd)
             .await
             .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
 
         tracing::info!(
-            "📥 SINCE 命令返回 {} 个 UID (预期: 所有近一年的邮件)",
+            "📥 SINCE 命令返回 {} 个 UID (预期: 所有近三个月的邮件)",
             uids.len()
         );
-        tracing::info!(
-            "📊 比例: {}/{} ({:.1}%)",
-            uids.len(),
-            all_uids.len(),
-            (uids.len() as f64 / all_uids.len() as f64) * 100.0
-        );
+        // tracing::info!(
+        //     "📊 比例: {}/{} ({:.1}%)",
+        //     uids.len(),
+        //     all_uids.len(),
+        //     (uids.len() as f64 / all_uids.len() as f64) * 100.0
+        // );
 
-        // 如果 SINCE 返回的结果太少，记录警告
-        if all_uids.len() > 100 && uids.len() < all_uids.len() / 2 {
-            tracing::warn!(
-                "⚠️  SINCE 命令返回的邮件数量异常少！可能的原因:\n\
-                 1. 日期格式不正确: '{}'\n\
-                 2. IMAP 服务器不支持 SINCE 命令\n\
-                 3. 服务器上的邮件确实都在近一个月内",
-                date_since
-            );
-        }
+        // // 如果 SINCE 返回的结果太少，记录警告
+        // if all_uids.len() > 100 && uids.len() < all_uids.len() / 2 {
+        //     tracing::warn!(
+        //         "⚠️  SINCE 命令返回的邮件数量异常少！可能的原因:\n\
+        //          1. 日期格式不正确: '{}'\n\
+        //          2. IMAP 服务器不支持 SINCE 命令\n\
+        //          3. 服务器上的邮件确实都在近一个月内",
+        //         date_since
+        //     );
+        // }
 
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
         uid_list.sort();
@@ -818,7 +818,7 @@ impl AsyncImapClient {
         // 使用 BODY.PEEK[] 保持邮件原本的已读/未读状态
         let uid_str = uid.to_string();
         let messages: Vec<async_imap::types::Fetch> = session
-            .fetch(&uid_str, "(BODY.PEEK[] FLAGS)")
+            .uid_fetch(&uid_str, "(BODY.PEEK[] FLAGS)")
             .await
             .map_err(|e| anyhow!("获取邮件失败: {}", e))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
@@ -883,7 +883,7 @@ impl AsyncImapClient {
         // FETCH 邮件头（使用 BODY.PEEK[HEADER] 不会设置已读标志）
         let uid_str = uid.to_string();
         let messages: Vec<async_imap::types::Fetch> = session
-            .fetch(&uid_str, "(BODY.PEEK[HEADER] FLAGS)")
+            .uid_fetch(&uid_str, "(BODY.PEEK[HEADER] FLAGS)")
             .await
             .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
@@ -943,7 +943,7 @@ impl AsyncImapClient {
 
         // 先获取纯文本正文
         let text_messages: Vec<async_imap::types::Fetch> = session
-            .fetch(&uid_str, "BODY[1.TEXT]")
+            .uid_fetch(&uid_str, "BODY[1.TEXT]")
             .await
             .map_err(|e| anyhow!("获取纯文本正文失败: {}", e))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
@@ -1002,7 +1002,7 @@ impl AsyncImapClient {
         // async-imap 0.11: flags 需要放在查询字符串中
         if is_read {
             session
-                .store(&uid_str, "+FLAGS (\\Seen)")
+                .uid_store(&uid_str, "+FLAGS (\\Seen)")
                 .await
                 .map_err(|e| anyhow!("标记邮件失败: {}", e))?
                 .try_collect::<Vec<_>>()
@@ -1010,7 +1010,7 @@ impl AsyncImapClient {
                 .map_err(|e| anyhow!("收集标记结果失败: {}", e))?;
         } else {
             session
-                .store(&uid_str, "-FLAGS (\\Seen)")
+                .uid_store(&uid_str, "-FLAGS (\\Seen)")
                 .await
                 .map_err(|e| anyhow!("标记邮件失败: {}", e))?
                 .try_collect::<Vec<_>>()
@@ -1037,7 +1037,7 @@ impl AsyncImapClient {
 
         if flagged {
             session
-                .store(&uid_str, "+FLAGS (\\Flagged)")
+                .uid_store(&uid_str, "+FLAGS (\\Flagged)")
                 .await
                 .map_err(|e| anyhow!("设置标志失败: {}", e))?
                 .try_collect::<Vec<_>>()
@@ -1045,7 +1045,7 @@ impl AsyncImapClient {
                 .map_err(|e| anyhow!("收集设置标志结果失败: {}", e))?;
         } else {
             session
-                .store(&uid_str, "-FLAGS (\\Flagged)")
+                .uid_store(&uid_str, "-FLAGS (\\Flagged)")
                 .await
                 .map_err(|e| anyhow!("设置标志失败: {}", e))?
                 .try_collect::<Vec<_>>()
@@ -1072,7 +1072,7 @@ impl AsyncImapClient {
 
         // 标记为删除（返回流）
         session
-            .store(&uid_str, "+FLAGS (\\Deleted)")
+            .uid_store(&uid_str, "+FLAGS (\\Deleted)")
             .await
             .map_err(|e| anyhow!("标记删除失败: {}", e))?
             .try_collect::<Vec<_>>()
@@ -1116,7 +1116,7 @@ impl AsyncImapClient {
 
         let uid_str = uid.to_string();
         let messages = session
-            .fetch(&uid_str, "(RFC822.HEADER)")
+            .uid_fetch(&uid_str, "(RFC822.HEADER)")
             .await
             .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
             .try_collect::<Vec<_>>()
@@ -1507,7 +1507,7 @@ impl AsyncImapClient {
 
         let search_cmd = format!("UID {}:{}", last_uid + 1, "*");
         let uids = session
-            .search(&search_cmd)
+            .uid_search(&search_cmd)
             .await
             .map_err(|e| anyhow!("搜索新邮件失败: {}", e))?;
 
