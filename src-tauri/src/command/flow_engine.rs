@@ -47,13 +47,13 @@ use tauri::State;
 /// println!("活跃任务: {}", status.active_tasks);
 /// println!("已完成: {}", status.completed_tasks);
 /// ```
-#[tauri::command]
-pub async fn get_flow_engine_status(
-    engine_state: State<'_, super::FlowEngineState>,
-) -> Result<EngineStatusReport, String> {
-    let engine = engine_state.0.lock().await;
-    Ok(engine.get_status().await)
-}
+// #[tauri::command]
+// pub async fn get_flow_engine_status(
+//     engine_state: State<'_, super::FlowEngineState>,
+// ) -> Result<EngineStatusReport, String> {
+//     let engine = engine_state.0.lock().await;
+//     Ok(engine.get_status().await)
+// }
 
 /// 为账号添加定时同步任务
 ///

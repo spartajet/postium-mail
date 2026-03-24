@@ -2,13 +2,13 @@
 //!
 //! 提供 PKCE、token 管理、XOAUTH2 生成等通用功能
 
-use std::sync::Mutex;
-use std::collections::HashMap;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use rand::distributions::Alphanumeric;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tracing::info;
 
 /// PKCE 验证器存储
@@ -52,26 +52,23 @@ impl PkceVerifierStore {
 
     /// 获取并移除验证器
     pub fn take(&self, state: &str) -> Option<String> {
-        self.verifiers
-            .lock()
-            .ok()?
-            .remove(state)
-            .map(|v| {
-                info!("移除 PKCE 验证器: state={}", state);
-                v.code_verifier
-            })
+        self.verifiers.lock().ok()?.remove(state).map(|v| {
+            info!("移除 PKCE 验证器: state={}", state);
+            v.code_verifier
+        })
     }
 
     /// 创建 code_challenge（公开方法，供外部使用）
     pub fn create_code_challenge(code_verifier: &str) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
 
         let mut hasher = Sha256::new();
         hasher.update(code_verifier.as_bytes());
         let hash = hasher.finalize();
 
         // Base64 URL-safe encoding
-        BASE64.encode(hash)
+        BASE64
+            .encode(hash)
             .replace('+', "-")
             .replace('/', "_")
             .trim_end_matches('=')
@@ -118,17 +115,17 @@ pub struct OAuthTokenResponse {
     pub id_token: Option<String>,
 }
 
-/// 生成 XOAUTH2 认证字符串
-///
-/// 格式: user={email}\x01auth=Bearer {access_token}\x01\x01
-/// 然后进行 base64 编码
-pub fn generate_xoauth2_string(email: &str, access_token: &str) -> String {
-    let auth_string = format!(
-        "user={}\x01auth=Bearer {}\x01\x01",
-        email, access_token
-    );
-    BASE64.encode(auth_string)
-}
+// /// 生成 XOAUTH2 认证字符串
+// ///
+// /// 格式: user={email}\x01auth=Bearer {access_token}\x01\x01
+// /// 然后进行 base64 编码
+// pub fn generate_xoauth2_string(email: &str, access_token: &str) -> String {
+//     let auth_string = format!(
+//         "user={}\x01auth=Bearer {}\x01\x01",
+//         email, access_token
+//     );
+//     BASE64.encode(auth_string)
+// }
 
 /// 验证 access token 格式
 pub fn validate_access_token(token: &str) -> Result<(), String> {
@@ -151,19 +148,6 @@ pub fn validate_access_token(token: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_generate_xoauth2_string() {
-        let xoauth2 = generate_xoauth2_string("user@example.com", "test_token");
-
-        // 验证是 base64 编码
-        assert!(xoauth2.chars().all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
-
-        // 验证解码后格式正确
-        let decoded = BASE64.decode(&xoauth2).unwrap();
-        let decoded_str = String::from_utf8(decoded).unwrap();
-        assert!(decoded_str.starts_with("user=user@example.com\x01auth=Bearer test_token\x01"));
-    }
 
     #[test]
     fn test_validate_access_token() {
@@ -198,7 +182,11 @@ mod tests {
         let challenge = PkceVerifierStore::create_code_challenge(verifier);
 
         // challenge 应该是 base64 编码的
-        assert!(challenge.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            challenge
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        );
         assert!(!challenge.contains('='));
 
         // 相同的 verifier 应该生成相同的 challenge

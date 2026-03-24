@@ -52,7 +52,7 @@ pub enum ImapAuthInfo {
     /// 密码认证
     Password { username: String, password: String },
     /// OAuth 认证
-    OAuth { email: String, xoauth2: String },
+    OAuth { email: String, access_token: String },
 }
 
 /// SMTP 认证信息
@@ -61,7 +61,7 @@ pub enum SmtpAuthInfo {
     /// 密码认证
     Password { username: String, password: String },
     /// OAuth 认证
-    OAuth { email: String, xoauth2: String },
+    OAuth { email: String, access_token: String },
 }
 
 /// 认证状态
@@ -824,12 +824,12 @@ impl AuthManager {
                     })
                     .await?;
 
-                // 3. 生成 XOAUTH2 字符串
-                let xoauth2 = self.oauth_handler.generate_xoauth2(email, &access_token);
+                // // 3. 生成 XOAUTH2 字符串
+                // let xoauth2 = self.oauth_handler.generate_xoauth2(email, &access_token);
 
                 Ok(ImapAuthInfo::OAuth {
                     email: email.to_string(),
-                    xoauth2,
+                    access_token,
                 })
             }
             AuthType::Password | AuthType::AppPassword => {
@@ -914,12 +914,9 @@ impl AuthManager {
                     })
                     .await?;
 
-                // 3. 生成 XOAUTH2 字符串
-                let xoauth2 = self.oauth_handler.generate_xoauth2(email, &access_token);
-
                 Ok(SmtpAuthInfo::OAuth {
                     email: email.to_string(),
-                    xoauth2,
+                    access_token,
                 })
             }
             AuthType::Password | AuthType::AppPassword => {
@@ -1179,11 +1176,14 @@ mod tests {
     fn test_imap_auth_info_oauth() {
         let auth_info = ImapAuthInfo::OAuth {
             email: "user@example.com".to_string(),
-            xoauth2: "test_xoauth2".to_string(),
+            access_token: "test_xoauth2".to_string(),
         };
 
         match auth_info {
-            ImapAuthInfo::OAuth { email, xoauth2 } => {
+            ImapAuthInfo::OAuth {
+                email,
+                access_token: xoauth2,
+            } => {
                 assert_eq!(email, "user@example.com");
                 assert_eq!(xoauth2, "test_xoauth2");
             }
@@ -1211,11 +1211,14 @@ mod tests {
     fn test_smtp_auth_info_oauth() {
         let auth_info = SmtpAuthInfo::OAuth {
             email: "user@example.com".to_string(),
-            xoauth2: "test_xoauth2".to_string(),
+            access_token: "test_xoauth2".to_string(),
         };
 
         match auth_info {
-            SmtpAuthInfo::OAuth { email, xoauth2 } => {
+            SmtpAuthInfo::OAuth {
+                email,
+                access_token: xoauth2,
+            } => {
                 assert_eq!(email, "user@example.com");
                 assert_eq!(xoauth2, "test_xoauth2");
             }

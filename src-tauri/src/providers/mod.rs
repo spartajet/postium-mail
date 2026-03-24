@@ -184,9 +184,7 @@ pub use traits::{
 };
 
 // OAuth 工具导出（供 auth 模块使用）
-pub use oauth_utils::{
-    generate_xoauth2_string, validate_access_token, OAuthTokenResponse, PkceVerifierStore,
-};
+pub use oauth_utils::{OAuthTokenResponse, PkceVerifierStore, validate_access_token};
 pub use provider_pool::ProviderPool;
 
 // 个人邮箱（阶段2使用）
