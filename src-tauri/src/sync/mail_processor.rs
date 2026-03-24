@@ -121,12 +121,12 @@ pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData, folder: &
 /// 返回名称部分（如果有）
 fn extract_name_from_address(address: &str) -> Option<String> {
     // 地址格式: "Name <email>" 或 "email"
-    if let Some(start) = address.find('<') {
-        if let Some(end) = address.find('>') {
-            let name_part = &address[..start].trim();
-            if !name_part.is_empty() {
-                return Some(name_part.to_string());
-            }
+    if let Some(start) = address.find('<')
+        && let Some(end) = address.find('>')
+    {
+        let name_part = &address[..start].trim();
+        if !name_part.is_empty() {
+            return Some(name_part.to_string());
         }
     }
     None
@@ -211,10 +211,10 @@ fn normalize_folder_name(folder: &str) -> String {
 /// 返回邮箱地址
 fn extract_email_from_address(address: &str) -> String {
     // 地址格式: "Name <email>" 或 "email"
-    if let Some(start) = address.find('<') {
-        if let Some(end) = address.find('>') {
-            return address[start + 1..end].to_string();
-        }
+    if let Some(start) = address.find('<')
+        && let Some(end) = address.find('>')
+    {
+        return address[start + 1..end].to_string();
     }
     address.to_string()
 }

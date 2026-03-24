@@ -191,17 +191,13 @@ mod tests {
                                     );
 
                                     // 获取 SINCE 返回的最旧邮件
-                                    if let Some(oldest_uid) = since_uids.last() {
-                                        if let Ok(email) =
+                                    if let Some(oldest_uid) = since_uids.last()
+                                        && let Ok(email) =
                                             client.fetch_email(folder, *oldest_uid).await
-                                        {
-                                            info!("SINCE 返回的最旧邮件 (UID {}):", oldest_uid);
-                                            info!(
-                                                "  日期: {}",
-                                                email.date.format("%Y-%m-%d %H:%M:%S")
-                                            );
-                                            info!("  主题: {}", email.subject);
-                                        }
+                                    {
+                                        info!("SINCE 返回的最旧邮件 (UID {}):", oldest_uid);
+                                        info!("  日期: {}", email.date.format("%Y-%m-%d %H:%M:%S"));
+                                        info!("  主题: {}", email.subject);
                                     }
                                 }
 

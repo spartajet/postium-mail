@@ -341,7 +341,7 @@ impl SyncManager {
                 return Err(MailError::Internal(format!(
                     "不支持的认证类型: {}",
                     auth_type_str
-                )))
+                )));
             }
         };
 
@@ -408,7 +408,7 @@ impl SyncManager {
 
         // 2. 检测 UIDVALIDITY 变化
         let mut needs_full_resync = false;
-        if let Ok(ref meta) = &metadata {
+        if let Ok(meta) = &metadata {
             let uidvalidity_changed = self
                 .folder_manager
                 .check_uidvalidity_changed(account_id, folder, meta.uidvalidity)
@@ -442,7 +442,7 @@ impl SyncManager {
         }
 
         // 3. 更新文件夹元数据
-        if let Ok(meta) = metadata {
+        if needs_full_resync && let Ok(meta) = metadata {
             self.folder_manager
                 .update_folder_metadata(
                     account_id,
@@ -739,14 +739,13 @@ impl SyncManager {
         }
 
         // 5. 更新 last_sync_uid（使用服务器 UID 中的最大值）
-        if let Some(&max_uid) = server_uids.iter().max() {
-            if let Err(e) = self
+        if let Some(&max_uid) = server_uids.iter().max()
+            && let Err(e) = self
                 .folder_manager
                 .update_last_sync_uid(account_id, folder, max_uid as i32)
                 .await
-            {
-                tracing::warn!("更新 last_sync_uid 失败: {}", e);
-            }
+        {
+            tracing::warn!("更新 last_sync_uid 失败: {}", e);
         }
 
         // 6. 返回同步结果

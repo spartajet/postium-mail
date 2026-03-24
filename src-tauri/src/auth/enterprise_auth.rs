@@ -6,8 +6,8 @@
 //! - MFA 检测
 //! - 条件访问检测
 
-use crate::providers::{AccountType, EnterpriseConfig};
 use crate::error::{MailError, Result};
+use crate::providers::{AccountType, EnterpriseConfig};
 
 /// 企业认证结果
 #[derive(Debug, Clone)]
@@ -64,17 +64,13 @@ impl EnterpriseAuth {
     /// ```
     pub fn validate_config(&self, config: &EnterpriseConfig) -> Result<()> {
         // 如果指定了租户 ID，验证它不为空
-        if let Some(ref tenant_id) = config.tenant_id {
-            if tenant_id.is_empty() {
-                return Err(MailError::Internal("租户 ID 不能为空".to_string()));
-            }
-        }
-
-        // 如果指定了域名，验证它不为空
-        if let Some(ref domain) = config.domain {
-            if domain.is_empty() {
-                return Err(MailError::Internal("域名不能为空".to_string()));
-            }
+        if let Some(tenant_id) = &config.tenant_id
+            && tenant_id.is_empty()
+            && let Some(domain) = &config.domain
+            && domain.is_empty()
+        {
+            return Err(MailError::Internal("租户 ID 和域名 不能为空".to_string()));
+            // }
         }
 
         Ok(())
@@ -99,18 +95,26 @@ impl EnterpriseAuth {
         let domain = email
             .split('@')
             .nth(1)
-            .ok_or_else(|| {
-                MailError::Internal("无效的邮箱地址".to_string())
-            })?;
+            .ok_or_else(|| MailError::Internal("无效的邮箱地址".to_string()))?;
 
         // 已知的个人邮箱域名
         let personal_domains = [
-            "gmail.com", "googlemail.com",
-            "outlook.com", "hotmail.com", "live.com", "msn.com",
-            "yahoo.com", "ymail.com",
-            "163.com", "126.com", "yeah.net",
-            "qq.com", "foxmail.com",
-            "icloud.com", "me.com", "mac.com",
+            "gmail.com",
+            "googlemail.com",
+            "outlook.com",
+            "hotmail.com",
+            "live.com",
+            "msn.com",
+            "yahoo.com",
+            "ymail.com",
+            "163.com",
+            "126.com",
+            "yeah.net",
+            "qq.com",
+            "foxmail.com",
+            "icloud.com",
+            "me.com",
+            "mac.com",
         ];
 
         // 检查是否是个人邮箱
@@ -411,15 +415,19 @@ mod tests {
         let config = EnterpriseConfig::default();
 
         // 企业邮箱
-        assert!(handler
-            .verify_enterprise_email("user@company.com", &config)
-            .await
-            .is_ok());
+        assert!(
+            handler
+                .verify_enterprise_email("user@company.com", &config)
+                .await
+                .is_ok()
+        );
 
         // 个人邮箱
-        assert!(handler
-            .verify_enterprise_email("user@gmail.com", &config)
-            .await
-            .is_ok());
+        assert!(
+            handler
+                .verify_enterprise_email("user@gmail.com", &config)
+                .await
+                .is_ok()
+        );
     }
 }
