@@ -13,7 +13,6 @@ pub struct Model {
     pub folder_type: Option<String>,
     pub uidvalidity: Option<i64>,
     pub uidnext: Option<i64>,
-    pub highest_modseq: Option<i64>,
     pub synced_at: Option<i64>,
     /// 同步进度字段（合并自 sync_states）
     pub last_sync_uid: Option<i32>,   // 最后同步的 UID

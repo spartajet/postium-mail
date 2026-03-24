@@ -12,7 +12,6 @@ pub struct FolderSyncStateDto {
     pub imap_name: String,
     pub uidvalidity: Option<i64>,
     pub uidnext: Option<i64>,
-    pub highest_modseq: Option<i64>,
     pub synced_at: Option<i64>,
 }
 
@@ -24,7 +23,6 @@ impl From<folder_sync_state::Model> for FolderSyncStateDto {
             imap_name: model.imap_name,
             uidvalidity: model.uidvalidity,
             uidnext: model.uidnext,
-            highest_modseq: model.highest_modseq,
             synced_at: model.synced_at,
         }
     }

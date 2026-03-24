@@ -64,7 +64,6 @@ impl MailProvider for Mail163Provider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_idle: false,      // 不支持 IDLE 扩展
-            supports_condstore: false, // 不支持 CONDSTORE 扩展
             supports_push: false,      // 不支持标准推送（虽有 XAPPLEPUSHSERVICE）
             supports_oauth: true,      // 支持 XOAUTH2 认证
             supports_enterprise: false,
@@ -174,7 +173,6 @@ mod tests {
         let caps = provider.capabilities();
 
         assert!(!caps.supports_idle);
-        assert!(!caps.supports_condstore);
         assert!(!caps.supports_push);
         assert!(caps.supports_oauth); // 支持 XOAUTH2 认证
         assert!(!caps.supports_enterprise);

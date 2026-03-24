@@ -213,9 +213,6 @@ pub struct FolderInfo {
 /// - `uidvalidity`: UIDVALIDITY 值，文件夹 UID 的有效性标识符
 /// - `uidnext`: 预期的下一个 UID
 ///
-/// ## CONDSTORE 相关
-/// - `highest_modseq`: CONDSTORE 扩展的最高修改序列号（如果支持）
-///
 /// ## 统计信息
 /// - `exists`: 文件夹中存在的邮件数量
 /// - `recent`: 最近邮件数量（\Recent 标志）
@@ -226,19 +223,12 @@ pub struct FolderInfo {
 /// UIDVALIDITY 是一个递增的数字，每当文件夹的内容
 /// 发生不可逆变化时会改变（如文件夹被删除后重新创建）。
 /// 如果 UIDVALIDITY 改变，之前存储的 UID 不再有效。
-///
-/// # CONDSTORE 说明
-///
-/// `highest_modseq` 用于增量同步（RFC 4551）。
-/// 如果服务器支持 CONDSTORE，可以通过 MODSEQ 检测变更的邮件。
 #[derive(Debug, Clone)]
 pub struct FolderMetadata {
     /// IMAP UIDVALIDITY 值 - 文件夹 UID 的有效性标识符
     pub uidvalidity: u64,
     /// 预期的下一个 UID
     pub uidnext: u64,
-    /// CONDSTORE 扩展的最高修改序列号（如果支持）
-    pub highest_modseq: Option<u64>,
     /// 文件夹中存在的邮件数量
     pub exists: u32,
     /// 最近邮件数量

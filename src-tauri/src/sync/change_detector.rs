@@ -353,15 +353,12 @@ impl ChangeDetector {
     }
 
     /// 检测变更（统一入口）
-    ///
-    /// 根据 CONDSTORE 支持情况自动选择检测策略
     pub async fn detect_changes(
         &self,
         account_id: i32,
         folder: &str,
         server_uids: &[u32],
         last_sync_uid: Option<u32>,
-        _supports_condstore: bool,
     ) -> Result<ChangeDetectionResult> {
         // 1. 检测新邮件
         let new_emails = self

@@ -184,7 +184,6 @@ impl MailProvider for CustomProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_idle: false,
-            supports_condstore: false,
             supports_push: false,
             supports_oauth: false,
             supports_enterprise: true,
@@ -314,7 +313,6 @@ mod tests {
         let caps = provider.capabilities();
 
         assert!(!caps.supports_idle);
-        assert!(!caps.supports_condstore);
         assert!(!caps.supports_push);
         assert!(!caps.supports_oauth);
         assert!(caps.supports_enterprise);
