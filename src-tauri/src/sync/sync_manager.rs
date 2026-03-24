@@ -228,11 +228,7 @@ impl SyncManager {
 
             // 同步单个文件夹
             match self
-                .sync_folder_internal(
-                    account_id,
-                    folder_name,
-                    &mut imap_client,
-                )
+                .sync_folder_internal(account_id, folder_name, &mut imap_client)
                 .await
             {
                 Ok(result) => {
@@ -447,7 +443,7 @@ impl SyncManager {
     /// * `account_id` - 账号 ID
     /// * `folder` - 文件夹名称
     /// * `imap_client` - IMAP 客户端引用
-    /// * `capabilities` - 服务器能力信息（用于判断 CONDSTORE 支持）
+    /// * `capabilities` - 服务器能力信息（保留用于扩展）
     /// * `metadata` - 文件夹元数据（已在调用方获取）
     ///
     /// # 返回
@@ -641,7 +637,7 @@ impl SyncManager {
                 account_id,
                 folder,
                 server_uids,
-                None,  // last_sync_uid - 从本地状态推断
+                None, // last_sync_uid - 从本地状态推断
             )
             .await
             .map_err(|e| MailError::Internal(format!("变更检测失败: {}", e)))?;

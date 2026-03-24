@@ -174,10 +174,8 @@ async fn test_mail_provider_capabilities() {
     let capabilities = gmail.capabilities();
 
     test_info!("Gmail 能力:");
-    test_info!("  - 支持 CONDSTORE: {}", capabilities.supports_condstore);
     test_info!("  - 支持 OAuth: {}", capabilities.supports_oauth);
 
-    assert!(capabilities.supports_condstore, "Gmail 应该支持 CONDSTORE");
     assert!(capabilities.supports_oauth, "Gmail 应该支持 OAuth");
 
     test_success!(MailProvider 能力检测正常");
@@ -235,17 +233,16 @@ async fn test_sync_strategy() {
     use postium_mail_lib::sync::SyncStrategy;
 
     let strategies = vec![
-        SyncStrategy::Condstore,
         SyncStrategy::UidSearch,
         SyncStrategy::FullSync,
     ];
 
-    assert_eq!(strategies.len(), 3);
+    assert_eq!(strategies.len(), 2);
 
     for strategy in strategies {
         test_info!("  - {:?}", strategy);
     }
-    test_success!(SyncStrategy 枚举包含 3 个变体");
+    test_success!(SyncStrategy 枚举包含 2 个变体");
 }
 
 /// 测试 DeltaSyncResult 结构
@@ -257,7 +254,7 @@ async fn test_delta_sync_result() {
     use postium_mail_lib::sync::{DeltaSyncResult, SyncStrategy};
 
     let result = DeltaSyncResult {
-        strategy_used: SyncStrategy::Condstore,
+        strategy_used: SyncStrategy::UidSearch,
         new_emails: 10,
         modified_emails: 5,
         deleted_emails: 2,

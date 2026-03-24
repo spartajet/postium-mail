@@ -9,7 +9,7 @@
 //! - **连接管理**: TLS 加密连接、密码和 OAuth2 认证
 //! - **文件夹操作**: 列出文件夹、获取文件夹元数据、RFC 6154 特殊用途支持
 //! - **邮件操作**: 获取邮件、搜索、标志管理、删除
-//! - **增量同步**: CONDSTORE 支持（RFC 4551）用于高效的变更检测
+//! - **增量同步**: UID 搜索策略用于高效的变更检测
 //! - **实时推送**: IDLE 支持（RFC 2177）用于新邮件通知
 //!
 //! # 与 `ImapService` 的区别
@@ -85,40 +85,17 @@
 //! # }
 //! ```
 //!
-//! ## CONDSTORE 增量同步
+//! ## UID 搜索增量同步
 //!
 //! ```rust,no_run
 //! # async fn example() -> anyhow::Result<()> {
 //! # let mut client = AsyncImapClient::new();
-//! // 检查 CONDSTORE 支持
-//! let supported = client.check_condstore_support().await?;
-//!
-//! if supported {
-//!     // 使用 CONDSTORE 选择文件夹
-//!     let (count, highest_modseq) = client.select_with_condstore("INBOX", None).await?;
-//!     println!("HIGHESTMODSEQ: {:?}", highest_modseq);
-//! }
+//! // 搜索所有邮件 UID
+//! let uids = client.search_all("INBOX").await?;
+//! println!("Found {} emails", uids.len());
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! # CONDSTORE 支持 (RFC 4551)
-//!
-//! CONDSTORE 扩展允许使用 MODSEQ（修改序列号）进行增量同步。
-//!
-//! ## 支持的服务商
-//!
-//! - ✅ Gmail (imap.gmail.com)
-//! - ✅ iCloud (imap.mail.me.com)
-//! - ❌ Outlook/Office365 (outlook.office365.com) - 不支持
-//! - ❌ Yahoo (imap.mail.yahoo.com) - 不支持
-//!
-//! ## 限制说明
-//!
-//! 由于 `async-imap` 0.11 的限制：
-//! - `search_modified_since()` 尚未完全实现，建议使用 UID SEARCH 降级策略
-//! - `fetch_with_modseq()` 无法获取 MODSEQ 值，返回 None
-//! - `select_with_condstore()` 只能启用 CONDSTORE 模式，不支持 UNCHANGEDSINCE 参数
 //!
 //! # IDLE 支持 (RFC 2177)
 //!

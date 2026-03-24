@@ -6,4 +6,3 @@ pub mod connection;
 
 // TODO: 添加更多测试模块
 // pub mod commands;
-// pub mod condstore;
