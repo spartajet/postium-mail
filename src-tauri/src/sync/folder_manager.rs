@@ -28,7 +28,7 @@ impl FolderManager {
 
     /// 更新文件夹同步状态
     ///
-    /// 只更新同步时间戳，IMAP 元数据（uidvalidity, uidnext, highest_modseq）
+    /// 只更新同步时间戳，IMAP 元数据（uidvalidity, uidnext）
     /// 需要在同步邮件时单独获取并更新。
     ///
     /// # 参数
@@ -89,7 +89,6 @@ impl FolderManager {
                     imap_name: Set(info.name.clone()),
                     uidvalidity: Set(None),
                     uidnext: Set(None),
-                    highest_modseq: Set(None),
                     synced_at: Set(Some(now)),
                     ..Default::default()
                 };
@@ -195,7 +194,6 @@ impl FolderManager {
                     folder_type: Set(Some(folder_type.to_string())),
                     uidvalidity: Set(None),
                     uidnext: Set(None),
-                    highest_modseq: Set(None),
                     synced_at: Set(Some(now)),
                     ..Default::default()
                 };
@@ -229,7 +227,7 @@ impl FolderManager {
 
     /// 更新文件夹的 IMAP 元数据
     ///
-    /// 在同步邮件时调用，更新 uidvalidity, uidnext, highest_modseq
+    /// 在同步邮件时调用，更新 uidvalidity, uidnext
     ///
     /// # 参数
     ///
@@ -237,14 +235,12 @@ impl FolderManager {
     /// * `imap_name` - IMAP 文件夹名称
     /// * `uidvalidity` - IMAP UIDVALIDITY 值
     /// * `uidnext` - 预期的下一个 UID
-    /// * `highest_modseq` - CONDSTORE 最高修改序列号
     pub async fn update_folder_metadata(
         &self,
         account_id: i32,
         imap_name: &str,
         uidvalidity: Option<u64>,
         uidnext: Option<u64>,
-        highest_modseq: Option<u64>,
     ) -> Result<()> {
         let existing_state = folder_sync_state::Entity::find()
             .filter(folder_sync_state::Column::AccountId.eq(account_id))
@@ -259,7 +255,6 @@ impl FolderManager {
             let mut active: folder_sync_state::ActiveModel = existing.into();
             active.uidvalidity = Set(uidvalidity.map(|v| v as i64));
             active.uidnext = Set(uidnext.map(|v| v as i64));
-            active.highest_modseq = Set(highest_modseq.map(|v| v as i64));
             active.synced_at = Set(Some(now));
             active.updated_at = Set(Some(now));
 
@@ -275,7 +270,6 @@ impl FolderManager {
                 imap_name: Set(imap_name.to_string()),
                 uidvalidity: Set(uidvalidity.map(|v| v as i64)),
                 uidnext: Set(uidnext.map(|v| v as i64)),
-                highest_modseq: Set(highest_modseq.map(|v| v as i64)),
                 synced_at: Set(Some(now)),
                 ..Default::default()
             };
@@ -426,7 +420,6 @@ impl FolderManager {
             // 重置同步状态
             active.uidvalidity = Set(None);
             active.uidnext = Set(None);
-            active.highest_modseq = Set(None);
             active.synced_at = Set(None);
             active.updated_at = Set(Some(chrono::Utc::now().timestamp()));
 

@@ -128,7 +128,6 @@
 //! [`ProviderCapabilities`] 描述服务商支持的 IMAP 扩展和功能：
 //!
 //! - `supports_idle`: 支持 IDLE 实时推送
-//! - `supports_condstore`: 支持 CONDSTORE 增量同步
 //! - `supports_push`: 支持推送通知
 //! - `supports_oauth`: 支持 OAuth2 认证
 //! - `supports_enterprise`: 支持企业特性
@@ -302,8 +301,6 @@ pub enum ProviderAccountType {
 pub struct ProviderCapabilities {
     /// 是否支持 IDLE 推送
     pub supports_idle: bool,
-    /// 是否支持 CONDSTORE
-    pub supports_condstore: bool,
     /// 是否支持推送通知
     pub supports_push: bool,
     /// 是否支持 OAuth
@@ -326,7 +323,6 @@ impl Default for ProviderCapabilities {
     fn default() -> Self {
         Self {
             supports_idle: false,
-            supports_condstore: false,
             supports_push: false,
             supports_oauth: false,
             supports_enterprise: false,

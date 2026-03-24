@@ -183,7 +183,6 @@ impl ImapService {
     /// 返回文件夹元数据，包括：
     /// - `uidvalidity`: UIDVALIDITY 值
     /// - `uidnext`: 下一个 UID
-    /// - `highest_modseq`: 最高 MODSEQ（如果支持 CONDSTORE）
     /// - `exists`: 邮件数量
     /// - `recent`: 最近邮件数量
     /// - `unseen`: 未读邮件数量

@@ -119,7 +119,6 @@ impl MailProvider for OutlookProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_idle: true,
-            supports_condstore: true,
             supports_push: true,
             supports_oauth: true,
             supports_enterprise: false,

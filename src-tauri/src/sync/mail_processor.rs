@@ -53,8 +53,6 @@ pub struct MailData {
     pub received_at: i64,
     /// 标志状态
     pub flags: EmailFlags,
-    /// MODSEQ（CONDSTORE，可选）
-    pub modseq: Option<i64>,
 }
 
 /// 邮件处理器
@@ -106,7 +104,6 @@ pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData, folder: &
             deleted: email_data.flags.deleted,
             recent: false, // EmailData 没有包含 recent 标志
         },
-        modseq: None, // TODO: 从 CONDSTORE 响应中提取 MODSEQ
     }
 }
 
@@ -566,7 +563,6 @@ mod tests {
             sent_at: chrono::Utc::now().timestamp(),
             received_at: chrono::Utc::now().timestamp(),
             flags,
-            modseq: None,
         };
 
         assert_eq!(mail_data.uid, 12345);

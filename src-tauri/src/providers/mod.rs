@@ -10,7 +10,7 @@
 //!
 //! - **配置获取**: IMAP/SMTP 服务器地址、端口、SSL 配置
 //! - **认证支持**: 支持的认证方式（密码、OAuth2）
-//! - **功能能力**: 是否支持 CONDSTORE、IDLE 等扩展
+//! - **功能能力**: 是否支持 IDLE 等扩展
 //!
 //! ## 个人邮箱 vs 企业邮箱
 //!
@@ -86,8 +86,8 @@
 //!
 //! // 检查能力
 //! let caps = provider.get_capabilities();
-//! if caps.supports_condstore {
-//!     println!("支持 CONDSTORE");
+//! if caps.supports_idle {
+//!     println!("支持 IDLE");
 //! }
 //! ```
 //!

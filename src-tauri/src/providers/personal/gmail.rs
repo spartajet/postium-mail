@@ -120,7 +120,6 @@ impl MailProvider for GmailProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_idle: true,
-            supports_condstore: true,
             supports_push: true,
             supports_oauth: true,
             supports_enterprise: false,

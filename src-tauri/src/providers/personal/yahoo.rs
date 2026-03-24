@@ -46,7 +46,6 @@ impl MailProvider for YahooProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_idle: true,
-            supports_condstore: false,
             supports_push: false,
             supports_oauth: true,
             supports_enterprise: false,
