@@ -3,7 +3,7 @@ name = "postium-mail"
 version = "0.1.0"
 description = "A Tauri App"
 
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,20 +14,29 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "postium_mail_lib"
 
+# 集成测试
+[[test]]
+harness = true
+name = "integration"
+path = "tests/integration/main.rs"
+
+# 服务商测试
+[[test]]
+harness = true
+name = "provider"
+path = "tests/provider/main.rs"
+
 [dependencies]
 # 错误处理
 anyhow = "1"
-thiserror = "2"
-# 异步 trait 支持
-async-trait = "0.1"
-# 随机数生成（用于重试抖动）
-rand = "0.8"
 # 邮件协议
 # imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
 async-imap = { version = "0.11", default-features = false, features = [
   "runtime-tokio"
 ] }
 async-native-tls = "0.6"
+# 异步 trait 支持
+async-trait = "0.1"
 base64 = "0.22"
 # 时间处理
 chrono = "0.4"
@@ -40,18 +49,23 @@ encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
 futures = "0.3"
 getrandom = "0.4"
 hex = "0.4"
+http-body-util = "0.1"
+# HTTP 服务器 (用于 OAuth 回调)
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 lettre = "0.11"
 mail-parser = "0.11"
+migration = { path = "../migration" }
 native-tls = "0.2"  # 保留用于旧的 imap_service.rs
 # OAuth 2.0 相关（最新版本）
 oauth2 = { version = "5", features = ["curl", "reqwest"] }
-# SHA-256 哈希（用于 PKCE）
-sha2 = "0.10"
 # 全局静态变量
 once_cell = "1"
+# 随机数生成（用于重试抖动）
+rand = "0.8"
 # 正则表达式（用于解析RFC 2047编码）
 regex = "1"
-reqwest = { version = "0.13", features = ["json", "form"] }
+reqwest = { version = "0.13", features = ["form", "json"] }
 # 数据库相关
 sea-orm = { version = "2.0.0-rc.37", features = [
   "macros",
@@ -59,19 +73,17 @@ sea-orm = { version = "2.0.0-rc.37", features = [
   "sqlx-sqlite"
 ] }
 sea-orm-migration = "2.0.0-rc.37"
-migration = { path = "../migration" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# SHA-256 哈希（用于 PKCE）
+sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
-# HTTP 服务器 (用于 OAuth 回调)
-hyper = { version = "1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-http-body-util = "0.1"
 # Keyring 安全存储（系统原生密钥链）
 tauri-plugin-keyring = "0.1"
 tauri-plugin-opener = "2"
 tauri-plugin-positioner = "2"
 tauri-plugin-single-instance = "2"
+thiserror = "2"
 # 异步运行时
 tokio = { version = "1", features = ["full"] }
 tokio-native-tls = "0.3"  # Tokio TLS 支持
@@ -89,18 +101,6 @@ url = "2"
 [dev-dependencies]
 # 全局测试设置
 ctor = "0.2"  # 用于在所有测试前初始化 tracing
-
-# 集成测试
-[[test]]
-name = "integration"
-path = "tests/integration/main.rs"
-harness = true
-
-# 服务商测试
-[[test]]
-name = "provider"
-path = "tests/provider/main.rs"
-harness = true
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

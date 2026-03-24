@@ -106,12 +106,14 @@ mod tests {
         let mut client = ImapClient::new();
 
         // 连接并登录
-        let result = client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await;
+        let result = client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await;
 
         let connect_time = start.elapsed();
 
@@ -141,14 +143,20 @@ mod tests {
         info!("   邮件数量: {}", count);
 
         // 获取邮件 UID 列表（限制 10 封）
-        let uids = client.list_uids("INBOX", 10).await.expect("获取 UID 列表失败");
+        let uids = client
+            .list_uids("INBOX", 10)
+            .await
+            .expect("获取 UID 列表失败");
         info!("   获取 UID 列表成功");
         debug!("   最新 {} 封邮件 UID: {:?}", uids.len(), uids);
 
         // 获取第一封邮件（如果有）
         if let Some(&uid) = uids.first() {
             info!("尝试获取第一封邮件 (UID: {})...", uid);
-            let email = client.fetch_email("INBOX", uid).await.expect("获取邮件失败");
+            let email = client
+                .fetch_email("INBOX", uid)
+                .await
+                .expect("获取邮件失败");
             info!("✅ 获取邮件成功!");
             info!("   主题: {}", email.subject);
             info!("   发件人: {}", email.from);
@@ -180,12 +188,14 @@ mod tests {
         let client = SmtpClient::new();
 
         // 连接
-        let result = client.connect(
-            &account.smtp_server,
-            account.smtp_port,
-            &account.account,
-            SmtpAuth::Password(account.password.clone()),
-        ).await;
+        let result = client
+            .connect(
+                &account.smtp_server,
+                account.smtp_port,
+                &account.account,
+                SmtpAuth::Password(account.password.clone()),
+            )
+            .await;
 
         let connect_time = start.elapsed();
 
@@ -276,12 +286,15 @@ mod tests {
         info!("▶️  测试 IMAP 功能...");
         let mut imap_client = ImapClient::new();
 
-        match imap_client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await {
+        match imap_client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await
+        {
             Ok(_) => {
                 info!("   ✅ IMAP 连接成功");
 
@@ -330,12 +343,15 @@ mod tests {
             info!("▶️  测试 SMTP 功能...");
             let smtp_client = SmtpClient::new();
 
-            match smtp_client.connect(
-                &account.smtp_server,
-                account.smtp_port,
-                &account.account,
-                SmtpAuth::Password(account.password.clone()),
-            ).await {
+            match smtp_client
+                .connect(
+                    &account.smtp_server,
+                    account.smtp_port,
+                    &account.account,
+                    SmtpAuth::Password(account.password.clone()),
+                )
+                .await
+            {
                 Ok(_) => {
                     info!("   ✅ SMTP 连接成功");
 
@@ -391,12 +407,15 @@ mod tests {
         let mut client = ImapClient::new();
 
         // 连接并登录
-        match client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await {
+        match client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await
+        {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
@@ -410,9 +429,16 @@ mod tests {
 
                         // 检查常见的已发送邮件文件夹名称
                         let sent_variants = vec![
-                            "Sent", "SENT", "Sent Items", "Sent Mail", "Sent Messages",
-                            "已发送", "已发送邮件", "发送",
-                            "INBOX.Sent", "INBOX.Sent Items",
+                            "Sent",
+                            "SENT",
+                            "Sent Items",
+                            "Sent Mail",
+                            "Sent Messages",
+                            "已发送",
+                            "已发送邮件",
+                            "发送",
+                            "INBOX.Sent",
+                            "INBOX.Sent Items",
                         ];
 
                         info!("\n检查可能的已发送文件夹名称:");
@@ -434,7 +460,10 @@ mod tests {
             }
             Err(e) => {
                 let err_str = e.to_string();
-                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                if err_str.contains("11001")
+                    || err_str.contains("dns")
+                    || err_str.contains("不知道这样的主机")
+                {
                     warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
                 } else {
                     error!("❌ IMAP 连接失败: {}", e);
@@ -458,12 +487,15 @@ mod tests {
         let mut client = ImapClient::new();
 
         // 连接并登录
-        match client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await {
+        match client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await
+        {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
@@ -477,8 +509,14 @@ mod tests {
 
                         // 尝试查找可能的 Sent 文件夹
                         let sent_folder_names = vec![
-                            "Sent", "SENT", "Sent Items", "Sent Mail", "Sent Messages",
-                            "已发送", "已发送邮件", "发送",
+                            "Sent",
+                            "SENT",
+                            "Sent Items",
+                            "Sent Mail",
+                            "Sent Messages",
+                            "已发送",
+                            "已发送邮件",
+                            "发送",
                         ];
 
                         for folder_name in &sent_folder_names {
@@ -496,13 +534,21 @@ mod tests {
 
                                                 // 获取第一封邮件详情
                                                 if let Some(uid) = uids.first() {
-                                                    match client.fetch_email(folder_name, *uid).await {
+                                                    match client
+                                                        .fetch_email(folder_name, *uid)
+                                                        .await
+                                                    {
                                                         Ok(email) => {
                                                             info!("✅ 最新邮件详情:");
                                                             info!("   主题: {}", email.subject);
                                                             info!("   发件人: {}", email.from);
                                                             info!("   收件人: {:?}", email.to);
-                                                            info!("   日期: {}", email.date.format("%Y-%m-%d %H:%M:%S"));
+                                                            info!(
+                                                                "   日期: {}",
+                                                                email
+                                                                    .date
+                                                                    .format("%Y-%m-%d %H:%M:%S")
+                                                            );
                                                         }
                                                         Err(e) => {
                                                             warn!("⚠️  获取邮件详情失败: {}", e);
@@ -536,7 +582,10 @@ mod tests {
             }
             Err(e) => {
                 let err_str = e.to_string();
-                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                if err_str.contains("11001")
+                    || err_str.contains("dns")
+                    || err_str.contains("不知道这样的主机")
+                {
                     warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
                 } else {
                     error!("❌ IMAP 连接失败: {}", e);
@@ -560,12 +609,15 @@ mod tests {
         let mut client = ImapClient::new();
 
         // 连接并登录
-        match client.connect(
-            &account.imap_server,
-            account.imap_port,
-            &account.account,
-            ImapAuth::Password(account.password.clone()),
-        ).await {
+        match client
+            .connect(
+                &account.imap_server,
+                account.imap_port,
+                &account.account,
+                ImapAuth::Password(account.password.clone()),
+            )
+            .await
+        {
             Ok(_) => {
                 info!("✅ IMAP 连接成功!");
 
@@ -581,14 +633,12 @@ mod tests {
                                     info!("📁 {:30} - {:4} 封邮件", folder, count);
 
                                     // 如果有邮件，获取第一封的主题
-                                    if count > 0 {
-                                        if let Ok(uids) = client.list_uids(folder, 1).await {
-                                            if let Some(uid) = uids.first() {
-                                                if let Ok(email) = client.fetch_email(folder, *uid).await {
-                                                    info!("   └─ 最新: {}", email.subject);
-                                                }
-                                            }
-                                        }
+                                    if count > 0
+                                        && let Ok(uids) = client.list_uids(folder, 1).await
+                                        && let Some(uid) = uids.first()
+                                        && let Ok(email) = client.fetch_email(folder, *uid).await
+                                    {
+                                        info!("   └─ 最新: {}", email.subject);
                                     }
                                 }
                                 Err(e) => {
@@ -612,7 +662,10 @@ mod tests {
             }
             Err(e) => {
                 let err_str = e.to_string();
-                if err_str.contains("11001") || err_str.contains("dns") || err_str.contains("不知道这样的主机") {
+                if err_str.contains("11001")
+                    || err_str.contains("dns")
+                    || err_str.contains("不知道这样的主机")
+                {
                     warn!("⚠️  网络连接不可用 (DNS 错误)，跳过测试");
                 } else {
                     error!("❌ IMAP 连接失败: {}", e);

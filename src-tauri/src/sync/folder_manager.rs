@@ -6,9 +6,12 @@ use crate::error::{MailError, Result};
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
 use crate::providers::StandardFolder;
 use crate::storage::models::folder_sync_state;
-use sea_orm::{ActiveModelTrait, ActiveValue, DbConn, EntityTrait, Set, ColumnTrait, QueryFilter, sea_query::Expr, ExprTrait};
-use std::sync::Arc;
 use chrono::Utc;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, DbConn, EntityTrait, ExprTrait, QueryFilter, Set,
+    sea_query::Expr,
+};
+use std::sync::Arc;
 
 /// 文件夹同步状态管理器
 ///
@@ -66,7 +69,9 @@ impl FolderManager {
                 active.synced_at = Set(Some(now));
                 active.updated_at = Set(Some(now));
 
-                active.update(self.db.as_ref()).await
+                active
+                    .update(self.db.as_ref())
+                    .await
                     .map_err(|e| MailError::Internal(format!("更新文件夹同步状态失败: {}", e)))?;
 
                 tracing::debug!(
@@ -89,7 +94,9 @@ impl FolderManager {
                     ..Default::default()
                 };
 
-                active.insert(self.db.as_ref()).await
+                active
+                    .insert(self.db.as_ref())
+                    .await
                     .map_err(|e| MailError::Internal(format!("创建文件夹同步状态失败: {}", e)))?;
 
                 tracing::debug!(
@@ -166,7 +173,9 @@ impl FolderManager {
                 active.synced_at = Set(Some(now));
                 active.updated_at = Set(Some(now));
 
-                active.update(self.db.as_ref()).await
+                active
+                    .update(self.db.as_ref())
+                    .await
                     .map_err(|e| MailError::Internal(format!("更新文件夹同步状态失败: {}", e)))?;
 
                 tracing::debug!(
@@ -191,7 +200,9 @@ impl FolderManager {
                     ..Default::default()
                 };
 
-                active.insert(self.db.as_ref()).await
+                active
+                    .insert(self.db.as_ref())
+                    .await
                     .map_err(|e| MailError::Internal(format!("创建文件夹同步状态失败: {}", e)))?;
 
                 tracing::debug!(
@@ -252,7 +263,9 @@ impl FolderManager {
             active.synced_at = Set(Some(now));
             active.updated_at = Set(Some(now));
 
-            active.update(self.db.as_ref()).await
+            active
+                .update(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("更新文件夹元数据失败: {}", e)))?;
         } else {
             // 创建新记录
@@ -267,7 +280,9 @@ impl FolderManager {
                 ..Default::default()
             };
 
-            active.insert(self.db.as_ref()).await
+            active
+                .insert(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("创建文件夹元数据失败: {}", e)))?;
         }
 
@@ -363,19 +378,26 @@ impl FolderManager {
         imap_name: &str,
         server_uidvalidity: u64,
     ) -> Result<bool> {
-        if let Some(local_state) = self.get_sync_state(account_id, imap_name).await? {
-            if let Some(local_uidvalidity) = local_state.uidvalidity {
-                let local_uidvalidity = local_uidvalidity as u64;
-                if local_uidvalidity != server_uidvalidity {
-                    tracing::warn!(
-                        "UIDVALIDITY 变化: account_id={}, folder={}, local={}, server={}",
-                        account_id,
-                        imap_name,
-                        local_uidvalidity,
-                        server_uidvalidity
-                    );
-                    return Ok(true);
-                }
+        if let Some(local_state) = self.get_sync_state(account_id, imap_name).await?
+            && let Some(local_uidvalidity) = local_state.uidvalidity
+        {
+            let local_uidvalidity = local_uidvalidity as u64;
+            tracing::debug!(
+                "检查 UIDVALIDITY: account_id={}, folder={}, local={}, server={}",
+                account_id,
+                imap_name,
+                local_uidvalidity,
+                server_uidvalidity
+            );
+            if local_uidvalidity != server_uidvalidity {
+                tracing::warn!(
+                    "UIDVALIDITY 变化: account_id={}, folder={}, local={}, server={}",
+                    account_id,
+                    imap_name,
+                    local_uidvalidity,
+                    server_uidvalidity
+                );
+                return Ok(true);
             }
         }
 
@@ -390,11 +412,7 @@ impl FolderManager {
     ///
     /// * `account_id` - 账号 ID
     /// * `imap_name` - IMAP 文件夹名称
-    pub async fn reset_sync_state(
-        &self,
-        account_id: i32,
-        imap_name: &str,
-    ) -> Result<()> {
+    pub async fn reset_sync_state(&self, account_id: i32, imap_name: &str) -> Result<()> {
         tracing::info!(
             "重置文件夹同步状态: account_id={}, folder={}",
             account_id,
@@ -410,7 +428,9 @@ impl FolderManager {
             active.synced_at = Set(None);
             active.updated_at = Set(Some(chrono::Utc::now().timestamp()));
 
-            active.update(self.db.as_ref()).await
+            active
+                .update(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("重置同步状态失败: {}", e)))?;
         }
 
@@ -437,10 +457,7 @@ impl FolderManager {
                 folder_sync_state::Column::SyncCount,
                 Expr::val(synced_count),
             )
-            .col_expr(
-                folder_sync_state::Column::UpdatedAt,
-                Expr::val(now),
-            )
+            .col_expr(folder_sync_state::Column::UpdatedAt, Expr::val(now))
             .exec(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("更新同步进度失败: {}", e)))?;
@@ -470,10 +487,7 @@ impl FolderManager {
                 folder_sync_state::Column::LastError,
                 Expr::val(error_message),
             )
-            .col_expr(
-                folder_sync_state::Column::UpdatedAt,
-                Expr::val(now),
-            )
+            .col_expr(folder_sync_state::Column::UpdatedAt, Expr::val(now))
             .exec(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("记录同步错误失败: {}", e)))?;
@@ -484,28 +498,18 @@ impl FolderManager {
     /// 清除错误计数
     ///
     /// 成功同步后调用，清除错误计数和错误信息
-    pub async fn clear_errors(
-        &self,
-        account_id: i32,
-        imap_name: &str,
-    ) -> Result<()> {
+    pub async fn clear_errors(&self, account_id: i32, imap_name: &str) -> Result<()> {
         let now = Utc::now().timestamp();
 
         folder_sync_state::Entity::update_many()
             .filter(folder_sync_state::Column::AccountId.eq(account_id))
             .filter(folder_sync_state::Column::ImapName.eq(imap_name))
-            .col_expr(
-                folder_sync_state::Column::ErrorCount,
-                Expr::val(0),
-            )
+            .col_expr(folder_sync_state::Column::ErrorCount, Expr::val(0))
             .col_expr(
                 folder_sync_state::Column::LastError,
                 Expr::val(Option::<String>::None),
             )
-            .col_expr(
-                folder_sync_state::Column::UpdatedAt,
-                Expr::val(now),
-            )
+            .col_expr(folder_sync_state::Column::UpdatedAt, Expr::val(now))
             .exec(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("清除错误计数失败: {}", e)))?;
@@ -525,7 +529,9 @@ impl FolderManager {
             active.last_sync_uid = Set(Some(last_sync_uid));
             active.updated_at = Set(Some(Utc::now().timestamp()));
 
-            active.update(self.db.as_ref()).await
+            active
+                .update(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("更新 last_sync_uid 失败: {}", e)))?;
 
             tracing::debug!(
@@ -551,7 +557,9 @@ impl FolderManager {
             active.highest_uid = Set(Some(highest_uid));
             active.updated_at = Set(Some(Utc::now().timestamp()));
 
-            active.update(self.db.as_ref()).await
+            active
+                .update(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("更新 highest_uid 失败: {}", e)))?;
 
             tracing::debug!(
@@ -584,7 +592,9 @@ impl FolderManager {
             active.last_error = Set(None);
             active.updated_at = Set(Some(Utc::now().timestamp()));
 
-            active.update(self.db.as_ref()).await
+            active
+                .update(self.db.as_ref())
+                .await
                 .map_err(|e| MailError::Internal(format!("更新同步完成状态失败: {}", e)))?;
 
             tracing::info!(

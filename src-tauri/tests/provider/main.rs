@@ -176,8 +176,8 @@ mod tests {
     #[test]
     fn test_config_load_returns_none_when_not_set() {
         // 清除环境变量
-        env::remove_var("GMAIL_EMAIL");
-        env::remove_var("GMAIL_APP_PASSWORD");
+        unsafe { env::remove_var("GMAIL_EMAIL") };
+        unsafe { env::remove_var("GMAIL_APP_PASSWORD") };
 
         assert!(GmailConfig::load().is_none());
     }
