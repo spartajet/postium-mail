@@ -150,7 +150,7 @@ pub mod sync; // 公开以支持测试
 
 // 重新导出关键类型
 pub use auth::AuthManager;
-pub use engine::FlowEngine;
+// pub use engine::FlowEngine;
 pub use error::{MailError, Result};
 pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
 pub use storage::database::init_database;
@@ -161,8 +161,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Listener, Manager};
 
 use command::{
-    AuthManagerState, DatabaseState, FlowEngineState, KeyringState, OAuthFlowResult,
-    OAuthSessionManagerState, ProviderPoolState,
+    AuthManagerState, DatabaseState, KeyringState, OAuthFlowResult, OAuthSessionManagerState,
+    ProviderPoolState,
 };
 
 /// 处理 OAuth HTTP 回调
@@ -555,12 +555,12 @@ pub fn run() {
                 ));
 
                 // 创建 FlowEngine
-                let flow_engine =
-                    engine::FlowEngine::new(db_arc, sync_manager, app.handle().clone());
+                // let flow_engine =
+                //     engine::FlowEngine::new(db_arc, sync_manager, app.handle().clone());
 
                 // 注册 FlowEngineState（包装在 Arc<tokio::sync::Mutex> 中）
-                let flow_engine_state = std::sync::Arc::new(tokio::sync::Mutex::new(flow_engine));
-                app.manage(FlowEngineState(flow_engine_state.clone()));
+                // let flow_engine_state = std::sync::Arc::new(tokio::sync::Mutex::new(flow_engine));
+                // app.manage(FlowEngineState(flow_engine_state.clone()));
 
                 // 注册 AuthManagerState 和 ProviderPoolState
                 let auth_manager_for_cleanup = auth_manager.clone();
@@ -569,36 +569,36 @@ pub fn run() {
                 // 注册 OAuthSessionManagerState（使用之前克隆的 session_manager）
                 app.manage(command::OAuthSessionManagerState(session_manager));
 
-                // 启动 FlowEngine
-                {
-                    let engine = flow_engine_state.lock().await;
-                    if let Err(e) = engine.start().await {
-                        tracing::error!("FlowEngine 启动失败: {}", e);
-                    } else {
-                        tracing::info!("FlowEngine 已启动");
-                    }
-                }
+                // // 启动 FlowEngine
+                // {
+                //     // let engine = flow_engine_state.lock().await;
+                //     if let Err(e) = engine.start().await {
+                //         tracing::error!("FlowEngine 启动失败: {}", e);
+                //     } else {
+                //         tracing::info!("FlowEngine 已启动");
+                //     }
+                // }
 
                 // ========== FlowEngine 和 AuthManager 优雅关闭 ==========
                 // 监听应用退出事件，停止 FlowEngine 和 AuthManager
                 let _ = app.listen("tauri://destroy", move |_| {
-                    let engine_state = flow_engine_state.clone();
+                    // let engine_state = flow_engine_state.clone();
                     let auth_manager = auth_manager_for_cleanup.clone();
                     tauri::async_runtime::block_on(async move {
-                        use tokio::time::{Duration, timeout};
+                        // use tokio::time::{Duration, timeout};
 
                         // 停止 FlowEngine
-                        tracing::info!("正在停止 FlowEngine...");
-                        let engine_guard = engine_state.lock().await;
-                        let stop_result =
-                            timeout(Duration::from_secs(5), engine_guard.stop()).await;
+                        // tracing::info!("正在停止 FlowEngine...");
+                        // let engine_guard = engine_state.lock().await;
+                        // let stop_result =
+                        //     timeout(Duration::from_secs(5), engine_guard.stop()).await;
 
-                        match stop_result {
-                            Ok(Ok(())) => tracing::info!("FlowEngine 已停止"),
-                            Ok(Err(e)) => tracing::error!("FlowEngine 停止失败: {}", e),
-                            Err(_) => tracing::warn!("FlowEngine 停止超时，将强制退出"),
-                        }
-                        drop(engine_guard); // 释放锁
+                        // match stop_result {
+                        //     Ok(Ok(())) => tracing::info!("FlowEngine 已停止"),
+                        //     Ok(Err(e)) => tracing::error!("FlowEngine 停止失败: {}", e),
+                        //     Err(_) => tracing::warn!("FlowEngine 停止超时，将强制退出"),
+                        // }
+                        // drop(engine_guard); // 释放锁
 
                         // 停止 AuthManager (包括 OAuth HTTP 服务器)
                         tracing::info!("正在停止 AuthManager...");
@@ -644,12 +644,6 @@ pub fn run() {
             command::sync_account,
             command::sync_account_with_progress,
             command::send_email,
-            // FlowEngine 管理
-            command::add_sync_task,
-            command::remove_sync_task,
-            command::pause_sync_task,
-            command::resume_sync_task,
-            command::trigger_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

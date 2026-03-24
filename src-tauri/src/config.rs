@@ -43,7 +43,11 @@ pub fn load_microsoft_oauth_config() -> Result<OAuthConfig> {
 
     // Microsoft 公共客户端不需要 client_secret
     let client_secret = std::env::var("MICROSOFT_CLIENT_SECRET").ok();
-    let client_secret = if client_secret.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+    let client_secret = if client_secret
+        .as_ref()
+        .map(|s| s.is_empty())
+        .unwrap_or(false)
+    {
         None
     } else {
         client_secret
@@ -53,8 +57,8 @@ pub fn load_microsoft_oauth_config() -> Result<OAuthConfig> {
 
     // 使用 HTTP localhost redirect_uri
     let port = get_oauth_callback_port();
-    let redirect_uri = std::env::var("MICROSOFT_REDIRECT_URI")
-        .unwrap_or_else(|_| generate_redirect_uri(port));
+    let redirect_uri =
+        std::env::var("MICROSOFT_REDIRECT_URI").unwrap_or_else(|_| generate_redirect_uri(port));
 
     let scopes_str = std::env::var("MICROSOFT_SCOPES")
         .unwrap_or_else(|_| {
@@ -74,7 +78,14 @@ pub fn load_microsoft_oauth_config() -> Result<OAuthConfig> {
     // 调试日志：打印加载的配置
     tracing::info!("========== Microsoft OAuth 配置加载 ==========");
     tracing::info!("  client_id: {}", client_id);
-    tracing::info!("  client_secret: {}", if client_secret.is_some() { "*** (已设置)" } else { "None (公共客户端)" });
+    tracing::info!(
+        "  client_secret: {}",
+        if client_secret.is_some() {
+            "*** (已设置)"
+        } else {
+            "None (公共客户端)"
+        }
+    );
     tracing::info!("  tenant: {}", tenant);
     tracing::info!("  redirect_uri: {}", redirect_uri);
     tracing::info!("==============================================");
@@ -98,7 +109,11 @@ pub fn load_google_oauth_config() -> Result<OAuthConfig> {
 
     // Google 桌面应用需要 client_secret
     let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok();
-    let client_secret = if client_secret.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+    let client_secret = if client_secret
+        .as_ref()
+        .map(|s| s.is_empty())
+        .unwrap_or(false)
+    {
         None
     } else {
         client_secret
@@ -106,8 +121,8 @@ pub fn load_google_oauth_config() -> Result<OAuthConfig> {
 
     // 使用 HTTP localhost redirect_uri
     let port = get_oauth_callback_port();
-    let redirect_uri = std::env::var("GOOGLE_REDIRECT_URI")
-        .unwrap_or_else(|_| generate_redirect_uri(port));
+    let redirect_uri =
+        std::env::var("GOOGLE_REDIRECT_URI").unwrap_or_else(|_| generate_redirect_uri(port));
 
     // Google 不需要 tenant，使用空字符串
     let tenant = String::new();
@@ -133,7 +148,14 @@ pub fn load_google_oauth_config() -> Result<OAuthConfig> {
             &client_id
         }
     );
-    tracing::info!("  client_secret: {}", if client_secret.is_some() { "*** (已设置)" } else { "None" });
+    tracing::info!(
+        "  client_secret: {}",
+        if client_secret.is_some() {
+            "*** (已设置)"
+        } else {
+            "None"
+        }
+    );
     tracing::info!("  redirect_uri: {}", redirect_uri);
     tracing::info!("==========================================");
 
@@ -159,7 +181,11 @@ pub fn load_google_workspace_oauth_config() -> Result<OAuthConfig> {
     let client_secret = std::env::var("GOOGLE_WORKSPACE_CLIENT_SECRET")
         .or_else(|_| std::env::var("GOOGLE_CLIENT_SECRET"))
         .ok();
-    let client_secret = if client_secret.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+    let client_secret = if client_secret
+        .as_ref()
+        .map(|s| s.is_empty())
+        .unwrap_or(false)
+    {
         None
     } else {
         client_secret
@@ -199,7 +225,14 @@ pub fn load_google_workspace_oauth_config() -> Result<OAuthConfig> {
             &client_id
         }
     );
-    tracing::info!("  client_secret: {}", if client_secret.is_some() { "*** (已设置)" } else { "None" });
+    tracing::info!(
+        "  client_secret: {}",
+        if client_secret.is_some() {
+            "*** (已设置)"
+        } else {
+            "None"
+        }
+    );
     tracing::info!("  redirect_uri: {}", redirect_uri);
     tracing::info!("======================================================");
 
@@ -226,7 +259,11 @@ pub fn load_microsoft365_oauth_config() -> Result<OAuthConfig> {
     let client_secret = std::env::var("MICROSOFT365_CLIENT_SECRET")
         .or_else(|_| std::env::var("MICROSOFT_CLIENT_SECRET"))
         .ok();
-    let client_secret = if client_secret.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+    let client_secret = if client_secret
+        .as_ref()
+        .map(|s| s.is_empty())
+        .unwrap_or(false)
+    {
         None
     } else {
         client_secret
@@ -265,7 +302,14 @@ pub fn load_microsoft365_oauth_config() -> Result<OAuthConfig> {
     // 调试日志：打印加载的配置
     tracing::info!("========== Microsoft 365 OAuth 配置加载 ==========");
     tracing::info!("  client_id: {}", client_id);
-    tracing::info!("  client_secret: {}", if client_secret.is_some() { "*** (已设置)" } else { "None (公共客户端)" });
+    tracing::info!(
+        "  client_secret: {}",
+        if client_secret.is_some() {
+            "*** (已设置)"
+        } else {
+            "None (公共客户端)"
+        }
+    );
     tracing::info!("  tenant: {}", tenant);
     tracing::info!("  redirect_uri: {}", redirect_uri);
     tracing::info!("==================================================");
@@ -352,6 +396,7 @@ mod tests {
 
     #[test]
     fn test_get_data_dir() {
+        init_tracing();
         let dir = get_data_dir();
         assert!(dir.is_ok());
         assert!(dir.unwrap().ends_with(".postium"));

@@ -16,17 +16,6 @@ use crate::auth::token_manager::TokenManager;
 use crate::error::{MailError, Result};
 use crate::providers::{AuthType, ProviderPool};
 
-/// 认证凭证
-#[derive(Debug, Clone)]
-pub enum AuthCredential {
-    /// OAuth 授权码
-    OAuthCode { code: String, state: String },
-    /// 密码
-    Password(String),
-    /// 应用专用密码
-    AppPassword(String),
-}
-
 /// 认证结果
 #[derive(Debug, Clone)]
 pub struct AuthResult {
@@ -1084,55 +1073,12 @@ impl AuthManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
-
-    static TRACING_INIT: Once = Once::new();
-
-    fn init_tracing() {
-        TRACING_INIT.call_once(|| {
-            tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::TRACE)
-                .with_test_writer()
-                .with_target(false)
-                .with_ansi(true)
-                .with_line_number(true)
-                .with_file(true)
-                .try_init()
-                .ok();
-        });
-    }
 
     #[test]
     fn test_auth_manager_new() {
         // 注意：测试需要 Tauri AppHandle，这里只测试结构
         // 实际测试需要集成测试环境
         // TODO: 实现实际的集成测试
-    }
-
-    #[test]
-    fn test_auth_credential_oauth_code() {
-        let credential = AuthCredential::OAuthCode {
-            code: "test_code".to_string(),
-            state: "test_state".to_string(),
-        };
-        match credential {
-            AuthCredential::OAuthCode { code, state } => {
-                assert_eq!(code, "test_code");
-                assert_eq!(state, "test_state");
-            }
-            _ => panic!("Unexpected credential type"),
-        }
-    }
-
-    #[test]
-    fn test_auth_credential_password() {
-        let credential = AuthCredential::Password("test_password".to_string());
-        match credential {
-            AuthCredential::Password(pwd) => {
-                assert_eq!(pwd, "test_password");
-            }
-            _ => panic!("Unexpected credential type"),
-        }
     }
 
     #[test]

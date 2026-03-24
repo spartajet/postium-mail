@@ -18,7 +18,6 @@ pub use account::*;
 pub use auth::*;
 // pub use connection::*;
 pub use email::*;
-pub use flow_engine::*;
 pub use oauth::*;
 pub use provider::*;
 pub use sync::*;
@@ -28,7 +27,6 @@ pub use oauth::OAuthFlowResult;
 
 use sea_orm::DbConn;
 use std::sync::{Arc, Mutex as StdMutex};
-use tokio::sync::Mutex;
 
 use crate::auth::OAuthSessionManager;
 
@@ -48,18 +46,6 @@ impl DatabaseState {
 /// Keyring 密钥环状态
 pub struct KeyringState {
     pub app_handle: tauri::AppHandle,
-}
-
-/// FlowEngine 状态
-///
-/// 管理流程引擎的全局单例
-pub struct FlowEngineState(pub Arc<Mutex<crate::engine::FlowEngine>>);
-
-impl FlowEngineState {
-    /// 克隆引擎实例
-    pub fn clone_engine(&self) -> Arc<Mutex<crate::engine::FlowEngine>> {
-        Arc::clone(&self.0)
-    }
 }
 
 /// AuthManager 状态

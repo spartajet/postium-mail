@@ -855,6 +855,7 @@ mod tests {
 
     #[test]
     fn test_sync_progress_creation() {
+        init_tracing();
         let progress = SyncProgress {
             stage: SyncStage::SyncingEmails,
             folder: Some("INBOX".to_string()),
