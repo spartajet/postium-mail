@@ -81,7 +81,6 @@ mod tests {
             imap_name: "INBOX".to_string(),
             uidvalidity: Some(12345),
             uidnext: Some(101),
-            highest_modseq: Some(67890),
             synced_at: Some(1234567890),
             created_at: Some(1234567890),
             updated_at: Some(1234567890),
