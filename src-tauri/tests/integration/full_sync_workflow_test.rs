@@ -38,9 +38,7 @@ async fn test_full_sync_workflow() {
 
     // 步骤 3: 模拟服务器能力检查
     test_info!("步骤 3/{}: 检查服务器能力", total_steps);
-    let supports_condstore = false;
-    test_info!("支持 CONDSTORE: {}", supports_condstore);
-    test_info!("推荐策略: {}", if supports_condstore { "CONDSTORE" } else { "UID 搜索" });
+    test_info!("推荐策略: UID 搜索");
     steps_completed += 1;
 
     // 步骤 4: 同步文件夹列表
@@ -66,7 +64,7 @@ async fn test_full_sync_workflow() {
 
     // 步骤 7: 增量同步
     test_info!("步骤 7/{}: 增量同步", total_steps);
-    let strategy = if supports_condstore { "CONDSTORE" } else { "UID 搜索" };
+    let strategy = "UID 搜索";
     test_success!("增量同步完成 (模拟)");
     test_info!("策略: {}", strategy);
     steps_completed += 1;
@@ -105,14 +103,8 @@ async fn test_incremental_sync_workflow() {
 
     // 增量同步
     test_info!("增量同步...");
-    let supports_condstore = false;
-    if supports_condstore {
-        test_info!("使用 CONDSTORE 检测变更");
-        test_info!("(需要服务器支持)");
-    } else {
-        test_info!("使用 UID 搜索对比");
-        test_info!("(降级策略)");
-    }
+    test_info!("使用 UID 搜索对比");
+    test_info!("(标准策略)");
 
     test_success!("增量同步工作流测试完成");
 }
@@ -128,7 +120,6 @@ async fn test_sync_error_recovery() {
     test_info!("  2. 认证失败 → 提示用户检查凭证");
     test_info!("  3. 文件夹不存在 → 跳过或创建");
     test_info!("  4. 网络超时 → 增加超时时间");
-    test_info!("  5. CONDSTORE 不支持 → 降级到 UID 搜索");
 
     test_info!("重试策略:");
     test_info!("  - 最多重试 3 次");

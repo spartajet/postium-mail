@@ -216,21 +216,6 @@ mod tests {
         info!("步骤 2: 获取 IMAP CAPABILITIES");
         info!("========================================");
 
-        // 使用 check_condstore_support 内部获取 capabilities 的方式
-        match client.check_condstore_support().await {
-            Ok(has_condstore) => {
-                debug!("CONDSTORE 支持: {}", has_condstore);
-                if has_condstore {
-                    info!("✅ CONDSTORE 支持: 是");
-                } else {
-                    info!("⚠️  CONDSTORE 支持: 否");
-                }
-            }
-            Err(e) => {
-                warn!("获取 CONDSTORE 支持状态失败: {}", e);
-            }
-        }
-
         match client.check_idle_support().await {
             Ok(has_idle) => {
                 debug!("IDLE 支持: {}", has_idle);

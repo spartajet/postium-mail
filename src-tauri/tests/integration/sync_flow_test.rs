@@ -87,14 +87,6 @@ async fn test_greenmail_imap_capabilities() {
                             // 验证响应包含 IMAP4rev1
                             assert!(response.contains("IMAP4rev1"), "应该支持 IMAP4rev1");
 
-                            // 检查是否支持 CONDSTORE
-                            let has_condstore = response.contains("CONDSTORE");
-                            if has_condstore {
-                                test_success!(GreenMail 支持 CONDSTORE");
-                            } else {
-                                test_info!(GreenMail 不支持 CONDSTORE（这是预期的）");
-                            }
-
                             test_success!(CAPABILITY 命令执行成功");
                             return;
                         }

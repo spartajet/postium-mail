@@ -363,7 +363,7 @@ impl MailProcessor {
             .await?;
 
         if existing {
-            // 邮件已存在，更新标志和 MODSEQ
+            // 邮件已存在，更新标志
             self.update_mail_flags(account_id, folder, mail_data)
                 .await?;
             Ok(false) // 返回 false 表示已存在（跳过插入）

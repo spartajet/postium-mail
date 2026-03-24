@@ -128,14 +128,15 @@ impl DeltaSync {
         let start = std::time::Instant::now();
 
         // 使用 UID 搜索策略
-        let result = self.sync_with_uid_search(
-            account_id,
-            folder,
-            server_uids,
-            last_sync_uid,
-            server_uids_with_flags,
-        )
-        .await?;
+        let result = self
+            .sync_with_uid_search(
+                account_id,
+                folder,
+                server_uids,
+                last_sync_uid,
+                server_uids_with_flags,
+            )
+            .await?;
 
         // 记录耗时
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -242,16 +243,16 @@ mod tests {
 
     #[test]
     fn test_sync_strategy_equality() {
-        assert_eq!(SyncStrategy::Condstore, SyncStrategy::Condstore);
-        assert_ne!(SyncStrategy::Condstore, SyncStrategy::UidSearch);
+        assert_eq!(SyncStrategy::UidSearch, SyncStrategy::UidSearch);
+        assert_ne!(SyncStrategy::UidSearch, SyncStrategy::FullSync);
     }
 
     #[test]
     fn test_delta_sync_result_empty() {
-        let result = DeltaSyncResult::empty(SyncStrategy::Condstore);
+        let result = DeltaSyncResult::empty(SyncStrategy::UidSearch);
         assert!(!result.has_changes());
         assert_eq!(result.total_changes(), 0);
-        assert_eq!(result.strategy_used, SyncStrategy::Condstore);
+        assert_eq!(result.strategy_used, SyncStrategy::UidSearch);
     }
 
     #[test]
