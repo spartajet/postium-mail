@@ -135,7 +135,7 @@
 //! Username: "oauth:<account_id>"       → OAuth Token
 //! ```
 
-#![allow(dead_code, ambiguous_glob_reexports, unused_variables, deprecated)]
+#![allow(ambiguous_glob_reexports, unused_variables)]
 mod command;
 pub mod config;
 mod crypto;
@@ -380,19 +380,18 @@ async fn exchange_and_create_account(
 /// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
 fn init_tracing() {
     // 配置日志过滤器，屏蔽第三方 crate 的冗余日志
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new("debug")
-                // 过滤 keyring 相关 crate 的日志
-                .add_directive("keyring=error".parse().unwrap())
-                .add_directive("tauri_plugin_keyring=error".parse().unwrap())
-                .add_directive("secret_service=error".parse().unwrap())
-                .add_directive("windows=error".parse().unwrap())
-                .add_directive("windows_sys=error".parse().unwrap())
-                .add_directive("tokio_native_tls=warn".parse().unwrap())
-                .add_directive("native_tls=warn".parse().unwrap())
-                .add_directive("async_imap=warn".parse().unwrap())
-        });
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("debug")
+            // 过滤 keyring 相关 crate 的日志
+            .add_directive("keyring=error".parse().unwrap())
+            .add_directive("tauri_plugin_keyring=error".parse().unwrap())
+            .add_directive("secret_service=error".parse().unwrap())
+            .add_directive("windows=error".parse().unwrap())
+            .add_directive("windows_sys=error".parse().unwrap())
+            .add_directive("tokio_native_tls=warn".parse().unwrap())
+            .add_directive("native_tls=warn".parse().unwrap())
+            .add_directive("async_imap=warn".parse().unwrap())
+    });
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)
@@ -586,7 +585,7 @@ pub fn run() {
                     let engine_state = flow_engine_state.clone();
                     let auth_manager = auth_manager_for_cleanup.clone();
                     tauri::async_runtime::block_on(async move {
-                        use tokio::time::{timeout, Duration};
+                        use tokio::time::{Duration, timeout};
 
                         // 停止 FlowEngine
                         tracing::info!("正在停止 FlowEngine...");
@@ -646,7 +645,6 @@ pub fn run() {
             command::sync_account_with_progress,
             command::send_email,
             // FlowEngine 管理
-            command::get_flow_engine_status,
             command::add_sync_task,
             command::remove_sync_task,
             command::pause_sync_task,

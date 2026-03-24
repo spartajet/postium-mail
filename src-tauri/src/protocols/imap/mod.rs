@@ -19,7 +19,6 @@
 mod auth;
 mod client;
 mod error;
-pub mod idle_manager;
 mod parser;
 mod service;
 mod tests;
@@ -39,14 +38,11 @@ pub use types::*;
 // 错误类型
 pub use error::{ImapError, Result as ImapResult};
 
-// IDLE 管理
-pub use idle_manager::ImapIdleManager;
-
 // IMAP 服务
 pub use service::ImapService;
 
 // 测试工具
-pub use tests::{test_connection, ConnectionTestResult};
+pub use tests::{ConnectionTestResult, test_connection};
 
 // 向后兼容别名
 pub use AsyncImapClient as ImapClient;

@@ -9,10 +9,7 @@ use rand::Rng;
 use tokio::sync::RwLock;
 
 use crate::error::{OAuthError, Result};
-use crate::providers::{
-    generate_xoauth2_string, validate_access_token, MailProvider, OAuthConfig, OAuthTokenResponse,
-    PkceVerifierStore,
-};
+use crate::providers::{MailProvider, OAuthConfig, OAuthTokenResponse, PkceVerifierStore};
 
 /// URL 编码（用于 OAuth 参数）
 fn url_encode(value: &str) -> String {
@@ -362,49 +359,6 @@ impl OAuthHandler {
 
         Ok(token_response)
     }
-
-    /// 生成 XOAUTH2 字符串（用于 IMAP/SMTP 认证）
-    ///
-    /// # 参数
-    ///
-    /// * `email` - 邮箱地址
-    /// * `access_token` - OAuth 访问令牌
-    ///
-    /// # 返回
-    ///
-    /// 返回 XOAUTH2 认证字符串（Base64 编码）
-    ///
-    /// # 示例
-    ///
-    /// ```rust,ignore
-    /// let handler = OAuthHandler::new();
-    /// let xoauth2 = handler.generate_xoauth2("user@example.com", "access_token");
-    /// ```
-    pub fn generate_xoauth2(&self, email: &str, access_token: &str) -> String {
-        generate_xoauth2_string(email, access_token)
-    }
-
-    /// 验证 Access Token（可选，用于调试）
-    ///
-    /// # 参数
-    ///
-    /// * `access_token` - OAuth 访问令牌
-    ///
-    /// # 返回
-    ///
-    /// - `Ok(())` - Token 格式有效
-    /// - `Err(message)` - Token 格式无效
-    pub fn validate_access_token(&self, access_token: &str) -> Result<()> {
-        validate_access_token(access_token).map_err(OAuthError::RefreshFailed)?;
-        Ok(())
-    }
-
-    /// 清理过期的 PKCE 验证器
-    ///
-    /// 应该定期调用此方法来清理内存
-    pub fn cleanup_expired_verifiers(&self) {
-        self.pkce_store.cleanup_expired();
-    }
 }
 
 impl Default for OAuthHandler {
@@ -472,38 +426,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_generate_xoauth2() {
-        let handler = OAuthHandler::new();
-
-        let xoauth2 = handler.generate_xoauth2("user@example.com", "test_access_token");
-
-        // 验证 base64 编码
-        assert!(xoauth2
-            .chars()
-            .all(|c| { c.is_alphanumeric() || c == '+' || c == '/' || c == '=' }));
-
-        // 验证包含用户名
-        assert!(xoauth2.contains("dXNlcj1")); // "user=" 的 base64 编码
-    }
-
-    #[test]
-    fn test_validate_access_token() {
-        let handler = OAuthHandler::new();
-
-        // 有效的 token
-        assert!(handler.validate_access_token("valid_token_12345").is_ok());
-
-        // 空的 token
-        assert!(handler.validate_access_token("").is_err());
-
-        // 太短的 token
-        assert!(handler.validate_access_token("short").is_err());
-
-        // 包含空格的 token
-        assert!(handler.validate_access_token("invalid token").is_err());
-    }
-
-    #[tokio::test]
     async fn test_pkce_flow() {
         let handler = OAuthHandler::new();
         let provider = GmailProvider;
@@ -523,14 +445,6 @@ mod tests {
     #[tokio::test]
     async fn test_csrf_token_length() {
         assert_eq!(OAuthHandler::CSRF_TOKEN_LENGTH, 32);
-    }
-
-    #[test]
-    fn test_cleanup_expired_verifiers() {
-        let handler = OAuthHandler::new();
-
-        // 应该不 panic
-        handler.cleanup_expired_verifiers();
     }
 
     #[tokio::test]

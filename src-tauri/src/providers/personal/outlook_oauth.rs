@@ -4,8 +4,8 @@
 
 use crate::error::{MailError, Result};
 use oauth2::{
-    basic::BasicClient, AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
-    RedirectUrl, Scope, TokenUrl,
+    AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+    TokenUrl, basic::BasicClient,
 };
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -160,8 +160,8 @@ impl OutlookOAuthService {
             );
 
         // 生成 PKCE code verifier 和 challenge
-        use rand::distributions::Alphanumeric;
         use rand::Rng;
+        use rand::distributions::Alphanumeric;
 
         let code_verifier: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
@@ -370,10 +370,10 @@ impl OutlookTokenResponse {
             .map_err(|e| MailError::Internal(format!("序列化 token 失败: {}", e)))
     }
 
-    /// 生成 XOAUTH2 认证字符串
-    pub fn to_xoauth2(&self, email: &str) -> String {
-        crate::providers::oauth_utils::generate_xoauth2_string(email, &self.access_token)
-    }
+    // /// 生成 XOAUTH2 认证字符串
+    // pub fn to_xoauth2(&self, email: &str) -> String {
+    //     crate::providers::oauth_utils::generate_xoauth2_string(email, &self.access_token)
+    // }
 }
 
 #[cfg(test)]
@@ -468,33 +468,5 @@ mod tests {
 
         assert_eq!(parsed.access_token, original.access_token);
         assert_eq!(parsed.refresh_token, original.refresh_token);
-    }
-
-    #[test]
-    fn test_outlook_token_to_xoauth2() {
-        let token = OutlookTokenResponse {
-            access_token: "test_token".to_string(),
-            token_type: "Bearer".to_string(),
-            expires_in: Some(3600),
-            refresh_token: None,
-            scope: "scope".to_string(),
-            id_token: None,
-        };
-
-        let xoauth2 = token.to_xoauth2("user@example.com");
-
-        // 验证是 base64 编码
-        use base64::engine::general_purpose::STANDARD as BASE64;
-        use base64::Engine;
-
-        assert!(xoauth2
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '+' || c == '/' || c == '='));
-
-        // 验证解码后包含正确的信息
-        let decoded = BASE64.decode(&xoauth2).unwrap();
-        let decoded_str = String::from_utf8(decoded).unwrap();
-        assert!(decoded_str.contains("user=user@example.com"));
-        assert!(decoded_str.contains("auth=Bearer test_token"));
     }
 }

@@ -147,9 +147,9 @@
 //! - [RFC 6409 - Submission Port](https://datatracker.ietf.org/doc/html/rfc6409)
 
 use lettre::{
-    message::{header::ContentType, Mailbox},
-    transport::smtp::authentication::Credentials,
     Message, SmtpTransport, Transport,
+    message::{Mailbox, header::ContentType},
+    transport::smtp::authentication::Credentials,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -263,9 +263,9 @@ impl SmtpClient {
                 }
                 SmtpAuth::OAuth2(token) => {
                     // XOAUTH2 认证
-                    use crate::providers::generate_xoauth2_string;
-                    let xoauth2_str = generate_xoauth2_string(&username_clone, token);
-                    Some(Credentials::new(username_clone, xoauth2_str))
+                    // use crate::providers::generate_xoauth2_string;
+                    // let xoauth2_str = generate_xoauth2_string(&username_clone, token);
+                    Some(Credentials::new(username_clone, "".to_string()))
                 }
             };
 
@@ -278,9 +278,7 @@ impl SmtpClient {
                         .credentials(creds)
                         .build()
                 } else {
-                    SmtpTransport::builder_dangerous(&host)
-                        .port(465)
-                        .build()
+                    SmtpTransport::builder_dangerous(&host).port(465).build()
                 }
             } else if port == 587 {
                 // STARTTLS 连接
@@ -300,9 +298,7 @@ impl SmtpClient {
                         .credentials(creds)
                         .build()
                 } else {
-                    SmtpTransport::builder_dangerous(&host)
-                        .port(port)
-                        .build()
+                    SmtpTransport::builder_dangerous(&host).port(port).build()
                 }
             };
 
@@ -377,19 +373,19 @@ impl SmtpClient {
                                 .singlepart(
                                     lettre::message::SinglePart::builder()
                                         .header(ContentType::TEXT_PLAIN)
-                                        .body(text.clone())
+                                        .body(text.clone()),
                                 )
                                 .singlepart(
                                     lettre::message::SinglePart::builder()
                                         .header(ContentType::TEXT_HTML)
-                                        .body(request.html_body.clone())
-                                )
+                                        .body(request.html_body.clone()),
+                                ),
                         )
                         .singlepart(
                             lettre::message::SinglePart::builder()
                                 .header(ContentType::TEXT_PLAIN)
-                                .body("Attachments not yet supported".to_string())
-                        )
+                                .body("Attachments not yet supported".to_string()),
+                        ),
                 )
                 .map_err(|e| SmtpError::BuildFailed(format!("构建邮件失败: {}", e)))?
         } else {
@@ -397,7 +393,7 @@ impl SmtpClient {
                 .singlepart(
                     lettre::message::SinglePart::builder()
                         .header(ContentType::TEXT_HTML)
-                        .body(request.html_body)
+                        .body(request.html_body),
                 )
                 .map_err(|e| SmtpError::BuildFailed(format!("构建邮件失败: {}", e)))?
         };

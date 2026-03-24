@@ -337,7 +337,7 @@ impl SyncManager {
             ImapAuthInfo::Password { username, password } => ImapAuth::Password(password),
             ImapAuthInfo::OAuth {
                 email: oauth_email,
-                xoauth2,
+                access_token: xoauth2,
             } => ImapAuth::OAuth2 {
                 email: oauth_email,
                 access_token: xoauth2,

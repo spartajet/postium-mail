@@ -2,19 +2,18 @@
 //!
 //! 协调整个邮件客户端的工作流程，整合定时任务、通知管理和实时监听
 
-use crate::error::{MailError, Result};
 use crate::engine::notification_manager::NotificationManager;
 use crate::engine::task_scheduler::TaskScheduler;
-use crate::protocols::imap::idle_manager::ImapIdleManager;
+use crate::error::{MailError, Result};
 use crate::protocols::imap::AsyncImapClient;
 use crate::sync::SyncManager;
 use sea_orm::DbConn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
+use tokio::sync::{RwLock, mpsc};
 use tracing::instrument;
 
 /// 流程引擎
@@ -30,9 +29,8 @@ pub struct FlowEngine {
     /// 同步管理器
     sync_manager: Arc<SyncManager>,
 
-    /// IDLE 管理器集合: account_id -> ImapIdleManager
-    idle_managers: Arc<RwLock<HashMap<i32, Arc<ImapIdleManager>>>>,
-
+    // /// IDLE 管理器集合: account_id -> ImapIdleManager
+    // idle_managers: Arc<RwLock<HashMap<i32, Arc<ImapIdleManager>>>>,
     /// 全局运行标志
     running: Arc<AtomicBool>,
 
@@ -101,11 +99,7 @@ pub struct EngineStatusReport {
 
 impl FlowEngine {
     /// 创建新的流程引擎
-    pub fn new(
-        db: Arc<DbConn>,
-        sync_manager: Arc<SyncManager>,
-        app_handle: AppHandle,
-    ) -> Self {
+    pub fn new(db: Arc<DbConn>, sync_manager: Arc<SyncManager>, app_handle: AppHandle) -> Self {
         let config = FlowEngineConfig::default();
 
         // 创建任务调度器
@@ -122,7 +116,7 @@ impl FlowEngine {
             task_scheduler,
             notification_manager,
             sync_manager,
-            idle_managers: Arc::new(RwLock::new(HashMap::new())),
+            // idle_managers: Arc::new(RwLock::new(HashMap::new())),
             running: Arc::new(AtomicBool::new(false)),
             db,
             app_handle,
@@ -155,7 +149,7 @@ impl FlowEngine {
             task_scheduler,
             notification_manager,
             sync_manager,
-            idle_managers: Arc::new(RwLock::new(HashMap::new())),
+            // idle_managers: Arc::new(RwLock::new(HashMap::new())),
             running: Arc::new(AtomicBool::new(false)),
             db,
             app_handle,
@@ -213,49 +207,49 @@ impl FlowEngine {
         }
 
         // 2. 停止所有 IDLE 监听
-        if self.config.enable_idle_monitoring {
-            let idle_managers = self.idle_managers.read().await;
-            for (account_id, manager) in idle_managers.iter() {
-                manager.stop().await;
-                tracing::info!("✅ 已停止账号 {} 的 IDLE 监听", account_id);
-            }
-            self.idle_managers.write().await.clear();
-        }
+        // if self.config.enable_idle_monitoring {
+        //     let idle_managers = self.idle_managers.read().await;
+        //     for (account_id, manager) in idle_managers.iter() {
+        //         manager.stop().await;
+        //         tracing::info!("✅ 已停止账号 {} 的 IDLE 监听", account_id);
+        //     }
+        //     self.idle_managers.write().await.clear();
+        // }
 
         tracing::info!("🏁 流程引擎已停止");
 
         Ok(())
     }
 
-    /// 获取引擎状态报告
-    pub async fn get_status(&self) -> EngineStatusReport {
-        let running = self.running.load(Ordering::Relaxed);
-        let state = if running {
-            EngineState::Running
-        } else {
-            EngineState::Stopped
-        };
+    // /// 获取引擎状态报告
+    // pub async fn get_status(&self) -> EngineStatusReport {
+    //     let running = self.running.load(Ordering::Relaxed);
+    //     let state = if running {
+    //         EngineState::Running
+    //     } else {
+    //         EngineState::Stopped
+    //     };
 
-        // 获取任务调度器状态
-        let task_status = self.task_scheduler.get_task_status().await;
-        let running_tasks = task_status.len();
+    //     // 获取任务调度器状态
+    //     let task_status = self.task_scheduler.get_task_status().await;
+    //     let running_tasks = task_status.len();
 
-        // 获取 IDLE 管理器数量
-        let idle_managers = self.idle_managers.read().await;
-        let active_idle_monitors = idle_managers.len();
+    //     // 获取 IDLE 管理器数量
+    //     let idle_managers = self.idle_managers.read().await;
+    //     let active_idle_monitors = idle_managers.len();
 
-        // 获取通知统计
-        let notification_stats = self.notification_manager.get_stats().await;
-        let total_notifications_sent = notification_stats.total_sent;
+    //     // 获取通知统计
+    //     let notification_stats = self.notification_manager.get_stats().await;
+    //     let total_notifications_sent = notification_stats.total_sent;
 
-        EngineStatusReport {
-            state,
-            running_tasks,
-            active_idle_monitors,
-            total_notifications_sent,
-            uptime_seconds: 0, // TODO: 实现运行时间追踪
-        }
-    }
+    //     EngineStatusReport {
+    //         state,
+    //         running_tasks,
+    //         active_idle_monitors,
+    //         total_notifications_sent,
+    //         uptime_seconds: 0, // TODO: 实现运行时间追踪
+    //     }
+    // }
 
     /// 检查引擎是否正在运行
     pub fn is_running(&self) -> bool {
@@ -264,7 +258,9 @@ impl FlowEngine {
 
     /// 为账号添加定时同步任务
     pub async fn add_sync_task(&self, account_id: i32, interval_minutes: u64) -> Result<()> {
-        self.task_scheduler.add_sync_task(account_id, interval_minutes).await
+        self.task_scheduler
+            .add_sync_task(account_id, interval_minutes)
+            .await
     }
 
     /// 移除账号的同步任务
@@ -297,90 +293,96 @@ impl FlowEngine {
         Ok(())
     }
 
-    /// 为单个账号启动 IDLE 监听
-    async fn start_idle_monitor_for_account(
-        &self,
-        account_id: i32,
-        imap_client: Arc<tokio::sync::Mutex<AsyncImapClient>>,
-        folder: String,
-    ) -> Result<()> {
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    // 为单个账号启动 IDLE 监听
+    // async fn start_idle_monitor_for_account(
+    //     &self,
+    //     account_id: i32,
+    //     imap_client: Arc<tokio::sync::Mutex<AsyncImapClient>>,
+    //     folder: String,
+    // ) -> Result<()> {
+    //     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
 
-        let idle_manager = Arc::new(ImapIdleManager::new(
-            imap_client,
-            account_id,
-            folder,
-            event_tx,
-            self.config.idle_polling_interval_secs,
-        ));
+    //     let idle_manager = Arc::new(ImapIdleManager::new(
+    //         imap_client,
+    //         account_id,
+    //         folder,
+    //         event_tx,
+    //         self.config.idle_polling_interval_secs,
+    //     ));
 
-        // 启动 IDLE 监听
-        idle_manager
-            .start()
-            .await
-            .map_err(|e| MailError::Internal(format!("IDLE 启动失败: {}", e)))?;
+    //     // 启动 IDLE 监听
+    //     idle_manager
+    //         .start()
+    //         .await
+    //         .map_err(|e| MailError::Internal(format!("IDLE 启动失败: {}", e)))?;
 
-        // 注册到管理器集合
-        let mut managers = self.idle_managers.write().await;
-        managers.insert(account_id, idle_manager);
+    //     // 注册到管理器集合
+    //     let mut managers = self.idle_managers.write().await;
+    //     managers.insert(account_id, idle_manager);
 
-        tracing::info!("📡 已为账号 {} 启动 IDLE 监听", account_id);
+    //     tracing::info!("📡 已为账号 {} 启动 IDLE 监听", account_id);
 
-        // 启动事件处理任务
-        let notification_manager = self.notification_manager.clone();
-        let sync_manager = self.sync_manager.clone();
-        let running = self.running.clone();
+    //     // 启动事件处理任务
+    //     let notification_manager = self.notification_manager.clone();
+    //     let sync_manager = self.sync_manager.clone();
+    //     let running = self.running.clone();
 
-        tokio::spawn(async move {
-            while running.load(Ordering::Relaxed) {
-                match event_rx.recv().await {
-                    Some(event) => {
-                        // 处理 IDLE 事件
-                        match event {
-                            crate::protocols::imap::IdleEvent::NewEmail { folder, uid } => {
-                                tracing::info!(
-                                    "📬 IDLE 事件: 新邮件 account_id={}, folder={}, uid={}",
-                                    account_id,
-                                    folder,
-                                    uid
-                                );
+    //     tokio::spawn(async move {
+    //         while running.load(Ordering::Relaxed) {
+    //             match event_rx.recv().await {
+    //                 Some(event) => {
+    //                     // 处理 IDLE 事件
+    //                     match event {
+    //                         crate::protocols::imap::IdleEvent::NewEmail { folder, uid } => {
+    //                             tracing::info!(
+    //                                 "📬 IDLE 事件: 新邮件 account_id={}, folder={}, uid={}",
+    //                                 account_id,
+    //                                 folder,
+    //                                 uid
+    //                             );
 
-                                // 发送通知
-                                let _ = notification_manager.notify_new_email(
-                                    crate::engine::notification_manager::NewEmailData {
-                                        account_id,
-                                        account_name: format!("账号 {}", account_id),
-                                        folder: folder.clone(),
-                                        email_count: 1,
-                                        subject: None,
-                                        sender: None,
-                                    },
-                                ).await;
+    //                             // 发送通知
+    //                             let _ = notification_manager
+    //                                 .notify_new_email(
+    //                                     crate::engine::notification_manager::NewEmailData {
+    //                                         account_id,
+    //                                         account_name: format!("账号 {}", account_id),
+    //                                         folder: folder.clone(),
+    //                                         email_count: 1,
+    //                                         subject: None,
+    //                                         sender: None,
+    //                                     },
+    //                                 )
+    //                                 .await;
 
-                                // 触发同步
-                                let _ = sync_manager.sync_account(account_id).await;
-                            }
-                            crate::protocols::imap::IdleEvent::Disconnected => {
-                                tracing::warn!("⚠️  IDLE 连接断开: account_id={}", account_id);
-                            }
-                            crate::protocols::imap::IdleEvent::Error(err) => {
-                                tracing::error!("❌ IDLE 错误: account_id={}, error={}", account_id, err);
-                            }
-                            _ => {}
-                        }
-                    }
-                    None => {
-                        // 通道关闭，退出循环
-                        break;
-                    }
-                }
-            }
+    //                             // 触发同步
+    //                             let _ = sync_manager.sync_account(account_id).await;
+    //                         }
+    //                         crate::protocols::imap::IdleEvent::Disconnected => {
+    //                             tracing::warn!("⚠️  IDLE 连接断开: account_id={}", account_id);
+    //                         }
+    //                         crate::protocols::imap::IdleEvent::Error(err) => {
+    //                             tracing::error!(
+    //                                 "❌ IDLE 错误: account_id={}, error={}",
+    //                                 account_id,
+    //                                 err
+    //                             );
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //                 None => {
+    //                     // 通道关闭，退出循环
+    //                     break;
+    //                 }
+    //             }
+    //         }
 
-            tracing::info!("⏹ IDLE 事件处理已停止: account_id={}", account_id);
-        });
+    //         tracing::info!("⏹ IDLE 事件处理已停止: account_id={}", account_id);
+    //     });
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
 
 impl Default for FlowEngine {
