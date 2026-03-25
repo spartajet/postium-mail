@@ -9,6 +9,8 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use serde::Deserialize;
+use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tauri::Manager;
@@ -18,8 +20,23 @@ use tokio::sync::Mutex;
 use crate::command;
 use crate::command::AuthManagerState;
 use crate::command::DatabaseState;
-use crate::command::OAuthFlowResult;
 use crate::command::OAuthSessionManagerState;
+use crate::storage;
+
+/// OAuth 流程完成事件
+///
+/// 后端处理完 Deep Link 回调后发射此事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthFlowResult {
+    /// 会话 ID
+    pub session_id: String,
+    /// 流程状态: "success" | "error"
+    pub status: String,
+    /// 创建的账号（成功时）
+    pub account: Option<storage::AccountDto>,
+    /// 错误信息（失败时）
+    pub error: Option<String>,
+}
 
 /// OAuth HTTP 服务器
 pub struct OAuthHttpServer {
