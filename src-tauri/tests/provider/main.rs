@@ -27,7 +27,6 @@ mod folder_attrs;
 mod folder_sync;
 mod helpers;
 mod personal;
-mod rfc6154;
 mod smtp;
 mod sync_features;
 mod uid_tests;

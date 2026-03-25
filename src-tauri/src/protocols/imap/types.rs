@@ -440,7 +440,7 @@ impl Default for ReconnectConfig {
             enabled: true,
             max_attempts: 10,
             initial_delay_secs: 5,
-            max_delay_secs: 300,  // 5分钟
+            max_delay_secs: 300, // 5分钟
             backoff_multiplier: 2.0,
         }
     }
@@ -512,7 +512,8 @@ impl IdleHandle {
     /// 将活跃状态设置为 false，信号通知 IDLE 循环退出。
     /// 此方法是线程安全的，可以从任何线程调用。
     pub fn stop(&self) {
-        self.active.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 检查是否活跃
