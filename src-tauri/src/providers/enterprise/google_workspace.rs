@@ -3,8 +3,11 @@
 //! 支持 Google Workspace (formerly G Suite) 企业邮箱
 //! 企业域名 OAuth、单点登录 (SSO)、企业安全策略支持
 
+use super::super::{
+    AccountType, AuthType, EnterpriseConfig, ImapServerConfig, MailProvider, OAuthConfig,
+    ProviderCapabilities, ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, ProviderInfo, OAuthConfig, EnterpriseConfig};
 
 impl GoogleWorkspaceProvider {
     /// Google Workspace 默认客户端 ID
@@ -12,12 +15,8 @@ impl GoogleWorkspaceProvider {
     /// 注册地址: https://console.cloud.google.com/
     /// 应用类型: Desktop app
     /// 授权重定向 URI: postium-mail://oauth/callback
-    const DEFAULT_CLIENT_ID: &str = "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
-
-    /// Google Workspace 默认重定向 URI
-    ///
-    /// 使用自定义 Deep Link 方案
-    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
+    const DEFAULT_CLIENT_ID: &str =
+        "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
 
     /// Google Workspace 默认授权端点
     const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -112,11 +111,16 @@ impl GoogleWorkspaceProvider {
         match OAuthConfig::from_env_for_provider("googleworkspace") {
             Ok(config) => config,
             Err(_) => {
-                tracing::warn!("使用 Google Workspace 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
+                tracing::warn!(
+                    "使用 Google Workspace 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件"
+                );
                 let port = crate::config::get_oauth_callback_port();
                 let redirect_uri = crate::config::generate_redirect_uri(port);
 
-                tracing::info!("GoogleWorkspace OAuth 配置: redirect_uri = {}", redirect_uri);
+                tracing::info!(
+                    "GoogleWorkspace OAuth 配置: redirect_uri = {}",
+                    redirect_uri
+                );
 
                 OAuthConfig {
                     client_id: Self::DEFAULT_CLIENT_ID.to_string(),
@@ -233,11 +237,22 @@ mod tests {
         let provider = GoogleWorkspaceProvider::with_defaults();
         let oauth_config = provider.oauth_config();
 
-        assert_eq!(oauth_config.client_id, GoogleWorkspaceProvider::DEFAULT_CLIENT_ID);
-        assert_eq!(oauth_config.auth_url, GoogleWorkspaceProvider::DEFAULT_AUTH_URL);
-        assert_eq!(oauth_config.token_url, GoogleWorkspaceProvider::DEFAULT_TOKEN_URL);
-        assert_eq!(oauth_config.redirect_uri, GoogleWorkspaceProvider::DEFAULT_REDIRECT_URI);
-        assert_eq!(oauth_config.scopes.len(), GoogleWorkspaceProvider::DEFAULT_SCOPES.len());
+        assert_eq!(
+            oauth_config.client_id,
+            GoogleWorkspaceProvider::DEFAULT_CLIENT_ID
+        );
+        assert_eq!(
+            oauth_config.auth_url,
+            GoogleWorkspaceProvider::DEFAULT_AUTH_URL
+        );
+        assert_eq!(
+            oauth_config.token_url,
+            GoogleWorkspaceProvider::DEFAULT_TOKEN_URL
+        );
+        assert_eq!(
+            oauth_config.scopes.len(),
+            GoogleWorkspaceProvider::DEFAULT_SCOPES.len()
+        );
         assert!(oauth_config.pkce_enabled);
         assert!(oauth_config.tenant_id.is_none());
         assert!(oauth_config.client_secret.is_none());

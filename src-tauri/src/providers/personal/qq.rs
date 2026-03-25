@@ -13,6 +13,12 @@ pub struct QqMailProvider {
     info: ProviderInfo,
 }
 
+impl Default for QqMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QqMailProvider {
     pub fn new() -> Self {
         Self {

@@ -3,8 +3,11 @@
 //! 支持 Outlook 个人邮箱（@outlook.com, @hotmail.com, @live.com 等）
 //! OAuth 2.0、密码认证
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig, StandardFolder,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder, ProviderInfo};
 
 impl OutlookProvider {
     /// Outlook 默认客户端 ID
@@ -50,6 +53,11 @@ pub struct OutlookProvider {
     info: ProviderInfo,
 }
 
+impl Default for OutlookProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl OutlookProvider {
     /// 创建新的 Outlook 服务商实例
     pub fn new() -> Self {
@@ -162,10 +170,23 @@ impl MailProvider for OutlookProvider {
     fn folder_mapping(&self) -> StandardFolder {
         StandardFolder {
             inbox: vec!["收件箱".to_string(), "INBOX".to_string()],
-            sent: vec!["已发送".to_string(), "Sent".to_string(), "Sent Items".to_string()],
+            sent: vec![
+                "已发送".to_string(),
+                "Sent".to_string(),
+                "Sent Items".to_string(),
+            ],
             drafts: vec!["草稿".to_string(), "Drafts".to_string()],
-            spam: vec!["垃圾邮件".to_string(), "Junk".to_string(), "Junk Email".to_string()],
-            trash: vec!["已删除邮件".to_string(), "Deleted".to_string(), "Deleted Items".to_string(), "Trash".to_string()],
+            spam: vec![
+                "垃圾邮件".to_string(),
+                "Junk".to_string(),
+                "Junk Email".to_string(),
+            ],
+            trash: vec![
+                "已删除邮件".to_string(),
+                "Deleted".to_string(),
+                "Deleted Items".to_string(),
+                "Trash".to_string(),
+            ],
             archive: vec!["归档".to_string(), "Archive".to_string()],
         }
     }
