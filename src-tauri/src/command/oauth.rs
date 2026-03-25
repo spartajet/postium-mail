@@ -21,8 +21,8 @@
 
 use super::{AuthManagerState, DatabaseState, KeyringState, OAuthSessionManagerState};
 use crate::auth::OAuthSessionStatus;
-use crate::storage;
 use crate::providers;
+use crate::storage;
 use serde::{Deserialize, Serialize};
 
 /// 启动 OAuth 流程响应
@@ -32,21 +32,6 @@ pub struct StartOAuthFlowResponse {
     pub session_id: String,
     /// 授权 URL（已通过系统浏览器打开）
     pub auth_url: String,
-}
-
-/// OAuth 流程完成事件
-///
-/// 后端处理完 Deep Link 回调后发射此事件
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthFlowResult {
-    /// 会话 ID
-    pub session_id: String,
-    /// 流程状态: "success" | "error"
-    pub status: String,
-    /// 创建的账号（成功时）
-    pub account: Option<storage::AccountDto>,
-    /// 错误信息（失败时）
-    pub error: Option<String>,
 }
 
 /// 验证 OAuth 令牌的有效性
@@ -80,10 +65,7 @@ pub struct OAuthFlowResult {
 /// }
 /// ```
 #[tauri::command]
-pub async fn validate_oauth_token(
-    provider: String,
-    token: String,
-) -> Result<bool, String> {
+pub async fn validate_oauth_token(provider: String, token: String) -> Result<bool, String> {
     match provider.as_str() {
         "google" => {
             let client = reqwest::Client::new();
@@ -246,18 +228,18 @@ pub async fn exchange_oauth_code(
 
     // 构建账号创建请求
     let account_req = storage::CreateAccountRequest {
-        name: auth_result.display_name.unwrap_or_else(|| {
-            email.split('@')
-                .next()
-                .unwrap_or("用户")
-                .to_string()
-        }),
+        name: auth_result
+            .display_name
+            .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string()),
         email: auth_result.email.clone(),
         provider: provider_info.id.clone(),
         password: String::new(),
         imap_host: Some(imap_config.host),
         imap_port: Some(imap_config.port as i32),
-        imap_ssl: Some(matches!(imap_config.ssl, providers::SslMode::Implicit | providers::SslMode::StartTls)),
+        imap_ssl: Some(matches!(
+            imap_config.ssl,
+            providers::SslMode::Implicit | providers::SslMode::StartTls
+        )),
         smtp_host: Some(smtp_config.host),
         smtp_port: Some(smtp_config.port as i32),
         smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
@@ -268,19 +250,15 @@ pub async fn exchange_oauth_code(
         oauth_refresh_token: Some(
             // 注意：TokenManager 已经存储了 refresh_token，这里只是为了兼容
             // 实际使用时应该从 TokenManager 读取
-            String::new()
+            String::new(),
         ),
         oauth_expires_at: auth_result.expires_at,
     };
 
     // 创建账号
-    let account = storage::AccountRepository::create(
-        &db,
-        &keyring_state.app_handle,
-        account_req,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let account = storage::AccountRepository::create(&db, &keyring_state.app_handle, account_req)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // 迁移 Token 从临时 account_id (0) 到实际的 account_id
     let token_manager = auth_manager.token_manager();

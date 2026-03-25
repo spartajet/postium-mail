@@ -293,12 +293,10 @@ pub fn run() {
             command::detect_provider,
             command::list_providers,
             // OAuth
-            command::validate_oauth_token,
-            command::get_oauth_auth_url,
-            command::exchange_oauth_code,
-            command::refresh_oauth_token,
-            command::start_oauth_flow,
-            command::cancel_oauth_flow,
+            // command::validate_oauth_token,
+            // command::get_oauth_auth_url,
+            // command::exchange_oauth_code,
+            // command::refresh_oauth_token,
             // 统一认证
             command::start_auth_command,
             // 邮件操作

@@ -375,6 +375,19 @@ impl AuthManager {
     ///
     /// 返回会话 ID 和授权 URL
     async fn start_oauth_auth(&self, email: &str) -> Result<AuthResponse> {
+        // 🆕 按需启动 HTTP Server
+        let http_server = self.get_http_server();
+        if !http_server.is_running().await {
+            if let Err(e) = http_server.start().await {
+                tracing::error!("OAuth HTTP 服务器启动失败: {}", e);
+                return Err(MailError::Internal(e.to_string()));
+            } else {
+                tracing::info!("OAuth HTTP 服务器已启动（按需启动）");
+            }
+        } else {
+            tracing::info!("OAuth HTTP 服务器已在运行");
+        }
+
         // 1. 生成授权 URL 和 state
         let context = self.get_oauth_url(email).await?;
 
