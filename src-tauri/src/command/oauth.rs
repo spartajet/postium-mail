@@ -399,6 +399,19 @@ pub async fn start_oauth_flow(
     let auth_manager = auth_manager_state.clone_manager();
     let session_manager = &session_manager_state.0;
 
+    // 🆕 按需启动 HTTP Server
+    let http_server = auth_manager.get_http_server();
+    if !http_server.is_running().await {
+        if let Err(e) = http_server.start().await {
+            tracing::error!("OAuth HTTP 服务器启动失败: {}", e);
+            return Err(format!("无法启动 OAuth 服务器: {}", e));
+        } else {
+            tracing::info!("OAuth HTTP 服务器已启动（按需启动）");
+        }
+    } else {
+        tracing::info!("OAuth HTTP 服务器已在运行");
+    }
+
     // 1. 生成授权 URL 和 state
     let context = auth_manager
         .get_oauth_url(&email)
