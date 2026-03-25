@@ -3,27 +3,59 @@
 //! 支持 yandex.com、yandex.ru 等Yandex邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Yandex邮箱个人邮件服务商
-pub struct YandexMailProvider;
+pub struct YandexMailProvider {
+    info: ProviderInfo,
+}
+
+impl YandexMailProvider {
+    /// 创建 Yandex 服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "yandex".to_string(),
+                name: "Yandex邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "yandex.com".to_string(),
+                    "yandex.ru".to_string(),
+                    "yandex.ua".to_string(),
+                    "yandex.by".to_string(),
+                    "yandex.kz".to_string(),
+                    "ya.ru".to_string(),
+                    "yandex.fr".to_string(),
+                    "yandex.com.tr".to_string(),
+                ],
+                auth_types: vec![AuthType::Password, AuthType::OAuth2],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: true,
+                    supports_folders: true,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: Some("yandex".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for YandexMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for YandexMailProvider {
-    fn provider_id(&self) -> &str {
-        "yandex"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Yandex邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password, AuthType::OAuth2]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -59,17 +91,7 @@ impl MailProvider for YandexMailProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            supports_idle: true,
-            supports_push: false,
-            supports_oauth: true,
-            supports_enterprise: false,
-            supports_labels: true,
-            supports_folders: true,
-            supports_threads: true,
-            supports_search: true,
-            max_message_size: Some(50 * 1024 * 1024), // 50MB
-        }
+        self.info.capabilities.clone()
     }
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
@@ -95,7 +117,7 @@ impl MailProvider for YandexMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(YandexMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -105,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_yandex_detection() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
 
         // 测试Yandex邮箱域名
         assert!(provider.detect("test@yandex.com").await.unwrap());
@@ -120,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_yandex_config() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -137,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_yandex_domains() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(
@@ -157,18 +179,19 @@ mod tests {
 
     #[test]
     fn test_yandex_provider_info() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "yandex");
-        assert_eq!(provider.provider_name(), "Yandex邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert!(provider.auth_types().contains(&AuthType::Password));
-        assert!(provider.auth_types().contains(&AuthType::OAuth2));
+        assert_eq!(info.id, "yandex");
+        assert_eq!(info.name, "Yandex邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
+        assert!(info.auth_types.contains(&AuthType::OAuth2));
     }
 
     #[test]
     fn test_yandex_capabilities() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -184,15 +207,15 @@ mod tests {
 
     #[test]
     fn test_yandex_box_clone() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "yandex");
+        assert_eq!(cloned.provider_info().id, "yandex");
     }
 
     #[test]
     fn test_yandex_oauth() {
-        let provider = YandexMailProvider;
+        let provider = YandexMailProvider::new();
         let oauth = provider.oauth_config();
 
         assert!(oauth.is_some());

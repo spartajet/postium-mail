@@ -490,6 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_smtp_client_creation() {
+        init_tracing();
         let client = SmtpClient::new();
         assert!(!client.is_connected().await);
     }

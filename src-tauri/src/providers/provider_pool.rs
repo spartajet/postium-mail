@@ -2,45 +2,8 @@
 //!
 //! 管理所有邮件服务商实例
 
-use super::{AccountType, AuthType, MailProvider, ProviderCapabilities};
+use super::{AccountType, MailProvider, ProviderInfo};
 use crate::error::{MailError, Result};
-
-/// 服务商信息（用于前端展示）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProviderInfo {
-    /// 服务商唯一标识
-    pub id: String,
-    /// 服务商显示名称
-    pub name: String,
-    /// 账号类型
-    pub account_type: AccountType,
-    /// 支持的认证类型
-    pub auth_types: Vec<AuthType>,
-    /// 支持的域名列表
-    pub domains: Vec<String>,
-    /// 服务商能力
-    pub capabilities: ProviderCapabilities,
-    /// 是否支持 OAuth
-    pub supports_oauth: bool,
-}
-
-impl From<&dyn MailProvider> for ProviderInfo {
-    fn from(provider: &dyn MailProvider) -> Self {
-        Self {
-            id: provider.provider_id().to_string(),
-            name: provider.provider_name().to_string(),
-            account_type: provider.account_type(),
-            auth_types: provider.auth_types(),
-            domains: provider
-                .supported_domains()
-                .into_iter()
-                .map(String::from)
-                .collect(),
-            capabilities: provider.capabilities(),
-            supports_oauth: provider.oauth_config().is_some(),
-        }
-    }
-}
 
 /// 服务商池
 pub struct ProviderPool {
@@ -63,26 +26,26 @@ impl Default for ProviderPool {
         };
 
         // 个人邮箱服务商
-        pool.register(Box::new(GmailProvider));
-        pool.register(Box::new(OutlookProvider));
-        pool.register(Box::new(YahooProvider));
-        pool.register(Box::new(AolMailProvider));
-        pool.register(Box::new(GmxMailProvider));
-        pool.register(Box::new(MailComProvider));
-        pool.register(Box::new(ZohoMailProvider));
-        pool.register(Box::new(YandexMailProvider));
+        pool.register(Box::new(GmailProvider::new()));
+        pool.register(Box::new(OutlookProvider::new()));
+        pool.register(Box::new(YahooProvider::new()));
+        pool.register(Box::new(AolMailProvider::new()));
+        pool.register(Box::new(GmxMailProvider::new()));
+        pool.register(Box::new(MailComProvider::new()));
+        pool.register(Box::new(ZohoMailProvider::new()));
+        pool.register(Box::new(YandexMailProvider::new()));
 
         // 国内邮箱服务商
-        pool.register(Box::new(Mail163Provider));
-        pool.register(Box::new(QqMailProvider));
-        pool.register(Box::new(SinaMailProvider));
-        pool.register(Box::new(SohuMailProvider));
-        pool.register(Box::new(TomMailProvider));
-        pool.register(Box::new(CmccMailProvider));
-        pool.register(Box::new(ChinaMailProvider));
-        pool.register(Box::new(Net263MailProvider));
-        pool.register(Box::new(Cn21MailProvider));
-        pool.register(Box::new(ICloudProvider));
+        pool.register(Box::new(Mail163Provider::new()));
+        pool.register(Box::new(QqMailProvider::new()));
+        pool.register(Box::new(SinaMailProvider::new()));
+        pool.register(Box::new(SohuMailProvider::new()));
+        pool.register(Box::new(TomMailProvider::new()));
+        pool.register(Box::new(CmccMailProvider::new()));
+        pool.register(Box::new(ChinaMailProvider::new()));
+        pool.register(Box::new(Net263MailProvider::new()));
+        pool.register(Box::new(Cn21MailProvider::new()));
+        pool.register(Box::new(ICloudProvider::new()));
 
         // 企业邮箱服务商（使用默认配置）
         pool.register(Box::new(Microsoft365Provider::with_defaults()));
@@ -119,13 +82,14 @@ impl ProviderPool {
         // 1. 先尝试域名匹配
         tracing::debug!("步骤 1: 尝试匹配个人邮箱服务商");
         for provider in &self.providers {
-            if provider.account_type() == AccountType::Personal {
-                tracing::trace!("尝试检测: provider_id={}", provider.provider_id());
+            let info = provider.provider_info();
+            if info.account_type == AccountType::Personal {
+                tracing::trace!("尝试检测: provider_id={}", info.id);
                 if provider.detect(email).await? {
                     tracing::info!(
                         "匹配到个人邮箱服务商: email={}, provider={}",
                         email,
-                        provider.provider_id()
+                        info.id
                     );
                     return Ok(provider.box_clone());
                 }
@@ -142,11 +106,12 @@ impl ProviderPool {
         tracing::debug!("提取域名: domain={}", domain);
 
         if let Some(provider) = self.detect_enterprise_provider(domain).await {
+            let info = provider.provider_info();
             tracing::info!(
                 "匹配到企业邮箱服务商: email={}, domain={}, provider={}",
                 email,
                 domain,
-                provider.provider_id()
+                info.id
             );
             return Ok(provider);
         }
@@ -158,7 +123,7 @@ impl ProviderPool {
 
         // 3. 回退到自定义服务商
         for provider in &self.providers {
-            if provider.provider_id() == "custom" {
+            if provider.provider_info().id == "custom" {
                 tracing::info!("使用自定义服务商: email={}", email);
                 return Ok(provider.box_clone());
             }
@@ -277,7 +242,7 @@ impl ProviderPool {
     /// 根据 ID 查找服务商
     pub fn find_provider_by_id(&self, id: &str) -> Option<Box<dyn MailProvider>> {
         for provider in &self.providers {
-            if provider.provider_id() == id {
+            if provider.provider_info().id == id {
                 return Some(provider.box_clone());
             }
         }
@@ -291,7 +256,7 @@ impl ProviderPool {
         self.providers
             .iter()
             .filter(|p| p.supported_domains().iter().any(|d| d == &domain))
-            .map(|p| ProviderInfo::from(p.as_ref()))
+            .map(|p| p.provider_info().clone())
             .collect()
     }
 
@@ -299,7 +264,7 @@ impl ProviderPool {
     pub fn get_providers_info(&self) -> Vec<ProviderInfo> {
         self.providers
             .iter()
-            .map(|p| ProviderInfo::from(p.as_ref()))
+            .map(|p| p.provider_info().clone())
             .collect()
     }
 
@@ -307,8 +272,8 @@ impl ProviderPool {
     pub fn get_providers_by_type(&self, account_type: AccountType) -> Vec<ProviderInfo> {
         self.providers
             .iter()
-            .filter(|p| p.account_type() == account_type)
-            .map(|p| ProviderInfo::from(p.as_ref()))
+            .filter(|p| p.provider_info().account_type == account_type)
+            .map(|p| p.provider_info().clone())
             .collect()
     }
 
@@ -321,7 +286,7 @@ impl ProviderPool {
     pub fn list_by_type(&self, account_type: AccountType) -> Vec<Box<dyn MailProvider>> {
         self.providers
             .iter()
-            .filter(|p| p.account_type() == account_type)
+            .filter(|p| p.provider_info().account_type == account_type)
             .map(|p| p.box_clone())
             .collect()
     }
@@ -334,7 +299,7 @@ impl ProviderPool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ImapServerConfig, SmtpServerConfig};
+    use super::super::{AuthType, ImapServerConfig, ProviderCapabilities, SmtpServerConfig};
     use super::*;
     use async_trait::async_trait;
     use std::sync::Once;
@@ -356,24 +321,13 @@ mod tests {
     }
 
     struct MockProvider {
-        id: &'static str,
-        name: &'static str,
-        account_type: AccountType,
+        info: ProviderInfo,
     }
 
     #[async_trait]
     impl MailProvider for MockProvider {
-        fn provider_id(&self) -> &str {
-            self.id
-        }
-        fn provider_name(&self) -> &str {
-            self.name
-        }
-        fn account_type(&self) -> AccountType {
-            self.account_type
-        }
-        fn auth_types(&self) -> Vec<AuthType> {
-            vec![AuthType::Password]
+        fn provider_info(&self) -> &ProviderInfo {
+            &self.info
         }
         fn imap_config(&self, _email: &str) -> ImapServerConfig {
             Default::default()
@@ -382,7 +336,7 @@ mod tests {
             Default::default()
         }
         fn capabilities(&self) -> ProviderCapabilities {
-            Default::default()
+            self.info.capabilities.clone()
         }
         async fn detect(&self, email: &str) -> Result<bool> {
             Ok(email.ends_with("@example.com"))
@@ -392,9 +346,7 @@ mod tests {
         }
         fn box_clone(&self) -> Box<dyn MailProvider> {
             Box::new(MockProvider {
-                id: self.id,
-                name: self.name,
-                account_type: self.account_type,
+                info: self.info.clone(),
             })
         }
     }
@@ -405,9 +357,15 @@ mod tests {
         let mut pool = ProviderPool::default();
 
         let provider = Box::new(MockProvider {
-            id: "test",
-            name: "Test Provider",
-            account_type: AccountType::Personal,
+            info: ProviderInfo {
+                id: "test".to_string(),
+                name: "Test Provider".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["example.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities::default(),
+                icon: None,
+            },
         });
 
         pool.register(provider);
@@ -473,7 +431,7 @@ mod tests {
         let pool = ProviderPool::default();
 
         let provider = pool.detect_provider("user@gmail.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "gmail");
+        assert_eq!(provider.provider_info().id, "gmail");
     }
 
     #[tokio::test]
@@ -482,7 +440,7 @@ mod tests {
         let pool = ProviderPool::default();
 
         let provider = pool.detect_provider("user@outlook.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "outlook");
+        assert_eq!(provider.provider_info().id, "outlook");
     }
 
     #[tokio::test]
@@ -492,15 +450,15 @@ mod tests {
 
         // 测试 163.com
         let provider = pool.detect_provider("user@163.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "yi");
+        assert_eq!(provider.provider_info().id, "yi");
 
         // 测试 126.com
         let provider = pool.detect_provider("user@126.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "yi");
+        assert_eq!(provider.provider_info().id, "yi");
 
         // 测试 yeah.net
         let provider = pool.detect_provider("user@yeah.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "yi");
+        assert_eq!(provider.provider_info().id, "yi");
     }
 
     #[tokio::test]
@@ -510,11 +468,11 @@ mod tests {
 
         // 测试 qq.com
         let provider = pool.detect_provider("user@qq.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "qq");
+        assert_eq!(provider.provider_info().id, "qq");
 
         // 测试 foxmail.com
         let provider = pool.detect_provider("user@foxmail.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "qq");
+        assert_eq!(provider.provider_info().id, "qq");
     }
 
     #[tokio::test]
@@ -524,15 +482,15 @@ mod tests {
 
         // 测试 icloud.com
         let provider = pool.detect_provider("user@icloud.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "icloud");
+        assert_eq!(provider.provider_info().id, "icloud");
 
         // 测试 me.com
         let provider = pool.detect_provider("user@me.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "icloud");
+        assert_eq!(provider.provider_info().id, "icloud");
 
         // 测试 mac.com
         let provider = pool.detect_provider("user@mac.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "icloud");
+        assert_eq!(provider.provider_info().id, "icloud");
     }
 
     #[tokio::test]
@@ -542,15 +500,15 @@ mod tests {
 
         // 测试 sina.com
         let provider = pool.detect_provider("user@sina.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "sina");
+        assert_eq!(provider.provider_info().id, "sina");
 
         // 测试 sina.cn
         let provider = pool.detect_provider("user@sina.cn").await.unwrap();
-        assert_eq!(provider.provider_id(), "sina");
+        assert_eq!(provider.provider_info().id, "sina");
 
         // 测试 vip.sina.com
         let provider = pool.detect_provider("user@vip.sina.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "sina");
+        assert_eq!(provider.provider_info().id, "sina");
     }
 
     #[tokio::test]
@@ -560,19 +518,19 @@ mod tests {
 
         // 测试 139.com
         let provider = pool.detect_provider("user@139.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "cmcc");
+        assert_eq!(provider.provider_info().id, "cmcc");
 
         // 测试 139.com.cn
         let provider = pool.detect_provider("user@139.com.cn").await.unwrap();
-        assert_eq!(provider.provider_id(), "cmcc");
+        assert_eq!(provider.provider_info().id, "cmcc");
 
         // 测试 10086.cn
         let provider = pool.detect_provider("user@10086.cn").await.unwrap();
-        assert_eq!(provider.provider_id(), "cmcc");
+        assert_eq!(provider.provider_info().id, "cmcc");
 
         // 测试 10086.com
         let provider = pool.detect_provider("user@10086.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "cmcc");
+        assert_eq!(provider.provider_info().id, "cmcc");
     }
 
     #[tokio::test]
@@ -582,15 +540,15 @@ mod tests {
 
         // 测试 sohu.com
         let provider = pool.detect_provider("user@sohu.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "sohu");
+        assert_eq!(provider.provider_info().id, "sohu");
 
         // 测试 vip.sohu.com
         let provider = pool.detect_provider("user@vip.sohu.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "sohu");
+        assert_eq!(provider.provider_info().id, "sohu");
 
         // 测试 sohu.net
         let provider = pool.detect_provider("user@sohu.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "sohu");
+        assert_eq!(provider.provider_info().id, "sohu");
     }
 
     #[tokio::test]
@@ -600,11 +558,11 @@ mod tests {
 
         // 测试 china.com
         let provider = pool.detect_provider("user@china.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "china");
+        assert_eq!(provider.provider_info().id, "china");
 
         // 测试 mail.china.com
         let provider = pool.detect_provider("user@mail.china.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "china");
+        assert_eq!(provider.provider_info().id, "china");
     }
 
     #[tokio::test]
@@ -614,15 +572,15 @@ mod tests {
 
         // 测试 tom.com
         let provider = pool.detect_provider("user@tom.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "tom");
+        assert_eq!(provider.provider_info().id, "tom");
 
         // 测试 mail.tom.com
         let provider = pool.detect_provider("user@mail.tom.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "tom");
+        assert_eq!(provider.provider_info().id, "tom");
 
         // 测试 163.tom.com
         let provider = pool.detect_provider("user@163.tom.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "tom");
+        assert_eq!(provider.provider_info().id, "tom");
     }
 
     #[tokio::test]
@@ -632,15 +590,15 @@ mod tests {
 
         // 测试 263.net
         let provider = pool.detect_provider("user@263.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "net263");
+        assert_eq!(provider.provider_info().id, "net263");
 
         // 测试 263.com
         let provider = pool.detect_provider("user@263.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "net263");
+        assert_eq!(provider.provider_info().id, "net263");
 
         // 测试 x263.net
         let provider = pool.detect_provider("user@x263.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "net263");
+        assert_eq!(provider.provider_info().id, "net263");
     }
 
     #[tokio::test]
@@ -650,15 +608,15 @@ mod tests {
 
         // 测试 21cn.com
         let provider = pool.detect_provider("user@21cn.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "cn21");
+        assert_eq!(provider.provider_info().id, "cn21");
 
         // 测试 21cn.net
         let provider = pool.detect_provider("user@21cn.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "cn21");
+        assert_eq!(provider.provider_info().id, "cn21");
 
         // 测试 mail.21cn.com
         let provider = pool.detect_provider("user@mail.21cn.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "cn21");
+        assert_eq!(provider.provider_info().id, "cn21");
     }
 
     #[tokio::test]
@@ -668,15 +626,15 @@ mod tests {
 
         // 测试 aol.com
         let provider = pool.detect_provider("user@aol.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "aol");
+        assert_eq!(provider.provider_info().id, "aol");
 
         // 测试 aim.com
         let provider = pool.detect_provider("user@aim.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "aol");
+        assert_eq!(provider.provider_info().id, "aol");
 
         // 测试 verizon.net
         let provider = pool.detect_provider("user@verizon.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "aol");
+        assert_eq!(provider.provider_info().id, "aol");
     }
 
     #[tokio::test]
@@ -686,15 +644,15 @@ mod tests {
 
         // 测试 gmx.com
         let provider = pool.detect_provider("user@gmx.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "gmx");
+        assert_eq!(provider.provider_info().id, "gmx");
 
         // 测试 gmx.de
         let provider = pool.detect_provider("user@gmx.de").await.unwrap();
-        assert_eq!(provider.provider_id(), "gmx");
+        assert_eq!(provider.provider_info().id, "gmx");
 
         // 测试 gmx.net
         let provider = pool.detect_provider("user@gmx.net").await.unwrap();
-        assert_eq!(provider.provider_id(), "gmx");
+        assert_eq!(provider.provider_info().id, "gmx");
     }
 
     #[tokio::test]
@@ -704,15 +662,15 @@ mod tests {
 
         // 测试 zoho.com
         let provider = pool.detect_provider("user@zoho.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "zoho");
+        assert_eq!(provider.provider_info().id, "zoho");
 
         // 测试 zohomail.com
         let provider = pool.detect_provider("user@zohomail.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "zoho");
+        assert_eq!(provider.provider_info().id, "zoho");
 
         // 测试 zoho.eu
         let provider = pool.detect_provider("user@zoho.eu").await.unwrap();
-        assert_eq!(provider.provider_id(), "zoho");
+        assert_eq!(provider.provider_info().id, "zoho");
     }
 
     #[tokio::test]
@@ -722,15 +680,15 @@ mod tests {
 
         // 测试 yandex.com
         let provider = pool.detect_provider("user@yandex.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "yandex");
+        assert_eq!(provider.provider_info().id, "yandex");
 
         // 测试 yandex.ru
         let provider = pool.detect_provider("user@yandex.ru").await.unwrap();
-        assert_eq!(provider.provider_id(), "yandex");
+        assert_eq!(provider.provider_info().id, "yandex");
 
         // 测试 ya.ru
         let provider = pool.detect_provider("user@ya.ru").await.unwrap();
-        assert_eq!(provider.provider_id(), "yandex");
+        assert_eq!(provider.provider_info().id, "yandex");
     }
 
     #[tokio::test]
@@ -740,10 +698,10 @@ mod tests {
 
         // 测试 mail.com
         let provider = pool.detect_provider("user@mail.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "mailcom");
+        assert_eq!(provider.provider_info().id, "mailcom");
 
         // 测试 email.com
         let provider = pool.detect_provider("user@email.com").await.unwrap();
-        assert_eq!(provider.provider_id(), "mailcom");
+        assert_eq!(provider.provider_info().id, "mailcom");
     }
 }

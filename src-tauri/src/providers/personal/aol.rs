@@ -3,27 +3,56 @@
 //! 支持 aol.com 等AOL邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// AOL邮箱个人邮件服务商
-pub struct AolMailProvider;
+pub struct AolMailProvider {
+    info: ProviderInfo,
+}
+
+impl AolMailProvider {
+    /// 创建 AOL 服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "aol".to_string(),
+                name: "AOL邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "aol.com".to_string(),
+                    "aim.com".to_string(),
+                    "netscape.net".to_string(),
+                    "cs.com".to_string(),
+                    "verizon.net".to_string(),
+                ],
+                auth_types: vec![AuthType::Password, AuthType::OAuth2],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(25 * 1024 * 1024), // 25MB
+                },
+                icon: Some("aol".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for AolMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for AolMailProvider {
-    fn provider_id(&self) -> &str {
-        "aol"
-    }
-
-    fn provider_name(&self) -> &str {
-        "AOL邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password, AuthType::OAuth2]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -83,7 +112,7 @@ impl MailProvider for AolMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(AolMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -93,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aol_detection() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
 
         // 测试AOL邮箱域名
         assert!(provider.detect("test@aol.com").await.unwrap());
@@ -108,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_aol_config() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -125,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_aol_domains() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(
@@ -136,18 +165,19 @@ mod tests {
 
     #[test]
     fn test_aol_provider_info() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "aol");
-        assert_eq!(provider.provider_name(), "AOL邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert!(provider.auth_types().contains(&AuthType::Password));
-        assert!(provider.auth_types().contains(&AuthType::OAuth2));
+        assert_eq!(info.id, "aol");
+        assert_eq!(info.name, "AOL邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
+        assert!(info.auth_types.contains(&AuthType::OAuth2));
     }
 
     #[test]
     fn test_aol_capabilities() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -163,15 +193,15 @@ mod tests {
 
     #[test]
     fn test_aol_box_clone() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "aol");
+        assert_eq!(cloned.provider_info().id, "aol");
     }
 
     #[test]
     fn test_aol_oauth() {
-        let provider = AolMailProvider;
+        let provider = AolMailProvider::new();
         let oauth = provider.oauth_config();
 
         assert!(oauth.is_some());

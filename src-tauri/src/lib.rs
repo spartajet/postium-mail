@@ -331,13 +331,16 @@ async fn exchange_and_create_account(
     let imap_config = provider.imap_config(&email);
     let smtp_config = provider.smtp_config(&email);
 
+    // 缓存 provider_info 避免多次调用
+    let provider_info = provider.provider_info();
+
     // 构建账号创建请求
     let account_req = crate::storage::CreateAccountRequest {
         name: auth_result
             .display_name
             .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string()),
         email: auth_result.email.clone(),
-        provider: provider.provider_id().to_string(),
+        provider: provider_info.id.clone(),
         password: String::new(),
         imap_host: Some(imap_config.host),
         imap_port: Some(imap_config.port as i32),
@@ -350,7 +353,7 @@ async fn exchange_and_create_account(
         smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
         color: Some("#0078D4".to_string()),
         auth_type: Some("oauth2".to_string()),
-        oauth_provider: Some(provider.provider_id().to_string()),
+        oauth_provider: Some(provider_info.id.clone()),
         oauth_token: auth_result.id_token,
         oauth_refresh_token: Some(String::new()),
         oauth_expires_at: auth_result.expires_at,

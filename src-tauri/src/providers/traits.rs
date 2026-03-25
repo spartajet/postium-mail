@@ -423,17 +423,11 @@ pub struct ProviderInfo {
 /// 邮件服务商 Trait
 #[async_trait]
 pub trait MailProvider: Send + Sync {
-    /// 服务商唯一标识
-    fn provider_id(&self) -> &str;
-
-    /// 服务商显示名称
-    fn provider_name(&self) -> &str;
-
-    /// 账号类型（个人/企业）
-    fn account_type(&self) -> AccountType;
-
-    /// 支持的认证类型
-    fn auth_types(&self) -> Vec<AuthType>;
+    /// 获取服务商信息
+    ///
+    /// 返回 `&ProviderInfo` 引用，避免 clone 开销
+    /// 每个服务商必须有 `info: ProviderInfo` 字段
+    fn provider_info(&self) -> &ProviderInfo;
 
     /// 获取 IMAP 配置（根据邮箱地址返回对应域名服务器配置）
     fn imap_config(&self, email: &str) -> ImapServerConfig;
@@ -452,7 +446,9 @@ pub trait MailProvider: Send + Sync {
     }
 
     /// 服务商能力
-    fn capabilities(&self) -> ProviderCapabilities;
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.provider_info().capabilities.clone()
+    }
 
     /// 根据邮箱地址检测是否为此服务商
     async fn detect(&self, email: &str) -> Result<bool>;
@@ -519,20 +515,13 @@ mod tests {
 
     #[test]
     fn test_generate_xoauth2() {
-        struct TestProvider;
+        struct TestProvider {
+            info: ProviderInfo,
+        }
         #[async_trait]
         impl MailProvider for TestProvider {
-            fn provider_id(&self) -> &str {
-                "test"
-            }
-            fn provider_name(&self) -> &str {
-                "Test"
-            }
-            fn account_type(&self) -> AccountType {
-                AccountType::Personal
-            }
-            fn auth_types(&self) -> Vec<AuthType> {
-                vec![AuthType::Password]
+            fn provider_info(&self) -> &ProviderInfo {
+                &self.info
             }
             fn imap_config(&self, _email: &str) -> ImapServerConfig {
                 Default::default()
@@ -550,11 +539,23 @@ mod tests {
                 vec!["example.com"]
             }
             fn box_clone(&self) -> Box<dyn MailProvider> {
-                Box::new(TestProvider)
+                Box::new(TestProvider {
+                    info: self.info.clone(),
+                })
             }
         }
 
-        let provider = TestProvider;
+        let provider = TestProvider {
+            info: ProviderInfo {
+                id: "test".to_string(),
+                name: "Test".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["example.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities::default(),
+                icon: None,
+            },
+        };
         let xoauth2 = provider.generate_xoauth2("user@example.com", "token123");
 
         // 验证 XOAUTH2 字符串不为空且是 base64 编码

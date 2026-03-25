@@ -5,9 +5,14 @@
 
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig, StandardFolder,
+    ProviderInfo, SmtpServerConfig, StandardFolder,
 };
 use async_trait::async_trait;
+
+/// Gmail 个人邮件服务商
+pub struct GmailProvider {
+    info: ProviderInfo,
+}
 
 impl GmailProvider {
     /// Gmail 默认客户端 ID
@@ -45,12 +50,32 @@ impl GmailProvider {
     /// Gmail SMTP 服务器配置
     const SMTP_HOST: &str = "smtp.gmail.com";
     const SMTP_PORT: u16 = 587;
-}
 
-/// Gmail 个人邮件服务商
-pub struct GmailProvider;
+    /// 创建 Gmail 服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "gmail".to_string(),
+                name: "Gmail".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["gmail.com".to_string(), "googlemail.com".to_string()],
+                auth_types: vec![AuthType::OAuth2, AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: true,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: true,
+                    supports_folders: false,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: Some("gmail".to_string()),
+            },
+        }
+    }
 
-impl GmailProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
         // 从环境变量加载配置（支持 client_secret）
@@ -79,25 +104,19 @@ impl GmailProvider {
     }
 }
 
+impl Default for GmailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl MailProvider for GmailProvider {
-    fn provider_id(&self) -> &str {
-        "gmail"
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
-    fn provider_name(&self) -> &str {
-        "Gmail"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::OAuth2, AuthType::Password]
-    }
-
-    fn imap_config(&self, email: &str) -> ImapServerConfig {
+    fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: Self::IMAP_HOST.to_string(),
             port: Self::IMAP_PORT,
@@ -105,7 +124,7 @@ impl MailProvider for GmailProvider {
         }
     }
 
-    fn smtp_config(&self, email: &str) -> SmtpServerConfig {
+    fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: Self::SMTP_HOST.to_string(),
             port: Self::SMTP_PORT,
@@ -115,20 +134,6 @@ impl MailProvider for GmailProvider {
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
         Some(self.oauth_config())
-    }
-
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            supports_idle: true,
-            supports_push: true,
-            supports_oauth: true,
-            supports_enterprise: false,
-            supports_labels: true,
-            supports_folders: false,
-            supports_threads: true,
-            supports_search: true,
-            max_message_size: Some(50 * 1024 * 1024), // 50MB
-        }
     }
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
@@ -152,6 +157,52 @@ impl MailProvider for GmailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(GmailProvider)
+        Box::new(Self::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gmail_provider_info() {
+        let provider = GmailProvider::new();
+        let info = provider.provider_info();
+
+        assert_eq!(info.id, "gmail");
+        assert_eq!(info.name, "Gmail");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert_eq!(info.domains, vec!["gmail.com", "googlemail.com"]);
+        assert_eq!(info.auth_types, vec![AuthType::OAuth2, AuthType::Password]);
+        assert!(info.capabilities.supports_oauth);
+        assert!(info.capabilities.supports_labels);
+        assert_eq!(info.icon, Some("gmail".to_string()));
+    }
+
+    #[test]
+    fn test_gmail_imap_config() {
+        let provider = GmailProvider::new();
+        let config = provider.imap_config("test@gmail.com");
+
+        assert_eq!(config.host, "imap.gmail.com");
+        assert_eq!(config.port, 993);
+    }
+
+    #[test]
+    fn test_gmail_smtp_config() {
+        let provider = GmailProvider::new();
+        let config = provider.smtp_config("test@gmail.com");
+
+        assert_eq!(config.host, "smtp.gmail.com");
+        assert_eq!(config.port, 587);
+    }
+
+    #[test]
+    fn test_gmail_box_clone() {
+        let provider = GmailProvider::new();
+        let cloned = provider.box_clone();
+
+        assert_eq!(cloned.provider_info().id, "gmail");
     }
 }

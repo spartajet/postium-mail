@@ -4,7 +4,7 @@
 //! OAuth 2.0、密码认证
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder, ProviderInfo};
 
 impl OutlookProvider {
     /// Outlook 默认客户端 ID
@@ -46,9 +46,41 @@ impl OutlookProvider {
 }
 
 /// Outlook 个人邮件服务商
-pub struct OutlookProvider;
+pub struct OutlookProvider {
+    info: ProviderInfo,
+}
 
 impl OutlookProvider {
+    /// 创建新的 Outlook 服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "outlook".to_string(),
+                name: "Outlook".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "outlook.com".to_string(),
+                    "hotmail.com".to_string(),
+                    "live.com".to_string(),
+                    "msn.com".to_string(),
+                ],
+                auth_types: vec![AuthType::OAuth2, AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: true,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(35 * 1024 * 1024),
+                },
+                icon: Some("outlook".to_string()),
+            },
+        }
+    }
+
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
         match OAuthConfig::from_env_for_provider("outlook") {
@@ -77,23 +109,8 @@ impl OutlookProvider {
 
 #[async_trait]
 impl MailProvider for OutlookProvider {
-    fn provider_id(&self) -> &str {
-        "outlook"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Outlook"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![
-            AuthType::OAuth2,
-            AuthType::Password,
-        ]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -154,6 +171,23 @@ impl MailProvider for OutlookProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(OutlookProvider)
+        Box::new(Self::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_outlook_provider_info() {
+        let provider = OutlookProvider::new();
+        let info = provider.provider_info();
+
+        assert_eq!(info.id, "outlook");
+        assert_eq!(info.name, "Outlook");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::OAuth2));
+        assert!(info.capabilities.supports_oauth);
     }
 }

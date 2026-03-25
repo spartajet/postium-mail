@@ -63,11 +63,12 @@ pub async fn detect_provider(
         .await
         .map_err(|e| e.to_string())?;
 
-    // 2. 获取配置
+    // 2. 获取配置（缓存 provider_info 避免多次调用）
+    let provider_info = provider.provider_info();
     let imap_config = provider.imap_config(&email);
     let smtp_config = provider.smtp_config(&email);
-    let auth_types = provider.auth_types();
-    let capabilities = provider.capabilities();
+    let auth_types = provider_info.auth_types.clone();
+    let capabilities = provider_info.capabilities.clone();
 
     // 3. 确定推荐的认证类型（优先 OAuth）
     let recommended_auth_type = if auth_types.contains(&AuthType::OAuth2) {
@@ -78,8 +79,8 @@ pub async fn detect_provider(
 
     // 4. 转换为 DTO
     Ok(ProviderDetectionResult {
-        provider_id: provider.provider_id().to_string(),
-        provider_name: provider.provider_name().to_string(),
+        provider_id: provider_info.id.clone(),
+        provider_name: provider_info.name.clone(),
         auth_types: auth_types
             .into_iter()
             .map(|t| match t {
@@ -123,9 +124,12 @@ pub async fn list_providers(
 
     Ok(providers
         .into_iter()
-        .map(|p| ProviderInfoDto {
-            id: p.provider_id().to_string(),
-            name: p.provider_name().to_string(),
+        .map(|p| {
+            let info = p.provider_info();
+            ProviderInfoDto {
+                id: info.id.clone(),
+                name: info.name.clone(),
+            }
         })
         .collect())
 }

@@ -3,27 +3,49 @@
 //! 支持 21cn.com、21cn.net 等21CN邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 21CN邮箱个人邮件服务商
-pub struct Cn21MailProvider;
+pub struct Cn21MailProvider {
+    info: ProviderInfo,
+}
+
+impl Cn21MailProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "cn21".to_string(),
+                name: "21CN邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["21cn.com".to_string(), "21cn.net".to_string(), "mail.21cn.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024),
+                },
+                icon: Some("cn21".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for Cn21MailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for Cn21MailProvider {
-    fn provider_id(&self) -> &str {
-        "cn21"
-    }
-
-    fn provider_name(&self) -> &str {
-        "21CN邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -70,7 +92,7 @@ impl MailProvider for Cn21MailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Cn21MailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -80,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cn21_detection() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
 
         // 测试21CN邮箱域名
         assert!(provider.detect("test@21cn.com").await.unwrap());
@@ -94,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_cn21_config() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -111,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_cn21_domains() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["21cn.com", "21cn.net", "mail.21cn.com"]);
@@ -119,17 +141,18 @@ mod tests {
 
     #[test]
     fn test_cn21_provider_info() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "cn21");
-        assert_eq!(provider.provider_name(), "21CN邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "cn21");
+        assert_eq!(info.name, "21CN邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
     }
 
     #[test]
     fn test_cn21_capabilities() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -145,9 +168,9 @@ mod tests {
 
     #[test]
     fn test_cn21_box_clone() {
-        let provider = Cn21MailProvider;
+        let provider = Cn21MailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "cn21");
+        assert_eq!(cloned.provider_info().id, "cn21");
     }
 }

@@ -4,7 +4,7 @@
 //! 企业域名 OAuth、单点登录 (SSO)、企业安全策略支持
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, EnterpriseConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, ProviderInfo, OAuthConfig, EnterpriseConfig};
 
 impl GoogleWorkspaceProvider {
     /// Google Workspace 默认客户端 ID
@@ -46,6 +46,7 @@ impl GoogleWorkspaceProvider {
 /// Google Workspace 企业邮件服务商
 pub struct GoogleWorkspaceProvider {
     domain: Option<String>,
+    info: ProviderInfo,
 }
 
 impl GoogleWorkspaceProvider {
@@ -53,9 +54,7 @@ impl GoogleWorkspaceProvider {
     ///
     /// 这是推荐的方式，使用预配置的 Google Workspace 凭证。
     pub fn with_defaults() -> Self {
-        Self {
-            domain: None,
-        }
+        Self::new(None)
     }
 
     /// 使用指定企业域名创建服务商
@@ -74,15 +73,40 @@ impl GoogleWorkspaceProvider {
     /// let provider = GoogleWorkspaceProvider::with_domain("example.com");
     /// ```
     pub fn with_domain<S: Into<String>>(domain: S) -> Self {
-        Self {
-            domain: Some(domain.into()),
-        }
+        Self::new(Some(domain.into()))
     }
 
     pub fn new(domain: Option<String>) -> Self {
-        Self { domain }
+        let info = ProviderInfo {
+            id: "google-workspace".to_string(),
+            name: "Google Workspace".to_string(),
+            account_type: AccountType::Enterprise,
+            domains: vec![],
+            auth_types: vec![AuthType::OAuth2],
+            capabilities: ProviderCapabilities {
+                supports_idle: true,
+                supports_push: true,
+                supports_oauth: true,
+                supports_enterprise: true,
+                supports_labels: true,
+                supports_folders: false,
+                supports_threads: true,
+                supports_search: true,
+                max_message_size: Some(50 * 1024 * 1024),
+            },
+            icon: Some("google-workspace".to_string()),
+        };
+        Self { domain, info }
     }
+}
 
+impl Default for GoogleWorkspaceProvider {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl GoogleWorkspaceProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
         match OAuthConfig::from_env_for_provider("googleworkspace") {
@@ -111,20 +135,8 @@ impl GoogleWorkspaceProvider {
 
 #[async_trait]
 impl MailProvider for GoogleWorkspaceProvider {
-    fn provider_id(&self) -> &str {
-        "google-workspace"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Google Workspace"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Enterprise
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::OAuth2]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, _email: &str) -> ImapServerConfig {
@@ -332,13 +344,22 @@ mod tests {
 
     #[test]
     fn test_google_workspace_provider_info() {
-        let provider = GoogleWorkspaceProvider::with_defaults();
+        let provider = GoogleWorkspaceProvider::new(None);
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "google-workspace");
-        assert_eq!(provider.provider_name(), "Google Workspace");
-        assert_eq!(provider.account_type(), AccountType::Enterprise);
-
-        let auth_types = provider.auth_types();
-        assert_eq!(auth_types, vec![AuthType::OAuth2]);
+        assert_eq!(info.id, "google-workspace");
+        assert_eq!(info.name, "Google Workspace");
+        assert_eq!(info.account_type, AccountType::Enterprise);
+        assert_eq!(info.auth_types, vec![AuthType::OAuth2]);
+        assert!(info.capabilities.supports_idle);
+        assert!(info.capabilities.supports_push);
+        assert!(info.capabilities.supports_oauth);
+        assert!(info.capabilities.supports_enterprise);
+        assert!(info.capabilities.supports_labels);
+        assert!(!info.capabilities.supports_folders);
+        assert!(info.capabilities.supports_threads);
+        assert!(info.capabilities.supports_search);
+        assert_eq!(info.capabilities.max_message_size, Some(50 * 1024 * 1024));
+        assert_eq!(info.icon, Some("google-workspace".to_string()));
     }
 }

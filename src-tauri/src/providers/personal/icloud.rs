@@ -3,27 +3,49 @@
 //! 支持 icloud.com、me.com、mac.com 等 Apple 邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// iCloud 邮件服务商
-pub struct ICloudProvider;
+pub struct ICloudProvider {
+    info: ProviderInfo,
+}
+
+impl ICloudProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "icloud".to_string(),
+                name: "iCloud".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["icloud.com".to_string(), "me.com".to_string(), "mac.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: None,
+            },
+        }
+    }
+}
+
+impl Default for ICloudProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for ICloudProvider {
-    fn provider_id(&self) -> &str {
-        "icloud"
-    }
-
-    fn provider_name(&self) -> &str {
-        "iCloud"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -70,7 +92,7 @@ impl MailProvider for ICloudProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(ICloudProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -80,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_icloud_detection() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
 
         // 测试 iCloud 邮箱域名
         assert!(provider.detect("test@icloud.com").await.unwrap());
@@ -94,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_icloud_config() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -111,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_icloud_domains() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["icloud.com", "me.com", "mac.com"]);
@@ -119,17 +141,18 @@ mod tests {
 
     #[test]
     fn test_icloud_provider_info() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "icloud");
-        assert_eq!(provider.provider_name(), "iCloud");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "icloud");
+        assert_eq!(info.name, "iCloud");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert_eq!(info.auth_types, vec![AuthType::Password]);
     }
 
     #[test]
     fn test_icloud_capabilities() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -145,9 +168,9 @@ mod tests {
 
     #[test]
     fn test_icloud_box_clone() {
-        let provider = ICloudProvider;
+        let provider = ICloudProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "icloud");
+        assert_eq!(cloned.provider_info().id, "icloud");
     }
 }

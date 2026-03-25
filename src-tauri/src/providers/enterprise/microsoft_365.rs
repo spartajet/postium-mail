@@ -4,7 +4,7 @@
 //! 企业租户 OAuth、条件访问策略、MFA 支持
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, EnterpriseConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, EnterpriseConfig, ProviderInfo};
 
 impl Microsoft365Provider {
     /// Microsoft 365 默认客户端 ID
@@ -55,6 +55,7 @@ impl Microsoft365Provider {
 
 /// Microsoft 365 企业邮件服务商
 pub struct Microsoft365Provider {
+    info: ProviderInfo,
     tenant_id: Option<String>,
 }
 
@@ -63,9 +64,7 @@ impl Microsoft365Provider {
     ///
     /// 这是推荐的方式，使用预配置的 Microsoft 365 凭证。
     pub fn with_defaults() -> Self {
-        Self {
-            tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
-        }
+        Self::new(Some(Self::DEFAULT_TENANT.to_string()))
     }
 
     /// 使用指定租户 ID 创建服务商
@@ -85,13 +84,32 @@ impl Microsoft365Provider {
     /// let provider = Microsoft365Provider::with_tenant("8aef722a-1234-5678-9abc-123456789012");
     /// ```
     pub fn with_tenant<S: Into<String>>(tenant_id: S) -> Self {
-        Self {
-            tenant_id: Some(tenant_id.into()),
-        }
+        Self::new(Some(tenant_id.into()))
     }
 
     pub fn new(tenant_id: Option<String>) -> Self {
-        Self { tenant_id }
+        Self {
+            info: ProviderInfo {
+                id: "microsoft365".to_string(),
+                name: "Microsoft 365".to_string(),
+                account_type: AccountType::Enterprise,
+                domains: vec![".onmicrosoft.com".to_string()],
+                auth_types: vec![AuthType::OAuth2, AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: true,
+                    supports_oauth: true,
+                    supports_enterprise: true,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(150 * 1024 * 1024), // 150MB
+                },
+                icon: Some("microsoft365".to_string()),
+            },
+            tenant_id,
+        }
     }
 
     /// 获取 OAuth 配置
@@ -126,25 +144,16 @@ impl Microsoft365Provider {
     }
 }
 
+impl Default for Microsoft365Provider {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
 #[async_trait]
 impl MailProvider for Microsoft365Provider {
-    fn provider_id(&self) -> &str {
-        "microsoft365"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Microsoft 365"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Enterprise
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![
-            AuthType::OAuth2,
-            AuthType::Password,
-        ]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, _email: &str) -> ImapServerConfig {
@@ -205,7 +214,7 @@ impl MailProvider for Microsoft365Provider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Microsoft365Provider::new(self.tenant_id.clone()))
+        Box::new(Self::new(self.tenant_id.clone()))
     }
 }
 
@@ -215,14 +224,14 @@ mod tests {
 
     #[test]
     fn test_microsoft365_with_defaults() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
 
         assert_eq!(provider.tenant_id, Some("common".to_string()));
     }
 
     #[test]
     fn test_microsoft365_with_tenant() {
-        let provider = Microsoft365Provider::with_tenant("8aef722a-1234-5678-9abc-123456789012");
+        let provider = Microsoft365Provider::new(Some("8aef722a-1234-5678-9abc-123456789012".to_string()));
 
         assert_eq!(provider.tenant_id, Some("8aef722a-1234-5678-9abc-123456789012".to_string()));
     }
@@ -236,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_oauth_config() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let oauth_config = provider.oauth_config();
 
         assert_eq!(oauth_config.client_id, Microsoft365Provider::DEFAULT_CLIENT_ID);
@@ -251,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_oauth_scopes() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let oauth_config = provider.oauth_config();
 
         let expected_scopes = vec![
@@ -266,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_imap_config() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let imap_config = provider.imap_config("user@example.com");
 
         assert_eq!(imap_config.host, "outlook.office365.com");
@@ -276,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_smtp_config() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let smtp_config = provider.smtp_config("user@example.com");
 
         assert_eq!(smtp_config.host, "smtp.office365.com");
@@ -286,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_capabilities() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -302,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_enterprise_config() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let enterprise_config = provider.enterprise_config().unwrap();
 
         assert!(enterprise_config.conditional_access);
@@ -314,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_detect_onmicrosoft() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
 
         // 需要使用运行时检测
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -332,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_microsoft365_supported_domains() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec![".onmicrosoft.com"]);
@@ -340,13 +349,13 @@ mod tests {
 
     #[test]
     fn test_microsoft365_provider_info() {
-        let provider = Microsoft365Provider::with_defaults();
+        let provider = Microsoft365Provider::new(Some("common".to_string()));
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "microsoft365");
-        assert_eq!(provider.provider_name(), "Microsoft 365");
-        assert_eq!(provider.account_type(), AccountType::Enterprise);
-
-        let auth_types = provider.auth_types();
-        assert_eq!(auth_types, vec![AuthType::OAuth2, AuthType::Password]);
+        assert_eq!(info.id, "microsoft365");
+        assert_eq!(info.name, "Microsoft 365");
+        assert_eq!(info.account_type, AccountType::Enterprise);
+        assert!(info.auth_types.contains(&AuthType::OAuth2));
+        assert!(info.capabilities.supports_oauth);
     }
 }

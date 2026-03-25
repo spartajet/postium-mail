@@ -2,31 +2,56 @@
 //!
 //! 支持 zoho.com 等Zoho邮箱域名
 
-use super::super::{
-    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig,
-};
 use async_trait::async_trait;
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Zoho邮箱个人邮件服务商
-pub struct ZohoMailProvider;
+pub struct ZohoMailProvider {
+    info: ProviderInfo,
+}
+
+impl ZohoMailProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "zoho".to_string(),
+                name: "Zoho邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "zoho.com".to_string(),
+                    "zohomail.com".to_string(),
+                    "zoho.eu".to_string(),
+                    "zoho.in".to_string(),
+                    "zoho.com.au".to_string(),
+                ],
+                auth_types: vec![AuthType::Password, AuthType::OAuth2],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: true,
+                    supports_folders: true,
+                    supports_threads: true,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024),
+                },
+                icon: Some("zoho".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for ZohoMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for ZohoMailProvider {
-    fn provider_id(&self) -> &str {
-        "zoho"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Zoho邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password, AuthType::OAuth2]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -94,7 +119,7 @@ impl MailProvider for ZohoMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(ZohoMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -104,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_zoho_detection() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
 
         // 测试Zoho邮箱域名
         assert!(provider.detect("test@zoho.com").await.unwrap());
@@ -119,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_zoho_config() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -142,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_zoho_domains() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(
@@ -159,18 +184,19 @@ mod tests {
 
     #[test]
     fn test_zoho_provider_info() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "zoho");
-        assert_eq!(provider.provider_name(), "Zoho邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert!(provider.auth_types().contains(&AuthType::Password));
-        assert!(provider.auth_types().contains(&AuthType::OAuth2));
+        assert_eq!(info.id, "zoho");
+        assert_eq!(info.name, "Zoho邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
+        assert!(info.auth_types.contains(&AuthType::OAuth2));
     }
 
     #[test]
     fn test_zoho_capabilities() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -186,15 +212,15 @@ mod tests {
 
     #[test]
     fn test_zoho_box_clone() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "zoho");
+        assert_eq!(cloned.provider_info().id, "zoho");
     }
 
     #[test]
     fn test_zoho_oauth() {
-        let provider = ZohoMailProvider;
+        let provider = ZohoMailProvider::new();
         let oauth = provider.oauth_config();
 
         assert!(oauth.is_some());

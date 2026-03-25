@@ -5,7 +5,7 @@
 
 use super::super::{
     AccountType, AuthType, EnterpriseConfig, ImapServerConfig, MailProvider, ProviderCapabilities,
-    SmtpServerConfig, SslMode,
+    ProviderInfo, SmtpServerConfig, SslMode,
 };
 use async_trait::async_trait;
 
@@ -25,7 +25,7 @@ impl CustomProvider {
 
 /// 自定义企业邮件服务商
 pub struct CustomProvider {
-    name: String,
+    info: ProviderInfo,
     imap_host: String,
     imap_port: u16,
     imap_ssl: SslMode,
@@ -57,15 +57,16 @@ impl CustomProvider {
         imap_host: S,
         smtp_host: S,
     ) -> Self {
-        Self {
-            name: name.into(),
-            imap_host: imap_host.into(),
-            imap_port: Self::DEFAULT_IMAP_PORT,
-            imap_ssl: Self::DEFAULT_IMAP_SSL,
-            smtp_host: smtp_host.into(),
-            smtp_port: Self::DEFAULT_SMTP_PORT,
-            smtp_ssl: Self::DEFAULT_SMTP_SSL,
-        }
+        let name = name.into();
+        Self::new(
+            name,
+            imap_host.into(),
+            Self::DEFAULT_IMAP_PORT,
+            Self::DEFAULT_IMAP_SSL,
+            smtp_host.into(),
+            Self::DEFAULT_SMTP_PORT,
+            Self::DEFAULT_SMTP_SSL,
+        )
     }
 
     /// 创建完全自定义的服务商配置
@@ -89,7 +90,25 @@ impl CustomProvider {
         smtp_ssl: SslMode,
     ) -> Self {
         Self {
-            name,
+            info: ProviderInfo {
+                id: "custom".to_string(),
+                name: name.clone(),
+                account_type: AccountType::Enterprise,
+                domains: vec![],
+                auth_types: vec![AuthType::Password, AuthType::OAuth2],
+                capabilities: ProviderCapabilities {
+                    supports_idle: false,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: true,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(25 * 1024 * 1024),
+                },
+                icon: None,
+            },
             imap_host,
             imap_port,
             imap_ssl,
@@ -115,34 +134,36 @@ impl CustomProvider {
         smtp_host: String,
         smtp_port: u16,
     ) -> Self {
-        Self {
+        Self::new(
             name,
             imap_host,
             imap_port,
-            imap_ssl: Self::DEFAULT_IMAP_SSL,
+            Self::DEFAULT_IMAP_SSL,
             smtp_host,
             smtp_port,
-            smtp_ssl: Self::DEFAULT_SMTP_SSL,
-        }
+            Self::DEFAULT_SMTP_SSL,
+        )
+    }
+}
+
+impl Default for CustomProvider {
+    fn default() -> Self {
+        Self::new(
+            String::new(),
+            String::new(),
+            Self::DEFAULT_IMAP_PORT,
+            Self::DEFAULT_IMAP_SSL,
+            String::new(),
+            Self::DEFAULT_SMTP_PORT,
+            Self::DEFAULT_SMTP_SSL,
+        )
     }
 }
 
 #[async_trait]
 impl MailProvider for CustomProvider {
-    fn provider_id(&self) -> &str {
-        "custom"
-    }
-
-    fn provider_name(&self) -> &str {
-        &self.name
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Enterprise
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password, AuthType::OAuth2]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, _email: &str) -> ImapServerConfig {
@@ -204,8 +225,8 @@ impl MailProvider for CustomProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(CustomProvider::new(
-            self.name.clone(),
+        Box::new(Self::new(
+            self.info.name.clone(),
             self.imap_host.clone(),
             self.imap_port,
             self.imap_ssl.clone(),
@@ -228,7 +249,7 @@ mod tests {
             "smtp.test.com"
         );
 
-        assert_eq!(provider.name, "Test Company");
+        assert_eq!(provider.provider_info().name, "Test Company");
         assert_eq!(provider.imap_host, "imap.test.com");
         assert_eq!(provider.smtp_host, "smtp.test.com");
         assert_eq!(provider.imap_port, 993);
@@ -247,7 +268,7 @@ mod tests {
             587,
         );
 
-        assert_eq!(provider.name, "Test Company");
+        assert_eq!(provider.provider_info().name, "Test Company");
         assert_eq!(provider.imap_host, "imap.test.com");
         assert_eq!(provider.smtp_host, "smtp.test.com");
         assert_eq!(provider.imap_port, 993);
@@ -268,7 +289,7 @@ mod tests {
             SslMode::None,
         );
 
-        assert_eq!(provider.name, "Test Company");
+        assert_eq!(provider.provider_info().name, "Test Company");
         assert_eq!(provider.imap_port, 143);
         assert_eq!(provider.imap_ssl, SslMode::None);
         assert_eq!(provider.smtp_port, 25);
@@ -310,7 +331,7 @@ mod tests {
             "imap.test.com",
             "smtp.test.com"
         );
-        let caps = provider.capabilities();
+        let caps = provider.provider_info().capabilities.clone();
 
         assert!(!caps.supports_idle);
         assert!(!caps.supports_push);
@@ -391,9 +412,10 @@ mod tests {
 
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "custom");
-        assert_eq!(cloned.provider_name(), "Test");
-        assert_eq!(cloned.account_type(), AccountType::Enterprise);
+        let info = cloned.provider_info();
+        assert_eq!(info.id, "custom");
+        assert_eq!(info.name, "Test");
+        assert_eq!(info.account_type, AccountType::Enterprise);
     }
 
     #[test]
@@ -404,12 +426,11 @@ mod tests {
             "smtp.company.com"
         );
 
-        assert_eq!(provider.provider_id(), "custom");
-        assert_eq!(provider.provider_name(), "My Company Mail");
-        assert_eq!(provider.account_type(), AccountType::Enterprise);
-
-        let auth_types = provider.auth_types();
-        assert_eq!(auth_types, vec![AuthType::Password, AuthType::OAuth2]);
+        let info = provider.provider_info();
+        assert_eq!(info.id, "custom");
+        assert_eq!(info.name, "My Company Mail");
+        assert_eq!(info.account_type, AccountType::Enterprise);
+        assert_eq!(info.auth_types, vec![AuthType::Password, AuthType::OAuth2]);
     }
 
     #[test]
