@@ -169,7 +169,6 @@
 
 #[allow(unused_imports, deprecated)]
 mod account_type;
-mod config;
 mod enterprise;
 mod oauth_utils;
 mod personal;

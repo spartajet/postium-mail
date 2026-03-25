@@ -12,7 +12,7 @@ use crate::sync::{
     change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
     mail_processor::MailProcessor,
 };
-use chrono::Datelike; // 添加 Datelike trait来访问日期方法
+// use chrono::Datelike; // 添加 Datelike trait来访问日期方法
 use sea_orm::DbConn;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -810,24 +810,24 @@ impl SyncManager {
     }
 }
 
-/// 格式化日期为 IMAP SINCE 命令所需的格式
-///
-/// IMAP SINCE 命令需要英文月份缩写（RFC 3501）：
-/// 格式：dd-MMM-yyyy（如 20-Dec-2025）
-///
-/// 注意：不能使用 chrono 的 %b 格式化，因为它会根据系统语言环境
-/// 生成不同的月份名称（如中文系统会生成 "12月"）
-fn format_imap_date(datetime: chrono::DateTime<chrono::Utc>) -> String {
-    const MONTH_NAMES: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
+// /// 格式化日期为 IMAP SINCE 命令所需的格式
+// ///
+// /// IMAP SINCE 命令需要英文月份缩写（RFC 3501）：
+// /// 格式：dd-MMM-yyyy（如 20-Dec-2025）
+// ///
+// /// 注意：不能使用 chrono 的 %b 格式化，因为它会根据系统语言环境
+// /// 生成不同的月份名称（如中文系统会生成 "12月"）
+// fn format_imap_date(datetime: chrono::DateTime<chrono::Utc>) -> String {
+//     const MONTH_NAMES: [&str; 12] = [
+//         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+//     ];
 
-    let day = datetime.day();
-    let month = MONTH_NAMES[datetime.month() as usize - 1];
-    let year = datetime.year();
+//     let day = datetime.day();
+//     let month = MONTH_NAMES[datetime.month() as usize - 1];
+//     let year = datetime.year();
 
-    format!("{:02}-{}-{}", day, month, year)
-}
+//     format!("{:02}-{}-{}", day, month, year)
+// }
 
 #[cfg(test)]
 mod tests {

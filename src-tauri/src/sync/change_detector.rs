@@ -410,32 +410,32 @@ impl ChangeDetector {
         Ok(uids)
     }
 
-    /// 获取本地邮件的标志状态
-    ///
-    /// 从数据库查询指定 UID 的邮件标志
-    async fn get_local_flags(
-        &self,
-        account_id: i32,
-        folder: &str,
-        uid: u32,
-    ) -> Result<Option<EmailFlags>> {
-        use crate::storage::models::email;
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    // /// 获取本地邮件的标志状态
+    // ///
+    // /// 从数据库查询指定 UID 的邮件标志
+    // async fn get_local_flags(
+    //     &self,
+    //     account_id: i32,
+    //     folder: &str,
+    //     uid: u32,
+    // ) -> Result<Option<EmailFlags>> {
+    //     use crate::storage::models::email;
+    //     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-        // 查询数据库
-        let emails = email::Entity::find()
-            .filter(email::Column::AccountId.eq(account_id))
-            .filter(email::Column::Folder.eq(folder))
-            .filter(email::Column::Uid.eq(uid as i32))
-            .all(self.db.as_ref())
-            .await?;
+    //     // 查询数据库
+    //     let emails = email::Entity::find()
+    //         .filter(email::Column::AccountId.eq(account_id))
+    //         .filter(email::Column::Folder.eq(folder))
+    //         .filter(email::Column::Uid.eq(uid as i32))
+    //         .all(self.db.as_ref())
+    //         .await?;
 
-        if let Some(email) = emails.first() {
-            Ok(Some(EmailFlags::from_email_model(email)))
-        } else {
-            Ok(None)
-        }
-    }
+    //     if let Some(email) = emails.first() {
+    //         Ok(Some(EmailFlags::from_email_model(email)))
+    //     } else {
+    //         Ok(None)
+    //     }
+    // }
 
     /// 批量获取本地邮件的标志状态
     ///

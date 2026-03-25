@@ -23,11 +23,6 @@ impl GmailProvider {
     const DEFAULT_CLIENT_ID: &str =
         "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
 
-    /// Gmail 默认重定向 URI
-    ///
-    /// 使用自定义 Deep Link 方案
-    const DEFAULT_REDIRECT_URI: &str = "com.spartajet.postium-mail:/oauth/callback";
-
     /// Gmail 默认授权端点
     const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 

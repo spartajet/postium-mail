@@ -3,8 +3,11 @@
 //! 支持 Microsoft 365 (Office 365) 企业邮箱
 //! 企业租户 OAuth、条件访问策略、MFA 支持
 
+use super::super::{
+    AccountType, AuthType, EnterpriseConfig, ImapServerConfig, MailProvider, OAuthConfig,
+    ProviderCapabilities, ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, EnterpriseConfig, ProviderInfo};
 
 impl Microsoft365Provider {
     /// Microsoft 365 默认客户端 ID
@@ -19,11 +22,6 @@ impl Microsoft365Provider {
     /// "common" 表示允许使用个人账号和企业账号
     /// 企业部署时应替换为实际的租户 ID（如：8aef722a-1234-5678-9abc-123456789012）
     const DEFAULT_TENANT: &str = "common";
-
-    /// Microsoft 365 默认重定向 URI
-    ///
-    /// 使用自定义 Deep Link 方案
-    const DEFAULT_REDIRECT_URI: &str = "postium-mail://oauth/callback";
 
     /// Microsoft 365 默认授权端点
     const DEFAULT_AUTH_URL: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
@@ -43,14 +41,6 @@ impl Microsoft365Provider {
         "offline_access",
         "openid",
     ];
-
-    /// Microsoft 365 IMAP 服务器配置
-    const IMAP_HOST: &str = "outlook.office365.com";
-    const IMAP_PORT: u16 = 993;
-
-    /// Microsoft 365 SMTP 服务器配置
-    const SMTP_HOST: &str = "smtp.office365.com";
-    const SMTP_PORT: u16 = 587;
 }
 
 /// Microsoft 365 企业邮件服务商
@@ -123,7 +113,9 @@ impl Microsoft365Provider {
                 config
             }
             Err(_) => {
-                tracing::warn!("使用 Microsoft 365 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
+                tracing::warn!(
+                    "使用 Microsoft 365 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件"
+                );
                 let port = crate::config::get_oauth_callback_port();
                 let redirect_uri = crate::config::generate_redirect_uri(port);
 
@@ -231,9 +223,13 @@ mod tests {
 
     #[test]
     fn test_microsoft365_with_tenant() {
-        let provider = Microsoft365Provider::new(Some("8aef722a-1234-5678-9abc-123456789012".to_string()));
+        let provider =
+            Microsoft365Provider::new(Some("8aef722a-1234-5678-9abc-123456789012".to_string()));
 
-        assert_eq!(provider.tenant_id, Some("8aef722a-1234-5678-9abc-123456789012".to_string()));
+        assert_eq!(
+            provider.tenant_id,
+            Some("8aef722a-1234-5678-9abc-123456789012".to_string())
+        );
     }
 
     #[test]
@@ -248,11 +244,22 @@ mod tests {
         let provider = Microsoft365Provider::new(Some("common".to_string()));
         let oauth_config = provider.oauth_config();
 
-        assert_eq!(oauth_config.client_id, Microsoft365Provider::DEFAULT_CLIENT_ID);
-        assert_eq!(oauth_config.auth_url, Microsoft365Provider::DEFAULT_AUTH_URL);
-        assert_eq!(oauth_config.token_url, Microsoft365Provider::DEFAULT_TOKEN_URL);
-        assert_eq!(oauth_config.redirect_uri, Microsoft365Provider::DEFAULT_REDIRECT_URI);
-        assert_eq!(oauth_config.scopes.len(), Microsoft365Provider::DEFAULT_SCOPES.len());
+        assert_eq!(
+            oauth_config.client_id,
+            Microsoft365Provider::DEFAULT_CLIENT_ID
+        );
+        assert_eq!(
+            oauth_config.auth_url,
+            Microsoft365Provider::DEFAULT_AUTH_URL
+        );
+        assert_eq!(
+            oauth_config.token_url,
+            Microsoft365Provider::DEFAULT_TOKEN_URL
+        );
+        assert_eq!(
+            oauth_config.scopes.len(),
+            Microsoft365Provider::DEFAULT_SCOPES.len()
+        );
         assert!(oauth_config.pkce_enabled);
         assert_eq!(oauth_config.tenant_id, Some("common".to_string()));
         assert!(oauth_config.client_secret.is_none());

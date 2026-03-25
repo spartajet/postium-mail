@@ -67,7 +67,7 @@ impl DeltaSyncResult {
 ///
 /// 负责高效的增量同步，自动选择最佳策略
 pub struct DeltaSync {
-    db: Arc<DbConn>,
+    // db: Arc<DbConn>,
     change_detector: ChangeDetector,
     // TODO: 添加更多依赖
     // imap_client: Arc<AsyncImapClient>,
@@ -79,7 +79,7 @@ impl DeltaSync {
     pub fn new(db: Arc<DbConn>) -> Self {
         let change_detector = ChangeDetector::new(db.clone());
         Self {
-            db,
+            // db,
             change_detector,
         }
     }

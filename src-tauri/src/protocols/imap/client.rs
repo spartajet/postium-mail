@@ -170,8 +170,8 @@ pub struct XOAuth2Authenticator {
     email: String,
     /// OAuth2 访问令牌
     access_token: String,
-    /// 是否已发送初始响应
-    initial_response_sent: bool,
+    // /// 是否已发送初始响应
+    // initial_response_sent: bool,
 }
 
 impl XOAuth2Authenticator {
@@ -180,7 +180,7 @@ impl XOAuth2Authenticator {
         Self {
             email,
             access_token,
-            initial_response_sent: false,
+            // initial_response_sent: false,
         }
     }
 }
