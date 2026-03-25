@@ -16,33 +16,22 @@
 //! - `service` - IMAP 服务包装
 //! - `tests` - 测试工具
 
-mod auth;
 mod client;
 mod error;
 mod parser;
-mod service;
-mod tests;
+
 mod types;
 
 // ========== 重新导出所有公共接口 ==========
 
-// 认证相关
-pub use auth::ImapAuth;
-
 // 客户端
-pub use client::{AsyncImapClient, three_months_ago_imap_format};
+pub use client::{AsyncImapClient, ImapAuth, three_months_ago_imap_format};
 
 // 类型定义
 pub use types::*;
 
 // 错误类型
 pub use error::{ImapError, Result as ImapResult};
-
-// IMAP 服务
-pub use service::ImapService;
-
-// 测试工具
-pub use tests::{ConnectionTestResult, test_connection};
 
 // 向后兼容别名
 pub use AsyncImapClient as ImapClient;

@@ -152,7 +152,6 @@
 //! - 连接会在 Drop 时自动关闭
 //! - OAuth2 认证需要进一步实现（当前返回错误）
 
-use super::auth::ImapAuth;
 use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
 use anyhow::{Result, anyhow};
 use async_imap::{Authenticator, Session};
@@ -162,30 +161,57 @@ use std::time::Instant;
 use tokio::net::TcpStream;
 use tracing::instrument;
 
-/// XOAUTH2 认证器
+/// IMAP 认证方式
 ///
-/// 实现 async-imap 的 Authenticator trait，用于 OAuth2 认证
-pub struct XOAuth2Authenticator {
-    /// 用户邮箱
-    email: String,
-    /// OAuth2 访问令牌
-    access_token: String,
-    // /// 是否已发送初始响应
-    // initial_response_sent: bool,
+/// 表示 IMAP 连接时使用的认证信息。
+///
+/// # 变体说明
+///
+/// ## Password
+///
+/// 传统密码认证，使用 IMAP `LOGIN` 命令。
+///
+/// **注意**: 对于 Gmail 等服务商，需要使用应用专用密码而非账号密码。
+///
+/// ## OAuth2
+///
+/// OAuth2 认证，使用 SASL XOAUTH2 机制。
+///
+/// **字段**:
+/// - `email`: OAuth 邮箱地址（通常与账号邮箱相同）
+/// - `access_token`: OAuth2 访问令牌
+///
+/// **生成格式**:
+/// ```text
+/// user={email}\x01auth=Bearer {access_token}\x01\x01
+/// ```
+///
+/// # 使用建议
+///
+/// - 优先使用 OAuth2 认证，更安全且支持更精细的权限控制
+/// - 对于不支持 OAuth2 的服务商，回退到密码认证
+/// - 密码认证时应使用应用专用密码，而非账号主密码
+#[derive(Debug, Clone)]
+pub enum ImapAuth {
+    /// 传统密码认证
+    ///
+    /// 使用 IMAP LOGIN 命令进行认证。
+    /// 需要提供应用专用密码（App Password）而非账号密码。
+    Password(String),
+
+    /// OAuth2 认证
+    ///
+    /// 使用 SASL XOAUTH2 机制进行认证。
+    /// 访问令牌应该从 OAuth2 流程中获取并定期刷新。
+    OAuth2 {
+        /// OAuth 邮箱地址（可能与认证邮箱不同）
+        email: String,
+        /// OAuth 访问令牌
+        access_token: String,
+    },
 }
 
-impl XOAuth2Authenticator {
-    /// 创建新的 XOAUTH2 认证器
-    pub fn new(email: String, access_token: String) -> Self {
-        Self {
-            email,
-            access_token,
-            // initial_response_sent: false,
-        }
-    }
-}
-
-impl Authenticator for XOAuth2Authenticator {
+impl Authenticator for ImapAuth {
     type Response = String;
 
     /// 处理服务器挑战
@@ -195,10 +221,13 @@ impl Authenticator for XOAuth2Authenticator {
     /// 2. 如果认证成功，服务器返回 OK
     /// 3. 如果认证失败，服务器发送挑战（包含错误信息），客户端应发送空响应
     fn process(&mut self, challenge: &[u8]) -> Self::Response {
-        format!(
-            "user={}\x01auth=Bearer {}\x01\x01",
-            self.email, self.access_token
-        )
+        match self {
+            ImapAuth::Password(password) => password.to_string(),
+            ImapAuth::OAuth2 {
+                email,
+                access_token,
+            } => format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token),
+        }
     }
 }
 
@@ -252,6 +281,7 @@ impl AsyncImapClient {
 
         // 异步登录
         let login_start = Instant::now();
+
         let session = match &auth {
             ImapAuth::Password(pwd) => {
                 // 传统密码认证
@@ -260,15 +290,12 @@ impl AsyncImapClient {
                     .await
                     .map_err(|(e, _)| anyhow!("IMAP 密码登录失败: {}", e))?
             }
-            ImapAuth::OAuth2 {
-                email: oauth_email,
-                access_token,
-            } => {
+            ImapAuth::OAuth2 { .. } => {
                 // OAuth2/XOAUTH2 认证
-                tracing::info!("使用OAuth2认证IMAP: {}", oauth_email);
-                let oauth2 = XOAuth2Authenticator::new(email.to_string(), access_token.to_string());
+                // tracing::info!("使用OAuth2认证IMAP: {}", oauth_email);
+                // let oauth2 = XOAuth2Authenticator::new(email.to_string(), access_token.to_string());
                 client
-                    .authenticate("XOAUTH2", oauth2)
+                    .authenticate("XOAUTH2", auth)
                     .await
                     .map_err(|e| anyhow!("IMAP OAuth2 登录失败: {:?}", e))?
             }
@@ -286,34 +313,6 @@ impl AsyncImapClient {
         self.session = Some(session);
         Ok(())
     }
-
-    // /// OAuth2/XOAUTH2认证辅助方法
-    // /// 手动发送IMAP AUTHENTICATE XOAUTH2命令
-    // async fn authenticate_oauth2(
-    //     client: async_imap::Client<tokio_native_tls::TlsStream<TcpStream>>,
-    //     email: &str,
-    //     xoauth2_str: &str,
-    // ) -> Result<Session<tokio_native_tls::TlsStream<TcpStream>>> {
-    //     // 发送AUTHENTICATE XOAUTH2命令
-    //     // 格式: AUTHENTICATE XOAUTH2 <base64_string>
-
-    //     tracing::info!("发送OAuth2认证命令: AUTHENTICATE XOAUTH2 {}", xoauth2_str);
-    //     // XOAUTH2 认证器实现
-    //     let authenticator = XOAuth2Authenticator::new(email.to_string(), xoauth2_str.to_string());
-
-    //     tracing::info!("使用 XOAUTH2 进行 IMAP 认证: {}", email);
-
-    //     match client.authenticate("XOAUTH2", authenticator).await {
-    //         Ok(session) => {
-    //             tracing::info!("IMAP OAuth2 认证成功");
-    //             Ok(session)
-    //         }
-    //         Err((e, _)) => {
-    //             tracing::error!("IMAP OAuth2 认证失败: {}", e);
-    //             Err(anyhow!("IMAP OAuth2 认证失败: {}", e))
-    //         }
-    //     }
-    // }
 
     /// 异步列出服务器上的所有文件夹及其属性（RFC 6154）
     #[instrument(skip(self))]

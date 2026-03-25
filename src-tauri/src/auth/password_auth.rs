@@ -7,8 +7,9 @@ use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 
-use crate::crypto::{password_username, KEYRING_SERVICE};
-use crate::error::{MailError, Result, StorageError};
+use crate::crypto::{KEYRING_SERVICE, password_username};
+use crate::error::{AuthError, MailError, Result, StorageError};
+use crate::protocols::{AsyncImapClient, ImapAuth};
 
 /// 密码认证处理器
 ///
@@ -148,25 +149,23 @@ impl PasswordAuth {
         &self,
         host: &str,
         port: u16,
-        username: &str,
+        email: &str,
         password: &str,
     ) -> Result<bool> {
-        tracing::info!(
-            "验证密码: host={}, port={}, username={}",
-            host,
-            port,
-            username
-        );
-
-        // 使用 IMAP test_connection 验证密码
-        use crate::protocols::imap::{test_connection, ImapAuth};
+        tracing::info!("验证密码: host={}, port={}, username={}", host, port, email);
 
         let auth = ImapAuth::Password(password.to_string());
-        let result = test_connection(host, port, username, auth)
-            .await
-            .map_err(|e| MailError::Internal(format!("IMAP 连接测试失败: {}", e)))?;
+        let mut imap_client = AsyncImapClient::new();
+        let connect_result = imap_client.connect(host, port, email, auth).await;
 
-        Ok(result.success)
+        match connect_result {
+            Ok(_) => Ok(true),
+            Err(e) => Err(MailError::Authentication(AuthError::InvalidCredentials)),
+        }
+
+        // let result = test_connection(host, port, email, auth)
+        //     .await
+        //     .map_err(|e| MailError::Internal(format!("IMAP 连接测试失败: {}", e)))?;
     }
 
     /// 检查密码是否存在
