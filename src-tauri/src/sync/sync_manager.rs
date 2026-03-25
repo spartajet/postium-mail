@@ -4,12 +4,16 @@
 
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::error::{MailError, Result};
-use crate::protocols::imap::{AsyncImapClient, ImapAuth, three_months_ago_imap_format};
+use crate::protocols::imap::{AsyncImapClient, FolderMetadata, ImapAuth, three_months_ago_imap_format};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
 use crate::sync::SyncStrategy;
 use crate::sync::{
-    change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
+    change_detector::ChangeDetector,
+    delta_sync::DeltaSync,
+    folder_manager::FolderManager,
+    full_sync::{FullSyncEngine, FullSyncPreparation},
+    incremental_sync::{IncrementalSyncEngine, IncrementalSyncPreparation},
     mail_processor::MailProcessor,
 };
 // use chrono::Datelike; // 添加 Datelike trait来访问日期方法
@@ -60,6 +64,10 @@ pub struct SyncManager {
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
     change_detector: Arc<ChangeDetector>,
+    /// 全量同步引擎
+    full_sync_engine: Arc<FullSyncEngine>,
+    /// 增量同步引擎
+    incremental_sync_engine: Arc<IncrementalSyncEngine>,
 }
 
 impl SyncManager {
@@ -75,6 +83,10 @@ impl SyncManager {
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
         let change_detector = Arc::new(ChangeDetector::new(db.clone()));
 
+        // 初始化全量同步和增量同步引擎
+        let full_sync_engine = Arc::new(FullSyncEngine::new(folder_manager.clone()));
+        let incremental_sync_engine = Arc::new(IncrementalSyncEngine::new(folder_manager.clone()));
+
         Self {
             db,
             app_handle,
@@ -84,6 +96,8 @@ impl SyncManager {
             folder_manager,
             mail_processor,
             change_detector,
+            full_sync_engine,
+            incremental_sync_engine,
         }
     }
 
@@ -380,7 +394,7 @@ impl SyncManager {
         account_id: i32,
         folder: &str,
         imap_client: &mut AsyncImapClient,
-        metadata: &crate::protocols::imap::FolderMetadata,
+        metadata: &FolderMetadata,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::info!(
             "全量同步文件夹: account_id={}, folder={}, uidvalidity={}",
@@ -389,46 +403,24 @@ impl SyncManager {
             metadata.uidvalidity
         );
 
-        // 1. 更新文件夹元数据（全量同步特有）
-        self.folder_manager
-            .update_folder_metadata(
-                account_id,
-                folder,
-                Some(metadata.uidvalidity),
-                Some(metadata.uidnext),
-            )
-            .await
-            .map_err(|e| {
-                tracing::warn!("更新文件夹元数据失败: {}", e);
-                e
-            })?;
+        // 1. 使用全量同步引擎准备同步
+        let preparation = self
+            .full_sync_engine
+            .prepare_sync(account_id, folder, imap_client, metadata)
+            .await?;
 
-        tracing::debug!(
-            "文件夹元数据已更新: uidvalidity={}, uidnext={}",
-            metadata.uidvalidity,
-            metadata.uidnext
-        );
-
-        // 2. 获取近三个月的邮件 UID
-        let date_since = three_months_ago_imap_format();
         tracing::info!(
-            "全量同步，获取三个月内的邮件: folder={}, date_since={}",
+            "全量同步准备完成: folder={}, 需同步邮件数={}",
             folder,
-            date_since
+            preparation.server_uids.len()
         );
-        let server_uids = imap_client
-            .list_uids_since(folder, &date_since)
-            .await
-            .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?;
 
-        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
-
-        // 3. 调用 sync_folder 进行实际同步
+        // 2. 调用 sync_folder 进行实际同步
         let result = self
             .sync_folder(
                 account_id,
                 folder,
-                Some(&server_uids),
+                Some(&preparation.server_uids),
                 None,
                 Some(imap_client),
             )
@@ -457,7 +449,7 @@ impl SyncManager {
         account_id: i32,
         folder: &str,
         imap_client: &mut AsyncImapClient,
-        metadata: &crate::protocols::imap::FolderMetadata,
+        metadata: &FolderMetadata,
     ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
         tracing::info!(
             "增量同步文件夹: account_id={}, folder={}",
@@ -465,41 +457,23 @@ impl SyncManager {
             folder
         );
 
-        // 1. 获取本地 last_sync_uid
-        let last_sync_uid = self
-            .folder_manager
-            .get_sync_state(account_id, folder)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|s| s.last_sync_uid)
-            .map(|v| v as u32)
-            .unwrap_or(0);
+        // 1. 使用增量同步引擎准备同步
+        let preparation = self
+            .incremental_sync_engine
+            .prepare_sync(account_id, folder, imap_client, metadata)
+            .await?;
 
         tracing::info!(
-            "增量同步，获取 last UID > {} 的邮件: folder={}",
-            last_sync_uid,
-            folder
+            "增量同步准备完成: folder={}, 需同步邮件数={}, last_sync_uid={}",
+            folder,
+            preparation.server_uids.len(),
+            preparation.last_sync_uid
         );
 
-        // 2. 获取新增邮件 UID 列表
-        let server_uids = imap_client
-            .list_uids_after(folder, last_sync_uid)
-            .await
-            .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?;
-
-        tracing::info!("文件夹 {} 需要同步的邮件数: {}", folder, server_uids.len());
-
-        if server_uids.is_empty() {
+        // 2. 如果没有新邮件，返回空结果
+        if !preparation.needs_sync() {
             tracing::info!("文件夹 {} 没有新邮件，跳过同步", folder);
-            return Ok(crate::sync::delta_sync::DeltaSyncResult {
-                strategy_used: SyncStrategy::UidSearch,
-                new_emails: 0,
-                modified_emails: 0,
-                deleted_emails: 0,
-                flags_changed: 0,
-                duration_ms: 0,
-            });
+            return Ok(preparation.to_empty_result());
         }
 
         // 3. 调用 sync_folder 进行实际同步
@@ -507,7 +481,7 @@ impl SyncManager {
             .sync_folder(
                 account_id,
                 folder,
-                Some(&server_uids),
+                Some(&preparation.server_uids),
                 None,
                 Some(imap_client),
             )

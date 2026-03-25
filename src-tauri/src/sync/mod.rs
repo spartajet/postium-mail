@@ -24,6 +24,13 @@
 //! │Delta  │ │Change  │ │Folder  │ │Mail    │
 //! │ Sync   │ │Detector│ │Manager │ │Processor│
 //! └───────┘ └────────┘ └────────┘ └─────────┘
+//!     ▲
+//!     │
+//! ┌───▼───┐ ┌───▼────┐
+//! │Full   │ │Incre-  │
+//! │Sync   │ │mental  │
+//! │Engine │ │ Sync   │
+//! └───────┘ └────────┘
 //! ```
 //!
 //! # 模块说明
@@ -58,7 +65,7 @@
 //! - 特殊文件夹识别（收件箱、已发送等）
 //! - 文件夹同步状态管理（合并自 SyncStateManager）
 //! - IMAP 元数据管理（UIDVALIDITY, UIDNEXT）
-//! - 同步进度跟踪（sync_count, error_count）
+//! - 同步进度跟踪（sync_count, error_count)
 //!
 //! ## [`MailProcessor`] - 邮件处理器
 //!
@@ -66,6 +73,17 @@
 //! - 邮件解析和验证
 //! - 数据库保存
 //! - 附件处理
+//!
+//! ## [`FullSyncEngine`] - 全量同步引擎
+//!
+//! 当 UIDVALIDITY 变化或首次同步时使用:
+//! - 获取近三个月的邮件进行完整同步
+//!
+//! ## [`IncrementalSyncEngine`] - 增量同步引擎
+//!
+//! 在 UIDVALIDITY 未变化时使用?
+//! - 基于 last_sync_uid 获取新增邮件
+//! - 仅同步新增和修改的邮件
 //!
 //! # 同步流程
 //!
@@ -103,7 +121,7 @@
 //!
 //! # 进度事件
 //!
-//! 同步过程中会发布进度事件：
+//! 同步过程中会发布进度事件:
 //!
 //! - `Connecting`: 连接服务器
 //! - `SyncingFolders`: 同步文件夹
@@ -113,7 +131,7 @@
 //!
 //! # 错误处理
 //!
-//! 同步错误分为以下类型：
+//! 同步错误分为以下类型:
 //!
 //! - **ConnectionError**: 连接失败
 //! - **AuthenticationError**: 认证失败
@@ -189,9 +207,11 @@
 pub mod change_detector;
 mod delta_sync;
 mod folder_manager;
+mod full_sync;
+mod incremental_sync;
 mod mail_processor;
-mod sync_manager;
 mod sync_error;
+mod sync_manager;
 
 // 重新导出主要类型
 pub use sync_manager::{SyncManager, SyncProgress, SyncStage, SyncResult};
@@ -200,3 +220,5 @@ pub use change_detector::{ChangeDetector, ChangeType, ChangeDetectionResult, Ema
 pub use folder_manager::{FolderManager, SyncStateUpdateResult};
 pub use mail_processor::{MailProcessor, MailData, MailProcessResult};
 pub use sync_error::SyncErrorManager;
+pub use full_sync::{FullSyncEngine, FullSyncPreparation};
+pub use incremental_sync::{IncrementalSyncEngine, IncrementalSyncPreparation};

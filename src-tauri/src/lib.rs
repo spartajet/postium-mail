@@ -147,6 +147,7 @@ pub mod protocols; // 协议层（IMAP/SMTP）
 pub mod providers; // 公开以支持测试
 pub mod storage; // 存储层
 pub mod sync; // 公开以支持测试
+pub mod sys;
 
 // 重新导出关键类型
 pub use auth::AuthManager;
@@ -156,8 +157,6 @@ pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
 pub use storage::database::init_database;
 pub use sync::SyncManager; // 用于测试
 
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Listener, Manager};
 
 use command::{
@@ -431,58 +430,10 @@ pub fn run() {
         .plugin(tauri_plugin_keyring::init())
         .setup(|app| {
             // ========== 系统托盘初始化 ==========
-            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            sys::tray::init_tray(app.handle())?;
 
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.unminimize();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click {
-                        button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.unminimize();
-                        }
-                    }
-                })
-                .build(app)?;
-
-            // ========== 窗口关闭事件处理 ==========
-            if let Some(window) = app.get_webview_window("main") {
-                let window_clone = window.clone();
-                window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = window_clone.hide();
-                        tracing::info!("窗口已隐藏到系统托盘");
-                    }
-                });
-            }
-
-            tracing::info!("系统托盘初始化完成");
+            // // ========== 窗口关闭事件处理 ==========
+            // sys::tray::setup_window_close_behavior(app.handle());
 
             // ========== OAuth HTTP 回调事件监听器 ==========
             let app_handle_for_callback = app.handle().clone();
