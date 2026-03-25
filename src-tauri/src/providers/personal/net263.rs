@@ -3,27 +3,49 @@
 //! 支持 263.net、263.com、x263.net 等263邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 263邮箱个人邮件服务商
-pub struct Net263MailProvider;
+pub struct Net263MailProvider {
+    info: ProviderInfo,
+}
+
+impl Net263MailProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "net263".to_string(),
+                name: "263邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["263.net".to_string(), "263.com".to_string(), "x263.net".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024),
+                },
+                icon: Some("net263".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for Net263MailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for Net263MailProvider {
-    fn provider_id(&self) -> &str {
-        "net263"
-    }
-
-    fn provider_name(&self) -> &str {
-        "263邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -70,7 +92,7 @@ impl MailProvider for Net263MailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Net263MailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -80,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_net263_detection() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
 
         // 测试263邮箱域名
         assert!(provider.detect("test@263.net").await.unwrap());
@@ -94,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_net263_config() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -111,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_net263_domains() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["263.net", "263.com", "x263.net"]);
@@ -119,17 +141,18 @@ mod tests {
 
     #[test]
     fn test_net263_provider_info() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "net263");
-        assert_eq!(provider.provider_name(), "263邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "net263");
+        assert_eq!(info.name, "263邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
     }
 
     #[test]
     fn test_net263_capabilities() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -145,9 +168,9 @@ mod tests {
 
     #[test]
     fn test_net263_box_clone() {
-        let provider = Net263MailProvider;
+        let provider = Net263MailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "net263");
+        assert_eq!(cloned.provider_info().id, "net263");
     }
 }

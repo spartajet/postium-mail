@@ -133,9 +133,12 @@ impl SyncManager {
             .find_provider_by_id(&account.provider)
             .ok_or_else(|| MailError::Internal(format!("未找到服务商: {}", account.provider)))?;
 
+        // 缓存 provider_info 以避免多次调用
+        let provider_info = provider.provider_info();
+
         tracing::info!(
             "使用账号服务商: {} (provider_id={})",
-            provider.provider_name(),
+            provider_info.name,
             account.provider
         );
 

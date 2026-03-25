@@ -242,6 +242,7 @@ pub async fn exchange_oauth_code(
 
     let imap_config = provider.imap_config(&email);
     let smtp_config = provider.smtp_config(&email);
+    let provider_info = provider.provider_info();
 
     // 构建账号创建请求
     let account_req = storage::CreateAccountRequest {
@@ -252,7 +253,7 @@ pub async fn exchange_oauth_code(
                 .to_string()
         }),
         email: auth_result.email.clone(),
-        provider: provider.provider_id().to_string(),
+        provider: provider_info.id.clone(),
         password: String::new(),
         imap_host: Some(imap_config.host),
         imap_port: Some(imap_config.port as i32),
@@ -262,7 +263,7 @@ pub async fn exchange_oauth_code(
         smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
         color: Some("#0078D4".to_string()), // 默认颜色
         auth_type: Some("oauth2".to_string()),
-        oauth_provider: Some(provider.provider_id().to_string()),
+        oauth_provider: Some(provider_info.id.clone()),
         oauth_token: auth_result.id_token,
         oauth_refresh_token: Some(
             // 注意：TokenManager 已经存储了 refresh_token，这里只是为了兼容
@@ -411,8 +412,9 @@ pub async fn start_oauth_flow(
         .await
         .map_err(|e| e.to_string())?;
 
+    let provider_info = provider.provider_info();
     let session_id = session_manager
-        .create_session(provider.provider_id(), &email, &context.state)
+        .create_session(&provider_info.id, &email, &context.state)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -424,7 +426,7 @@ pub async fn start_oauth_flow(
         "启动 OAuth 流程: session_id={}, email={}, provider={}",
         session_id,
         email,
-        provider.provider_id()
+        provider_info.id
     );
 
     Ok(StartOAuthFlowResponse {

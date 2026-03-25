@@ -252,7 +252,7 @@ impl AccountRepository {
                 .detect_provider(&req.email)
                 .await
                 .map_err(|e| StorageError::Database(format!("检测服务商失败: {}", e)))?;
-            detected.provider_id().to_string()
+            detected.provider_info().id.clone()
         } else {
             req.provider.clone()
         };

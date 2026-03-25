@@ -4,29 +4,56 @@
 
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
-    SmtpServerConfig, StandardFolder,
+    ProviderInfo, SmtpServerConfig, StandardFolder,
 };
 use async_trait::async_trait;
 
 /// 163 邮箱个人邮件服务商
-pub struct Mail163Provider;
+pub struct Mail163Provider {
+    info: ProviderInfo,
+}
+
+impl Mail163Provider {
+    /// 创建网易邮箱服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "yi".to_string(),
+                name: "网易邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "163.com".to_string(),
+                    "126.com".to_string(),
+                    "yeah.net".to_string(),
+                ],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: false,
+                    supports_push: false,
+                    supports_oauth: true,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(71680000),
+                },
+                icon: Some("163".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for Mail163Provider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for Mail163Provider {
-    fn provider_id(&self) -> &str {
-        "yi"
-    }
-
-    fn provider_name(&self) -> &str {
-        "网易邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -61,20 +88,6 @@ impl MailProvider for Mail163Provider {
         None // 163 邮箱不支持 OAuth
     }
 
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            supports_idle: false,      // 不支持 IDLE 扩展
-            supports_push: false,      // 不支持标准推送（虽有 XAPPLEPUSHSERVICE）
-            supports_oauth: true,      // 支持 XOAUTH2 认证
-            supports_enterprise: false,
-            supports_labels: false,
-            supports_folders: true, // 支持文件夹管理
-            supports_threads: false,
-            supports_search: true,            // 支持搜索
-            max_message_size: Some(71680000), // APPENDLIMIT=71680000 (约68MB)
-        }
-    }
-
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
         let domain = email.split('@').nth(1).unwrap_or("");
         Ok(matches!(domain, "163.com" | "126.com" | "yeah.net"))
@@ -99,7 +112,7 @@ impl MailProvider for Mail163Provider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Mail163Provider)
+        Box::new(Self::new())
     }
 }
 
@@ -109,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mail163_detection() {
-        let provider = Mail163Provider;
+        let provider = Mail163Provider::new();
 
         // 测试 163 域名
         assert!(provider.detect("test@163.com").await.unwrap());
@@ -123,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_mail163_config() {
-        let provider = Mail163Provider;
+        let provider = Mail163Provider::new();
 
         // 测试 163.com 域名的 IMAP/SMTP 配置
         let imap_config = provider.imap_config("test@163.com");
@@ -151,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_mail163_domains() {
-        let provider = Mail163Provider;
+        let provider = Mail163Provider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["163.com", "126.com", "yeah.net"]);
@@ -159,18 +172,19 @@ mod tests {
 
     #[test]
     fn test_mail163_provider_info() {
-        let provider = Mail163Provider;
+        let provider = Mail163Provider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "yi");
-        assert_eq!(provider.provider_name(), "网易邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "yi");
+        assert_eq!(info.name, "网易邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert_eq!(info.auth_types, vec![AuthType::Password]);
     }
 
     #[test]
     fn test_mail163_capabilities() {
-        let provider = Mail163Provider;
-        let caps = provider.capabilities();
+        let provider = Mail163Provider::new();
+        let caps = &provider.provider_info().capabilities;
 
         assert!(!caps.supports_idle);
         assert!(!caps.supports_push);
@@ -185,9 +199,10 @@ mod tests {
 
     #[test]
     fn test_mail163_box_clone() {
-        let provider = Mail163Provider;
+        let provider = Mail163Provider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "yi");
+        let info = cloned.provider_info();
+        assert_eq!(info.id, "yi");
     }
 }

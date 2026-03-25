@@ -3,27 +3,58 @@
 //! 支持 gmx.com、gmx.net、gmx.co.uk 等GMX邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// GMX邮箱个人邮件服务商
-pub struct GmxMailProvider;
+pub struct GmxMailProvider {
+    info: ProviderInfo,
+}
+
+impl GmxMailProvider {
+    /// 创建 GMX 服务商实例
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "gmx".to_string(),
+                name: "GMX邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "gmx.com".to_string(),
+                    "gmx.net".to_string(),
+                    "gmx.co.uk".to_string(),
+                    "gmx.de".to_string(),
+                    "gmx.fr".to_string(),
+                    "gmx.es".to_string(),
+                    "gmx.it".to_string(),
+                ],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: Some("gmx".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for GmxMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for GmxMailProvider {
-    fn provider_id(&self) -> &str {
-        "gmx"
-    }
-
-    fn provider_name(&self) -> &str {
-        "GMX邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -47,17 +78,7 @@ impl MailProvider for GmxMailProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities {
-            supports_idle: true,
-            supports_push: false,
-            supports_oauth: false,
-            supports_enterprise: false,
-            supports_labels: false,
-            supports_folders: true,
-            supports_threads: false,
-            supports_search: true,
-            max_message_size: Some(50 * 1024 * 1024), // 50MB
-        }
+        self.info.capabilities.clone()
     }
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
@@ -81,7 +102,7 @@ impl MailProvider for GmxMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(GmxMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -91,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gmx_detection() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
 
         // 测试GMX邮箱域名
         assert!(provider.detect("test@gmx.com").await.unwrap());
@@ -106,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_gmx_config() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -123,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_gmx_domains() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(
@@ -134,17 +155,18 @@ mod tests {
 
     #[test]
     fn test_gmx_provider_info() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "gmx");
-        assert_eq!(provider.provider_name(), "GMX邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "gmx");
+        assert_eq!(info.name, "GMX邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert_eq!(info.auth_types, vec![AuthType::Password]);
     }
 
     #[test]
     fn test_gmx_capabilities() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -160,9 +182,9 @@ mod tests {
 
     #[test]
     fn test_gmx_box_clone() {
-        let provider = GmxMailProvider;
+        let provider = GmxMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "gmx");
+        assert_eq!(cloned.provider_info().id, "gmx");
     }
 }

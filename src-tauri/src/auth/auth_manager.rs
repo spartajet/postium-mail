@@ -317,7 +317,8 @@ impl AuthManager {
             .detect_provider(email)
             .await
             .map_err(|e| MailError::Internal(format!("检测服务商失败: {}", e)))?;
-        let provider_id = provider.provider_id().to_string();
+        let provider_info = provider.provider_info();
+        let provider_id = provider_info.id.clone();
 
         // 2. 确定最终配置
         let imap_config_final = if !imap_config.host.is_empty() {
@@ -379,9 +380,10 @@ impl AuthManager {
 
         // 2. 检测服务商并创建会话
         let provider = self.provider_pool.detect_provider(email).await?;
+        let provider_info = provider.provider_info();
         let session_id = self
             .session_manager
-            .create_session(provider.provider_id(), email, &context.state)
+            .create_session(&provider_info.id, email, &context.state)
             .await?;
 
         // 3. 在浏览器中打开授权页面
@@ -425,7 +427,8 @@ impl AuthManager {
     ) -> Result<AuthResult> {
         // 1. 检测服务商
         let provider = self.provider_pool.detect_provider(email).await?;
-        let provider_id = provider.provider_id().to_string();
+        let provider_info = provider.provider_info();
+        let provider_id = provider_info.id.clone();
 
         // 2. 交换授权码
         let token_response = self
@@ -519,7 +522,8 @@ impl AuthManager {
     ) -> Result<AuthResult> {
         // 1. 根据配置检测提供商（用于获取 provider_id）
         let provider = self.provider_pool.detect_provider(email).await?;
-        let provider_id = provider.provider_id().to_string();
+        let provider_info = provider.provider_info();
+        let provider_id = provider_info.id.clone();
 
         // 2. 使用提供的 IMAP 配置验证密码
         let state = self

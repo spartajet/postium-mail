@@ -133,8 +133,9 @@ impl OAuthHandler {
         );
 
         // 打印 OAuth 配置和授权 URL（用于调试）
+        let provider_info = provider.provider_info();
         tracing::info!("========== OAuth 授权 URL 生成 ==========");
-        tracing::info!("Provider: {}", provider.provider_id());
+        tracing::info!("Provider: {}", provider_info.id);
         tracing::info!("Client ID: {}", oauth_config.client_id);
         tracing::info!("Redirect URI: {}", oauth_config.redirect_uri);
         tracing::info!("State: {}", state);
@@ -145,7 +146,7 @@ impl OAuthHandler {
             auth_url,
             state,
             code_verifier,
-            provider: provider.provider_id().to_string(),
+            provider: provider_info.id.clone(),
         })
     }
 
@@ -210,9 +211,10 @@ impl OAuthHandler {
         }
 
         // 打印请求参数（用于调试）
+        let provider_info = provider.provider_info();
         tracing::info!("========== OAuth Token 请求 ==========");
         tracing::info!("URL: {}", oauth_config.token_url);
-        tracing::info!("Provider: {}", provider.provider_id());
+        tracing::info!("Provider: {}", provider_info.id);
         tracing::info!("Client ID: {}", oauth_config.client_id);
         tracing::info!(
             "Client Secret: {}",
@@ -281,7 +283,8 @@ impl OAuthHandler {
             .await
             .map_err(|e| OAuthError::RefreshFailed(format!("解析响应失败: {}", e)))?;
 
-        tracing::info!("OAuth 授权码交换成功: provider={}", provider.provider_id());
+        let provider_info = provider.provider_info();
+        tracing::info!("OAuth 授权码交换成功: provider={}", provider_info.id);
 
         Ok(token_response)
     }
@@ -353,7 +356,8 @@ impl OAuthHandler {
             .await
             .map_err(|e| OAuthError::RefreshFailed(format!("解析响应失败: {}", e)))?;
 
-        tracing::info!("Token 刷新成功: provider={}", provider.provider_id());
+        let provider_info = provider.provider_info();
+        tracing::info!("Token 刷新成功: provider={}", provider_info.id);
 
         Ok(token_response)
     }
@@ -387,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn test_generate_authorization_url() {
         let handler = OAuthHandler::new();
-        let provider = GmailProvider;
+        let provider = GmailProvider::new();
 
         let context = handler.get_authorization_url(&provider).await.unwrap();
 
@@ -409,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn test_pkce_flow() {
         let handler = OAuthHandler::new();
-        let provider = GmailProvider;
+        let provider = GmailProvider::new();
 
         // 生成授权 URL
         let context = handler.get_authorization_url(&provider).await.unwrap();
@@ -431,7 +435,7 @@ mod tests {
     #[tokio::test]
     async fn test_authorization_context_fields() {
         let handler = OAuthHandler::new();
-        let provider = GmailProvider;
+        let provider = GmailProvider::new();
 
         let context = handler.get_authorization_url(&provider).await.unwrap();
 

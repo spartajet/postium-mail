@@ -3,27 +3,49 @@
 //! 支持 mail.com 等邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Mail.com邮箱个人邮件服务商
-pub struct MailComProvider;
+pub struct MailComProvider {
+    info: ProviderInfo,
+}
+
+impl MailComProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "mailcom".to_string(),
+                name: "Mail.com邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["mail.com".to_string(), "email.com".to_string(), "myemail.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: Some("mailcom".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for MailComProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for MailComProvider {
-    fn provider_id(&self) -> &str {
-        "mailcom"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Mail.com邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -70,7 +92,7 @@ impl MailProvider for MailComProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(MailComProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -80,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailcom_detection() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
 
         // 测试Mail.com邮箱域名
         assert!(provider.detect("test@mail.com").await.unwrap());
@@ -94,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_mailcom_config() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -111,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_mailcom_domains() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["mail.com", "email.com", "myemail.com"]);
@@ -119,17 +141,18 @@ mod tests {
 
     #[test]
     fn test_mailcom_provider_info() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "mailcom");
-        assert_eq!(provider.provider_name(), "Mail.com邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "mailcom");
+        assert_eq!(info.name, "Mail.com邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert_eq!(info.auth_types, vec![AuthType::Password]);
     }
 
     #[test]
     fn test_mailcom_capabilities() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -145,9 +168,9 @@ mod tests {
 
     #[test]
     fn test_mailcom_box_clone() {
-        let provider = MailComProvider;
+        let provider = MailComProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "mailcom");
+        assert_eq!(cloned.provider_info().id, "mailcom");
     }
 }

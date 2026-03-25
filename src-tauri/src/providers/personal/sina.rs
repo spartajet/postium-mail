@@ -3,27 +3,49 @@
 //! 支持 sina.com、sina.cn 等新浪邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder, ProviderInfo};
 
 /// 新浪邮箱个人邮件服务商
-pub struct SinaMailProvider;
+pub struct SinaMailProvider {
+    info: ProviderInfo,
+}
+
+impl SinaMailProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "sina".to_string(),
+                name: "新浪邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec!["sina.com".to_string(), "sina.cn".to_string(), "vip.sina.com".to_string(), "2008.sina.com".to_string()],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024),
+                },
+                icon: Some("sina".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for SinaMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for SinaMailProvider {
-    fn provider_id(&self) -> &str {
-        "sina"
-    }
-
-    fn provider_name(&self) -> &str {
-        "新浪邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -93,7 +115,7 @@ impl MailProvider for SinaMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(SinaMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -103,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sina_detection() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
 
         // 测试新浪邮箱域名
         assert!(provider.detect("test@sina.com").await.unwrap());
@@ -118,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_sina_config() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
 
         // 测试 sina.com 域名的 IMAP/SMTP 配置
         let imap_config = provider.imap_config("test@sina.com");
@@ -145,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_sina_domains() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(domains, vec!["sina.com", "sina.cn", "vip.sina.com", "2008.sina.com"]);
@@ -153,17 +175,18 @@ mod tests {
 
     #[test]
     fn test_sina_provider_info() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "sina");
-        assert_eq!(provider.provider_name(), "新浪邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "sina");
+        assert_eq!(info.name, "新浪邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
     }
 
     #[test]
     fn test_sina_capabilities() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -179,9 +202,9 @@ mod tests {
 
     #[test]
     fn test_sina_box_clone() {
-        let provider = SinaMailProvider;
+        let provider = SinaMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "sina");
+        assert_eq!(cloned.provider_info().id, "sina");
     }
 }

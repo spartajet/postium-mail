@@ -3,27 +3,55 @@
 //! 支持 139.com、139.com.cn、10086.cn 等中国移动邮箱域名
 
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig};
+use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 中国移动139邮箱个人邮件服务商
-pub struct CmccMailProvider;
+pub struct CmccMailProvider {
+    info: ProviderInfo,
+}
+
+impl CmccMailProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ProviderInfo {
+                id: "cmcc".to_string(),
+                name: "中国移动139邮箱".to_string(),
+                account_type: AccountType::Personal,
+                domains: vec![
+                    "139.com".to_string(),
+                    "139.com.cn".to_string(),
+                    "10086.cn".to_string(),
+                    "10086.com".to_string(),
+                    "139mail.com".to_string(),
+                ],
+                auth_types: vec![AuthType::Password],
+                capabilities: ProviderCapabilities {
+                    supports_idle: true,
+                    supports_push: false,
+                    supports_oauth: false,
+                    supports_enterprise: false,
+                    supports_labels: false,
+                    supports_folders: true,
+                    supports_threads: false,
+                    supports_search: true,
+                    max_message_size: Some(50 * 1024 * 1024), // 50MB
+                },
+                icon: Some("cmcc".to_string()),
+            },
+        }
+    }
+}
+
+impl Default for CmccMailProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl MailProvider for CmccMailProvider {
-    fn provider_id(&self) -> &str {
-        "cmcc"
-    }
-
-    fn provider_name(&self) -> &str {
-        "中国移动139邮箱"
-    }
-
-    fn account_type(&self) -> AccountType {
-        AccountType::Personal
-    }
-
-    fn auth_types(&self) -> Vec<AuthType> {
-        vec![AuthType::Password]
+    fn provider_info(&self) -> &ProviderInfo {
+        &self.info
     }
 
     fn imap_config(&self, email: &str) -> ImapServerConfig {
@@ -73,7 +101,7 @@ impl MailProvider for CmccMailProvider {
     }
 
     fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(CmccMailProvider)
+        Box::new(Self::new())
     }
 }
 
@@ -83,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmcc_detection() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
 
         // 测试中国移动139邮箱域名
         assert!(provider.detect("test@139.com").await.unwrap());
@@ -99,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_cmcc_config() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
 
         // 测试 IMAP 配置
         let imap_config = provider.imap_config("test@domain.com");
@@ -116,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_cmcc_domains() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
         let domains = provider.supported_domains();
 
         assert_eq!(
@@ -127,17 +155,18 @@ mod tests {
 
     #[test]
     fn test_cmcc_provider_info() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
+        let info = provider.provider_info();
 
-        assert_eq!(provider.provider_id(), "cmcc");
-        assert_eq!(provider.provider_name(), "中国移动139邮箱");
-        assert_eq!(provider.account_type(), AccountType::Personal);
-        assert_eq!(provider.auth_types(), vec![AuthType::Password]);
+        assert_eq!(info.id, "cmcc");
+        assert_eq!(info.name, "中国移动139邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
     }
 
     #[test]
     fn test_cmcc_capabilities() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
         let caps = provider.capabilities();
 
         assert!(caps.supports_idle);
@@ -153,9 +182,21 @@ mod tests {
 
     #[test]
     fn test_cmcc_box_clone() {
-        let provider = CmccMailProvider;
+        let provider = CmccMailProvider::new();
         let cloned = provider.box_clone();
 
-        assert_eq!(cloned.provider_id(), "cmcc");
+        assert_eq!(cloned.provider_info().id, "cmcc");
+    }
+
+    #[test]
+    fn test_cmcc_provider_info_new() {
+        let provider = CmccMailProvider::new();
+        let info = provider.provider_info();
+
+        assert_eq!(info.id, "cmcc");
+        assert_eq!(info.name, "中国移动139邮箱");
+        assert_eq!(info.account_type, AccountType::Personal);
+        assert!(info.auth_types.contains(&AuthType::Password));
+        assert!(info.capabilities.supports_idle);
     }
 }
