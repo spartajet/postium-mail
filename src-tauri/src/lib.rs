@@ -157,222 +157,9 @@ pub use providers::{AccountType, MailProvider, OAuthConfig, ProviderPool};
 pub use storage::database::init_database;
 pub use sync::SyncManager; // 用于测试
 
-use tauri::{Emitter, Listener, Manager};
+use tauri::{Listener, Manager};
 
-use command::{
-    AuthManagerState, DatabaseState, KeyringState, OAuthFlowResult, OAuthSessionManagerState,
-    ProviderPoolState,
-};
-
-/// 处理 OAuth HTTP 回调
-fn handle_oauth_http_callback(
-    app_handle: tauri::AppHandle,
-    code: String,
-    state: String,
-    error: Option<String>,
-    error_description: Option<String>,
-) {
-    // 显示主窗口并聚焦
-    if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.set_focus();
-        let _ = window.unminimize();
-        let _ = window.show();
-    }
-
-    // 获取状态并克隆 Arc（确保 async block 中拥有所有权）
-    let session_manager = std::sync::Arc::clone(&app_handle.state::<OAuthSessionManagerState>().0);
-    let auth_manager = app_handle.state::<AuthManagerState>().clone_manager();
-    // 从 State<'_, DatabaseState> 中提取并克隆内部的 Arc
-    let db_arc = std::sync::Arc::clone(&app_handle.state::<DatabaseState>().0);
-    let db_state = command::DatabaseState(db_arc);
-
-    // KeyringState 包含 AppHandle，可以直接克隆
-    let keyring_state = command::KeyringState {
-        app_handle: app_handle.clone(),
-    };
-
-    // 在异步运行时中处理
-    tauri::async_runtime::spawn(async move {
-        // 验证会话
-        let session = match session_manager.verify_and_get_session(&state).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("验证 OAuth 会话失败: {}", e);
-                // 发射错误事件
-                let _ = app_handle.emit(
-                    "oauth-flow-complete",
-                    OAuthFlowResult {
-                        session_id: String::new(),
-                        status: "error".to_string(),
-                        account: None,
-                        error: Some(format!("无效的会话: {}", e)),
-                    },
-                );
-                return;
-            }
-        };
-
-        let session_id = session.session_id.clone();
-
-        // 如果有错误，标记会话失败
-        if let Some(err) = error {
-            tracing::warn!("OAuth 授权失败: {}", err);
-            let error_msg = error_description.as_deref().unwrap_or(&err);
-            let _ = session_manager
-                .set_session_error(&session_id, error_msg.to_string())
-                .await;
-
-            let _ = app_handle.emit(
-                "oauth-flow-complete",
-                OAuthFlowResult {
-                    session_id: session_id.clone(),
-                    status: "error".to_string(),
-                    account: None,
-                    error: error_description.or(Some(err)),
-                },
-            );
-            return;
-        }
-
-        // 交换 token 并创建账号
-        let email = session.email.clone();
-
-        // 使用现有的 exchange_oauth_code 逻辑
-        match exchange_and_create_account(
-            db_state,
-            keyring_state,
-            auth_manager,
-            email.clone(),
-            code,
-            state,
-        )
-        .await
-        {
-            Ok(account) => {
-                tracing::info!("OAuth 流程成功创建账号: {}", account.email);
-
-                // 更新会话状态
-                let _ = session_manager
-                    .set_session_account_id(&session_id, account.id)
-                    .await;
-
-                // 发射成功事件
-                let _ = app_handle.emit(
-                    "oauth-flow-complete",
-                    OAuthFlowResult {
-                        session_id,
-                        status: "success".to_string(),
-                        account: Some(account),
-                        error: None,
-                    },
-                );
-            }
-            Err(e) => {
-                tracing::error!("OAuth 流程失败: {}", e);
-
-                // 更新会话状态
-                let _ = session_manager
-                    .set_session_error(&session_id, e.clone())
-                    .await;
-
-                // 发射错误事件
-                let _ = app_handle.emit(
-                    "oauth-flow-complete",
-                    OAuthFlowResult {
-                        session_id,
-                        status: "error".to_string(),
-                        account: None,
-                        error: Some(e),
-                    },
-                );
-            }
-        }
-    });
-}
-
-/// 交换 OAuth 授权码并创建账号
-async fn exchange_and_create_account(
-    db_state: command::DatabaseState,
-    keyring_state: command::KeyringState,
-    auth_manager: std::sync::Arc<crate::auth::AuthManager>,
-    email: String,
-    code: String,
-    state: String,
-) -> std::result::Result<crate::storage::AccountDto, String> {
-    use crate::providers;
-
-    // 打印接收到的参数（用于调试）
-    tracing::info!("========== 交换 OAuth Token ==========");
-    tracing::info!("Email: {}", email);
-    tracing::info!(
-        "Code (前20字符): {}",
-        &code.chars().take(20).collect::<String>()
-    );
-    tracing::info!("Code 长度: {}", code.len());
-    tracing::info!("State: {}", state);
-    tracing::info!("====================================");
-
-    let db = db_state.clone_conn();
-
-    // 使用 AuthManager 进行 OAuth 认证
-    let auth_result = auth_manager
-        .authenticate_oauth(&email, &code, &state)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 获取服务商配置
-    let provider_pool = auth_manager.provider_pool();
-    let provider = provider_pool
-        .detect_provider(&email)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let imap_config = provider.imap_config(&email);
-    let smtp_config = provider.smtp_config(&email);
-
-    // 缓存 provider_info 避免多次调用
-    let provider_info = provider.provider_info();
-
-    // 构建账号创建请求
-    let account_req = crate::storage::CreateAccountRequest {
-        name: auth_result
-            .display_name
-            .unwrap_or_else(|| email.split('@').next().unwrap_or("用户").to_string()),
-        email: auth_result.email.clone(),
-        provider: provider_info.id.clone(),
-        password: String::new(),
-        imap_host: Some(imap_config.host),
-        imap_port: Some(imap_config.port as i32),
-        imap_ssl: Some(matches!(
-            imap_config.ssl,
-            providers::SslMode::Implicit | providers::SslMode::StartTls
-        )),
-        smtp_host: Some(smtp_config.host),
-        smtp_port: Some(smtp_config.port as i32),
-        smtp_ssl: Some(matches!(smtp_config.ssl, providers::SslMode::StartTls)),
-        color: Some("#0078D4".to_string()),
-        auth_type: Some("oauth2".to_string()),
-        oauth_provider: Some(provider_info.id.clone()),
-        oauth_token: auth_result.id_token,
-        oauth_refresh_token: Some(String::new()),
-        oauth_expires_at: auth_result.expires_at,
-    };
-
-    // 创建账号
-    let account =
-        crate::storage::AccountRepository::create(&db, &keyring_state.app_handle, account_req)
-            .await
-            .map_err(|e| e.to_string())?;
-
-    // 迁移 Token
-    let token_manager = auth_manager.token_manager();
-    token_manager
-        .migrate_token_account(0, account.id)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(account.into())
-}
+use command::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
 
 /// 初始化 tracing 日志系统
 ///
@@ -432,30 +219,6 @@ pub fn run() {
             // ========== 系统托盘初始化 ==========
             sys::tray::init_tray(app.handle())?;
 
-            // // ========== 窗口关闭事件处理 ==========
-            // sys::tray::setup_window_close_behavior(app.handle());
-
-            // ========== OAuth HTTP 回调事件监听器 ==========
-            let app_handle_for_callback = app.handle().clone();
-            app.listen("oauth-http-callback", move |event| {
-                let payload = event.payload();
-                if let Ok(data) = serde_json::from_str::<serde_json::Value>(payload) {
-                    let code = data["code"].as_str().unwrap_or("").to_string();
-                    let state = data["state"].as_str().unwrap_or("").to_string();
-                    let error = data["error"].as_str().map(|s| s.to_string());
-                    let error_description =
-                        data["error_description"].as_str().map(|s| s.to_string());
-
-                    handle_oauth_http_callback(
-                        app_handle_for_callback.clone(),
-                        code,
-                        state,
-                        error,
-                        error_description,
-                    );
-                }
-            });
-
             // ========== 数据库和服务初始化 ==========
             tauri::async_runtime::block_on(async move {
                 use sea_orm::DbConn;
@@ -484,16 +247,6 @@ pub fn run() {
                     auth::AuthManager::new(app.handle()).expect("无法创建 AuthManager"),
                 );
 
-                // 启动 OAuth HTTP 服务器（在异步运行时中）
-                {
-                    let http_server = auth_manager.get_http_server();
-                    if let Err(e) = http_server.start().await {
-                        tracing::error!("OAuth HTTP 服务器启动失败: {}", e);
-                    } else {
-                        tracing::info!("OAuth HTTP 服务器启动成功");
-                    }
-                }
-
                 // 创建 ProviderPool（注册所有默认服务商）
                 let provider_pool = std::sync::Arc::new(providers::ProviderPool::default());
 
@@ -508,14 +261,6 @@ pub fn run() {
                     provider_pool.clone(),
                 ));
 
-                // 创建 FlowEngine
-                // let flow_engine =
-                //     engine::FlowEngine::new(db_arc, sync_manager, app.handle().clone());
-
-                // 注册 FlowEngineState（包装在 Arc<tokio::sync::Mutex> 中）
-                // let flow_engine_state = std::sync::Arc::new(tokio::sync::Mutex::new(flow_engine));
-                // app.manage(FlowEngineState(flow_engine_state.clone()));
-
                 // 注册 AuthManagerState 和 ProviderPoolState
                 let auth_manager_for_cleanup = auth_manager.clone();
                 app.manage(AuthManagerState(auth_manager));
@@ -523,38 +268,12 @@ pub fn run() {
                 // 注册 OAuthSessionManagerState（使用之前克隆的 session_manager）
                 app.manage(command::OAuthSessionManagerState(session_manager));
 
-                // // 启动 FlowEngine
-                // {
-                //     // let engine = flow_engine_state.lock().await;
-                //     if let Err(e) = engine.start().await {
-                //         tracing::error!("FlowEngine 启动失败: {}", e);
-                //     } else {
-                //         tracing::info!("FlowEngine 已启动");
-                //     }
-                // }
-
                 // ========== FlowEngine 和 AuthManager 优雅关闭 ==========
                 // 监听应用退出事件，停止 FlowEngine 和 AuthManager
                 let _ = app.listen("tauri://destroy", move |_| {
                     // let engine_state = flow_engine_state.clone();
                     let auth_manager = auth_manager_for_cleanup.clone();
                     tauri::async_runtime::block_on(async move {
-                        // use tokio::time::{Duration, timeout};
-
-                        // 停止 FlowEngine
-                        // tracing::info!("正在停止 FlowEngine...");
-                        // let engine_guard = engine_state.lock().await;
-                        // let stop_result =
-                        //     timeout(Duration::from_secs(5), engine_guard.stop()).await;
-
-                        // match stop_result {
-                        //     Ok(Ok(())) => tracing::info!("FlowEngine 已停止"),
-                        //     Ok(Err(e)) => tracing::error!("FlowEngine 停止失败: {}", e),
-                        //     Err(_) => tracing::warn!("FlowEngine 停止超时，将强制退出"),
-                        // }
-                        // drop(engine_guard); // 释放锁
-
-                        // 停止 AuthManager (包括 OAuth HTTP 服务器)
                         tracing::info!("正在停止 AuthManager...");
                         auth_manager.shutdown().await;
                     });
@@ -567,13 +286,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // 账号管理
-            // command::add_account,
             command::list_accounts,
             command::get_account,
-            // command::update_account,
             command::delete_account,
-            // command::test_account_connection,
-            // command::test_email_connection,
             // 服务商检测
             command::detect_provider,
             command::list_providers,
