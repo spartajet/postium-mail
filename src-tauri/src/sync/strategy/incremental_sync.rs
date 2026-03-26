@@ -5,10 +5,11 @@
 
 use crate::error::{MailError, Result};
 use crate::protocols::imap::{AsyncImapClient, FolderMetadata};
-use crate::sync::delta_sync::DeltaSyncResult;
 use crate::sync::folder_manager::FolderManager;
-use crate::sync::SyncStrategy;
 use std::sync::Arc;
+
+// 导入 preparation 模块中的类型
+use super::preparation::IncrementalSyncPreparation;
 
 /// 增量同步引擎
 ///
@@ -45,11 +46,7 @@ impl IncrementalSyncEngine {
         imap_client: &mut AsyncImapClient,
         _metadata: &FolderMetadata,
     ) -> Result<IncrementalSyncPreparation> {
-        tracing::info!(
-            "准备增量同步: account_id={}, folder={}",
-            account_id,
-            folder
-        );
+        tracing::info!("准备增量同步: account_id={}, folder={}", account_id, folder);
 
         // 1. 获取本地 last_sync_uid
         let last_sync_uid = self
@@ -89,66 +86,5 @@ impl IncrementalSyncEngine {
     /// 获取文件夹管理器引用
     pub fn folder_manager(&self) -> &Arc<FolderManager> {
         &self.folder_manager
-    }
-}
-
-/// 增量同步准备结果
-///
-/// 包含增量同步所需的所有数据
-#[derive(Debug)]
-pub struct IncrementalSyncPreparation {
-    /// 服务器上需要同步的 UID 列表
-    pub server_uids: Vec<u32>,
-    /// 上次同步的最高 UID
-    pub last_sync_uid: u32,
-}
-
-impl IncrementalSyncPreparation {
-    /// 创建空的准备结果
-    pub fn empty() -> Self {
-        Self {
-            server_uids: Vec::new(),
-            last_sync_uid: 0,
-        }
-    }
-
-    /// 是否需要同步
-    pub fn needs_sync(&self) -> bool {
-        !self.server_uids.is_empty()
-    }
-
-    /// 转换为空的同步结果（用于跳过同步时）
-    pub fn to_empty_result(&self) -> DeltaSyncResult {
-        DeltaSyncResult::empty(SyncStrategy::UidSearch)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_incremental_sync_preparation_empty() {
-        let prep = IncrementalSyncPreparation::empty();
-        assert!(prep.server_uids.is_empty());
-        assert_eq!(prep.last_sync_uid, 0);
-        assert!(!prep.needs_sync());
-    }
-
-    #[test]
-    fn test_incremental_sync_preparation_needs_sync() {
-        let prep = IncrementalSyncPreparation {
-            server_uids: vec![100, 200],
-            last_sync_uid: 50,
-        };
-        assert!(prep.needs_sync());
-    }
-
-    #[test]
-    fn test_incremental_sync_preparation_to_empty_result() {
-        let prep = IncrementalSyncPreparation::empty();
-        let result = prep.to_empty_result();
-        assert_eq!(result.new_emails, 0);
-        assert_eq!(result.strategy_used, SyncStrategy::UidSearch);
     }
 }

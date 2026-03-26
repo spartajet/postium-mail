@@ -3,11 +3,10 @@
 //! 编排 OAuth2 认证流程，协调协议处理、会话管理和 Token 存储
 
 use std::sync::Arc;
-use base64::Engine;
 
+use crate::auth::AuthResult;
 use crate::auth::oauth2::OAuthHandler;
 use crate::auth::token::TokenManager;
-use crate::auth::AuthResult;
 use crate::error::{MailError, Result};
 use crate::providers::{AuthType, ProviderPool};
 
@@ -172,6 +171,8 @@ impl OAuthClient {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     use super::*;
 
     #[test]

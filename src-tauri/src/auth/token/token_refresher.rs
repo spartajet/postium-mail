@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use crate::auth::AuthState;
 use crate::auth::oauth2::OAuthHandler;
 use crate::auth::token::TokenManager;
-use crate::auth::AuthState;
 use crate::error::Result;
 use crate::providers::{AuthType, ProviderPool};
 
@@ -197,19 +197,5 @@ impl TokenRefresher {
         }
 
         Ok((success_count, fail_count))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // 注意：TokenRefresher 的功能测试需要完整的依赖项
-    // 这里只进行编译测试，实际的功能测试应该在集成测试中进行
-    #[test]
-    fn test_token_refresher_compile() {
-        // 这个测试只验证 TokenRefresher 能够正确编译
-        // 实际的功能测试需要 mock 或集成测试环境
-        assert!(true);
     }
 }
