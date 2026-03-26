@@ -2,8 +2,11 @@
 //!
 //! 支持 gmx.com、gmx.net、gmx.co.uk 等GMX邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// GMX邮箱个人邮件服务商
 pub struct GmxMailProvider {
@@ -100,10 +103,6 @@ impl MailProvider for GmxMailProvider {
             "gmx.it",
         ]
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -133,13 +132,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.gmx.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "mail.gmx.com");
         assert_eq!(smtp_config.port, 587);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::StartTls));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::StartTls
+        ));
     }
 
     #[test]
@@ -149,7 +154,15 @@ mod tests {
 
         assert_eq!(
             domains,
-            vec!["gmx.com", "gmx.net", "gmx.co.uk", "gmx.de", "gmx.fr", "gmx.es", "gmx.it"]
+            vec![
+                "gmx.com",
+                "gmx.net",
+                "gmx.co.uk",
+                "gmx.de",
+                "gmx.fr",
+                "gmx.es",
+                "gmx.it"
+            ]
         );
     }
 
@@ -183,7 +196,7 @@ mod tests {
     #[test]
     fn test_gmx_box_clone() {
         let provider = GmxMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "gmx");
     }

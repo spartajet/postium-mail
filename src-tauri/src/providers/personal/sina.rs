@@ -2,8 +2,11 @@
 //!
 //! 支持 sina.com、sina.cn 等新浪邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig, StandardFolder,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, StandardFolder, ProviderInfo};
 
 /// 新浪邮箱个人邮件服务商
 pub struct SinaMailProvider {
@@ -17,7 +20,12 @@ impl SinaMailProvider {
                 id: "sina".to_string(),
                 name: "新浪邮箱".to_string(),
                 account_type: AccountType::Personal,
-                domains: vec!["sina.com".to_string(), "sina.cn".to_string(), "vip.sina.com".to_string(), "2008.sina.com".to_string()],
+                domains: vec![
+                    "sina.com".to_string(),
+                    "sina.cn".to_string(),
+                    "vip.sina.com".to_string(),
+                    "2008.sina.com".to_string(),
+                ],
                 auth_types: vec![AuthType::Password],
                 capabilities: ProviderCapabilities {
                     supports_idle: true,
@@ -96,7 +104,10 @@ impl MailProvider for SinaMailProvider {
 
     async fn detect(&self, email: &str) -> crate::error::Result<bool> {
         let domain = email.split('@').nth(1).unwrap_or("");
-        Ok(matches!(domain, "sina.com" | "sina.cn" | "vip.sina.com" | "2008.sina.com"))
+        Ok(matches!(
+            domain,
+            "sina.com" | "sina.cn" | "vip.sina.com" | "2008.sina.com"
+        ))
     }
 
     fn supported_domains(&self) -> Vec<&'static str> {
@@ -108,14 +119,18 @@ impl MailProvider for SinaMailProvider {
             inbox: vec!["INBOX".to_string(), "收件箱".to_string()],
             sent: vec!["Sent".to_string(), "已发送".to_string()],
             drafts: vec!["Drafts".to_string(), "草稿箱".to_string()],
-            spam: vec!["Spam".to_string(), "Junk".to_string(), "垃圾邮件".to_string()],
-            trash: vec!["Trash".to_string(), "Deleted".to_string(), "已删除".to_string()],
+            spam: vec![
+                "Spam".to_string(),
+                "Junk".to_string(),
+                "垃圾邮件".to_string(),
+            ],
+            trash: vec![
+                "Trash".to_string(),
+                "Deleted".to_string(),
+                "已删除".to_string(),
+            ],
             archive: vec!["Archive".to_string(), "归档".to_string()],
         }
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
     }
 }
 
@@ -146,12 +161,18 @@ mod tests {
         let imap_config = provider.imap_config("test@sina.com");
         assert_eq!(imap_config.host, "imap.sina.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         let smtp_config = provider.smtp_config("test@sina.com");
         assert_eq!(smtp_config.host, "smtp.sina.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 sina.cn 域名的配置
         let imap_config = provider.imap_config("test@sina.cn");
@@ -170,7 +191,10 @@ mod tests {
         let provider = SinaMailProvider::new();
         let domains = provider.supported_domains();
 
-        assert_eq!(domains, vec!["sina.com", "sina.cn", "vip.sina.com", "2008.sina.com"]);
+        assert_eq!(
+            domains,
+            vec!["sina.com", "sina.cn", "vip.sina.com", "2008.sina.com"]
+        );
     }
 
     #[test]
@@ -203,7 +227,7 @@ mod tests {
     #[test]
     fn test_sina_box_clone() {
         let provider = SinaMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "sina");
     }

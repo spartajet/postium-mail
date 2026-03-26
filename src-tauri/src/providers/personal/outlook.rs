@@ -3,6 +3,8 @@
 //! 支持 Outlook 个人邮箱（@outlook.com, @hotmail.com, @live.com 等）
 //! OAuth 2.0、密码认证
 
+use crate::providers::OAUTH2_PORT;
+
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
     ProviderInfo, SmtpServerConfig, StandardFolder,
@@ -10,12 +12,6 @@ use super::super::{
 use async_trait::async_trait;
 
 impl OutlookProvider {
-    /// Outlook 默认客户端 ID
-    ///
-    /// 注册地址: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
-    /// 应用类型: Public client (desktop)
-    const DEFAULT_CLIENT_ID: &str = "67acce3b-a85a-40c1-be02-44d954282442";
-
     /// Outlook 默认租户 ID
     ///
     /// "common" 表示允许使用个人账号和企业账号
@@ -91,26 +87,16 @@ impl OutlookProvider {
 
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        match OAuthConfig::from_env_for_provider("outlook") {
-            Ok(config) => config,
-            Err(_) => {
-                tracing::warn!("使用 Outlook 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
-                let port = crate::config::get_oauth_callback_port();
-                let redirect_uri = crate::config::generate_redirect_uri(port);
-
-                tracing::info!("Outlook OAuth 配置: redirect_uri = {}", redirect_uri);
-
-                OAuthConfig {
-                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-                    client_secret: None, // Microsoft 不需要
-                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-                    redirect_uri,
-                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-                    pkce_enabled: true,
-                    tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
-                }
-            }
+        let redirect_uri = self.generate_redirect_uri(OAUTH2_PORT);
+        OAuthConfig {
+            client_id: env!("MICROSOFT_CLIENT_ID").to_string(),
+            client_secret: None,
+            auth_url: Self::DEFAULT_AUTH_URL.to_string(),
+            token_url: Self::DEFAULT_TOKEN_URL.to_string(),
+            redirect_uri,
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+            pkce_enabled: true,
+            tenant_id: Some(Self::DEFAULT_TENANT.to_string()),
         }
     }
 }
@@ -189,10 +175,6 @@ impl MailProvider for OutlookProvider {
             ],
             archive: vec!["归档".to_string(), "Archive".to_string()],
         }
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
     }
 }
 

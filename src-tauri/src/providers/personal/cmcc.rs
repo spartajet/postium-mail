@@ -2,8 +2,11 @@
 //!
 //! 支持 139.com、139.com.cn、10086.cn 等中国移动邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 中国移动139邮箱个人邮件服务商
 pub struct CmccMailProvider {
@@ -97,11 +100,13 @@ impl MailProvider for CmccMailProvider {
     }
 
     fn supported_domains(&self) -> Vec<&'static str> {
-        vec!["139.com", "139.com.cn", "10086.cn", "10086.com", "139mail.com"]
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
+        vec![
+            "139.com",
+            "139.com.cn",
+            "10086.cn",
+            "10086.com",
+            "139mail.com",
+        ]
     }
 }
 
@@ -133,13 +138,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.139.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.139.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
     }
 
     #[test]
@@ -149,7 +160,13 @@ mod tests {
 
         assert_eq!(
             domains,
-            vec!["139.com", "139.com.cn", "10086.cn", "10086.com", "139mail.com"]
+            vec![
+                "139.com",
+                "139.com.cn",
+                "10086.cn",
+                "10086.com",
+                "139mail.com"
+            ]
         );
     }
 
@@ -183,7 +200,7 @@ mod tests {
     #[test]
     fn test_cmcc_box_clone() {
         let provider = CmccMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "cmcc");
     }

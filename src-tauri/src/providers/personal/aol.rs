@@ -2,8 +2,11 @@
 //!
 //! 支持 aol.com 等AOL邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// AOL邮箱个人邮件服务商
 pub struct AolMailProvider {
@@ -74,7 +77,8 @@ impl MailProvider for AolMailProvider {
     fn oauth_config(&self) -> Option<OAuthConfig> {
         // AOL 使用与 Yahoo 相同的 OAuth 配置
         Some(OAuthConfig {
-            client_id: "dj0yJmk9QVk2dDJFVVNSQUzJnPTFjYTVDMjNiN0J0Y1ZJT09nTVVNNE15TXpJbw".to_string(),
+            client_id: "dj0yJmk9QVk2dDJFVVNSQUzJnPTFjYTVDMjNiN0J0Y1ZJT09nTVVNNE15TXpJbw"
+                .to_string(),
             client_secret: None,
             auth_url: "https://api.login.yahoo.com/oauth2/request_auth".to_string(),
             token_url: "https://api.login.yahoo.com/oauth2/get_token".to_string(),
@@ -108,11 +112,13 @@ impl MailProvider for AolMailProvider {
     }
 
     fn supported_domains(&self) -> Vec<&'static str> {
-        vec!["aol.com", "aim.com", "netscape.net", "cs.com", "verizon.net"]
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
+        vec![
+            "aol.com",
+            "aim.com",
+            "netscape.net",
+            "cs.com",
+            "verizon.net",
+        ]
     }
 }
 
@@ -143,13 +149,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.aol.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.aol.com");
         assert_eq!(smtp_config.port, 587);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::StartTls));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::StartTls
+        ));
     }
 
     #[test]
@@ -159,7 +171,13 @@ mod tests {
 
         assert_eq!(
             domains,
-            vec!["aol.com", "aim.com", "netscape.net", "cs.com", "verizon.net"]
+            vec![
+                "aol.com",
+                "aim.com",
+                "netscape.net",
+                "cs.com",
+                "verizon.net"
+            ]
         );
     }
 
@@ -194,7 +212,7 @@ mod tests {
     #[test]
     fn test_aol_box_clone() {
         let provider = AolMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "aol");
     }

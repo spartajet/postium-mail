@@ -52,11 +52,7 @@ impl CustomProvider {
     ///     "smtp.example.com"
     /// );
     /// ```
-    pub fn with_servers<S: Into<String>>(
-        name: S,
-        imap_host: S,
-        smtp_host: S,
-    ) -> Self {
+    pub fn with_servers<S: Into<String>>(name: S, imap_host: S, smtp_host: S) -> Self {
         let name = name.into();
         Self::new(
             name,
@@ -223,18 +219,6 @@ impl MailProvider for CustomProvider {
     fn supported_domains(&self) -> Vec<&'static str> {
         Vec::new()
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new(
-            self.info.name.clone(),
-            self.imap_host.clone(),
-            self.imap_port,
-            self.imap_ssl.clone(),
-            self.smtp_host.clone(),
-            self.smtp_port,
-            self.smtp_ssl.clone(),
-        ))
-    }
 }
 
 #[cfg(test)]
@@ -243,11 +227,8 @@ mod tests {
 
     #[test]
     fn test_custom_provider_with_servers() {
-        let provider = CustomProvider::with_servers(
-            "Test Company",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider =
+            CustomProvider::with_servers("Test Company", "imap.test.com", "smtp.test.com");
 
         assert_eq!(provider.provider_info().name, "Test Company");
         assert_eq!(provider.imap_host, "imap.test.com");
@@ -298,11 +279,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_imap_config() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
         let imap_config = provider.imap_config("user@example.com");
 
         assert_eq!(imap_config.host, "imap.test.com");
@@ -312,11 +289,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_smtp_config() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
         let smtp_config = provider.smtp_config("user@example.com");
 
         assert_eq!(smtp_config.host, "smtp.test.com");
@@ -326,11 +299,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_capabilities() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
         let caps = provider.provider_info().capabilities.clone();
 
         assert!(!caps.supports_idle);
@@ -346,11 +315,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_enterprise_config() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
         let enterprise_config = provider.enterprise_config().unwrap();
 
         assert!(enterprise_config.custom_server);
@@ -372,11 +337,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_detect() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
@@ -388,11 +349,7 @@ mod tests {
 
     #[test]
     fn test_custom_provider_supported_domains() {
-        let provider = CustomProvider::with_servers(
-            "Test",
-            "imap.test.com",
-            "smtp.test.com"
-        );
+        let provider = CustomProvider::with_servers("Test", "imap.test.com", "smtp.test.com");
         let domains = provider.supported_domains();
 
         assert_eq!(domains, Vec::<&str>::new());
@@ -410,7 +367,7 @@ mod tests {
             SslMode::None,
         );
 
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         let info = cloned.provider_info();
         assert_eq!(info.id, "custom");
@@ -420,11 +377,8 @@ mod tests {
 
     #[test]
     fn test_custom_provider_info() {
-        let provider = CustomProvider::with_servers(
-            "My Company Mail",
-            "imap.company.com",
-            "smtp.company.com"
-        );
+        let provider =
+            CustomProvider::with_servers("My Company Mail", "imap.company.com", "smtp.company.com");
 
         let info = provider.provider_info();
         assert_eq!(info.id, "custom");

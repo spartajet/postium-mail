@@ -4,16 +4,12 @@
 
 use crate::auth::{AuthManager, ImapAuthInfo};
 use crate::error::{MailError, Result};
-use crate::protocols::imap::{AsyncImapClient, FolderMetadata, ImapAuth, three_months_ago_imap_format};
+use crate::protocols::imap::{AsyncImapClient, FolderMetadata, ImapAuth};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
-use crate::sync::SyncStrategy;
 use crate::sync::{
-    change_detector::ChangeDetector,
-    delta_sync::DeltaSync,
-    folder_manager::FolderManager,
-    full_sync::{FullSyncEngine, FullSyncPreparation},
-    incremental_sync::{IncrementalSyncEngine, IncrementalSyncPreparation},
+    change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
+    full_sync::FullSyncEngine, incremental_sync::IncrementalSyncEngine,
     mail_processor::MailProcessor,
 };
 // use chrono::Datelike; // 添加 Datelike trait来访问日期方法

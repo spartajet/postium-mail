@@ -3,6 +3,8 @@
 //! 支持 Gmail 个人邮箱
 //! OAuth 2.0、密码认证、应用专用密码
 
+use crate::providers::OAUTH2_PORT;
+
 use super::super::{
     AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
     ProviderInfo, SmtpServerConfig, StandardFolder,
@@ -15,19 +17,11 @@ pub struct GmailProvider {
 }
 
 impl GmailProvider {
-    /// Gmail 默认客户端 ID
-    ///
-    /// 注册地址: https://console.cloud.google.com/
-    /// 应用类型: Desktop app
-    /// 授权重定向 URI: postium-mail://oauth/callback
-    const DEFAULT_CLIENT_ID: &str =
-        "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
+    // /// Gmail 默认授权端点
+    // const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 
-    /// Gmail 默认授权端点
-    const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-
-    /// Gmail 默认令牌端点
-    const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+    // /// Gmail 默认令牌端点
+    // const DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
     /// Gmail 默认 OAuth Scopes
     ///
@@ -38,13 +32,13 @@ impl GmailProvider {
         "https://www.googleapis.com/auth/userinfo.email",
     ];
 
-    /// Gmail IMAP 服务器配置
-    const IMAP_HOST: &str = "imap.gmail.com";
-    const IMAP_PORT: u16 = 993;
+    // /// Gmail IMAP 服务器配置
+    // const IMAP_HOST: &str = "imap.gmail.com";
+    // const IMAP_PORT: u16 = 993;
 
-    /// Gmail SMTP 服务器配置
-    const SMTP_HOST: &str = "smtp.gmail.com";
-    const SMTP_PORT: u16 = 587;
+    // /// Gmail SMTP 服务器配置
+    // const SMTP_HOST: &str = "smtp.gmail.com";
+    // const SMTP_PORT: u16 = 587;
 
     /// 创建 Gmail 服务商实例
     pub fn new() -> Self {
@@ -73,28 +67,16 @@ impl GmailProvider {
 
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        // 从环境变量加载配置（支持 client_secret）
-        match OAuthConfig::from_env_for_provider("gmail") {
-            Ok(config) => config,
-            Err(_) => {
-                // 回退到硬编码配置
-                tracing::warn!("使用 Gmail 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件");
-                let port = crate::config::get_oauth_callback_port();
-                let redirect_uri = crate::config::generate_redirect_uri(port);
-
-                tracing::info!("Gmail OAuth 配置: redirect_uri = {}", redirect_uri);
-
-                OAuthConfig {
-                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-                    client_secret: None, // 硬编码默认值
-                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-                    redirect_uri,
-                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-                    pkce_enabled: true,
-                    tenant_id: None,
-                }
-            }
+        let redirect_uri = self.generate_redirect_uri(OAUTH2_PORT);
+        OAuthConfig {
+            client_id: env!("GOOGLE_CLIENT_ID").to_string(),
+            client_secret: Some(env!("GOOGLE_CLIENT_SECRET").to_string()),
+            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+            token_url: "https://oauth2.googleapis.com/token".to_string(),
+            redirect_uri,
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+            pkce_enabled: true,
+            tenant_id: None,
         }
     }
 }
@@ -113,16 +95,16 @@ impl MailProvider for GmailProvider {
 
     fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
-            host: Self::IMAP_HOST.to_string(),
-            port: Self::IMAP_PORT,
+            host: "imap.gmail.com".to_string(),
+            port: 993,
             ssl: crate::providers::SslMode::Implicit,
         }
     }
 
     fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
-            host: Self::SMTP_HOST.to_string(),
-            port: Self::SMTP_PORT,
+            host: "smtp.gmail.com".to_string(),
+            port: 587,
             ssl: crate::providers::SslMode::StartTls,
         }
     }
@@ -149,10 +131,6 @@ impl MailProvider for GmailProvider {
             trash: vec!["Trash".to_string(), "[Gmail]/Trash".to_string()],
             archive: vec!["[Gmail]/All Mail".to_string()],
         }
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
     }
 }
 
@@ -196,7 +174,7 @@ mod tests {
     #[test]
     fn test_gmail_box_clone() {
         let provider = GmailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "gmail");
     }

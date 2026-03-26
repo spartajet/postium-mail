@@ -110,10 +110,6 @@ impl MailProvider for Mail163Provider {
             archive: vec!["Archive".to_string(), "&W1hoYw-".to_string()],
         }
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -200,7 +196,7 @@ mod tests {
     #[test]
     fn test_mail163_box_clone() {
         let provider = Mail163Provider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         let info = cloned.provider_info();
         assert_eq!(info.id, "yi");

@@ -2,8 +2,11 @@
 //!
 //! 支持 zoho.com 等Zoho邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Zoho邮箱个人邮件服务商
 pub struct ZohoMailProvider {
@@ -117,10 +120,6 @@ impl MailProvider for ZohoMailProvider {
             "zoho.com.au",
         ]
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -213,7 +212,7 @@ mod tests {
     #[test]
     fn test_zoho_box_clone() {
         let provider = ZohoMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "zoho");
     }

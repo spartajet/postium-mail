@@ -3,6 +3,8 @@
 //! 支持 Microsoft 365 (Office 365) 企业邮箱
 //! 企业租户 OAuth、条件访问策略、MFA 支持
 
+use crate::providers::OAUTH2_PORT;
+
 use super::super::{
     AccountType, AuthType, EnterpriseConfig, ImapServerConfig, MailProvider, OAuthConfig,
     ProviderCapabilities, ProviderInfo, SmtpServerConfig,
@@ -104,35 +106,21 @@ impl Microsoft365Provider {
 
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        match OAuthConfig::from_env_for_provider("microsoft365") {
-            Ok(mut config) => {
-                // 如果实例有自定义 tenant_id，覆盖配置中的 tenant_id
-                if let Some(ref tenant) = self.tenant_id {
-                    config.tenant_id = Some(tenant.clone());
-                }
-                config
-            }
-            Err(_) => {
-                tracing::warn!(
-                    "使用 Microsoft 365 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件"
-                );
-                let port = crate::config::get_oauth_callback_port();
-                let redirect_uri = crate::config::generate_redirect_uri(port);
-
-                tracing::info!("Microsoft365 OAuth 配置: redirect_uri = {}", redirect_uri);
-
-                OAuthConfig {
-                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-                    client_secret: None, // Microsoft 不需要
-                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-                    redirect_uri,
-                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-                    pkce_enabled: true,
-                    tenant_id: self.tenant_id.clone(),
-                }
-            }
+        let redirect_uri = self.generate_redirect_uri(OAUTH2_PORT);
+        let mut config = OAuthConfig {
+            client_id: Self::DEFAULT_CLIENT_ID.to_string(),
+            client_secret: None, // Microsoft 不需要
+            auth_url: Self::DEFAULT_AUTH_URL.to_string(),
+            token_url: Self::DEFAULT_TOKEN_URL.to_string(),
+            redirect_uri,
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+            pkce_enabled: true,
+            tenant_id: self.tenant_id.clone(),
+        };
+        if let Some(ref tenant) = self.tenant_id {
+            config.tenant_id = Some(tenant.clone());
         }
+        config
     }
 }
 
@@ -203,10 +191,6 @@ impl MailProvider for Microsoft365Provider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec![".onmicrosoft.com"]
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new(self.tenant_id.clone()))
     }
 }
 

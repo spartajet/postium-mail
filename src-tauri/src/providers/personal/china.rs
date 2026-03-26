@@ -2,8 +2,11 @@
 //!
 //! 支持 china.com、mail.china.com 等中华网邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 中华网邮箱个人邮件服务商
 pub struct ChinaMailProvider {
@@ -90,10 +93,6 @@ impl MailProvider for ChinaMailProvider {
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["china.com", "mail.china.com"]
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -121,13 +120,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.china.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.china.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
     }
 
     #[test]
@@ -168,7 +173,7 @@ mod tests {
     #[test]
     fn test_china_box_clone() {
         let provider = ChinaMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "china");
     }

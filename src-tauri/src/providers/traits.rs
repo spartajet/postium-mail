@@ -217,28 +217,28 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    /// 从环境变量加载指定服务商的配置
-    pub fn from_env_for_provider(provider_id: &str) -> Result<Self> {
-        let config = crate::config::load_oauth_config_for_provider(provider_id).map_err(|e| {
-            crate::error::MailError::Internal(format!("加载 OAuth 配置失败: {}", e))
-        })?;
+    // /// 从环境变量加载指定服务商的配置
+    // pub fn from_env_for_provider(provider_id: &str) -> Result<Self> {
+    //     let config = crate::config::load_oauth_config_for_provider(provider_id).map_err(|e| {
+    //         crate::error::MailError::Internal(format!("加载 OAuth 配置失败: {}", e))
+    //     })?;
 
-        // 将 config::OAuthConfig 转换为 traits::OAuthConfig
-        Ok(Self {
-            client_id: config.client_id,
-            client_secret: config.client_secret, // 从配置文件读取（不再硬编码 None）
-            auth_url: config.auth_url,
-            token_url: config.token_url,
-            redirect_uri: config.redirect_uri,
-            scopes: config.scopes,
-            pkce_enabled: true, // 默认启用 PKCE
-            tenant_id: if config.tenant.is_empty() {
-                None
-            } else {
-                Some(config.tenant)
-            },
-        })
-    }
+    //     // 将 config::OAuthConfig 转换为 traits::OAuthConfig
+    //     Ok(Self {
+    //         client_id: config.client_id,
+    //         client_secret: config.client_secret, // 从配置文件读取（不再硬编码 None）
+    //         auth_url: config.auth_url,
+    //         token_url: config.token_url,
+    //         redirect_uri: config.redirect_uri,
+    //         scopes: config.scopes,
+    //         pkce_enabled: true, // 默认启用 PKCE
+    //         tenant_id: if config.tenant.is_empty() {
+    //             None
+    //         } else {
+    //             Some(config.tenant)
+    //         },
+    //     })
+    // }
 
     /// 验证配置是否有效
     pub fn validate(&self) -> Result<()> {
@@ -475,16 +475,21 @@ pub trait MailProvider: Send + Sync {
         BASE64.encode(auth_string)
     }
 
-    /// 克隆为 Box
-    fn box_clone(&self) -> Box<dyn MailProvider>;
+    /// 生成 redirect_uri (HTTP localhost)
+    fn generate_redirect_uri(&self, port: u16) -> String {
+        format!("http://localhost:{}/callback", port).to_string()
+    }
+
+    // /// 克隆为 Box
+    // fn box_clone(&self) -> Box<dyn MailProvider>;
 }
 
-/// 用于 Box<dyn MailProvider> 的 Clone 实现
-impl Clone for Box<dyn MailProvider> {
-    fn clone(&self) -> Self {
-        self.box_clone()
-    }
-}
+// /// 用于 Box<dyn MailProvider> 的 Clone 实现
+// impl Clone for Box<dyn MailProvider> {
+//     fn clone(&self) -> Self {
+//         self.box_clone()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -538,11 +543,11 @@ mod tests {
             fn supported_domains(&self) -> Vec<&'static str> {
                 vec!["example.com"]
             }
-            fn box_clone(&self) -> Box<dyn MailProvider> {
-                Box::new(TestProvider {
-                    info: self.info.clone(),
-                })
-            }
+            // fn box_clone(&self) -> Box<dyn MailProvider> {
+            //     Box::new(TestProvider {
+            //         info: self.info.clone(),
+            //     })
+            // }
         }
 
         let provider = TestProvider {

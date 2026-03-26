@@ -157,9 +157,15 @@ mod token_manager;
 
 // 重新导出主要类型
 pub use auth_manager::{
-    AuthManager, AuthState, ImapAuthInfo,
     // 统一认证接口
-    AuthInfo, ServerConfig, AuthResponse,
+    AuthInfo,
+    AuthManager,
+    AuthResponse,
+    AuthState,
+    ImapAuthInfo,
+    ServerConfig,
 };
 pub use oauth_http_server::OAuthHttpServer;
 pub use oauth_session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};
+
+pub use token_manager::{KEYRING_SERVICE, OAuthToken, oauth_username, password_username};

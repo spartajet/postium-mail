@@ -1,7 +1,10 @@
 //! Yahoo Mail 邮件服务商
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, ProviderCapabilities, ProviderInfo,
+    SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, ProviderInfo};
 
 /// Yahoo Mail 邮件服务商
 pub struct YahooProvider {
@@ -75,9 +78,5 @@ impl MailProvider for YahooProvider {
 
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["yahoo.com", "yahoo.co.jp", "yahoo.co.uk", "yahoo.com.cn"]
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
     }
 }

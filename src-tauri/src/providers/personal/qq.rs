@@ -122,10 +122,6 @@ impl MailProvider for QqMailProvider {
             archive: vec!["Archive".to_string(), "归档".to_string()],
         }
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -212,7 +208,7 @@ mod tests {
     #[test]
     fn test_qqmail_box_clone() {
         let provider = QqMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "qq");
     }

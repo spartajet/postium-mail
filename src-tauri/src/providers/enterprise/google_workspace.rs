@@ -3,6 +3,8 @@
 //! 支持 Google Workspace (formerly G Suite) 企业邮箱
 //! 企业域名 OAuth、单点登录 (SSO)、企业安全策略支持
 
+use crate::providers::OAUTH2_PORT;
+
 use super::super::{
     AccountType, AuthType, EnterpriseConfig, ImapServerConfig, MailProvider, OAuthConfig,
     ProviderCapabilities, ProviderInfo, SmtpServerConfig,
@@ -10,14 +12,6 @@ use super::super::{
 use async_trait::async_trait;
 
 impl GoogleWorkspaceProvider {
-    /// Google Workspace 默认客户端 ID
-    ///
-    /// 注册地址: https://console.cloud.google.com/
-    /// 应用类型: Desktop app
-    /// 授权重定向 URI: postium-mail://oauth/callback
-    const DEFAULT_CLIENT_ID: &str =
-        "56071600997-2ggvvrf279h5391a2uka4aigisabbsja.apps.googleusercontent.com";
-
     /// Google Workspace 默认授权端点
     const DEFAULT_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 
@@ -108,32 +102,32 @@ impl Default for GoogleWorkspaceProvider {
 impl GoogleWorkspaceProvider {
     /// 获取 OAuth 配置
     pub fn oauth_config(&self) -> OAuthConfig {
-        match OAuthConfig::from_env_for_provider("googleworkspace") {
-            Ok(config) => config,
-            Err(_) => {
-                tracing::warn!(
-                    "使用 Google Workspace 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件"
-                );
-                let port = crate::config::get_oauth_callback_port();
-                let redirect_uri = crate::config::generate_redirect_uri(port);
+        // match OAuthConfig::from_env_for_provider("googleworkspace") {
+        //     Ok(config) => config,
+        //     Err(_) => {
+        //         tracing::warn!(
+        //             "使用 Google Workspace 硬编码 OAuth 配置，建议配置 src-tauri/.env 文件"
+        //         );
+        //         let port = crate::config::get_oauth_callback_port();
+        let redirect_uri = self.generate_redirect_uri(OAUTH2_PORT);
 
-                tracing::info!(
-                    "GoogleWorkspace OAuth 配置: redirect_uri = {}",
-                    redirect_uri
-                );
+        //         tracing::info!(
+        //             "GoogleWorkspace OAuth 配置: redirect_uri = {}",
+        //             redirect_uri
+        //         );
 
-                OAuthConfig {
-                    client_id: Self::DEFAULT_CLIENT_ID.to_string(),
-                    client_secret: None,
-                    auth_url: Self::DEFAULT_AUTH_URL.to_string(),
-                    token_url: Self::DEFAULT_TOKEN_URL.to_string(),
-                    redirect_uri,
-                    scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
-                    pkce_enabled: true,
-                    tenant_id: None,
-                }
-            }
+        OAuthConfig {
+            client_id: env!("GOOGLE_WORKSPACE_CLIENT_ID").to_string(),
+            client_secret: Some(env!("GOOGLE_WORKSPACE_CLIENT_SECRET").to_string()),
+            auth_url: Self::DEFAULT_AUTH_URL.to_string(),
+            token_url: Self::DEFAULT_TOKEN_URL.to_string(),
+            redirect_uri,
+            scopes: Self::DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect(),
+            pkce_enabled: true,
+            tenant_id: None,
         }
+        //     }
+        // }
     }
 }
 
@@ -201,10 +195,6 @@ impl MailProvider for GoogleWorkspaceProvider {
     fn supported_domains(&self) -> Vec<&'static str> {
         vec![] // Google Workspace 使用动态域名，不在静态列表中
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(GoogleWorkspaceProvider::new(self.domain.clone()))
-    }
 }
 
 #[cfg(test)]
@@ -237,10 +227,7 @@ mod tests {
         let provider = GoogleWorkspaceProvider::with_defaults();
         let oauth_config = provider.oauth_config();
 
-        assert_eq!(
-            oauth_config.client_id,
-            GoogleWorkspaceProvider::DEFAULT_CLIENT_ID
-        );
+        assert_eq!(oauth_config.client_id, env!("GOOGLE_WORKSPACE_CLIENT_ID"));
         assert_eq!(
             oauth_config.auth_url,
             GoogleWorkspaceProvider::DEFAULT_AUTH_URL

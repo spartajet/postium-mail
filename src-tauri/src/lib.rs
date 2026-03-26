@@ -137,8 +137,7 @@
 
 #![allow(ambiguous_glob_reexports, unused_variables)]
 mod command;
-pub mod config;
-mod crypto;
+// pub mod config;
 // 新增模块
 pub mod auth; // 公开以支持测试
 pub mod engine;
@@ -161,41 +160,10 @@ use tauri::{Listener, Manager};
 
 use command::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
 
-/// 初始化 tracing 日志系统
-///
-/// 使用环境变量 `RUST_LOG` 控制日志级别，例如：
-/// - `RUST_LOG=info` - 只显示 INFO 及以上级别
-/// - `RUST_LOG=debug` - 显示 DEBUG 及以上级别（开发调试用）
-/// - `RUST_LOG=postium_mail=trace` - 只对本模块使用 TRACE 级别
-fn init_tracing() {
-    // 配置日志过滤器，屏蔽第三方 crate 的冗余日志
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new("debug")
-            // 过滤 keyring 相关 crate 的日志
-            .add_directive("keyring=error".parse().unwrap())
-            .add_directive("tauri_plugin_keyring=error".parse().unwrap())
-            .add_directive("secret_service=error".parse().unwrap())
-            .add_directive("windows=error".parse().unwrap())
-            .add_directive("windows_sys=error".parse().unwrap())
-            .add_directive("tokio_native_tls=warn".parse().unwrap())
-            .add_directive("native_tls=warn".parse().unwrap())
-            .add_directive("async_imap=warn".parse().unwrap())
-    });
-
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(false) // 显示模块路径，便于调试
-        .with_thread_ids(false) // 线程ID通常不需要
-        .with_file(true) // 不显示文件名，减少日志冗余
-        .with_line_number(true) // 不显示行号
-        .compact() // 使用紧凑格式
-        .init();
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 初始化日志系统
-    init_tracing();
+    sys::log::init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -292,11 +260,6 @@ pub fn run() {
             // 服务商检测
             command::detect_provider,
             command::list_providers,
-            // OAuth
-            // command::validate_oauth_token,
-            // command::get_oauth_auth_url,
-            // command::exchange_oauth_code,
-            // command::refresh_oauth_token,
             // 统一认证
             command::start_auth_command,
             // 邮件操作

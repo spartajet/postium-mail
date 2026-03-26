@@ -76,7 +76,7 @@ impl ProviderPool {
         ),
         level = "info"
     )]
-    pub async fn detect_provider(&self, email: &str) -> Result<Box<dyn MailProvider>> {
+    pub async fn detect_provider(&self, email: &str) -> Result<&dyn MailProvider> {
         tracing::info!("开始检测邮箱服务商: email={}", email);
 
         // 1. 先尝试域名匹配
@@ -91,7 +91,7 @@ impl ProviderPool {
                         email,
                         info.id
                     );
-                    return Ok(provider.box_clone());
+                    return Ok(provider.as_ref());
                 }
             }
         }
@@ -125,7 +125,7 @@ impl ProviderPool {
         for provider in &self.providers {
             if provider.provider_info().id == "custom" {
                 tracing::info!("使用自定义服务商: email={}", email);
-                return Ok(provider.box_clone());
+                return Ok(provider.as_ref());
             }
         }
 
@@ -144,7 +144,7 @@ impl ProviderPool {
     ///
     /// 返回识别到的服务商，如果没有识别到则返回 None
     #[tracing::instrument(skip(self), fields(domain), level = "debug")]
-    pub async fn detect_enterprise_provider(&self, domain: &str) -> Option<Box<dyn MailProvider>> {
+    pub async fn detect_enterprise_provider(&self, domain: &str) -> Option<&dyn MailProvider> {
         tracing::debug!("开始检测企业邮箱服务商: domain={}", domain);
 
         // TODO: 实现 MX 记录查询
@@ -240,10 +240,10 @@ impl ProviderPool {
     }
 
     /// 根据 ID 查找服务商
-    pub fn find_provider_by_id(&self, id: &str) -> Option<Box<dyn MailProvider>> {
+    pub fn find_provider_by_id(&self, id: &str) -> Option<&dyn MailProvider> {
         for provider in &self.providers {
             if provider.provider_info().id == id {
-                return Some(provider.box_clone());
+                return Some(provider.as_ref());
             }
         }
         None
@@ -278,21 +278,21 @@ impl ProviderPool {
     }
 
     /// 获取所有服务商实例
-    pub fn list_providers(&self) -> Vec<Box<dyn MailProvider>> {
-        self.providers.iter().map(|p| p.box_clone()).collect()
+    pub fn list_providers(&self) -> Vec<&dyn MailProvider> {
+        self.providers.iter().map(|p| p.as_ref()).collect()
     }
 
     /// 按账号类型筛选服务商实例
-    pub fn list_by_type(&self, account_type: AccountType) -> Vec<Box<dyn MailProvider>> {
+    pub fn list_by_type(&self, account_type: AccountType) -> Vec<&dyn MailProvider> {
         self.providers
             .iter()
             .filter(|p| p.provider_info().account_type == account_type)
-            .map(|p| p.box_clone())
+            .map(|p| p.as_ref())
             .collect()
     }
 
     /// 根据邮箱地址检测服务商（旧方法，保留向后兼容）
-    pub async fn detect(&self, email: &str) -> Result<Box<dyn MailProvider>> {
+    pub async fn detect(&self, email: &str) -> Result<&dyn MailProvider> {
         self.detect_provider(email).await
     }
 }
@@ -344,11 +344,11 @@ mod tests {
         fn supported_domains(&self) -> Vec<&'static str> {
             vec!["example.com"]
         }
-        fn box_clone(&self) -> Box<dyn MailProvider> {
-            Box::new(MockProvider {
-                info: self.info.clone(),
-            })
-        }
+        // fn box_clone(&self) -> Box<dyn MailProvider> {
+        //     Box::new(MockProvider {
+        //         info: self.info.clone(),
+        //     })
+        // }
     }
 
     #[tokio::test]

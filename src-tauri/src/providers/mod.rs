@@ -195,3 +195,6 @@ pub use personal::{
 // 企业邮箱（阶段2使用）
 #[allow(unused_imports)]
 pub use enterprise::{CustomProvider, GoogleWorkspaceProvider, Microsoft365Provider};
+
+pub const OAUTH2_PORT: u16 = 36279;
+pub const OAUTH2_CALLBACK_URL: &str = "http://localhost:{}/callback";

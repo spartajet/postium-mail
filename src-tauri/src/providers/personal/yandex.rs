@@ -2,8 +2,11 @@
 //!
 //! 支持 yandex.com、yandex.ru 等Yandex邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Yandex邮箱个人邮件服务商
 pub struct YandexMailProvider {
@@ -81,10 +84,7 @@ impl MailProvider for YandexMailProvider {
             auth_url: "https://oauth.yandex.com/authorize".to_string(),
             token_url: "https://oauth.yandex.com/token".to_string(),
             redirect_uri: "urn:ietf:wg:oauth:2.0:oob".to_string(),
-            scopes: vec![
-                "mail:imap_full".to_string(),
-                "mail:smtp_full".to_string(),
-            ],
+            scopes: vec!["mail:imap_full".to_string(), "mail:smtp_full".to_string()],
             pkce_enabled: true,
             tenant_id: None,
         })
@@ -98,8 +98,14 @@ impl MailProvider for YandexMailProvider {
         let domain = email.split('@').nth(1).unwrap_or("");
         Ok(matches!(
             domain,
-            "yandex.com" | "yandex.ru" | "yandex.ua" | "yandex.by" | "yandex.kz" | "ya.ru"
-                | "yandex.fr" | "yandex.com.tr"
+            "yandex.com"
+                | "yandex.ru"
+                | "yandex.ua"
+                | "yandex.by"
+                | "yandex.kz"
+                | "ya.ru"
+                | "yandex.fr"
+                | "yandex.com.tr"
         ))
     }
 
@@ -114,10 +120,6 @@ impl MailProvider for YandexMailProvider {
             "yandex.fr",
             "yandex.com.tr",
         ]
-    }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
     }
 }
 
@@ -148,13 +150,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.yandex.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.yandex.com");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
     }
 
     #[test]
@@ -208,7 +216,7 @@ mod tests {
     #[test]
     fn test_yandex_box_clone() {
         let provider = YandexMailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "yandex");
     }

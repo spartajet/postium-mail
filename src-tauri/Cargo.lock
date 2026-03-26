@@ -4205,6 +4205,7 @@ dependencies = [
  "curl",
  "dirs",
  "dotenv",
+ "dotenvy",
  "encoding_rs",
  "futures",
  "getrandom 0.4.2",
