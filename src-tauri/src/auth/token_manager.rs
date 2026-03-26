@@ -10,8 +10,29 @@ use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 use tokio::sync::RwLock;
 
-use crate::crypto::{KEYRING_SERVICE, OAuthToken, oauth_username};
 use crate::error::{MailError, Result, StorageError};
+
+/// OAuth Token 结构（用于 Keyring 存储）
+/// 只存储 refresh_token，因为 access_token 可以通过 refresh_token 重新获取
+/// 这样可以避免超过 Windows Keyring 的 2560 字符（UTF-16）限制
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OAuthToken {
+    pub refresh_token: String,
+    pub expires_at: i64,
+}
+
+/// Keyring Service 名称（常量）
+pub const KEYRING_SERVICE: &str = "com.postium.mail";
+
+/// Keyring 辅助函数：生成账号密码的用户名
+pub fn password_username(account_id: i32) -> String {
+    format!("account_{}", account_id)
+}
+
+/// Keyring 辅助函数：生成 OAuth Token 的用户名
+pub fn oauth_username(account_id: i32) -> String {
+    format!("oauth_{}", account_id)
+}
 
 /// Token 元数据（内存缓存）
 #[derive(Debug, Clone)]

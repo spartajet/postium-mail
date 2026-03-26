@@ -104,6 +104,8 @@ ctor = "0.2"  # 用于在所有测试前初始化 tracing
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+dotenvy = "0.15"
+anyhow = "1"
 
 [patch.ustc]
 # libsqlite3-sys = {git="https://github.com/rusqlite/rusqlite", tag="v0.30.1"}

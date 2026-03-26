@@ -2,8 +2,11 @@
 //!
 //! 支持 mail.com 等邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// Mail.com邮箱个人邮件服务商
 pub struct MailComProvider {
@@ -17,7 +20,11 @@ impl MailComProvider {
                 id: "mailcom".to_string(),
                 name: "Mail.com邮箱".to_string(),
                 account_type: AccountType::Personal,
-                domains: vec!["mail.com".to_string(), "email.com".to_string(), "myemail.com".to_string()],
+                domains: vec![
+                    "mail.com".to_string(),
+                    "email.com".to_string(),
+                    "myemail.com".to_string(),
+                ],
                 auth_types: vec![AuthType::Password],
                 capabilities: ProviderCapabilities {
                     supports_idle: true,
@@ -90,10 +97,6 @@ impl MailProvider for MailComProvider {
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["mail.com", "email.com", "myemail.com"]
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -122,13 +125,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.mail.com");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.mail.com");
         assert_eq!(smtp_config.port, 587);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::StartTls));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::StartTls
+        ));
     }
 
     #[test]
@@ -169,7 +178,7 @@ mod tests {
     #[test]
     fn test_mailcom_box_clone() {
         let provider = MailComProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "mailcom");
     }

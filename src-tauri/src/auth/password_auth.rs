@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 
-use crate::crypto::{KEYRING_SERVICE, password_username};
+use crate::auth::{KEYRING_SERVICE, password_username};
 use crate::error::{AuthError, MailError, Result, StorageError};
 use crate::protocols::{AsyncImapClient, ImapAuth};
 

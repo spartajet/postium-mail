@@ -2,8 +2,11 @@
 //!
 //! 支持 263.net、263.com、x263.net 等263邮箱域名
 
+use super::super::{
+    AccountType, AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities,
+    ProviderInfo, SmtpServerConfig,
+};
 use async_trait::async_trait;
-use super::super::{MailProvider, AccountType, AuthType, ImapServerConfig, SmtpServerConfig, ProviderCapabilities, OAuthConfig, ProviderInfo};
 
 /// 263邮箱个人邮件服务商
 pub struct Net263MailProvider {
@@ -17,7 +20,11 @@ impl Net263MailProvider {
                 id: "net263".to_string(),
                 name: "263邮箱".to_string(),
                 account_type: AccountType::Personal,
-                domains: vec!["263.net".to_string(), "263.com".to_string(), "x263.net".to_string()],
+                domains: vec![
+                    "263.net".to_string(),
+                    "263.com".to_string(),
+                    "x263.net".to_string(),
+                ],
                 auth_types: vec![AuthType::Password],
                 capabilities: ProviderCapabilities {
                     supports_idle: true,
@@ -90,10 +97,6 @@ impl MailProvider for Net263MailProvider {
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["263.net", "263.com", "x263.net"]
     }
-
-    fn box_clone(&self) -> Box<dyn MailProvider> {
-        Box::new(Self::new())
-    }
 }
 
 #[cfg(test)]
@@ -122,13 +125,19 @@ mod tests {
         let imap_config = provider.imap_config("test@domain.com");
         assert_eq!(imap_config.host, "imap.263.net");
         assert_eq!(imap_config.port, 993);
-        assert!(matches!(imap_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            imap_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
 
         // 测试 SMTP 配置
         let smtp_config = provider.smtp_config("test@domain.com");
         assert_eq!(smtp_config.host, "smtp.263.net");
         assert_eq!(smtp_config.port, 465);
-        assert!(matches!(smtp_config.ssl, crate::providers::SslMode::Implicit));
+        assert!(matches!(
+            smtp_config.ssl,
+            crate::providers::SslMode::Implicit
+        ));
     }
 
     #[test]
@@ -169,7 +178,7 @@ mod tests {
     #[test]
     fn test_net263_box_clone() {
         let provider = Net263MailProvider::new();
-        let cloned = provider.box_clone();
+        let cloned = provider;
 
         assert_eq!(cloned.provider_info().id, "net263");
     }

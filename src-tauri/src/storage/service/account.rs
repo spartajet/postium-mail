@@ -51,7 +51,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DbConn, EntityTrait, QueryFilter, S
 use tauri::AppHandle;
 use tauri_plugin_keyring::KeyringExt;
 
-use crate::crypto::{self, OAuthToken, KEYRING_SERVICE};
+use crate::auth::{KEYRING_SERVICE, OAuthToken, oauth_username, password_username};
 use crate::error::{Result, StorageError};
 use crate::providers::ProviderPool;
 use crate::storage::models::account;
@@ -346,11 +346,7 @@ impl AccountRepository {
                         .map_err(|e| StorageError::Database(format!("序列化 Token 失败: {}", e)))?;
 
                     keyring
-                        .set_password(
-                            KEYRING_SERVICE,
-                            &crypto::oauth_username(account.id),
-                            &token_json,
-                        )
+                        .set_password(KEYRING_SERVICE, &oauth_username(account.id), &token_json)
                         .map_err(|e| StorageError::Keyring(format!("保存 Token 失败: {}", e)))?;
                 }
             }
@@ -359,7 +355,7 @@ impl AccountRepository {
                 keyring
                     .set_password(
                         KEYRING_SERVICE,
-                        &crypto::password_username(account.id),
+                        &password_username(account.id),
                         &req.password,
                     )
                     .map_err(|e| StorageError::Keyring(format!("保存密码失败: {}", e)))?;
@@ -464,10 +460,10 @@ impl AccountRepository {
         let keyring = app_handle.keyring();
 
         // 删除密码
-        let _ = keyring.delete_password(KEYRING_SERVICE, &crypto::password_username(id));
+        let _ = keyring.delete_password(KEYRING_SERVICE, &password_username(id));
 
         // 删除 OAuth Token
-        let _ = keyring.delete_password(KEYRING_SERVICE, &crypto::oauth_username(id));
+        let _ = keyring.delete_password(KEYRING_SERVICE, &oauth_username(id));
 
         // 删除数据库记录
         account::Entity::delete_by_id(id)
@@ -484,7 +480,7 @@ impl AccountRepository {
     pub fn get_password(app_handle: &AppHandle, id: i32) -> Result<String> {
         let keyring = app_handle.keyring();
         let password = keyring
-            .get_password(KEYRING_SERVICE, &crypto::password_username(id))
+            .get_password(KEYRING_SERVICE, &password_username(id))
             .map_err(|e| StorageError::Keyring(format!("获取密码失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("密码未找到".to_string()))?;
 
@@ -495,7 +491,7 @@ impl AccountRepository {
     pub fn get_oauth_token(app_handle: &AppHandle, id: i32) -> Result<OAuthToken> {
         let keyring = app_handle.keyring();
         let token_json = keyring
-            .get_password(KEYRING_SERVICE, &crypto::oauth_username(id))
+            .get_password(KEYRING_SERVICE, &oauth_username(id))
             .map_err(|e| StorageError::Keyring(format!("获取 Token 失败: {}", e)))?
             .ok_or_else(|| StorageError::NotFound("Token 未找到".to_string()))?;
 
@@ -509,7 +505,7 @@ impl AccountRepository {
     pub fn save_password(app_handle: &AppHandle, id: i32, password: &str) -> Result<()> {
         let keyring = app_handle.keyring();
         keyring
-            .set_password(KEYRING_SERVICE, &crypto::password_username(id), password)
+            .set_password(KEYRING_SERVICE, &password_username(id), password)
             .map_err(|e| StorageError::Keyring(format!("保存密码失败: {}", e)))?;
 
         Ok(())
@@ -522,7 +518,7 @@ impl AccountRepository {
             .map_err(|e| StorageError::Database(format!("序列化 Token 失败: {}", e)))?;
 
         keyring
-            .set_password(KEYRING_SERVICE, &crypto::oauth_username(id), &token_json)
+            .set_password(KEYRING_SERVICE, &oauth_username(id), &token_json)
             .map_err(|e| StorageError::Keyring(format!("保存 Token 失败: {}", e)))?;
 
         Ok(())

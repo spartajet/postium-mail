@@ -209,7 +209,8 @@ impl AuthManager {
         Arc::clone(&session_manager).spawn_cleanup_task();
 
         // 初始化 OAuth HTTP 服务器（但不启动）
-        let port = crate::config::get_oauth_callback_port();
+        // let port = crate::config::get_oauth_callback_port();
+        let port = 36279;
         let http_server = Arc::new(OAuthHttpServer::new(port, app_handle.clone()));
 
         tracing::info!("OAuth HTTP 服务器创建成功，将在异步运行时中启动");
@@ -246,10 +247,7 @@ impl AuthManager {
         let provider = self.provider_pool.detect_provider(email).await?;
 
         // 2. 获取授权 URL
-        let context = self
-            .oauth_handler
-            .get_authorization_url(provider.as_ref())
-            .await?;
+        let context = self.oauth_handler.get_authorization_url(provider).await?;
 
         tracing::info!("生成 OAuth 授权 URL: email={}", email);
 
@@ -446,7 +444,7 @@ impl AuthManager {
         // 2. 交换授权码
         let token_response = self
             .oauth_handler
-            .exchange_code(provider.as_ref(), auth_code, state)
+            .exchange_code(provider, auth_code, state)
             .await?;
 
         // 3. 计算 Token 过期时间
@@ -646,7 +644,7 @@ impl AuthManager {
         // 3. 刷新 Token
         let new_token_response = self
             .oauth_handler
-            .refresh_token(provider.as_ref(), &token.refresh_token)
+            .refresh_token(provider, &token.refresh_token)
             .await?;
 
         // 4. 计算新的过期时间
@@ -819,7 +817,7 @@ impl AuthManager {
                         // 2.2 刷新 token
                         let token_response = self
                             .oauth_handler
-                            .refresh_token(provider.as_ref(), &refresh_token.refresh_token)
+                            .refresh_token(provider, &refresh_token.refresh_token)
                             .await
                             .map_err(|e| {
                                 MailError::Internal(format!("刷新 access_token 失败: {}", e))
@@ -909,7 +907,7 @@ impl AuthManager {
                         // 2.2 刷新 token
                         let token_response = self
                             .oauth_handler
-                            .refresh_token(provider.as_ref(), &refresh_token.refresh_token)
+                            .refresh_token(provider, &refresh_token.refresh_token)
                             .await
                             .map_err(|e| {
                                 MailError::Internal(format!("刷新 access_token 失败: {}", e))

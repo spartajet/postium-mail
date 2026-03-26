@@ -28,7 +28,9 @@ use std::sync::Arc;
 use tauri_plugin_keyring::KeyringExt;
 
 use super::{AuthManagerState, DatabaseState, KeyringState, ProviderPoolState};
-use crate::crypto;
+
+use crate::auth::KEYRING_SERVICE;
+use crate::auth::password_username;
 use crate::protocols::smtp;
 use crate::storage;
 use crate::sync;
@@ -236,10 +238,10 @@ pub async fn send_email(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "账号不存在".to_string())?;
 
-    let username = crypto::password_username(request.account_id);
+    let username = password_username(request.account_id);
     let keyring = keyring_state.app_handle.keyring();
     let password = keyring
-        .get_password(crypto::KEYRING_SERVICE, &username)
+        .get_password(KEYRING_SERVICE, &username)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "密码未找到".to_string())?;
 

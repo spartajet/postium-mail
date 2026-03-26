@@ -98,8 +98,10 @@ use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config;
-use crate::error::{Result, StorageError};
+use crate::{
+    error::{Result, StorageError},
+    sys::path,
+};
 
 /// 数据库连接包装器
 #[derive(Clone)]
@@ -152,7 +154,7 @@ impl DatabaseConnection {
 ///
 /// 使用 SQLite 数据库，位置在 ~/.postium/postium.sqlite
 pub async fn establish_connection() -> std::result::Result<DbConn, DbErr> {
-    let db_path = config::get_db_path().map_err(|e| DbErr::Custom(e.to_string()))?;
+    let db_path = path::get_db_path().map_err(|e| DbErr::Custom(e.to_string()))?;
 
     // SeaORM 需要 sqlite:// 协议前缀
     // Windows 路径需要将反斜杠转换为正斜杠
