@@ -8,9 +8,10 @@ use crate::protocols::imap::{AsyncImapClient, FolderMetadata, ImapAuth};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
 use crate::sync::{
-    change_detector::ChangeDetector, delta_sync::DeltaSync, folder_manager::FolderManager,
-    full_sync::FullSyncEngine, incremental_sync::IncrementalSyncEngine,
+    change::ChangeDetector,
+    folder_manager::FolderManager,
     mail_processor::MailProcessor,
+    strategy::{FullSyncEngine, IncrementalSyncEngine},
 };
 // use chrono::Datelike; // 添加 Datelike trait来访问日期方法
 use sea_orm::DbConn;
@@ -48,6 +49,62 @@ pub struct SyncResult {
     pub duration_ms: u64,
 }
 
+/// 同步策略
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncStrategy {
+    /// 使用 UID 搜索对比
+    UidSearch,
+
+    /// 完整同步
+    FullSync,
+}
+
+/// 同步结果
+#[derive(Debug, Clone)]
+pub struct DeltaSyncResult {
+    /// 使用的同步策略
+    pub strategy_used: SyncStrategy,
+
+    /// 新邮件数量
+    pub new_emails: usize,
+
+    /// 修改邮件数量
+    pub modified_emails: usize,
+
+    /// 删除邮件数量
+    pub deleted_emails: usize,
+
+    /// 标志变更数量
+    pub flags_changed: usize,
+
+    /// 同步耗时（毫秒）
+    pub duration_ms: u64,
+}
+
+impl DeltaSyncResult {
+    /// 创建空的同步结果
+    pub fn empty(strategy: SyncStrategy) -> Self {
+        Self {
+            strategy_used: strategy,
+            new_emails: 0,
+            modified_emails: 0,
+            deleted_emails: 0,
+            flags_changed: 0,
+            duration_ms: 0,
+        }
+    }
+
+    /// 是否有变更
+    pub fn has_changes(&self) -> bool {
+        self.new_emails > 0 || self.modified_emails > 0 || self.deleted_emails > 0
+    }
+
+    /// 变更总数
+    pub fn total_changes(&self) -> usize {
+        self.new_emails + self.modified_emails + self.deleted_emails
+    }
+}
+
 /// 同步管理器
 ///
 /// 负责协调所有同步组件，管理同步流程
@@ -56,7 +113,6 @@ pub struct SyncManager {
     app_handle: AppHandle,
     auth_manager: Arc<AuthManager>,
     provider_pool: Arc<ProviderPool>,
-    delta_sync: Arc<DeltaSync>,
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
     change_detector: Arc<ChangeDetector>,
@@ -74,7 +130,6 @@ impl SyncManager {
         auth_manager: Arc<AuthManager>,
         provider_pool: Arc<ProviderPool>,
     ) -> Self {
-        let delta_sync = Arc::new(DeltaSync::new(db.clone()));
         let folder_manager = Arc::new(FolderManager::new(db.clone()));
         let mail_processor = Arc::new(MailProcessor::new(db.clone()));
         let change_detector = Arc::new(ChangeDetector::new(db.clone()));
@@ -88,7 +143,6 @@ impl SyncManager {
             app_handle,
             auth_manager,
             provider_pool,
-            delta_sync,
             folder_manager,
             mail_processor,
             change_detector,
@@ -391,7 +445,7 @@ impl SyncManager {
         folder: &str,
         imap_client: &mut AsyncImapClient,
         metadata: &FolderMetadata,
-    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+    ) -> Result<DeltaSyncResult> {
         tracing::info!(
             "全量同步文件夹: account_id={}, folder={}, uidvalidity={}",
             account_id,
@@ -446,7 +500,7 @@ impl SyncManager {
         folder: &str,
         imap_client: &mut AsyncImapClient,
         metadata: &FolderMetadata,
-    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+    ) -> Result<DeltaSyncResult> {
         tracing::info!(
             "增量同步文件夹: account_id={}, folder={}",
             account_id,
@@ -496,7 +550,7 @@ impl SyncManager {
         account_id: i32,
         folder: &str,
         imap_client: &mut AsyncImapClient,
-    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+    ) -> Result<DeltaSyncResult> {
         tracing::debug!(
             "开始同步文件夹: account_id={}, folder={}",
             account_id,
@@ -560,9 +614,7 @@ impl SyncManager {
             }
         } else {
             // 元数据获取失败，返回空结果
-            Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
-                crate::sync::delta_sync::SyncStrategy::UidSearch,
-            ))
+            Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch))
         }
     }
 
@@ -583,7 +635,7 @@ impl SyncManager {
         server_uids: Option<&[u32]>,
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
         imap_client: Option<&mut AsyncImapClient>,
-    ) -> Result<crate::sync::delta_sync::DeltaSyncResult> {
+    ) -> Result<DeltaSyncResult> {
         tracing::info!(
             "开始同步文件夹: account_id={}, folder={}, server_uids={}",
             account_id,
@@ -596,21 +648,21 @@ impl SyncManager {
             (Some(uids), Some(flags)) => (uids, flags),
             _ => {
                 tracing::warn!("缺少服务器数据，跳过同步");
-                return Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
-                    crate::sync::delta_sync::SyncStrategy::UidSearch,
-                ));
+                return Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch));
             }
         };
 
         // 1. 使用 ChangeDetector 检测变更
-        // 注意：这里暂时使用 None 作为 last_sync_uid，ChangeDetector 会自动推断
+        // 注意：这里暂时使用空 HashMap 作为 server_flags，None 作为 last_sync_uid
+        let empty_flags = std::collections::HashMap::new();
         let change_detection_result = self
             .change_detector
             .detect_changes(
                 account_id,
                 folder,
                 server_uids,
-                None, // last_sync_uid - 从本地状态推断
+                &empty_flags, // server_flags - 暂时使用空 HashMap
+                None,         // last_sync_uid - 从本地状态推断
             )
             .await
             .map_err(|e| MailError::Internal(format!("变更检测失败: {}", e)))?;
@@ -625,9 +677,7 @@ impl SyncManager {
         // 如果没有变更，直接返回
         if !change_detection_result.has_changes() {
             tracing::info!("无变更，跳过同步");
-            return Ok(crate::sync::delta_sync::DeltaSyncResult::empty(
-                crate::sync::delta_sync::SyncStrategy::UidSearch,
-            ));
+            return Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch));
         }
 
         // 2. 处理新邮件和修改的邮件
@@ -719,8 +769,8 @@ impl SyncManager {
         }
 
         // 6. 返回同步结果
-        Ok(crate::sync::delta_sync::DeltaSyncResult {
-            strategy_used: crate::sync::delta_sync::SyncStrategy::UidSearch,
+        Ok(DeltaSyncResult {
+            strategy_used: SyncStrategy::UidSearch,
             new_emails: new_emails_count,
             modified_emails: modified_emails_count,
             deleted_emails: change_detection_result.deleted_emails.len(),
@@ -757,11 +807,6 @@ impl SyncManager {
             )
             .map_err(|e| MailError::Internal(format!("发送进度事件失败: {}", e)))?;
         Ok(())
-    }
-
-    /// 获取 DeltaSync 引用
-    pub fn delta_sync(&self) -> &Arc<DeltaSync> {
-        &self.delta_sync
     }
 
     /// 获取 FolderManager 引用

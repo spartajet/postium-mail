@@ -4,7 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::storage::models::email;
-use crate::sync::change_detector::EmailFlags;
+use crate::sync::change::EmailFlags;
 use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set};
 use std::sync::Arc;
 use tracing::instrument;
@@ -73,7 +73,7 @@ pub struct MailProcessor {
 ///
 /// 返回 MailData
 pub fn from_imap_email(email_data: &crate::protocols::imap::EmailData, folder: &str) -> MailData {
-    use crate::sync::change_detector::EmailFlags;
+    use crate::sync::change::EmailFlags;
 
     // 标准化文件夹名称
     let normalized_folder = normalize_folder_name(folder);

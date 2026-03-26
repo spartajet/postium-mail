@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, StorageError};
 use crate::storage::models::{attachment, email};
-use crate::sync::change_detector::EmailFlags;
+use crate::sync::change::EmailFlags;
 
 // ============================================================================
 // DTO 类型定义

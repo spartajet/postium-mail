@@ -9,6 +9,7 @@
 //! - **多账号支持**: 并发同步多个账号
 //! - **进度跟踪**: 实时同步进度反馈
 //! - **错误处理**: 结构化的错误处理和重试机制
+//! - **任务调度**: 统一的同步任务调度和管理
 //!
 //! # 架构设计
 //!
@@ -17,12 +18,12 @@
 //! │           SyncManager                  │
 //! │  (同步调度器、流程编排)                   │
 //! └────────────┬────────────────────────────┘
-//!              │
-//!    ┌─────────┼─────────┬──────────┐
-//!    │         │         │          │
+//!               │
+//!     ┌─────────┼─────────┬──────────┐
+//!     │         │         │          │
 //! ┌───▼───┐ ┌───▼────┐ ┌─▼──────┐ ┌─▼──────┐
-//! │Delta  │ │Change  │ │Folder  │ │Mail    │
-//! │ Sync   │ │Detector│ │Manager │ │Processor│
+//! │Strategy│ │Change  │ │Folder  │ │Mail    │
+//! │Selector│ │Detector│ │Manager │ │Processor│
 //! └───────┘ └────────┘ └────────┘ └─────────┘
 //!     ▲
 //!     │
@@ -31,9 +32,19 @@
 //! │Sync   │ │mental  │
 //! │Engine │ │ Sync   │
 //! └───────┘ └────────┘
+//!       │
+//! ┌──────▼───────┐
+//! │   Scheduler  │
+//! │  (任务调度)   │
+//! └──────────────┘
+//!       │
+//! ┌──────▼───────┐
+//! │    State     │
+//! │  (状态管理)   │
+//! └──────────────┘
 //! ```
 //!
-//! # 模块说明
+//! # 子模块说明
 //!
 //! ## [`SyncManager`] - 同步管理器
 //!
@@ -43,47 +54,33 @@
 //! - 处理同步错误
 //! - 进度事件发布
 //!
-//! ## [`DeltaSync`] - 增量同步引擎
+//! ## [`strategy`] - 同步策略模块
 //!
-//! 基于策略的增量同步实现：
-//! - **FullSync**: 完整同步所有邮件
-//! - **SinceSync**: 同步指定日期后的邮件
-//! - **DeltaSync**: 基于变更检测的增量同步
+//! 包含全量和增量同步引擎：
+//! - [`FullSyncEngine`][]: 完整同步所有邮件
+//! - [`IncrementalSyncEngine`][]: 基于变更检测的增量同步
+//! - [`SyncPreparation`][]: 统一的同步准备结果
 //!
-//! ## [`ChangeDetector`] - 变更检测器
+//! ## [`change`] - 变化检测模块
 //!
 //! 检测邮件变更：
-//! - 新邮件检测
-//! - 标志变更检测
-//! - 删除检测
-//! - UID 搜索策略
+//! - [`ChangeDetector`][]: 核心检测逻辑
+//! - [`EmailFlags`][]: 邮件标志状态
+//! - [`UidSet`][]: UID 集合辅助类型
+//! - [`ChangeDetectionResult`][]: 变更检测结果
 //!
-//! ## [`FolderManager`] - 文件夹管理器
+//! ## [`state`] - 状态管理模块
 //!
-//! 管理邮件文件夹和同步状态：
-//! - 文件夹列表获取
-//! - 特殊文件夹识别（收件箱、已发送等）
-//! - 文件夹同步状态管理（合并自 SyncStateManager）
-//! - IMAP 元数据管理（UIDVALIDITY, UIDNEXT）
-//! - 同步进度跟踪（sync_count, error_count)
+//! 统一的同步状态管理：
+//! - [`SyncState`][]: 统一的同步状态管理器
+//! - [`ProgressTracker`][]: 同步进度追踪器
+//! - [`FolderSyncState`][]: 文件夹同步状态
 //!
-//! ## [`MailProcessor`] - 邮件处理器
+//! ## [`scheduler`] - 任务调度模块
 //!
-//! 处理邮件数据：
-//! - 邮件解析和验证
-//! - 数据库保存
-//! - 附件处理
-//!
-//! ## [`FullSyncEngine`] - 全量同步引擎
-//!
-//! 当 UIDVALIDITY 变化或首次同步时使用:
-//! - 获取近三个月的邮件进行完整同步
-//!
-//! ## [`IncrementalSyncEngine`] - 增量同步引擎
-//!
-//! 在 UIDVALIDITY 未变化时使用?
-//! - 基于 last_sync_uid 获取新增邮件
-//! - 仅同步新增和修改的邮件
+//! 同步任务调度：
+//! - [`SyncScheduler`][]: 任务调度器
+//! - [`SyncTask`][]: 同步任务定义
 //!
 //! # 同步流程
 //!
@@ -94,100 +91,17 @@
 //!    ↓
 //! 2. 获取文件夹列表
 //!    ↓
-//! 3. 获取 UID 列表
+//! 3. 检测同步策略（全量/增量）
 //!    ↓
-//! 4. 变更检测
+//! 4. 准备同步（获取 UID 列表）
 //!    ↓
-//! 5. 获取新/变更邮件
+//! 5. 变更检测
 //!    ↓
-//! 6. 保存到数据库
+//! 6. 获取新/变更邮件
 //!    ↓
-//! 7. 更新同步状态
-//! ```
-//!
-//! ## 增量同步流程
-//!
-//! ```text
-//! 1. 读取上次同步状态
+//! 7. 保存到数据库
 //!    ↓
-//! 2. 检测变更（UID 对比）
-//!    ↓
-//! 3. 获取变更邮件
-//!    ↓
-//! 4. 更新数据库
-//!    ↓
-//! 5. 保存新状态
-//! ```
-//!
-//! # 进度事件
-//!
-//! 同步过程中会发布进度事件:
-//!
-//! - `Connecting`: 连接服务器
-//! - `SyncingFolders`: 同步文件夹
-//! - `SyncingEmails`: 同步邮件
-//! - `Completed`: 完成
-//! - `Error`: 错误
-//!
-//! # 错误处理
-//!
-//! 同步错误分为以下类型:
-//!
-//! - **ConnectionError**: 连接失败
-//! - **AuthenticationError**: 认证失败
-//! - **SyncError**: 同步操作失败
-//! - **StorageError**: 数据库操作失败
-//!
-//! # 使用示例
-//!
-//! ## 基本同步
-//!
-//! ```rust,no_run
-//! use crate::sync::{SyncManager, SyncStrategy};
-//!
-//! # async fn example() -> anyhow::Result<()> {
-//! # let manager = SyncManager::new();
-//! // 执行完整同步
-//! let result = manager.sync_account(1, SyncStrategy::Full).await?;
-//! println!("同步完成: {} 封邮件", result.total_synced);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 增量同步
-//!
-//! ```rust,no_run
-//! # use crate::sync::SyncManager;
-//! # async fn example() -> anyhow::Result<()> {
-//! # let manager = SyncManager::new();
-//! // 执行增量同步
-//! let result = manager.sync_account(1, SyncStrategy::Delta).await?;
-//! println!("增量同步完成: {} 封变更", result.total_synced);
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## 监听进度事件
-//!
-//! ```rust,no_run
-//! # async fn example() -> anyhow::Result<()> {
-//! # let manager = SyncManager::new();
-//! use tokio::sync::mpsc;
-//!
-//! let mut rx = manager.subscribe_progress();
-//! while let Some(progress) = rx.recv().await {
-//!     match progress.stage {
-//!         crate::sync::SyncStage::Connecting => {
-//!             println!("正在连接...");
-//!         }
-//!         crate::sync::SyncStage::SyncingEmails => {
-//!             println!("正在同步: {}/{}", progress.current, progress.total);
-//!         }
-//!         _ => {}
-//!     }
-//! }
-//! # Ok(())
-//! # }
+//! 8. 更新同步状态
 //! ```
 //!
 //! # 性能优化
@@ -204,21 +118,40 @@
 //! - 网络不稳定时会自动重试
 //! - 某些操作（如删除）不可逆，请谨慎处理
 
-pub mod change_detector;
-mod delta_sync;
-mod folder_manager;
-mod full_sync;
-mod incremental_sync;
-mod mail_processor;
-mod sync_error;
-mod sync_manager;
+// ========== 子模块声明 ==========
 
-// 重新导出主要类型
-pub use sync_manager::{SyncManager, SyncProgress, SyncStage, SyncResult};
-pub use delta_sync::{DeltaSync, SyncStrategy, DeltaSyncResult};
-pub use change_detector::{ChangeDetector, ChangeType, ChangeDetectionResult, EmailFlags, UidSet};
-pub use folder_manager::{FolderManager, SyncStateUpdateResult};
-pub use mail_processor::{MailProcessor, MailData, MailProcessResult};
+// 核心模块
+pub mod folder_manager;
+pub mod mail_processor;
+pub mod sync_error;
+pub mod sync_manager;
+
+// 新增子模块
+pub mod change;
+pub mod scheduler;
+pub mod state;
+pub mod strategy;
+
+// ========== 重新导出主要类型 ==========
+
+// 核心类型
+pub use sync_manager::{SyncManager, SyncProgress, SyncResult, SyncStage};
+
+// 策略模块
+pub use strategy::{FullSyncEngine, IncrementalSyncEngine, SyncMetadata, SyncPreparation};
+
+// 变化检测模块
+pub use change::{
+    ChangeDetectionResult, ChangeDetector, ChangeType, EmailFlags, UidSet, imap_flags,
+};
+
+// 状态管理模块
+pub use state::{FolderSyncState, ProgressTracker, SyncState, SyncStatus as SyncStateStatus};
+
+// 调度模块
+pub use scheduler::{SyncScheduler, SyncTask, SyncTaskPriority, SyncTaskStatus};
+
+// 其他模块
+pub use folder_manager::FolderManager;
+pub use mail_processor::{MailData, MailProcessResult, MailProcessor};
 pub use sync_error::SyncErrorManager;
-pub use full_sync::{FullSyncEngine, FullSyncPreparation};
-pub use incremental_sync::{IncrementalSyncEngine, IncrementalSyncPreparation};

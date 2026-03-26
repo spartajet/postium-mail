@@ -4,9 +4,12 @@
 
 use crate::error::{MailError, Result};
 use crate::storage::models::sync_error;
-use sea_orm::{DbConn, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set, QueryOrder, QuerySelect, sea_query::Expr};
-use std::sync::Arc;
 use chrono::Utc;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DbConn, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    sea_query::Expr,
+};
+use std::sync::Arc;
 
 /// 同步错误管理器
 ///
@@ -134,10 +137,7 @@ impl SyncErrorManager {
     pub async fn mark_resolved(&self, id: i32) -> Result<()> {
         sync_error::Entity::update_many()
             .filter(sync_error::Column::Id.eq(id))
-            .col_expr(
-                sync_error::Column::Resolved,
-                Expr::val(true),
-            )
+            .col_expr(sync_error::Column::Resolved, Expr::val(true))
             .exec(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("标记错误已解决失败: {}", e)))?;
@@ -156,10 +156,7 @@ impl SyncErrorManager {
         let result = sync_error::Entity::update_many()
             .filter(sync_error::Column::AccountId.eq(account_id))
             .filter(sync_error::Column::Resolved.eq(false))
-            .col_expr(
-                sync_error::Column::Resolved,
-                Expr::val(true),
-            )
+            .col_expr(sync_error::Column::Resolved, Expr::val(true))
             .exec(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("批量标记错误已解决失败: {}", e)))?;
@@ -183,11 +180,7 @@ impl SyncErrorManager {
     /// # 返回
     ///
     /// 返回删除的记录数
-    pub async fn cleanup_old_resolved(
-        &self,
-        account_id: i32,
-        days: i64,
-    ) -> Result<u64> {
+    pub async fn cleanup_old_resolved(&self, account_id: i32, days: i64) -> Result<u64> {
         let cutoff_time = Utc::now().timestamp() - (days * 24 * 60 * 60);
 
         let result = sync_error::Entity::delete_many()

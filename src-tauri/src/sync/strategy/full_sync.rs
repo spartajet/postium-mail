@@ -5,10 +5,12 @@
 
 use crate::error::{MailError, Result};
 use crate::protocols::imap::{AsyncImapClient, FolderMetadata};
-use crate::sync::delta_sync::DeltaSyncResult;
 use crate::sync::folder_manager::FolderManager;
-use crate::sync::SyncStrategy;
+use crate::sync::strategy::FullSyncPreparation;
 use std::sync::Arc;
+
+// 导入 preparation 模块中的类型
+// use super::preparation::FullSyncPreparation;
 
 /// 全量同步引擎
 ///
@@ -101,55 +103,5 @@ impl FullSyncEngine {
     /// 获取文件夹管理器引用
     pub fn folder_manager(&self) -> &Arc<FolderManager> {
         &self.folder_manager
-    }
-}
-
-/// 全量同步准备结果
-///
-/// 包含执行全量同步所需的所有数据
-#[derive(Debug)]
-pub struct FullSyncPreparation {
-    /// 服务器上需要同步的 UID 列表
-    pub server_uids: Vec<u32>,
-    /// 文件夹的 UIDVALIDITY
-    pub uidvalidity: u64,
-    /// 文件夹的 UIDNEXT
-    pub uidnext: u64,
-}
-
-impl FullSyncPreparation {
-    /// 创建空的准备结果
-    pub fn empty() -> Self {
-        Self {
-            server_uids: Vec::new(),
-            uidvalidity: 0,
-            uidnext: 0,
-        }
-    }
-
-    /// 转换为空的同步结果（用于跳过同步时）
-    pub fn to_empty_result(&self) -> DeltaSyncResult {
-        DeltaSyncResult::empty(SyncStrategy::FullSync)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_full_sync_preparation_empty() {
-        let prep = FullSyncPreparation::empty();
-        assert!(prep.server_uids.is_empty());
-        assert_eq!(prep.uidvalidity, 0);
-        assert_eq!(prep.uidnext, 0);
-    }
-
-    #[test]
-    fn test_full_sync_preparation_to_empty_result() {
-        let prep = FullSyncPreparation::empty();
-        let result = prep.to_empty_result();
-        assert_eq!(result.new_emails, 0);
-        assert_eq!(result.strategy_used, SyncStrategy::FullSync);
     }
 }
