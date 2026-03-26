@@ -15,7 +15,7 @@
 //! # 使用示例
 //!
 //! ```rust,no_run
-//! # use postium_mail::auth::oauth_session::OAuthSessionManager;
+//! # use postium_mail::auth::oauth2::OAuthSessionManager;
 //! # async fn example() -> anyhow::Result<()> {
 //! let manager = OAuthSessionManager::new(600); // 10分钟超时
 //!

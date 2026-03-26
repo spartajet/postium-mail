@@ -155,11 +155,12 @@ pub mod token;
 pub mod session;
 // HTTP 服务器
 pub mod http;
+// OAuth2 模块
+pub mod oauth2;
 
 // 核心认证管理器
 mod auth_manager;
 mod enterprise_auth;
-mod oauth_handler;
 
 // 重新导出主要类型
 pub use auth_manager::{
@@ -176,5 +177,5 @@ pub use auth_manager::{
 // 从子模块重新导出
 pub use credentials::PasswordAuth;
 pub use http::OAuthHttpServer;
-pub use session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};
+pub use oauth2::{OAuthClient, OAuthHandler, OAuthSession, OAuthSessionManager, OAuthSessionStatus};
 pub use token::{KEYRING_SERVICE, OAuthToken, oauth_username, password_username};

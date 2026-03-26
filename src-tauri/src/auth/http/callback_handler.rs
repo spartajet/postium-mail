@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::auth::AuthManager;
-use crate::command::{AuthManagerState, DatabaseState, KeyringState};
+use crate::command::{DatabaseState, KeyringState};
 use crate::providers;
 use crate::storage;
 use crate::storage::AccountDto;

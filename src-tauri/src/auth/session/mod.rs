@@ -1,7 +1,6 @@
-//! OAuth 会话管理模块
+//! 会话管理模块
 //!
-//! 管理 OAuth2 授权流程的会话状态
+//! 重新导出 OAuth2 会话管理类型
 
-mod oauth_session;
-
-pub use oauth_session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};
+// 从 oauth2 模块重新导出
+pub use crate::auth::oauth2::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};

@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
-use crate::auth::oauth_handler::OAuthHandler;
+use crate::auth::oauth2::OAuthHandler;
 use crate::auth::token::TokenManager;
 use crate::auth::AuthState;
-use crate::error::{MailError, Result};
-use crate::providers::{AuthType, MailProvider, ProviderPool};
+use crate::error::Result;
+use crate::providers::{AuthType, ProviderPool};
 
 /// Token 刷新器
 ///
