@@ -40,6 +40,10 @@ pub struct EmailFlags {
     pub answered: bool,
     /// 邮件是否被标记删除（\Deleted）
     pub deleted: bool,
+    /// 邮件是否被标记草稿 （\Draft）
+    pub draft: bool,
+    ///邮件是否被标记最近的 （\Recent）
+    pub recent: bool,
 }
 
 /// 附件信息

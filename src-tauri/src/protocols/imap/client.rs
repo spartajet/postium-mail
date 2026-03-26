@@ -750,6 +750,10 @@ impl AsyncImapClient {
         let deleted = message
             .flags()
             .any(|f| f == async_imap::types::Flag::Deleted);
+        let draft = message.flags().any(|f| f == async_imap::types::Flag::Draft);
+        let recent = message
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Recent);
 
         Ok(EmailData {
             flags: EmailFlags {
@@ -757,9 +761,123 @@ impl AsyncImapClient {
                 flagged,
                 answered,
                 deleted,
+                draft,
+                recent,
             },
             ..email_data
         })
+    }
+
+    /// 批量获取邮件头（用于骨架同步，不获取正文）
+    ///
+    /// 使用 UID FETCH 命令批量获取多个邮件的头信息，避免设置已读标志。
+    ///
+    /// # 参数
+    ///
+    /// * `folder` - 文件夹名称
+    /// * `start_uid` - 起始 UID
+    /// * `end_uid` - 结束 UID
+    ///
+    /// # 返回
+    ///
+    /// 返回邮件头列表
+    ///
+    /// # IMAP 命令示例
+    ///
+    /// ```text
+    /// UID FETCH 101:110 (FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE UID)
+    /// ```
+    ///
+    /// # 性能优化
+    ///
+    /// - 使用 UID 范围（如 101:110）批量获取
+    /// - 使用 BODY.PEEK[HEADER] 避免设置已读标志
+    /// - 单次网络往返获取多个邮件头
+    pub async fn batch_fetch_email_headers(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<super::types::EmailHeader>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+
+        // SELECT 文件夹
+        session
+            .select(folder)
+            .await
+            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+
+        // 构建 UID 范围（如 "101:110"）
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+
+        tracing::debug!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+
+        // 批量 FETCH 邮件头
+        // 使用 BODY.PEEK[HEADER] 不会设置已读标志
+        let messages = session
+            .uid_fetch(
+                &uid_range,
+                "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE UID)",
+            )
+            .await
+            .map_err(|e| anyhow!("批量获取邮件头失败: {}", e))?
+            .try_collect::<Vec<async_imap::types::Fetch>>()
+            .await
+            .map_err(|e| anyhow!("收集邮件头数据失败: {}", e))?;
+
+        let mut headers = Vec::new();
+
+        for message in messages {
+            let uid = message.uid.ok_or_else(|| anyhow!("邮件缺少 UID"))?;
+
+            // 解析邮件头
+            let header_body = message
+                .body()
+                .ok_or_else(|| anyhow!("邮件头为空 UID={}", uid))?;
+            let raw_header = decode_email_body(header_body)?;
+
+            // 使用 mail_parser 解析邮件头
+            let email_header = super::parser::parse_email_header_only(&raw_header, uid)?;
+
+            // 解析标志
+            let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
+            let flagged = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Flagged);
+            let answered = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Answered);
+            let deleted = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Deleted);
+            let draft = message.flags().any(|f| f == async_imap::types::Flag::Draft);
+            let recent = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Recent);
+
+            headers.push(super::types::EmailHeader {
+                flags: super::types::EmailFlags {
+                    seen,
+                    flagged,
+                    answered,
+                    deleted,
+                    draft,
+                    recent,
+                },
+                ..email_header
+            });
+        }
+
+        tracing::debug!(
+            "批量获取邮件头完成: folder={}, count={}",
+            folder,
+            headers.len()
+        );
+
+        Ok(headers)
     }
 
     /// 仅获取邮件头（用于骨架同步，不获取正文）
@@ -812,6 +930,10 @@ impl AsyncImapClient {
         let deleted = message
             .flags()
             .any(|f| f == async_imap::types::Flag::Deleted);
+        let draft = message.flags().any(|f| f == async_imap::types::Flag::Draft);
+        let recent = message
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Recent);
 
         Ok(super::types::EmailHeader {
             flags: super::types::EmailFlags {
@@ -819,6 +941,8 @@ impl AsyncImapClient {
                 flagged,
                 answered,
                 deleted,
+                draft,
+                recent,
             },
             ..email_header
         })

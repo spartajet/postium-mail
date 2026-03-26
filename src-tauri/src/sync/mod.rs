@@ -121,24 +121,27 @@
 // ========== 子模块声明 ==========
 
 // 核心模块
-pub mod folder_manager;
+pub mod error;
 pub mod mail_processor;
-pub mod sync_error;
 pub mod sync_manager;
 
 // 新增子模块
 pub mod change;
+mod folder;
 pub mod scheduler;
 pub mod state;
 pub mod strategy;
+mod strcuts;
 
 // ========== 重新导出主要类型 ==========
 
 // 核心类型
-pub use sync_manager::{SyncManager, SyncProgress, SyncResult, SyncStage};
+pub use sync_manager::SyncManager;
+
+pub use strcuts::{SyncProgress, SyncResult, SyncStage};
 
 // 策略模块
-pub use strategy::{FullSyncEngine, IncrementalSyncEngine, SyncMetadata, SyncPreparation};
+pub use strategy::{IncrementalSyncEngine, SyncMetadata, SyncPreparation};
 
 // 变化检测模块
 pub use change::{
@@ -152,6 +155,5 @@ pub use state::{FolderSyncState, ProgressTracker, SyncState, SyncStatus as SyncS
 pub use scheduler::{SyncScheduler, SyncTask, SyncTaskPriority, SyncTaskStatus};
 
 // 其他模块
-pub use folder_manager::FolderManager;
+pub use error::SyncErrorManager;
 pub use mail_processor::{MailData, MailProcessResult, MailProcessor};
-pub use sync_error::SyncErrorManager;

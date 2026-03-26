@@ -39,9 +39,11 @@
 
 pub mod account;
 pub mod email;
-pub mod folder;
+pub mod folder_aync_state;
 
 // 重新导出常用类型
 pub use account::{AccountDto, AccountRepository, CreateAccountRequest, UpdateAccountRequest};
-pub use email::{AttachmentInfo, EmailAddress, EmailDetail, EmailListResponse, EmailListItem, EmailRepository, EmailSearchParams, SendEmailRequest};
-pub use folder::{FolderSyncStateDto, StandardFolder};
+pub use email::{
+    AttachmentInfo, EmailAddress, EmailDetail, EmailListItem, EmailListResponse, EmailSearchParams,
+    SendEmailRequest,
+};
