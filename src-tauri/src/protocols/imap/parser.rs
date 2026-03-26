@@ -142,7 +142,7 @@
 //!
 
 use super::types::{EmailAttachment, EmailData, EmailFlags};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use mail_parser::MimeHeaders;
 
 /// 检测字符串是否包含大量乱码字符
@@ -490,6 +490,8 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
             flagged: false,
             answered: false,
             deleted: false,
+            draft: false,
+            recent: false,
         },
         attachments,
     })
@@ -632,6 +634,8 @@ pub fn parse_email_header_only(raw: &str, uid: u32) -> Result<super::types::Emai
             flagged: false,
             answered: false,
             deleted: false,
+            draft: false,
+            recent: false,
         },
     })
 }

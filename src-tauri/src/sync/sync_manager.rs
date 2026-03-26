@@ -3,107 +3,22 @@
 //! 管理邮件同步流程，协调所有同步组件
 
 use crate::auth::{AuthManager, ImapAuthInfo};
-use crate::error::{MailError, Result};
+use crate::error::{MailError, Result, SyncError};
 use crate::protocols::imap::{AsyncImapClient, FolderMetadata, ImapAuth};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
+use crate::storage::service::folder_aync_state::save_or_update_sync_state;
+use crate::sync::folder::dispatcher::determine_sync_mode;
+use crate::sync::strategy::full_sync::sync_folder_full;
+use crate::sync::strcuts::{SyncResult, SyncStrategy};
+use crate::sync::{SyncProgress, SyncStage};
 use crate::sync::{
-    change::ChangeDetector,
-    folder_manager::FolderManager,
-    mail_processor::MailProcessor,
-    strategy::{FullSyncEngine, IncrementalSyncEngine},
+    change::ChangeDetector, mail_processor::MailProcessor, strategy::IncrementalSyncEngine,
 };
-// use chrono::Datelike; // 添加 Datelike trait来访问日期方法
 use sea_orm::DbConn;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tracing::instrument;
-
-/// 同步进度信息
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SyncProgress {
-    pub stage: SyncStage,
-    pub folder: Option<String>,
-    pub current: usize,
-    pub total: usize,
-    pub message: String,
-}
-
-/// 同步阶段
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum SyncStage {
-    Connecting,
-    SyncingFolders,
-    SyncingEmails,
-    Completed,
-    Error,
-}
-
-/// 同步结果
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SyncResult {
-    pub total_synced: usize,
-    pub folders_synced: usize,
-    pub errors: usize,
-    pub duration_ms: u64,
-}
-
-/// 同步策略
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncStrategy {
-    /// 使用 UID 搜索对比
-    UidSearch,
-
-    /// 完整同步
-    FullSync,
-}
-
-/// 同步结果
-#[derive(Debug, Clone)]
-pub struct DeltaSyncResult {
-    /// 使用的同步策略
-    pub strategy_used: SyncStrategy,
-
-    /// 新邮件数量
-    pub new_emails: usize,
-
-    /// 修改邮件数量
-    pub modified_emails: usize,
-
-    /// 删除邮件数量
-    pub deleted_emails: usize,
-
-    /// 标志变更数量
-    pub flags_changed: usize,
-
-    /// 同步耗时（毫秒）
-    pub duration_ms: u64,
-}
-
-impl DeltaSyncResult {
-    /// 创建空的同步结果
-    pub fn empty(strategy: SyncStrategy) -> Self {
-        Self {
-            strategy_used: strategy,
-            new_emails: 0,
-            modified_emails: 0,
-            deleted_emails: 0,
-            flags_changed: 0,
-            duration_ms: 0,
-        }
-    }
-
-    /// 是否有变更
-    pub fn has_changes(&self) -> bool {
-        self.new_emails > 0 || self.modified_emails > 0 || self.deleted_emails > 0
-    }
-
-    /// 变更总数
-    pub fn total_changes(&self) -> usize {
-        self.new_emails + self.modified_emails + self.deleted_emails
-    }
-}
 
 /// 同步管理器
 ///
@@ -116,8 +31,6 @@ pub struct SyncManager {
     folder_manager: Arc<FolderManager>,
     mail_processor: Arc<MailProcessor>,
     change_detector: Arc<ChangeDetector>,
-    /// 全量同步引擎
-    full_sync_engine: Arc<FullSyncEngine>,
     /// 增量同步引擎
     incremental_sync_engine: Arc<IncrementalSyncEngine>,
 }
@@ -135,7 +48,6 @@ impl SyncManager {
         let change_detector = Arc::new(ChangeDetector::new(db.clone()));
 
         // 初始化全量同步和增量同步引擎
-        let full_sync_engine = Arc::new(FullSyncEngine::new(folder_manager.clone()));
         let incremental_sync_engine = Arc::new(IncrementalSyncEngine::new(folder_manager.clone()));
 
         Self {
@@ -146,7 +58,6 @@ impl SyncManager {
             folder_manager,
             mail_processor,
             change_detector,
-            full_sync_engine,
             incremental_sync_engine,
         }
     }
@@ -258,7 +169,6 @@ impl SyncManager {
         folders_to_sync.extend(folder_mapping.archive.clone());
 
         // 去重（有些服务商可能用相同的名字表示不同类型）
-        folders_to_sync.sort();
         folders_to_sync.dedup();
 
         tracing::info!(
@@ -292,6 +202,32 @@ impl SyncManager {
                 folders_to_sync.len(),
                 folder_name
             );
+
+            let sync_mode =
+                determine_sync_mode(self.db.as_ref(), account_id, folder_name, &mut imap_client)
+                    .await
+                    .map_err(|e| MailError::Sync(SyncError::QuotaExceeded))?;
+
+            match sync_mode {
+                crate::sync::strcuts::SyncMode::Full { uidvalidity } => {
+                    let sync_result = sync_folder_full(
+                        self.db.as_ref(),
+                        account_id,
+                        folder_name,
+                        &mut imap_client,
+                    )
+                    .await?;
+                    let state = save_or_update_sync_state(
+                        self.db.as_ref(),
+                        account_id,
+                        folder_name,
+                        uidvalidity,
+                        sync_result.last_sync_uid as i32,
+                    )
+                    .await?;
+                }
+                crate::sync::strcuts::SyncMode::Incremental { last_sync_uid } => todo!(),
+            };
 
             // 同步单个文件夹
             match self
@@ -423,62 +359,6 @@ impl SyncManager {
         Ok(imap_client)
     }
 
-    /// 内部方法：同步单个文件夹
-    ///
-    /// 全量同步文件夹
-    ///
-    /// 当 UIDVALIDITY 变化或首次同步时调用。获取所有邮件进行完整同步。
-    ///
-    /// # 参数
-    ///
-    /// * `account_id` - 账号 ID
-    /// * `folder` - 文件夹名称
-    /// * `imap_client` - IMAP 客户端引用
-    /// * `metadata` - 文件夹元数据（已在调用方获取）
-    ///
-    /// # 返回
-    ///
-    /// 返回同步结果
-    async fn sync_folder_full(
-        &self,
-        account_id: i32,
-        folder: &str,
-        imap_client: &mut AsyncImapClient,
-        metadata: &FolderMetadata,
-    ) -> Result<DeltaSyncResult> {
-        tracing::info!(
-            "全量同步文件夹: account_id={}, folder={}, uidvalidity={}",
-            account_id,
-            folder,
-            metadata.uidvalidity
-        );
-
-        // 1. 使用全量同步引擎准备同步
-        let preparation = self
-            .full_sync_engine
-            .prepare_sync(account_id, folder, imap_client, metadata)
-            .await?;
-
-        tracing::info!(
-            "全量同步准备完成: folder={}, 需同步邮件数={}",
-            folder,
-            preparation.server_uids.len()
-        );
-
-        // 2. 调用 sync_folder 进行实际同步
-        let result = self
-            .sync_folder(
-                account_id,
-                folder,
-                Some(&preparation.server_uids),
-                None,
-                Some(imap_client),
-            )
-            .await?;
-
-        Ok(result)
-    }
-
     /// 增量同步文件夹
     ///
     /// 在 UIDVALIDITY 未变化时调用，仅同步新增和修改的邮件。
@@ -500,7 +380,7 @@ impl SyncManager {
         folder: &str,
         imap_client: &mut AsyncImapClient,
         metadata: &FolderMetadata,
-    ) -> Result<DeltaSyncResult> {
+    ) -> Result<SyncResult> {
         tracing::info!(
             "增量同步文件夹: account_id={}, folder={}",
             account_id,
@@ -540,84 +420,6 @@ impl SyncManager {
         Ok(result)
     }
 
-    /// # 参数
-    ///
-    /// * `account_id` - 账号 ID
-    /// * `folder` - 文件夹名称
-    /// * `imap_client` - IMAP 客户端引用
-    async fn sync_folder_internal(
-        &self,
-        account_id: i32,
-        folder: &str,
-        imap_client: &mut AsyncImapClient,
-    ) -> Result<DeltaSyncResult> {
-        tracing::debug!(
-            "开始同步文件夹: account_id={}, folder={}",
-            account_id,
-            folder
-        );
-
-        // 1. 获取文件夹 IMAP 元数据（uidvalidity, uidnext）
-        let metadata = imap_client
-            .fetch_folder_metadata(folder)
-            .await
-            .map_err(|e| {
-                tracing::warn!("获取文件夹元数据失败: {}, 跳过元数据更新", e);
-                // 元数据获取失败不应阻断同步流程
-                crate::error::MailError::Internal(format!("获取文件夹元数据失败: {}", e))
-            });
-        tracing::info!("获取文件夹元数据成功: {:?}", metadata);
-
-        // 2. 检测 UIDVALIDITY 变化，决定同步策略
-        let mut needs_full_resync = false;
-        if let Ok(meta) = &metadata {
-            let uidvalidity_changed = self
-                .folder_manager
-                .check_uidvalidity_changed(account_id, folder, meta.uidvalidity)
-                .await
-                .unwrap_or(false);
-            tracing::info!(
-                "UIDVALIDITY 变化: folder={}, uidvalidity_changed={}",
-                folder,
-                uidvalidity_changed
-            );
-
-            if uidvalidity_changed {
-                tracing::warn!(
-                    "检测到 UIDVALIDITY 变化: folder={}, server_uidvalidity={}",
-                    folder,
-                    meta.uidvalidity
-                );
-
-                // 重置本地同步状态
-                self.folder_manager
-                    .reset_sync_state(account_id, folder)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("重置同步状态失败: {}", e);
-                        e
-                    })?;
-
-                needs_full_resync = true;
-                tracing::info!("已重置文件夹同步状态，将进行完整同步: folder={}", folder);
-            }
-        }
-
-        // 3. 根据同步策略调用相应方法
-        if let Ok(meta) = metadata {
-            if needs_full_resync {
-                self.sync_folder_full(account_id, folder, imap_client, &meta)
-                    .await
-            } else {
-                self.sync_folder_incremental(account_id, folder, imap_client, &meta)
-                    .await
-            }
-        } else {
-            // 元数据获取失败，返回空结果
-            Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch))
-        }
-    }
-
     /// 同步单个文件夹
     ///
     /// # 参数
@@ -635,7 +437,7 @@ impl SyncManager {
         server_uids: Option<&[u32]>,
         server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
         imap_client: Option<&mut AsyncImapClient>,
-    ) -> Result<DeltaSyncResult> {
+    ) -> Result<SyncResult> {
         tracing::info!(
             "开始同步文件夹: account_id={}, folder={}, server_uids={}",
             account_id,
@@ -648,7 +450,7 @@ impl SyncManager {
             (Some(uids), Some(flags)) => (uids, flags),
             _ => {
                 tracing::warn!("缺少服务器数据，跳过同步");
-                return Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch));
+                return Ok(SyncResult::empty(SyncStrategy::UidSearch));
             }
         };
 
@@ -677,7 +479,7 @@ impl SyncManager {
         // 如果没有变更，直接返回
         if !change_detection_result.has_changes() {
             tracing::info!("无变更，跳过同步");
-            return Ok(DeltaSyncResult::empty(SyncStrategy::UidSearch));
+            return Ok(SyncResult::empty(SyncStrategy::UidSearch));
         }
 
         // 2. 处理新邮件和修改的邮件
@@ -769,7 +571,7 @@ impl SyncManager {
         }
 
         // 6. 返回同步结果
-        Ok(DeltaSyncResult {
+        Ok(SyncResult {
             strategy_used: SyncStrategy::UidSearch,
             new_emails: new_emails_count,
             modified_emails: modified_emails_count,
@@ -807,11 +609,6 @@ impl SyncManager {
             )
             .map_err(|e| MailError::Internal(format!("发送进度事件失败: {}", e)))?;
         Ok(())
-    }
-
-    /// 获取 FolderManager 引用
-    pub fn folder_manager(&self) -> &Arc<FolderManager> {
-        &self.folder_manager
     }
 
     /// 获取 MailProcessor 引用

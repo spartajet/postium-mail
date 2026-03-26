@@ -16,7 +16,7 @@
 //! - `limit`: 每页数量，建议 20-50
 
 use super::DatabaseState;
-use crate::storage;
+use crate::storage::{self, service::email};
 
 /// 分页获取邮件列表
 ///
@@ -64,18 +64,12 @@ pub async fn list_emails(
 
     let db = state.clone_conn();
 
-    let result = storage::EmailRepository::list(
-        &db,
-        account_id,
-        &folder,
-        page as u64,
-        limit as u64,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("查询失败: {}", e);
-        e.to_string()
-    })?;
+    let result = email::list(&db, account_id, &folder, page as u64, limit as u64)
+        .await
+        .map_err(|e| {
+            tracing::error!("查询失败: {}", e);
+            e.to_string()
+        })?;
 
     tracing::info!(
         "查询成功: 返回 {} 封邮件，总计 {} 封",
@@ -110,9 +104,7 @@ pub async fn get_email(
     id: i32,
 ) -> Result<storage::EmailDetail, String> {
     let db = state.clone_conn();
-    storage::EmailRepository::get_detail(&db, id)
-        .await
-        .map_err(|e| e.to_string())
+    email::get_detail(&db, id).await.map_err(|e| e.to_string())
 }
 
 /// 全文搜索邮件
@@ -183,7 +175,7 @@ pub async fn mark_as_read(
     is_read: bool,
 ) -> Result<(), String> {
     let db = state.clone_conn();
-    storage::EmailRepository::update_read_status(&db, email_id, is_read)
+    email::update_read_status(&db, email_id, is_read)
         .await
         .map_err(|e| e.to_string())
 }
@@ -212,7 +204,7 @@ pub async fn toggle_star(
     email_id: i32,
 ) -> Result<bool, String> {
     let db = state.clone_conn();
-    storage::EmailRepository::toggle_star(&db, email_id)
+    email::toggle_star(&db, email_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -242,7 +234,7 @@ pub async fn delete_emails(
     email_ids: Vec<i32>,
 ) -> Result<usize, String> {
     let db = state.clone_conn();
-    storage::EmailRepository::batch_delete(&db, email_ids)
+    email::batch_delete(&db, email_ids)
         .await
         .map_err(|e| e.to_string())
 }
@@ -277,7 +269,7 @@ pub async fn move_email_to_folder(
     folder: String,
 ) -> Result<(), String> {
     let db = state.clone_conn();
-    storage::EmailRepository::move_to_folder(&db, email_id, &folder)
+    email::move_to_folder(&db, email_id, &folder)
         .await
         .map_err(|e| e.to_string())
 }
