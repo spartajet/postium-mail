@@ -170,7 +170,7 @@
 #[allow(unused_imports, deprecated)]
 mod account_type;
 mod enterprise;
-mod oauth_utils;
+// OAuth 工具已移至 auth::oauth2 模块
 mod personal;
 mod provider_pool;
 mod traits;
@@ -181,10 +181,10 @@ pub use traits::{
     AuthType, ImapServerConfig, MailProvider, OAuthConfig, ProviderCapabilities, ProviderInfo,
     SmtpServerConfig, SslMode, StandardFolder,
 };
-
-// OAuth 工具导出（供 auth 模块使用）
-pub use oauth_utils::{OAuthTokenResponse, PkceVerifierStore, validate_access_token};
 pub use provider_pool::ProviderPool;
+
+// OAuth 相关类型已移至 crate::auth::oauth2 模块
+// 使用 `use crate::auth::oauth2::{OAuthTokenResponse, PkceVerifierStore};` 导入
 
 // 个人邮箱（阶段2使用）
 #[allow(unused_imports)]

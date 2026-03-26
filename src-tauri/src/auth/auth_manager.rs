@@ -6,14 +6,11 @@ use std::sync::Arc;
 
 use tauri::AppHandle;
 
-use crate::auth::credentials::OAuthAuth;
 use crate::auth::credentials::PasswordAuth;
 use crate::auth::enterprise_auth::EnterpriseAuth;
 use crate::auth::http::OAuthHttpServer;
-use crate::auth::oauth_handler::{AuthorizationContext, OAuthHandler};
-use crate::auth::session::OAuthSessionManager;
-use crate::auth::token::TokenManager;
-use crate::auth::token::TokenRefresher;
+use crate::auth::oauth2::{AuthorizationContext, OAuthClient, OAuthHandler, OAuthSessionManager};
+use crate::auth::token::{TokenManager, TokenRefresher};
 use crate::error::{MailError, Result};
 use crate::providers::{AuthType, ProviderPool};
 
@@ -169,8 +166,8 @@ pub struct AuthManager {
     oauth_handler: Arc<OAuthHandler>,
     /// Token 管理器
     token_manager: Arc<TokenManager>,
-    /// OAuth 认证器
-    oauth_auth: Arc<OAuthAuth>,
+    /// OAuth 客户端
+    oauth_client: Arc<OAuthClient>,
     /// Token 刷新器
     token_refresher: Arc<TokenRefresher>,
     /// 密码认证处理器
@@ -204,8 +201,8 @@ impl AuthManager {
         let password_auth = Arc::new(PasswordAuth::new(app_handle)?);
         let enterprise_auth = Arc::new(EnterpriseAuth::new());
 
-        // 创建 OAuth 认证器
-        let oauth_auth = Arc::new(OAuthAuth::new(
+        // 创建 OAuth 客户端
+        let oauth_client = Arc::new(OAuthClient::new(
             Arc::clone(&oauth_handler),
             Arc::clone(&token_manager),
             Arc::clone(&provider_pool),
@@ -234,7 +231,7 @@ impl AuthManager {
         Ok(Self {
             oauth_handler,
             token_manager,
-            oauth_auth,
+            oauth_client,
             token_refresher,
             password_auth,
             enterprise_auth,
@@ -454,8 +451,8 @@ impl AuthManager {
         auth_code: &str,
         state: &str,
     ) -> Result<AuthResult> {
-        // 委托给 OAuthAuth 处理
-        self.oauth_auth.authenticate(email, auth_code, state).await
+        // 委托给 OAuthClient 处理
+        self.oauth_client.authenticate(email, auth_code, state).await
     }
 
     /// 密码认证

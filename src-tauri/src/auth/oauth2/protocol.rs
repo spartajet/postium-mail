@@ -1,40 +1,14 @@
-//! OAuth 处理器
+//! OAuth2 协议处理
 //!
-//! 处理 OAuth 2.0 授权流程，支持所有 OAuth 提供商
+//! 实现 OAuth 2.0 授权码流程和 PKCE 扩展，支持所有 OAuth 提供商
 
 use std::sync::Arc;
 
 use rand::Rng;
 
+use crate::auth::oauth2::{PkceVerifierStore, AuthorizationContext, OAuthTokenResponse};
 use crate::error::{OAuthError, Result};
-use crate::providers::{MailProvider, OAuthTokenResponse, PkceVerifierStore};
-
-/// URL 编码（用于 OAuth 参数）
-fn url_encode(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                c.to_string()
-            } else {
-                format!("%{:02X}", c as u8)
-            }
-        })
-        .collect()
-}
-
-/// OAuth 授权上下文
-#[derive(Debug, Clone)]
-pub struct AuthorizationContext {
-    /// 授权 URL（用于在浏览器中打开）
-    pub auth_url: String,
-    /// CSRF 防护令牌
-    pub state: String,
-    /// PKCE code_verifier
-    pub code_verifier: String,
-    /// 服务商 ID
-    pub provider: String,
-}
+use crate::providers::MailProvider;
 
 /// OAuth 处理器
 ///
@@ -43,24 +17,25 @@ pub struct AuthorizationContext {
 /// - PKCE 流程集成
 /// - 授权码交换
 /// - Token 刷新
-/// - XOAUTH2 字符串生成
 pub struct OAuthHandler {
     /// PKCE 验证器存储
     pkce_store: Arc<PkceVerifierStore>,
-    // Provider 配置缓存（避免重复解析）
-    // provider_configs: Arc<RwLock<HashMap<String, OAuthConfig>>>,
 }
 
 impl OAuthHandler {
     /// 默认 CSRF token 长度
-    const CSRF_TOKEN_LENGTH: usize = 32;
+    pub const CSRF_TOKEN_LENGTH: usize = 32;
 
     /// 创建新的 OAuth 处理器
     pub fn new() -> Self {
         Self {
             pkce_store: Arc::new(PkceVerifierStore::new()),
-            // provider_configs: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 获取 PKCE 存储的引用
+    pub fn pkce_store(&self) -> &PkceVerifierStore {
+        &self.pkce_store
     }
 
     /// 生成授权 URL（支持所有 OAuth 提供商）
@@ -116,10 +91,6 @@ impl OAuthHandler {
             ("code_challenge", code_challenge.as_str()),
             ("code_challenge_method", "S256"),
         ];
-
-        // 注意：tenant_id 不应该作为查询参数传递
-        // 它已经包含在 auth_url 和 token_url 的路径中了
-        // 例如：https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
 
         // 5. 构建授权 URL
         let auth_url = format!(
@@ -369,6 +340,20 @@ impl Default for OAuthHandler {
     }
 }
 
+/// URL 编码（用于 OAuth 参数）
+fn url_encode(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
+                c.to_string()
+            } else {
+                format!("%{:02X}", c as u8)
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,14 +362,12 @@ mod tests {
     #[test]
     fn test_oauth_handler_new() {
         let handler = OAuthHandler::new();
-        // 通过创建成功来验证
         assert_eq!(OAuthHandler::CSRF_TOKEN_LENGTH, 32);
     }
 
     #[test]
     fn test_oauth_handler_default() {
         let handler = OAuthHandler::default();
-        // 通过创建成功来验证
         assert_eq!(OAuthHandler::CSRF_TOKEN_LENGTH, 32);
     }
 
@@ -448,7 +431,6 @@ mod tests {
 
     #[test]
     fn test_url_encode_function() {
-        // 测试 URL 编码功能
         let input = "user@example.com";
         let encoded = url_encode(input);
 

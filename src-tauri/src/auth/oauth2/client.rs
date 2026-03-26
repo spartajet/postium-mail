@@ -1,20 +1,20 @@
-//! OAuth 认证模块
+//! OAuth 客户端
 //!
-//! 处理 OAuth2 认证流程，包括授权码交换、Token 存储和用户信息解析
+//! 编排 OAuth2 认证流程，协调协议处理、会话管理和 Token 存储
 
 use std::sync::Arc;
 use base64::Engine;
 
-use crate::auth::oauth_handler::OAuthHandler;
+use crate::auth::oauth2::OAuthHandler;
 use crate::auth::token::TokenManager;
 use crate::auth::AuthResult;
 use crate::error::{MailError, Result};
 use crate::providers::{AuthType, ProviderPool};
 
-/// OAuth 认证器
+/// OAuth 客户端
 ///
-/// 负责处理 OAuth2 认证流程的各个环节
-pub struct OAuthAuth {
+/// 负责编排 OAuth2 认证流程的各个环节
+pub struct OAuthClient {
     /// OAuth 处理器
     oauth_handler: Arc<OAuthHandler>,
     /// Token 管理器
@@ -23,7 +23,7 @@ pub struct OAuthAuth {
     provider_pool: Arc<ProviderPool>,
 }
 
-impl OAuthAuth {
+impl OAuthClient {
     /// 创建新的 OAuth 认证器
     pub fn new(
         oauth_handler: Arc<OAuthHandler>,
@@ -188,7 +188,7 @@ mod tests {
 
         let fake_token = format!("header.{}.signature", encoded);
 
-        let result = OAuthAuth::parse_user_info_from_id_token(&fake_token);
+        let result = OAuthClient::parse_user_info_from_id_token(&fake_token);
         assert!(result.is_ok());
 
         let (email, name) = result.unwrap();

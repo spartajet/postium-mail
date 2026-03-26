@@ -17,7 +17,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 use crate::auth::http::callback_handler::{OAuthCallbackHandler, url_decode};
-use crate::command;
 use crate::command::{AuthManagerState, DatabaseState, KeyringState, OAuthSessionManagerState};
 use crate::storage;
 
