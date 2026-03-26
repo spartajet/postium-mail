@@ -147,13 +147,19 @@
 //! Username: "oauth:<account_id>"       → OAuth Token
 //! ```
 
+// 认证器
+pub mod credentials;
+// Token 管理
+pub mod token;
+// 会话管理
+pub mod session;
+// HTTP 服务器
+pub mod http;
+
+// 核心认证管理器
 mod auth_manager;
 mod enterprise_auth;
 mod oauth_handler;
-mod oauth_http_server;
-mod oauth_session;
-mod password_auth;
-mod token_manager;
 
 // 重新导出主要类型
 pub use auth_manager::{
@@ -161,11 +167,14 @@ pub use auth_manager::{
     AuthInfo,
     AuthManager,
     AuthResponse,
+    AuthResult,
     AuthState,
     ImapAuthInfo,
     ServerConfig,
 };
-pub use oauth_http_server::OAuthHttpServer;
-pub use oauth_session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};
 
-pub use token_manager::{KEYRING_SERVICE, OAuthToken, oauth_username, password_username};
+// 从子模块重新导出
+pub use credentials::PasswordAuth;
+pub use http::OAuthHttpServer;
+pub use session::{OAuthSession, OAuthSessionManager, OAuthSessionStatus};
+pub use token::{KEYRING_SERVICE, OAuthToken, oauth_username, password_username};
