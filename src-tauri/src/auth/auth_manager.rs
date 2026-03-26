@@ -4,15 +4,16 @@
 
 use std::sync::Arc;
 
-use base64::Engine;
 use tauri::AppHandle;
 
+use crate::auth::credentials::OAuthAuth;
+use crate::auth::credentials::PasswordAuth;
 use crate::auth::enterprise_auth::EnterpriseAuth;
+use crate::auth::http::OAuthHttpServer;
 use crate::auth::oauth_handler::{AuthorizationContext, OAuthHandler};
-use crate::auth::oauth_http_server::OAuthHttpServer;
-use crate::auth::oauth_session::OAuthSessionManager;
-use crate::auth::password_auth::PasswordAuth;
-use crate::auth::token_manager::TokenManager;
+use crate::auth::session::OAuthSessionManager;
+use crate::auth::token::TokenManager;
+use crate::auth::token::TokenRefresher;
 use crate::error::{MailError, Result};
 use crate::providers::{AuthType, ProviderPool};
 
@@ -161,16 +162,17 @@ pub enum AuthResponse {
 ///
 /// 负责：
 /// - 统一认证入口
-/// - OAuth 认证流程
-/// - 密码认证流程
-/// - Token 刷新
-/// - 批量刷新
-/// - OAuth 会话管理
+/// - 协调各认证处理器
+/// - 路由认证请求到适当的处理器
 pub struct AuthManager {
     /// OAuth 处理器
     oauth_handler: Arc<OAuthHandler>,
     /// Token 管理器
     token_manager: Arc<TokenManager>,
+    /// OAuth 认证器
+    oauth_auth: Arc<OAuthAuth>,
+    /// Token 刷新器
+    token_refresher: Arc<TokenRefresher>,
     /// 密码认证处理器
     password_auth: Arc<PasswordAuth>,
     /// 企业认证处理器
@@ -202,6 +204,20 @@ impl AuthManager {
         let password_auth = Arc::new(PasswordAuth::new(app_handle)?);
         let enterprise_auth = Arc::new(EnterpriseAuth::new());
 
+        // 创建 OAuth 认证器
+        let oauth_auth = Arc::new(OAuthAuth::new(
+            Arc::clone(&oauth_handler),
+            Arc::clone(&token_manager),
+            Arc::clone(&provider_pool),
+        ));
+
+        // 创建 Token 刷新器
+        let token_refresher = Arc::new(TokenRefresher::new(
+            Arc::clone(&oauth_handler),
+            Arc::clone(&token_manager),
+            Arc::clone(&provider_pool),
+        ));
+
         // 创建 OAuth 会话管理器（10分钟超时）
         let session_manager = Arc::new(OAuthSessionManager::new(600));
 
@@ -218,6 +234,8 @@ impl AuthManager {
         Ok(Self {
             oauth_handler,
             token_manager,
+            oauth_auth,
+            token_refresher,
             password_auth,
             enterprise_auth,
             provider_pool,
@@ -436,66 +454,8 @@ impl AuthManager {
         auth_code: &str,
         state: &str,
     ) -> Result<AuthResult> {
-        // 1. 检测服务商
-        let provider = self.provider_pool.detect_provider(email).await?;
-        let provider_info = provider.provider_info();
-        let provider_id = provider_info.id.clone();
-
-        // 2. 交换授权码
-        let token_response = self
-            .oauth_handler
-            .exchange_code(provider, auth_code, state)
-            .await?;
-
-        // 3. 计算 Token 过期时间
-        let expires_at = if let Some(expires_in) = token_response.expires_in {
-            Some(chrono::Utc::now().timestamp() + expires_in as i64)
-        } else {
-            // 默认 1 小时后过期
-            Some(chrono::Utc::now().timestamp() + 3600)
-        };
-
-        // 4. 存储到 TokenManager
-        // 注意：account_id 需要外部设置，这里先使用临时值
-        let temp_account_id = 0;
-        let refresh_token = token_response
-            .refresh_token
-            .ok_or_else(|| MailError::Internal("OAuth 响应缺少 refresh_token".to_string()))?;
-
-        self.token_manager
-            .store_oauth_token(
-                temp_account_id,
-                &provider_id,
-                &refresh_token,
-                expires_at.unwrap(),
-            )
-            .await?;
-
-        // 5. 解析用户信息（从 id_token）
-        let (user_email, display_name) = if let Some(ref id_token) = token_response.id_token {
-            self.get_user_info_from_id_token(id_token)?
-        } else {
-            // 如果没有 id_token，使用传入的 email
-            let name = email.split('@').next().unwrap_or("用户").to_string();
-            (email.to_string(), name)
-        };
-
-        tracing::info!(
-            "OAuth 认证成功: email={}, provider={}, display_name={}",
-            user_email,
-            provider_id,
-            display_name
-        );
-
-        Ok(AuthResult {
-            account_id: None,
-            email: user_email,
-            display_name: Some(display_name),
-            auth_type: AuthType::OAuth2,
-            provider: provider_id,
-            expires_at,
-            id_token: token_response.id_token,
-        })
+        // 委托给 OAuthAuth 处理
+        self.oauth_auth.authenticate(email, auth_code, state).await
     }
 
     /// 密码认证
@@ -635,38 +595,8 @@ impl AuthManager {
     /// manager.refresh_token(1, "user@example.com").await?;
     /// ```
     pub async fn refresh_token(&self, account_id: i32, email: &str) -> Result<()> {
-        // 1. 检测服务商
-        let provider = self.provider_pool.detect_provider(email).await?;
-
-        // 2. 获取当前的 refresh_token
-        let token = self.token_manager.get_oauth_token(account_id).await?;
-
-        // 3. 刷新 Token
-        let new_token_response = self
-            .oauth_handler
-            .refresh_token(provider, &token.refresh_token)
-            .await?;
-
-        // 4. 计算新的过期时间
-        let new_expires_at = if let Some(expires_in) = new_token_response.expires_in {
-            chrono::Utc::now().timestamp() + expires_in as i64
-        } else {
-            // 默认 1 小时后过期
-            chrono::Utc::now().timestamp() + 3600
-        };
-
-        // 5. 更新 Token
-        let new_refresh_token = new_token_response
-            .refresh_token
-            .unwrap_or(token.refresh_token);
-
-        self.token_manager
-            .update_token(account_id, &new_refresh_token, new_expires_at)
-            .await?;
-
-        tracing::info!("Token 刷新成功: account_id={}, email={}", account_id, email);
-
-        Ok(())
+        // 委托给 TokenRefresher 处理
+        self.token_refresher.refresh_token(account_id, email).await
     }
 
     /// 验证凭证状态
@@ -690,30 +620,10 @@ impl AuthManager {
         account_id: i32,
         auth_type: &AuthType,
     ) -> Result<AuthState> {
-        match auth_type {
-            AuthType::OAuth2 => {
-                // 检查 Token 是否过期
-                if self.token_manager.is_token_expired(account_id).await? {
-                    Ok(AuthState::Expired)
-                } else if self
-                    .token_manager
-                    .is_token_expiring_soon(account_id)
-                    .await?
-                {
-                    Ok(AuthState::ExpiringSoon)
-                } else {
-                    Ok(AuthState::Authenticated)
-                }
-            }
-            AuthType::Password | AuthType::AppPassword => {
-                // 密码认证无法检测状态
-                Ok(AuthState::Authenticated)
-            }
-            AuthType::Auto => {
-                // 自动检测
-                Ok(AuthState::Authenticated)
-            }
-        }
+        // 委托给 TokenRefresher 处理
+        self.token_refresher
+            .validate_credentials(account_id, auth_type)
+            .await
     }
 
     /// 批量刷新即将过期的 Token
@@ -733,33 +643,8 @@ impl AuthManager {
     /// let refreshed = manager.refresh_expiring_tokens(accounts).await?;
     /// ```
     pub async fn refresh_expiring_tokens(&self, accounts: Vec<(i32, String)>) -> Result<Vec<i32>> {
-        let mut refreshed = Vec::new();
-        let total = accounts.len();
-
-        // 获取即将过期的账号
-        let expiring = self.token_manager.get_expiring_accounts(300).await?;
-
-        for (account_id, email) in accounts {
-            if expiring.contains(&account_id) {
-                match self.refresh_token(account_id, &email).await {
-                    Ok(_) => {
-                        refreshed.push(account_id);
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Token 刷新失败: account_id={}, email={}, error={}",
-                            account_id,
-                            email,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-
-        tracing::info!("批量刷新完成: {}/{} 成功", refreshed.len(), total);
-
-        Ok(refreshed)
+        // 委托给 TokenRefresher 处理
+        self.token_refresher.refresh_expiring_tokens(accounts).await
     }
 
     /// 获取 IMAP 认证信息
@@ -975,91 +860,6 @@ impl AuthManager {
     /// 获取 OAuth 会话管理器
     pub fn session_manager(&self) -> Arc<OAuthSessionManager> {
         Arc::clone(&self.session_manager)
-    }
-
-    /// 从 JWT ID Token 中解析用户信息
-    ///
-    /// # 参数
-    ///
-    /// * `id_token` - JWT ID Token 字符串
-    ///
-    /// # 返回
-    ///
-    /// 返回 (email, display_name) 元组
-    ///
-    /// # 示例
-    ///
-    /// ```rust,ignore
-    /// let (email, name) = manager.get_user_info_from_id_token(id_token).await?;
-    /// ```
-    pub fn get_user_info_from_id_token(&self, id_token: &str) -> Result<(String, String)> {
-        // 分割 JWT
-        let parts: Vec<&str> = id_token.split('.').collect();
-        if parts.len() != 3 {
-            return Err(MailError::Internal(format!(
-                "无效的 JWT token 格式，期望3段，实际{}段",
-                parts.len()
-            )));
-        }
-
-        // 解码 payload
-        let payload = parts
-            .get(1)
-            .ok_or_else(|| MailError::Internal("JWT token 缺少 payload".to_string()))?;
-
-        let payload_json = self.base64_url_decode(payload)?;
-
-        // 解析 JSON
-        let claims: serde_json::Value = serde_json::from_str(&payload_json)
-            .map_err(|e| MailError::Internal(format!("解析 JWT payload 失败: {}", e)))?;
-
-        // 提取 email（支持多种字段名）
-        let email = claims
-            .get("upn") // Microsoft User Principal Name
-            .or_else(|| claims.get("email"))
-            .or_else(|| claims.get("unique_name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown@example.com")
-            .to_string();
-
-        // 提取 display name
-        let display_name = claims
-            .get("name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                // 如果没有 name 字段，使用 email 的用户名部分
-                email.split('@').next().unwrap_or("用户").to_string()
-            });
-
-        tracing::info!(
-            "从 ID Token 解析用户信息: email={}, display_name={}",
-            email,
-            display_name
-        );
-
-        Ok((email, display_name))
-    }
-
-    /// Base64URL 解码（辅助方法）
-    fn base64_url_decode(&self, input: &str) -> Result<String> {
-        // 添加 padding
-        let input_padded = if input.len().is_multiple_of(4) {
-            input.to_string()
-        } else {
-            let padding = "=".repeat(4 - (input.len() % 4));
-            format!("{}{}", input, padding)
-        };
-
-        // 转换为标准 base64
-        let input_standard = input_padded.replace('-', "+").replace('_', "/");
-
-        // 解码
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&input_standard)
-            .map_err(|e| MailError::Internal(format!("Base64 解码失败: {}", e)))?;
-
-        String::from_utf8(bytes).map_err(|e| MailError::Internal(format!("UTF-8 转换失败: {}", e)))
     }
 
     /// 获取当前使用的 redirect_uri

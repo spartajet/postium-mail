@@ -354,7 +354,8 @@ mod tests {
     #[tokio::test]
     async fn test_provider_pool_detection() {
         init_tracing();
-        let mut pool = ProviderPool::default();
+        // 创建空的 pool，而不是使用 default()，因为 default() 会注册 CustomProvider
+        let mut pool = ProviderPool { providers: Vec::new() };
 
         let provider = Box::new(MockProvider {
             info: ProviderInfo {

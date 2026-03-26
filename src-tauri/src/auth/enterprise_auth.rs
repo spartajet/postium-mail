@@ -63,14 +63,14 @@ impl EnterpriseAuth {
     /// handler.validate_config(&config)?;
     /// ```
     pub fn validate_config(&self, config: &EnterpriseConfig) -> Result<()> {
-        // 如果指定了租户 ID，验证它不为空
-        if let Some(tenant_id) = &config.tenant_id
-            && tenant_id.is_empty()
-            && let Some(domain) = &config.domain
-            && domain.is_empty()
-        {
-            return Err(MailError::Internal("租户 ID 和域名 不能为空".to_string()));
-            // }
+        // 验证租户 ID 不为空（如果指定了）
+        if let Some(tenant_id) = &config.tenant_id && tenant_id.is_empty() {
+            return Err(MailError::Internal("租户 ID 不能为空".to_string()));
+        }
+
+        // 验证域名不为空（如果指定了）
+        if let Some(domain) = &config.domain && domain.is_empty() {
+            return Err(MailError::Internal("域名 不能为空".to_string()));
         }
 
         Ok(())

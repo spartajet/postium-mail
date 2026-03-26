@@ -242,7 +242,10 @@ mod tests {
         );
         assert!(oauth_config.pkce_enabled);
         assert!(oauth_config.tenant_id.is_none());
-        assert!(oauth_config.client_secret.is_none());
+        assert_eq!(
+            oauth_config.client_secret,
+            Some(env!("GOOGLE_WORKSPACE_CLIENT_SECRET").to_string())
+        );
     }
 
     #[test]
