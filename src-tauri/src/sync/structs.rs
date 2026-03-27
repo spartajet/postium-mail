@@ -21,6 +21,7 @@ pub enum SyncMode {
 /// 同步进度信息
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncProgress {
+    pub account_id: i32,
     pub stage: SyncStage,
     pub folder: Option<String>,
     pub current: usize,
