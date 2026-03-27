@@ -239,6 +239,7 @@ pub struct FolderMetadata {
     pub recent: u32,
     /// 未读邮件数量（如果可用）
     pub unseen: Option<u32>,
+    pub nick_name: Option<String>,
 }
 
 /// 邮件头信息（仅包含邮件头，用于骨架同步）

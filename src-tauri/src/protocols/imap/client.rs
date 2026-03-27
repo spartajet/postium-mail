@@ -156,7 +156,7 @@ use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
 use crate::{
     MailError,
     error::{ImapError, Result},
-    protocols::imap::EmailStatusUid,
+    protocols::imap::{EmailHeader, EmailStatusUid, parser::parse_envelope},
 };
 use async_imap::{Authenticator, Session};
 use chrono::Datelike;
@@ -870,47 +870,51 @@ impl AsyncImapClient {
             .await
             .map_err(|e| ImapError::CollectHeadersDataFailed(e.to_string()))?;
 
+        tracing::debug!("获取邮件头message count: {}", messages.len());
+
         let mut headers = Vec::new();
 
-        for message in messages {
-            let uid = message.uid.ok_or(ImapError::EmailMissingUid)?;
+        for fetch in messages {
+            let uid = fetch.uid.ok_or(ImapError::EmailMissingUid)?;
 
-            // 解析邮件头
-            let header_body = message
-                .body()
-                .ok_or(ImapError::EmailHeaderEmptyByUid(uid))?;
-            let raw_header = decode_email_body(header_body)?;
-
-            // 使用 mail_parser 解析邮件头
-            let email_header = super::parser::parse_email_header_only(&raw_header, uid)?;
-
-            // 解析标志
-            let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
-            let flagged = message
-                .flags()
-                .any(|f| f == async_imap::types::Flag::Flagged);
-            let answered = message
+            let seen = fetch.flags().any(|f| f == async_imap::types::Flag::Seen);
+            let flagged = fetch.flags().any(|f| f == async_imap::types::Flag::Flagged);
+            let answered = fetch
                 .flags()
                 .any(|f| f == async_imap::types::Flag::Answered);
-            let deleted = message
-                .flags()
-                .any(|f| f == async_imap::types::Flag::Deleted);
-            let draft = message.flags().any(|f| f == async_imap::types::Flag::Draft);
-            let recent = message
-                .flags()
-                .any(|f| f == async_imap::types::Flag::Recent);
+            let deleted = fetch.flags().any(|f| f == async_imap::types::Flag::Deleted);
+            let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
+            let recent = fetch.flags().any(|f| f == async_imap::types::Flag::Recent);
+            // tracing::debug!("message:{:?}", fetch);
 
-            headers.push(super::types::EmailHeader {
-                flags: super::types::EmailFlags {
-                    seen,
-                    flagged,
-                    answered,
-                    deleted,
-                    draft,
-                    recent,
-                },
-                ..email_header
-            });
+            // 解析 ENVELOPE 获取邮件头信息
+            let mail_envelope = fetch.envelope().and_then(|enve| parse_envelope(enve).ok());
+
+            if let Some(enve) = mail_envelope {
+                tracing::debug!(
+                    "邮件 UID {} envelope: subject='{}', from='{}', to='{}'",
+                    uid,
+                    enve.subject,
+                    enve.from,
+                    enve.to
+                );
+                headers.push(EmailHeader {
+                    uid,
+                    subject: enve.subject,
+                    from: enve.from,
+                    to: enve.to,
+                    cc: enve.cc,
+                    date: enve.date,
+                    flags: super::types::EmailFlags {
+                        seen,
+                        flagged,
+                        answered,
+                        deleted,
+                        draft,
+                        recent,
+                    },
+                });
+            }
         }
 
         tracing::debug!(

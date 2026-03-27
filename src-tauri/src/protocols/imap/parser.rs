@@ -143,6 +143,7 @@
 
 use super::types::{EmailAttachment, EmailData, EmailFlags};
 use crate::error::{ImapError, Result};
+use async_imap::imap_proto::{Address, Envelope};
 use mail_parser::MimeHeaders;
 
 /// 检测字符串是否包含大量乱码字符
@@ -637,5 +638,145 @@ pub fn parse_email_header_only(raw: &str, uid: u32) -> Result<super::types::Emai
             draft: false,
             recent: false,
         },
+    })
+}
+
+/// 邮件信封信息
+///
+/// 从 IMAP ENVELOPE 响应中提取的邮件头信息。
+#[derive(Debug, Clone)]
+pub struct MailEnvelope {
+    pub subject: String,
+    pub from: String,
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
+    pub date: chrono::DateTime<chrono::Utc>,
+}
+
+/// 格式化地址列表为字符串
+///
+/// 将 `Address` 列表格式化为 "name <email@host>" 或 "email@host" 格式，
+/// 多个地址用逗号分隔。
+fn format_address_list(addrs: &[Address]) -> String {
+    addrs
+        .iter()
+        .filter_map(|addr| {
+            // 提取邮箱地址部分
+            // mailbox 和 host 是 Option<Cow<'_, [u8]>>
+            let email = match (&addr.mailbox, &addr.host) {
+                (Some(mailbox), Some(host)) => {
+                    // 将 Cow<[u8]> 转换为字符串（假设是 UTF-8 或 ASCII）
+                    let mailbox_str = String::from_utf8_lossy(mailbox.as_ref());
+                    let host_str = String::from_utf8_lossy(host.as_ref());
+                    format!("{}@{}", mailbox_str, host_str)
+                }
+                (Some(mailbox), None) => String::from_utf8_lossy(mailbox.as_ref()).to_string(),
+                _ => return None,
+            };
+
+            // 如果有显示名称，使用 "name <email>" 格式
+            if let Some(name) = &addr.name {
+                // name 是 Cow<'_, [u8]>，需要先转换为字符串
+                let name_str = String::from_utf8_lossy(name.as_ref());
+                // 解码 RFC 2047 编码的名称
+                let decoded_name = decode_rfc2047(&name_str).unwrap_or_else(|_| {
+                    // 如果解码失败，尝试修复编码问题
+                    fix_encoding_issue(&name_str)
+                });
+                Some(format!("{} <{}>", decoded_name, email))
+            } else {
+                Some(email)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// 解析 IMAP ENVELOPE 响应
+///
+/// 从服务器返回的 ENVELOPE 数据中提取邮件头信息，包括：
+/// - Subject: 邮件主题（使用自定义 RFC 2047 解码器）
+/// - From: 发件人地址列表
+/// - To: 收件人地址列表
+/// - Cc: 抄送地址列表
+/// - Bcc: 密送地址列表
+///
+/// # 参数
+///
+/// * `envelope` - IMAP ENVELOPE 响应
+///
+/// # 返回
+///
+/// 返回包含解码后邮件头信息的 `MailEnvelope`
+pub fn parse_envelope(envelope: &Envelope) -> Result<MailEnvelope> {
+    // 解析 Subject 字段
+    // subject 是 Option<Cow<'_, [u8]>>
+    let subject = envelope
+        .subject
+        .as_ref()
+        .map(|subject| {
+            // Cow<'_, [u8]> -> String
+            let subject_str = String::from_utf8_lossy(subject.as_ref());
+            // 使用自定义的 RFC 2047 解码器
+            decode_rfc2047(&subject_str).unwrap_or_else(|_| {
+                // 如果解码失败，尝试修复编码问题
+                fix_encoding_issue(&subject_str)
+            })
+        })
+        .unwrap_or_default();
+
+    // 解析 From 地址列表
+    let from = envelope
+        .from
+        .as_ref()
+        .map(|addrs| format_address_list(addrs.as_slice()))
+        .unwrap_or_default();
+
+    // 解析 To 地址列表
+    let to = envelope
+        .to
+        .as_ref()
+        .map(|addrs| format_address_list(addrs.as_slice()))
+        .unwrap_or_default();
+
+    // 解析 Cc 地址列表
+    let cc = envelope
+        .cc
+        .as_ref()
+        .map(|addrs| format_address_list(addrs.as_slice()))
+        .unwrap_or_default();
+
+    // 解析 Bcc 地址列表
+    let bcc = envelope
+        .bcc
+        .as_ref()
+        .map(|addrs| format_address_list(addrs.as_slice()))
+        .unwrap_or_default();
+    // 解析日期
+    // date 是 Option<Cow<'_, [u8]>>，RFC 2822 格式
+    let date = envelope
+        .date
+        .as_ref()
+        .and_then(|date_bytes| {
+            // 将 Cow<[u8]> 转换为字符串
+            let date_str = String::from_utf8_lossy(date_bytes.as_ref());
+            // 解析 RFC 2822 日期格式
+            chrono::DateTime::parse_from_rfc2822(&date_str)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+        })
+        .unwrap_or_else(|| {
+            tracing::warn!("IMAP ENVELOPE 日期解析失败，使用当前时间");
+            chrono::Utc::now()
+        });
+
+    Ok(MailEnvelope {
+        subject,
+        from,
+        to,
+        cc,
+        bcc,
+        date,
     })
 }

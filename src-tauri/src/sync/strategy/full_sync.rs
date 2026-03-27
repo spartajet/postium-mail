@@ -48,10 +48,11 @@ pub async fn sync_folder_full(
         date_since
     );
 
-    let server_uids = imap_client
+    let mut server_uids = imap_client
         .list_uids_since(folder, &date_since)
         .await
         .map_err(|e| MailError::Internal(format!("获取服务器 UID 列表失败: {}", e)))?;
+    server_uids.sort();
 
     tracing::info!(
         "全量同步准备完成: folder={}, 需同步邮件数={}",
@@ -88,7 +89,7 @@ pub async fn sync_folder(
 ) -> Result<SyncResult> {
     let uid_len = uids.len();
     tracing::info!(
-        "开始同步文件夹: account_id={}, folder={}, server_uids={}",
+        "开始同步文件夹: account_id={}, folder={}, server_uids len={}",
         account_id,
         folder,
         uid_len
@@ -114,7 +115,11 @@ pub async fn sync_folder(
 
     // 5. 更新 last_sync_uid（使用服务器 UID 中的最大值）
 
-    let max_uid = uids.iter().max().unwrap_or(&uids[uid_len - 1]);
+    let max_uid = if uid_len > 0 {
+        uids.iter().max().unwrap_or(&uids[uid_len - 1])
+    } else {
+        &0
+    };
 
     // 6. 返回同步结果
     Ok(SyncResult {
