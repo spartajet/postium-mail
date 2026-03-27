@@ -111,7 +111,7 @@ export const useSyncStore = defineStore('sync', {
     /**
      * 开始监听指定账号的同步进度
      */
-    startListening(accountId: number) {
+    async startListening(accountId: number) {
       console.log('[SyncStore] 开始监听同步进度:', accountId)
 
       // 如果已经在监听，先清理
@@ -126,17 +126,22 @@ export const useSyncStore = defineStore('sync', {
       })
 
       // 监听同步进度事件
-      const unlisten = listen<SyncProgressEvent>(
+      // 注意：必须 await 确保监听器注册完成
+      const unlistenPromise = listen<SyncProgressEvent>(
         `sync-progress-${accountId}`,
         (event: any) => {
-          console.log('[SyncStore] 收到进度事件:', event.payload)
+          console.log('[SyncStore] ✅ 收到进度事件:', event.payload)
           const progress = event.payload
           this.handleProgressEvent(accountId, progress)
         }
       )
 
       // 保存清理函数
-      this.unlisteners.set(accountId, unlisten)
+      this.unlisteners.set(accountId, unlistenPromise)
+
+      // 等待监听器注册完成
+      await unlistenPromise
+      console.log('[SyncStore] ✅ 监听器已注册，账号ID:', accountId)
     },
 
     /**
@@ -271,8 +276,8 @@ export const useSyncStore = defineStore('sync', {
       try {
         console.log('[SyncStore] syncAccount 调用:', { accountId, numericAccountId, type: typeof accountId })
 
-        // 开始监听进度
-        this.startListening(numericAccountId)
+        // 开始监听进度（必须等待监听器注册完成）
+        await this.startListening(numericAccountId)
 
         // 调用后端同步命令
         await invoke('sync_account_with_progress', { accountId: numericAccountId })

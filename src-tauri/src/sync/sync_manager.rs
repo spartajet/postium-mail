@@ -405,9 +405,12 @@ impl SyncManager {
     /// * `progress` - 进度信息
     fn emit_progress(&self, account_id: i32, progress: SyncProgress) -> Result<()> {
         // 使用前端期望的事件名称格式：sync-progress-{account_id}
+        let event_name = format!("sync-progress-{}", account_id);
+        tracing::info!("📤 发送进度事件: event_name={}, stage={:?}", event_name, progress.stage);
+
         self.app_handle
             .emit(
-                &format!("sync-progress-{}", account_id),
+                &event_name,
                 progress,
             )
             .map_err(|e| MailError::Internal(format!("发送进度事件失败: {}", e)))?;
