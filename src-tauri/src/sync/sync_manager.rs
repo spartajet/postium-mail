@@ -7,7 +7,7 @@ use crate::error::{MailError, Result, SyncError};
 use crate::protocols::imap::{AsyncImapClient, ImapAuth};
 use crate::providers::{AuthType, ProviderPool};
 use crate::storage;
-use crate::storage::service::folder_aync_state::{save_or_update_sync_state, update_last_sync_uid};
+use crate::storage::service::aync_state::{save_or_update_sync_state, update_last_sync_uid};
 use crate::sync::folder::dispatcher::determine_sync_mode;
 use crate::sync::strategy::full_sync::sync_folder_full;
 use crate::sync::strategy::incremental_sync::sync_folder_increamental;

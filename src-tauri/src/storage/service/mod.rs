@@ -38,8 +38,8 @@
 //! - **验证内嵌**: 包含业务验证规则（如果有）
 
 pub mod account;
+pub mod aync_state;
 pub mod email;
-pub mod folder_aync_state;
 
 // 重新导出常用类型
 pub use account::{AccountDto, AccountRepository, CreateAccountRequest, UpdateAccountRequest};
