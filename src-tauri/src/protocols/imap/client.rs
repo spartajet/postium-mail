@@ -164,6 +164,7 @@ use futures::TryStreamExt;
 use std::time::Instant;
 use tokio::net::TcpStream;
 use tracing::instrument;
+use utf7_imap::decode_utf7_imap;
 
 /// IMAP 认证方式
 ///
@@ -338,12 +339,21 @@ impl AsyncImapClient {
             let name_str = folder.name().to_string();
             let special_use = Self::parse_special_use(folder.attributes());
 
+            // 解码 IMAP UTF-7 编码的文件夹名称作为昵称
+            let nick_name = decode_utf7_imap(name_str.clone());
+            let nick_name = if nick_name != name_str {
+                Some(nick_name)
+            } else {
+                None
+            };
+
             // 过滤掉以 . 开头的文件夹（通常是系统文件夹）
             if !name_str.starts_with('.') {
                 folder_infos.push(FolderInfo {
                     name: name_str.clone(),
                     special_use,
                     standard_name: Self::determine_standard_name(special_use, &name_str),
+                    nick_name,
                 });
             }
         }
@@ -436,12 +446,16 @@ impl AsyncImapClient {
             mailbox.exists
         );
 
+        // 解码 IMAP UTF-7 编码的文件夹名称作为昵称
+        let nick_name = decode_utf7_imap(folder.to_string());
+
         Ok(FolderMetadata {
             uidvalidity,
             uidnext,
             exists: mailbox.exists as u32,
             recent: mailbox.recent as u32,
             unseen: None,
+            nick_name,
         })
     }
 
@@ -451,26 +465,6 @@ impl AsyncImapClient {
         // 暂时返回 None，依赖 determine_standard_name 的名称推断
         // TODO: 研究异步 IMAP 库的属性 API
         None
-    }
-
-    /// 解码 IMAP UTF-7 编码的文件夹名称（163、QQ邮箱等中文文件夹）
-    fn decode_imap_utf7(imap_name: &str) -> String {
-        // 常见的中文邮箱文件夹名称映射
-        let common_mappings = [
-            ("&XfJT0ZAB-", "已发送"),
-            ("&XfJSIJZk-", "收件箱"),
-            ("&V4NXPpCuTvY-", "垃圾邮件"),
-            ("&dcVr0mWHTvZZOQ-", "已删除"),
-            ("&g0l6P3ux-", "草稿箱"),
-        ];
-
-        for (encoded, decoded) in common_mappings.iter() {
-            if imap_name == *encoded || imap_name.ends_with(encoded) {
-                return decoded.to_string();
-            }
-        }
-
-        imap_name.to_string()
     }
 
     /// 根据特殊用途或名称确定标准文件夹名
@@ -489,7 +483,7 @@ impl AsyncImapClient {
         }
 
         // 先尝试解码 UTF-7 编码的中文名称
-        let decoded_name = Self::decode_imap_utf7(name);
+        let decoded_name = decode_utf7_imap(name.to_string());
 
         // 根据名称推断（包括解码后的中文名称）
         let name_lower = decoded_name.to_lowercase();
@@ -891,13 +885,13 @@ impl AsyncImapClient {
             let mail_envelope = fetch.envelope().and_then(|enve| parse_envelope(enve).ok());
 
             if let Some(enve) = mail_envelope {
-                tracing::debug!(
-                    "邮件 UID {} envelope: subject='{}', from='{}', to='{}'",
-                    uid,
-                    enve.subject,
-                    enve.from,
-                    enve.to
-                );
+                // tracing::debug!(
+                //     "邮件 UID {} envelope: subject='{}', from='{}', to='{}'",
+                //     uid,
+                //     enve.subject,
+                //     enve.from,
+                //     enve.to
+                // );
                 headers.push(EmailHeader {
                     uid,
                     subject: enve.subject,

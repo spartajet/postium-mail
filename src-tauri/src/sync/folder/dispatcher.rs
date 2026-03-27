@@ -47,15 +47,18 @@ pub async fn determine_sync_mode(
             );
             return Ok(SyncMode::Incremental {
                 last_sync_uid: local_state.last_sync_uid.unwrap_or(0),
+                folder_nick_name: metadata.nick_name.clone(),
             });
         } else {
             return Ok(SyncMode::Full {
                 uidvalidity: server_uidvalidity,
+                folder_nick_name: metadata.nick_name.clone(),
             });
         }
     }
 
     Ok(SyncMode::Full {
         uidvalidity: server_uidvalidity,
+        folder_nick_name: metadata.nick_name.clone(),
     })
 }

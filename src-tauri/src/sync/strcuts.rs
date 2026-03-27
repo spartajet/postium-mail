@@ -6,11 +6,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub enum SyncMode {
     /// 全量同步元数据
-    Full { uidvalidity: u64 },
+    Full {
+        uidvalidity: u64,
+        folder_nick_name: String,
+    },
     /// 增量同步元数据
     Incremental {
         /// 上次同步的最高 UID
-        last_sync_uid: i32,
+        last_sync_uid: u32,
+        folder_nick_name: String,
     },
 }
 

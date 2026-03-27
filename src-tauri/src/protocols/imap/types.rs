@@ -205,6 +205,8 @@ pub struct FolderInfo {
     pub special_use: Option<SpecialUse>,
     /// 标准名称（基于 special-use 或名称映射）
     pub standard_name: String,
+    /// 昵称（解码后的可读名称，用于非英文字符文件夹）
+    pub nick_name: Option<String>,
 }
 
 /// 文件夹 IMAP 元数据
@@ -239,7 +241,8 @@ pub struct FolderMetadata {
     pub recent: u32,
     /// 未读邮件数量（如果可用）
     pub unseen: Option<u32>,
-    pub nick_name: Option<String>,
+    /// 昵称（解码后的可读名称，用于非英文字符文件夹）
+    pub nick_name: String,
 }
 
 /// 邮件头信息（仅包含邮件头，用于骨架同步）

@@ -22,7 +22,7 @@ pub struct Model {
     pub uidvalidity: Option<i64>,
     pub uidnext: Option<i64>,
     pub synced_at: Option<i64>,
-    pub last_sync_uid: Option<i32>,
+    pub last_sync_uid: Option<u32>,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
 }

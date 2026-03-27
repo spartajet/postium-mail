@@ -21,7 +21,7 @@ pub async fn sync_folder_increamental(
     db: &DbConn,
     account_id: i32,
     folder: &str,
-    last_sync_uid: i32,
+    last_sync_uid: u32,
     imap_client: &mut AsyncImapClient,
 ) -> Result<SyncResult> {
     // 1. 获取本地 last_sync_uid
@@ -29,11 +29,11 @@ pub async fn sync_folder_increamental(
         .await?
         .ok_or(MailError::Storage(StorageError::NotFound(
             "last_sync_uid_model".to_string(),
-        )))?
+       )))?
         .last_sync_uid
         .ok_or(MailError::Storage(StorageError::NotFound(
             "last_sync_uid".to_string(),
-        )))? as u32;
+        )))?;
 
     tracing::info!(
         "增量同步记录，获取本地 last UID > {} 的邮件: folder={}",
@@ -106,6 +106,8 @@ async fn sync_existing_email_flag(
     folder: &str,
     local_last_sync_uid: u32,
 ) -> Result<(usize, usize)> {
+    // 将 u64 转换为 u32 进行处理（IMAP UID 是 32 位的）
+    let local_last_sync_uid = local_last_sync_uid as u32;
     // 1. 获取本地已同步的邮件状态
     let local_statuses = list_status_by_folder(db, account_id, folder).await?;
     let first_uid = local_statuses
