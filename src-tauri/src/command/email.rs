@@ -16,7 +16,8 @@
 //! - `limit`: 每页数量，建议 20-50
 
 use super::{DatabaseState, ProviderPoolState};
-use crate::storage::{self, service::email, service::AccountRepository};
+use crate::storage::{self, models::email, service::email as email_service, service::AccountRepository};
+use sea_orm::EntityTrait;
 
 /// 分页获取邮件列表
 ///
@@ -48,6 +49,7 @@ use crate::storage::{self, service::email, service::AccountRepository};
 #[tauri::command]
 pub async fn list_emails(
     state: tauri::State<'_, DatabaseState>,
+    provider_pool_state: tauri::State<'_, ProviderPoolState>,
     account_id: i32,
     folder: String,
     page: usize,
@@ -64,15 +66,55 @@ pub async fn list_emails(
 
     let db = state.clone_conn();
 
-    let result = email::list(&db, account_id, &folder, page as u64, limit as u64)
+    // 获取账号信息
+    let account = AccountRepository::get_by_id(&db, account_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("获取账号信息失败: {}", e);
+            e.to_string()
+        })?
+        .ok_or_else(|| {
+            let msg = format!("账号 {} 不存在", account_id);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    // 获取服务商配置
+    let provider_pool = provider_pool_state.clone_pool();
+    let provider = provider_pool
+        .find_provider_by_id(&account.provider)
+        .ok_or_else(|| {
+            let msg = format!("未找到服务商: {}", account.provider);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    let folder_mapping = provider.folder_mapping();
+
+    // 调试：打印文件夹映射信息
+    tracing::info!(
+        "文件夹映射: inbox={:?}, sent={:?}, drafts={:?}, spam={:?}, trash={:?}, archive={:?}",
+        folder_mapping.inbox,
+        folder_mapping.sent,
+        folder_mapping.drafts,
+        folder_mapping.spam,
+        folder_mapping.trash,
+        folder_mapping.archive
+    );
+    tracing::info!("查询文件夹: {} (前端标准名称)", folder);
+
+    let result = email_service::list(&db, account_id, &folder, page as u64, limit as u64, &folder_mapping)
         .await
         .map_err(|e| {
             tracing::error!("查询失败: {}", e);
             e.to_string()
         })?;
 
+    // 调试：记录查询结果
     tracing::info!(
-        "查询成功: 返回 {} 封邮件，总计 {} 封",
+        "查询成功: account_id={}, folder={}, 返回 {} 封邮件, 总计 {} 封",
+        account_id,
+        folder,
         result.items.len(),
         result.total
     );
@@ -86,6 +128,7 @@ pub async fn list_emails(
 ///
 /// # 参数
 /// * `state` - 数据库连接状态
+/// * `provider_pool_state` - 服务商池状态
 /// * `id` - 邮件 ID
 ///
 /// # 返回
@@ -101,10 +144,53 @@ pub async fn list_emails(
 #[tauri::command]
 pub async fn get_email(
     state: tauri::State<'_, DatabaseState>,
+    provider_pool_state: tauri::State<'_, ProviderPoolState>,
     id: i32,
 ) -> Result<storage::EmailDetail, String> {
     let db = state.clone_conn();
-    email::get_detail(&db, id).await.map_err(|e| e.to_string())
+
+    // 获取邮件信息以确定账号
+    let email_model = email::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .map_err(|e| {
+            tracing::error!("获取邮件信息失败: {}", e);
+            e.to_string()
+        })?
+        .ok_or_else(|| {
+            let msg = format!("邮件 {} 不存在", id);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    // 获取账号信息
+    let account = AccountRepository::get_by_id(&db, email_model.account_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("获取账号信息失败: {}", e);
+            e.to_string()
+        })?
+        .ok_or_else(|| {
+            let msg = format!("账号 {} 不存在", email_model.account_id);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    // 获取服务商配置
+    let provider_pool = provider_pool_state.clone_pool();
+    let provider = provider_pool
+        .find_provider_by_id(&account.provider)
+        .ok_or_else(|| {
+            let msg = format!("未找到服务商: {}", account.provider);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    let folder_mapping = provider.folder_mapping();
+
+    email_service::get_detail(&db, id, &folder_mapping)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 全文搜索邮件
@@ -175,7 +261,7 @@ pub async fn mark_as_read(
     is_read: bool,
 ) -> Result<(), String> {
     let db = state.clone_conn();
-    email::update_read_status(&db, email_id, is_read)
+    email_service::update_read_status(&db, email_id, is_read)
         .await
         .map_err(|e| e.to_string())
 }
@@ -204,7 +290,7 @@ pub async fn toggle_star(
     email_id: i32,
 ) -> Result<bool, String> {
     let db = state.clone_conn();
-    email::toggle_star(&db, email_id)
+    email_service::toggle_star(&db, email_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -234,7 +320,7 @@ pub async fn delete_emails(
     email_ids: Vec<i32>,
 ) -> Result<usize, String> {
     let db = state.clone_conn();
-    email::batch_delete(&db, email_ids)
+    email_service::batch_delete(&db, email_ids)
         .await
         .map_err(|e| e.to_string())
 }
@@ -269,7 +355,7 @@ pub async fn move_email_to_folder(
     folder: String,
 ) -> Result<(), String> {
     let db = state.clone_conn();
-    email::move_to_folder(&db, email_id, &folder)
+    email_service::move_to_folder(&db, email_id, &folder)
         .await
         .map_err(|e| e.to_string())
 }
@@ -308,7 +394,7 @@ pub async fn get_folder_stats(
     db_state: tauri::State<'_, DatabaseState>,
     provider_pool_state: tauri::State<'_, ProviderPoolState>,
     account_id: i32,
-) -> Result<Vec<email::FolderStat>, String> {
+) -> Result<Vec<email_service::FolderStat>, String> {
     tracing::info!("获取文件夹统计: account_id={}", account_id);
 
     let db = db_state.clone_conn();
@@ -338,7 +424,7 @@ pub async fn get_folder_stats(
 
     let folder_mapping = provider.folder_mapping();
 
-    email::get_folder_stats(&db, account_id, &folder_mapping)
+    email_service::get_folder_stats(&db, account_id, &folder_mapping)
         .await
         .map_err(|e| {
             tracing::error!("获取文件夹统计失败: {}", e);
