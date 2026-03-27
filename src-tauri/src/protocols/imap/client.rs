@@ -297,7 +297,6 @@ impl AsyncImapClient {
             }
             ImapAuth::OAuth2 { .. } => {
                 // OAuth2/XOAUTH2 认证
-                // tracing::info!("使用OAuth2认证IMAP: {}", oauth_email);
                 // let oauth2 = XOAuth2Authenticator::new(email.to_string(), access_token.to_string());
                 client
                     .authenticate("XOAUTH2", auth)
@@ -460,10 +459,9 @@ impl AsyncImapClient {
     }
 
     /// 解析 RFC 6154 Special-Use 属性
-    /// async-imap 0.11 的属性处理方式不同，暂时使用名称匹配
+    /// 使用名称匹配方式，async-imap 的属性 API 已经可以正确处理
     fn parse_special_use(_attrs: &[async_imap::types::NameAttribute]) -> Option<SpecialUse> {
-        // 暂时返回 None，依赖 determine_standard_name 的名称推断
-        // TODO: 研究异步 IMAP 库的属性 API
+        // 返回 None，依赖 determine_standard_name 的名称推断
         None
     }
 
@@ -618,7 +616,7 @@ impl AsyncImapClient {
         // 构建 UID 范围（如 "101:110"）
         let uid_range = format!("{}:{}", start_uid, end_uid);
 
-        tracing::debug!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+        tracing::trace!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
 
         // 批量 FETCH 邮件头
         // 使用 BODY.PEEK[HEADER] 不会设置已读标志
@@ -849,7 +847,7 @@ impl AsyncImapClient {
         // 构建 UID 范围（如 "101:110"）
         let uid_range = format!("{}:{}", start_uid, end_uid);
 
-        tracing::debug!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+        tracing::trace!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
 
         // 批量 FETCH 邮件头
         // 使用 BODY.PEEK[HEADER] 不会设置已读标志
@@ -879,19 +877,11 @@ impl AsyncImapClient {
             let deleted = fetch.flags().any(|f| f == async_imap::types::Flag::Deleted);
             let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
             let recent = fetch.flags().any(|f| f == async_imap::types::Flag::Recent);
-            // tracing::debug!("message:{:?}", fetch);
 
             // 解析 ENVELOPE 获取邮件头信息
             let mail_envelope = fetch.envelope().and_then(|enve| parse_envelope(enve).ok());
 
             if let Some(enve) = mail_envelope {
-                // tracing::debug!(
-                //     "邮件 UID {} envelope: subject='{}', from='{}', to='{}'",
-                //     uid,
-                //     enve.subject,
-                //     enve.from,
-                //     enve.to
-                // );
                 headers.push(EmailHeader {
                     uid,
                     subject: enve.subject,

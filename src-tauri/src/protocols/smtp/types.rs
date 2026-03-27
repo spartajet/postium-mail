@@ -16,7 +16,7 @@
 //!
 //! // 创建邮件地址
 //! let addr = EmailAddress::with_name("user@example.com", "张三");
-//! println!("{}", addr);  // 输出: 张三 <user@example.com>
+//! // 使用 addr 进行后续操作
 //!
 //! // 构建发送请求
 //! let request = SendEmailRequest {

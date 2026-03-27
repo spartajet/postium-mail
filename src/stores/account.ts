@@ -74,7 +74,14 @@ function dtoToAccount(dto: AccountDto): Account {
     smtpSsl: dto.smtp_ssl ?? undefined,
     // UI 配置
     color: dto.color || '#7C3AED',
-    unreadCount: 0, // TODO: 从后端获取
+    unreadCount: 0, // TODO: 从后端获取真实的未读数
+    //
+    // 当前状态：硬编码为 0
+    // 需要实现：
+    // 1. 后端 AccountDto 添加 unread_count 字段
+    // 2. 后端从数据库统计未读邮件数
+    // 3. 定期同步未读数（通过 IMAP STATUS 或 UNSEEN 标志）
+    // 4. 监听新邮件事件并实时更新
     syncEnabled: dto.sync_enabled,
     lastSyncAt: dto.last_sync_at ? new Date(dto.last_sync_at) : undefined,
     // OAuth 相关

@@ -168,12 +168,25 @@ watch(
 function handleReply() {
     uiStore.openComposeModal();
     // TODO: 设置回复数据
+    //
+    // 需要实现：
+    // 1. 预填充收件人（来自 From 字段）
+    // 2. 设置主题前缀 "Re: "
+    // 3. 引用原文（添加 "> " 前缀）
+    // 4. 设置回复引用的 Message-ID
+    // 5. 区分回复全部 vs 回复发件人
 }
 
 // 转发邮件
 function handleForward() {
     uiStore.openComposeModal();
     // TODO: 设置转发数据
+    //
+    // 需要实现：
+    // 1. 预填充主题前缀 "Fwd: "
+    // 2. 将原文作为附件或引用内容
+    // 3. 保留原始邮件的完整信息
+    // 4. 设置转发引用的 Message-ID
 }
 
 // 切换星标

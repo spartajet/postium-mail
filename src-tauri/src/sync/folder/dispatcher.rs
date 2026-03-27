@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::protocols::AsyncImapClient;
 use crate::storage::service::aync_state::get_sync_state;
-use crate::sync::strcuts::SyncMode;
+use crate::sync::structs::SyncMode;
 use sea_orm::DbConn;
 
 pub async fn determine_sync_mode(

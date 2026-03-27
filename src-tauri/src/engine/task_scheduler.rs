@@ -136,9 +136,19 @@ impl TaskScheduler {
 
         self.running.store(true, Ordering::Relaxed);
 
-        // TODO: 从数据库加载所有账号
-        // let accounts = crate::services::account_service::list_accounts(&self.db).await?;
-        // 目前先使用占位符，后续集成账号服务
+        // TODO: 从数据库加载所有账号并恢复定时同步任务
+        //
+        // 当前状态：占位实现，启动调度器但不加载账号
+        // 需要实现：
+        // 1. 调用 AccountRepository 获取所有启用同步的账号
+        // 2. 读取每个账号的同步间隔设置
+        // 3. 为每个账号重新注册定时同步任务
+        // 4. 处理应用关闭前的任务状态恢复
+        //
+        // 技术要点：
+        // - 需要区分定时同步和手动同步
+        // - 需要持久化任务状态到数据库
+        // - 需要处理同步失败的退避策略
         tracing::info!("任务调度器启动（待集成账号加载）");
 
         // 临时：为测试目的，记录启动
@@ -354,7 +364,7 @@ impl TaskScheduler {
                 }
 
                 // 执行同步
-                tracing::info!("⏰ 触发定时同步: account_id={}", account_id);
+                tracing::debug!("⏰ 触发定时同步: account_id={}", account_id);
 
                 match sync_manager.sync_account(account_id).await {
                     Ok(result) => {

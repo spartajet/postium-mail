@@ -6,7 +6,7 @@
 use crate::error::MailError;
 use crate::protocols::imap::AsyncImapClient;
 use crate::storage::service::email::{delete_account_folder_emails, save_batch_email_headers};
-use crate::sync::strcuts::{SyncResult, SyncStrategy};
+use crate::sync::structs::{SyncResult, SyncStrategy};
 
 use crate::error::Result;
 use sea_orm::DbConn;

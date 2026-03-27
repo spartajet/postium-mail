@@ -15,7 +15,7 @@ use crate::storage::service::email::{
     save_batch_email_headers,
 };
 use crate::sync::SyncResult;
-use crate::sync::strcuts::SyncStrategy;
+use crate::sync::structs::SyncStrategy;
 
 pub async fn sync_folder_increamental(
     db: &DbConn,

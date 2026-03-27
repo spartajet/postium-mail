@@ -139,7 +139,7 @@ pub struct EmailData {
 /// ```rust
 /// // 检查文件夹是否为垃圾邮件文件夹
 /// if folder_info.special_use == Some(SpecialUse::Junk) {
-///     println!("这是垃圾邮件文件夹");
+///     // 标记为垃圾邮件文件夹
 /// }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,10 +326,10 @@ pub struct EmailStatusUid {
 /// ```rust
 /// match event {
 ///     IdleEvent::NewEmail { folder, uid } => {
-///         println!("新邮件到达 {}，UID: {}", folder, uid);
+///         // 处理新邮件事件
 ///     }
 ///     IdleEvent::FlagsChanged { folder, uid, flags } => {
-///         println!("邮件标志变更: {} in {}", uid, folder);
+///         // 处理标志变更事件
 ///     }
 ///     _ => {}
 /// }

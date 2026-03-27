@@ -469,10 +469,10 @@ impl TokenManager {
         if let Some((token, expires_at)) = cache.get(&account_id) {
             let now = Utc::now().timestamp();
             if *expires_at > now {
-                tracing::debug!("access_token 缓存命中: account_id={}", account_id);
+                tracing::trace!("access_token 缓存命中: account_id={}", account_id);
                 return Some(token.clone());
             } else {
-                tracing::debug!("access_token 缓存已过期: account_id={}", account_id);
+                tracing::trace!("access_token 缓存已过期: account_id={}", account_id);
             }
         }
         None
