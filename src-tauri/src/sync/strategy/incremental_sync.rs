@@ -6,7 +6,8 @@
 use itertools::Itertools;
 use sea_orm::DbConn;
 
-use crate::error::Result;
+use crate::MailError;
+use crate::error::{Result, StorageError};
 use crate::protocols::imap::{AsyncImapClient, EmailStatusUid};
 use crate::storage::service::email::{
     EmailStatus, batch_delete_by_ids, batch_update_email_status, list_status_by_folder,
@@ -25,12 +26,14 @@ pub async fn sync_folder_increamental(
 ) -> Result<SyncResult> {
     // 1. 获取本地 last_sync_uid
     let local_last_sync_uid = get_sync_state(db, account_id, folder)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|s| s.last_sync_uid)
-        .map(|v| v as u32)
-        .unwrap_or(0);
+        .await?
+        .ok_or(MailError::Storage(StorageError::NotFound(
+            "last_sync_uid_model".to_string(),
+        )))?
+        .last_sync_uid
+        .ok_or(MailError::Storage(StorageError::NotFound(
+            "last_sync_uid".to_string(),
+        )))? as u32;
 
     tracing::info!(
         "增量同步记录，获取本地 last UID > {} 的邮件: folder={}",
@@ -64,6 +67,11 @@ async fn sync_new_emails(
 ) -> Result<(usize, u32)> {
     // 1. 获取服务器 last_uid
     let server_last_uid = imap_client.get_last_uid(folder).await?;
+    tracing::debug!(
+        "服务器 last_uid: {}, 本地 last_uid: {}",
+        server_last_uid,
+        local_last_sync_uid
+    );
 
     // 3. 拉取新的邮件
     if local_last_sync_uid < server_last_uid {

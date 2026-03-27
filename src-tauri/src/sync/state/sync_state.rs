@@ -144,7 +144,8 @@ impl SyncState {
         }
 
         // 更新数据库
-        self.save_folder_state_to_db(account_id, folder, &state).await
+        self.save_folder_state_to_db(account_id, folder, &state)
+            .await
     }
 
     /// 从数据库加载文件夹同步状态
@@ -153,12 +154,12 @@ impl SyncState {
         account_id: i32,
         folder: &str,
     ) -> Result<Option<FolderSyncState>> {
-        use crate::storage::models::folder_sync_state;
-        use sea_orm::{EntityTrait, QueryFilter, ColumnTrait};
+        use crate::storage::models::sync_state;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-        match folder_sync_state::Entity::find()
-            .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .filter(folder_sync_state::Column::Folder.eq(folder))
+        match sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(folder))
             .one(self.db.as_ref())
             .await
         {
@@ -167,14 +168,17 @@ impl SyncState {
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
                 last_sync_uid: model.last_sync_uid.map(|v| v as i64),
-                last_sync_time: model.synced_at.map(|ts| {
-                    DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)
-                }),
+                last_sync_time: model
+                    .synced_at
+                    .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)),
                 status: SyncStatus::Idle, // 从数据库加载的状态默认为 Idle
                 error: None,
             })),
             Ok(None) => Ok(None),
-            Err(e) => Err(MailError::Internal(format!("加载文件夹同步状态失败: {}", e))),
+            Err(e) => Err(MailError::Internal(format!(
+                "加载文件夹同步状态失败: {}",
+                e
+            ))),
         }
     }
 
@@ -185,13 +189,13 @@ impl SyncState {
         folder: &str,
         state: &FolderSyncState,
     ) -> Result<()> {
-        use crate::storage::models::folder_sync_state;
-        use sea_orm::{ActiveModelTrait, Set, EntityTrait, QueryFilter, ColumnTrait};
+        use crate::storage::models::sync_state;
+        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
         // 查找现有记录
-        let existing = folder_sync_state::Entity::find()
-            .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .filter(folder_sync_state::Column::Folder.eq(folder))
+        let existing = sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(folder))
             .one(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("查询文件夹同步状态失败: {}", e)))?;
@@ -200,7 +204,7 @@ impl SyncState {
 
         if let Some(model) = existing {
             // 更新现有记录
-            let mut active_model: folder_sync_state::ActiveModel = model.into();
+            let mut active_model: sync_state::ActiveModel = model.into();
             active_model.uidvalidity = Set(state.uidvalidity.map(|v| v as i64));
             active_model.uidnext = Set(state.uidnext.map(|v| v as i64));
             active_model.last_sync_uid = Set(state.last_sync_uid.map(|v| v as i32));
@@ -213,7 +217,7 @@ impl SyncState {
                 .map_err(|e| MailError::Internal(format!("更新文件夹同步状态失败: {}", e)))?;
         } else {
             // 创建新记录
-            let new_state = folder_sync_state::ActiveModel {
+            let new_state = sync_state::ActiveModel {
                 account_id: Set(account_id),
                 folder: Set(folder.to_string()),
                 uidvalidity: Set(state.uidvalidity.map(|v| v as i64)),
@@ -236,12 +240,12 @@ impl SyncState {
 
     /// 获取账号的所有文件夹状态
     pub async fn get_account_states(&self, account_id: i32) -> Result<Vec<FolderSyncState>> {
-        use crate::storage::models::folder_sync_state;
-        use sea_orm::{EntityTrait, QueryFilter, ColumnTrait, QueryOrder};
+        use crate::storage::models::sync_state;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-        let models = folder_sync_state::Entity::find()
-            .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .order_by_asc(folder_sync_state::Column::Folder)
+        let models = sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .order_by_asc(sync_state::Column::Folder)
             .all(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("获取账号同步状态失败: {}", e)))?;
@@ -253,9 +257,9 @@ impl SyncState {
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
                 last_sync_uid: model.last_sync_uid.map(|v| v as i64),
-                last_sync_time: model.synced_at.map(|ts| {
-                    DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)
-                }),
+                last_sync_time: model
+                    .synced_at
+                    .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)),
                 status: SyncStatus::Idle,
                 error: None,
             })
@@ -282,7 +286,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_folder_sync_state() {
+    fn test_sync_state() {
         let mut state = FolderSyncState::new("INBOX".to_string());
         assert!(!state.needs_full_sync(123)); // None 意味着需要全量同步
 
@@ -292,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_folder_sync_state_updates() {
+    fn test_sync_state_updates() {
         let mut state = FolderSyncState::new("INBOX".to_string());
         state.update_uidvalidity(123);
         state.update_uidnext(456);

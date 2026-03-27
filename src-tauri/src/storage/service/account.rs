@@ -436,9 +436,9 @@ impl AccountRepository {
             .await;
 
         // 2. 删除该账号的文件夹同步状态
-        use crate::storage::models::folder_sync_state;
-        let _ = folder_sync_state::Entity::delete_many()
-            .filter(folder_sync_state::Column::AccountId.eq(id))
+        use crate::storage::models::sync_state;
+        let _ = sync_state::Entity::delete_many()
+            .filter(sync_state::Column::AccountId.eq(id))
             .exec(db)
             .await;
 

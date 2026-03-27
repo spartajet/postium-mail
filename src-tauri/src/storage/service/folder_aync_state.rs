@@ -4,7 +4,7 @@
 
 use crate::error::{MailError, Result};
 use crate::protocols::imap::FolderInfo as ImapFolderInfo;
-use crate::storage::models::folder_sync_state;
+use crate::storage::models::sync_state;
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbConn, EntityTrait, QueryFilter, Set};
 
@@ -36,9 +36,9 @@ pub async fn update_sync_states(
 
     for info in folder_infos {
         // 使用 upsert（插入或更新）
-        let existing_state = folder_sync_state::Entity::find()
-            .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .filter(folder_sync_state::Column::Folder.eq(&info.name))
+        let existing_state = sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_id))
+            .filter(sync_state::Column::Folder.eq(&info.name))
             .one(db)
             .await?;
 
@@ -46,7 +46,7 @@ pub async fn update_sync_states(
 
         if let Some(existing) = existing_state {
             // 更新现有记录
-            let mut active: folder_sync_state::ActiveModel = existing.into();
+            let mut active: sync_state::ActiveModel = existing.into();
             active.synced_at = Set(Some(now));
             active.updated_at = Set(Some(now));
 
@@ -64,7 +64,7 @@ pub async fn update_sync_states(
             updated_count += 1;
         } else {
             // 创建新记录（IMAP 元数据初始为 None）
-            let active = folder_sync_state::ActiveModel {
+            let active = sync_state::ActiveModel {
                 id: ActiveValue::NotSet, // 自增
                 account_id: Set(account_id),
                 folder: Set(info.name.clone()),
@@ -119,9 +119,9 @@ pub async fn update_folder_metadata(
     uidvalidity: Option<u64>,
     uidnext: Option<u64>,
 ) -> Result<()> {
-    let existing_state = folder_sync_state::Entity::find()
-        .filter(folder_sync_state::Column::AccountId.eq(account_id))
-        .filter(folder_sync_state::Column::Folder.eq(folder))
+    let existing_state = sync_state::Entity::find()
+        .filter(sync_state::Column::AccountId.eq(account_id))
+        .filter(sync_state::Column::Folder.eq(folder))
         .one(db)
         .await?;
 
@@ -129,7 +129,7 @@ pub async fn update_folder_metadata(
 
     if let Some(existing) = existing_state {
         // 更新现有记录
-        let mut active: folder_sync_state::ActiveModel = existing.into();
+        let mut active: sync_state::ActiveModel = existing.into();
         active.uidvalidity = Set(uidvalidity.map(|v| v as i64));
         active.uidnext = Set(uidnext.map(|v| v as i64));
         active.synced_at = Set(Some(now));
@@ -141,7 +141,7 @@ pub async fn update_folder_metadata(
             .map_err(|e| MailError::Internal(format!("更新文件夹元数据失败: {}", e)))?;
     } else {
         // 创建新记录
-        let active = folder_sync_state::ActiveModel {
+        let active = sync_state::ActiveModel {
             id: ActiveValue::NotSet,
             account_id: Set(account_id),
             folder: Set(folder.to_string()),
@@ -177,10 +177,10 @@ pub async fn get_sync_state(
     db: &DbConn,
     account_id: i32,
     folder: &str,
-) -> Result<Option<folder_sync_state::Model>> {
-    let state = folder_sync_state::Entity::find()
-        .filter(folder_sync_state::Column::AccountId.eq(account_id))
-        .filter(folder_sync_state::Column::Folder.eq(folder))
+) -> Result<Option<sync_state::Model>> {
+    let state = sync_state::Entity::find()
+        .filter(sync_state::Column::AccountId.eq(account_id))
+        .filter(sync_state::Column::Folder.eq(folder))
         .one(db)
         .await?;
 
@@ -209,19 +209,19 @@ pub async fn save_or_update_sync_state(
     folder: &str,
     uidvalidity: u64,
     last_sync_uid: i32,
-) -> Result<folder_sync_state::Model> {
+) -> Result<sync_state::Model> {
     let now = Utc::now().timestamp();
 
     // 查找是否已存在该账号+文件夹的记录
-    let existing_state = folder_sync_state::Entity::find()
-        .filter(folder_sync_state::Column::AccountId.eq(account_id))
-        .filter(folder_sync_state::Column::Folder.eq(folder))
+    let existing_state = sync_state::Entity::find()
+        .filter(sync_state::Column::AccountId.eq(account_id))
+        .filter(sync_state::Column::Folder.eq(folder))
         .one(db)
         .await?;
 
     if let Some(existing) = existing_state {
         // 更新现有记录
-        let mut active: folder_sync_state::ActiveModel = existing.into();
+        let mut active: sync_state::ActiveModel = existing.into();
         active.uidvalidity = Set(Some(uidvalidity as i64));
         active.last_sync_uid = Set(Some(last_sync_uid));
         active.synced_at = Set(Some(now));
@@ -243,7 +243,7 @@ pub async fn save_or_update_sync_state(
         Ok(updated)
     } else {
         // 创建新记录
-        let active = folder_sync_state::ActiveModel {
+        let active = sync_state::ActiveModel {
             id: ActiveValue::NotSet,
             account_id: Set(account_id),
             folder: Set(folder.to_string()),
@@ -280,7 +280,7 @@ pub async fn update_last_sync_uid(
     last_sync_uid: i32,
 ) -> Result<()> {
     if let Some(existing) = get_sync_state(db, account_id, folder).await? {
-        let mut active: folder_sync_state::ActiveModel = existing.into();
+        let mut active: sync_state::ActiveModel = existing.into();
         active.last_sync_uid = Set(Some(last_sync_uid));
         active.updated_at = Set(Some(Utc::now().timestamp()));
 
@@ -309,12 +309,9 @@ pub async fn update_last_sync_uid(
 /// # 返回
 ///
 /// 返回同步状态列表
-pub async fn get_all_sync_states(
-    db: &DbConn,
-    account_id: i32,
-) -> Result<Vec<folder_sync_state::Model>> {
-    let states = folder_sync_state::Entity::find()
-        .filter(folder_sync_state::Column::AccountId.eq(account_id))
+pub async fn get_all_sync_states(db: &DbConn, account_id: i32) -> Result<Vec<sync_state::Model>> {
+    let states = sync_state::Entity::find()
+        .filter(sync_state::Column::AccountId.eq(account_id))
         .all(db)
         .await?;
 
@@ -337,7 +334,7 @@ pub async fn reset_sync_state(db: &DbConn, account_id: i32, folder: &str) -> Res
     );
 
     if let Some(existing) = get_sync_state(db, account_id, folder).await? {
-        let mut active: folder_sync_state::ActiveModel = existing.into();
+        let mut active: sync_state::ActiveModel = existing.into();
         // 重置同步状态
         active.uidvalidity = Set(None);
         active.uidnext = Set(None);
@@ -355,9 +352,9 @@ pub async fn reset_sync_state(db: &DbConn, account_id: i32, folder: &str) -> Res
 
 /// 删除文件夹同步状态
 pub async fn delete(db: &DbConn, account_id: i32, folder: &str) -> Result<()> {
-    folder_sync_state::Entity::delete_many()
-        .filter(folder_sync_state::Column::AccountId.eq(account_id))
-        .filter(folder_sync_state::Column::Folder.eq(folder))
+    sync_state::Entity::delete_many()
+        .filter(sync_state::Column::AccountId.eq(account_id))
+        .filter(sync_state::Column::Folder.eq(folder))
         .exec(db)
         .await
         .map_err(|e| MailError::Internal(format!("删除文件夹同步状态失败: {}", e)))?;

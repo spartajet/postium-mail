@@ -2,8 +2,8 @@
 //!
 //! 存储文件夹的 IMAP 同步状态信息（UIDVALIDITY、UIDNEXT、同步时间等）
 
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
