@@ -829,7 +829,14 @@ impl AuthManager {
     /// * `new_id` - 新的账号 ID
     pub async fn update_account_id(&self, temp_id: i32, new_id: i32) -> Result<()> {
         // TODO: 实现账号 ID 更新逻辑
-        // 需要迁移 Token 和密码存储
+        //
+        // 当前状态：占位函数，仅记录日志
+        // 需要实现：
+        // 1. 迁移 Token 存储到新的账号 ID
+        // 2. 迁移密码存储到新的账号 ID
+        // 3. 更新相关的数据库引用
+        //
+        // 触发场景：账号创建后需要更新临时 ID 为数据库生成的真实 ID
         tracing::info!("更新账号 ID: {} -> {}", temp_id, new_id);
         Ok(())
     }

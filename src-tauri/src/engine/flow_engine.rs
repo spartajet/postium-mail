@@ -218,36 +218,6 @@ impl FlowEngine {
         Ok(())
     }
 
-    // /// 获取引擎状态报告
-    // pub async fn get_status(&self) -> EngineStatusReport {
-    //     let running = self.running.load(Ordering::Relaxed);
-    //     let state = if running {
-    //         EngineState::Running
-    //     } else {
-    //         EngineState::Stopped
-    //     };
-
-    //     // 获取任务调度器状态
-    //     let task_status = self.task_scheduler.get_task_status().await;
-    //     let running_tasks = task_status.len();
-
-    //     // 获取 IDLE 管理器数量
-    //     let idle_managers = self.idle_managers.read().await;
-    //     let active_idle_monitors = idle_managers.len();
-
-    //     // 获取通知统计
-    //     let notification_stats = self.notification_manager.get_stats().await;
-    //     let total_notifications_sent = notification_stats.total_sent;
-
-    //     EngineStatusReport {
-    //         state,
-    //         running_tasks,
-    //         active_idle_monitors,
-    //         total_notifications_sent,
-    //         uptime_seconds: 0, // TODO: 实现运行时间追踪
-    //     }
-    // }
-
     /// 检查引擎是否正在运行
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -284,8 +254,19 @@ impl FlowEngine {
 
     /// 启动 IDLE 监听（为所有账号）
     async fn start_idle_monitors(&self) -> Result<()> {
-        // TODO: 从数据库加载账号列表
-        // 目前暂时只记录日志
+        // TODO: 从数据库加载账号列表并启动 IDLE 监听
+        //
+        // 当前状态：占位实现，仅记录日志
+        // 需要实现：
+        // 1. 调用 AccountRepository 获取所有账号
+        // 2. 为每个账号创建 IMAP 连接
+        // 3. 对每个账号的 INBOX 启动 IDLE 监听
+        // 4. 处理新邮件通知事件
+        //
+        // 技术要点：
+        // - 需要为每个账号维护独立的 IMAP 连接
+        // - IDLE 连接断开时需要自动重连
+        // - 需要处理账号更新/删除事件
         tracing::info!("📡 IDLE 监听启动（待集成账号加载）");
         Ok(())
     }

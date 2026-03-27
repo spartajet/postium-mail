@@ -131,14 +131,14 @@ mod folder;
 pub mod scheduler;
 pub mod state;
 pub mod strategy;
-mod strcuts;
+mod structs;
 
 // ========== 重新导出主要类型 ==========
 
 // 核心类型
 pub use sync_manager::SyncManager;
 
-pub use strcuts::{SyncProgress, SyncResult, SyncStage};
+pub use structs::{SyncProgress, SyncResult, SyncStage};
 
 // 变化检测模块
 pub use change::{

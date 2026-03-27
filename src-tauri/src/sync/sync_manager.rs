@@ -11,8 +11,8 @@ use crate::storage::service::aync_state::{save_or_update_sync_state, update_last
 use crate::sync::folder::dispatcher::determine_sync_mode;
 use crate::sync::strategy::full_sync::sync_folder_full;
 use crate::sync::strategy::incremental_sync::sync_folder_increamental;
-use crate::sync::strcuts::SyncResult;
-use crate::sync::{SyncProgress, SyncStage, strcuts::SyncStrategy};
+use crate::sync::structs::SyncResult;
+use crate::sync::{SyncProgress, SyncStage, structs::SyncStrategy};
 use crate::sync::{change::ChangeDetector, mail_processor::MailProcessor};
 use sea_orm::DbConn;
 use std::sync::Arc;
@@ -202,7 +202,7 @@ impl SyncManager {
                     .map_err(|e| MailError::Sync(SyncError::QuotaExceeded))?;
 
             let sync_result = match sync_mode {
-                crate::sync::strcuts::SyncMode::Full {
+                crate::sync::structs::SyncMode::Full {
                     uidvalidity,
                     folder_nick_name,
                 } => {
@@ -236,7 +236,7 @@ impl SyncManager {
                     );
                     sync_result
                 }
-                crate::sync::strcuts::SyncMode::Incremental {
+                crate::sync::structs::SyncMode::Incremental {
                     last_sync_uid,
                     folder_nick_name,
                 } => {
@@ -370,228 +370,6 @@ impl SyncManager {
         Ok(imap_client)
     }
 
-    // /// 增量同步文件夹
-    // ///
-    // /// 在 UIDVALIDITY 未变化时调用，仅同步新增和修改的邮件。
-    // ///
-    // /// # 参数
-    // ///
-    // /// * `account_id` - 账号 ID
-    // /// * `folder` - 文件夹名称
-    // /// * `imap_client` - IMAP 客户端引用
-    // /// * `capabilities` - 服务器能力信息（保留用于扩展）
-    // /// * `metadata` - 文件夹元数据（已在调用方获取）
-    // ///
-    // /// # 返回
-    // ///
-    // /// 返回同步结果
-    // async fn sync_folder_incremental(
-    //     &self,
-    //     account_id: i32,
-    //     folder: &str,
-    //     imap_client: &mut AsyncImapClient,
-    //     metadata: &FolderMetadata,
-    // ) -> Result<SyncResult> {
-    //     tracing::info!(
-    //         "增量同步文件夹: account_id={}, folder={}",
-    //         account_id,
-    //         folder
-    //     );
-
-    //     // 1. 使用增量同步引擎准备同步
-    //     let preparation = self
-    //         .incremental_sync_engine
-    //         .prepare_sync(account_id, folder, imap_client, metadata)
-    //         .await?;
-
-    //     tracing::info!(
-    //         "增量同步准备完成: folder={}, 需同步邮件数={}, last_sync_uid={}",
-    //         folder,
-    //         preparation.server_uids.len(),
-    //         preparation.last_sync_uid
-    //     );
-
-    //     // 2. 如果没有新邮件，返回空结果
-    //     if !preparation.needs_sync() {
-    //         tracing::info!("文件夹 {} 没有新邮件，跳过同步", folder);
-    //         return Ok(preparation.to_empty_result());
-    //     }
-
-    //     // 3. 调用 sync_folder 进行实际同步
-    //     let result = self
-    //         .sync_folder(
-    //             account_id,
-    //             folder,
-    //             Some(&preparation.server_uids),
-    //             None,
-    //             Some(imap_client),
-    //         )
-    //         .await?;
-
-    //     Ok(result)
-    // }
-
-    // /// 同步单个文件夹
-    // ///
-    // /// # 参数
-    // ///
-    // /// * `account_id` - 账号 ID
-    // /// * `folder` - 文件夹名称
-    // /// * `server_uids` - 服务器 UID 列表（可选）
-    // /// * `server_uids_with_flags` - 服务器 UID 和标志列表（可选）
-    // /// * `imap_client` - IMAP 客户端引用（可选，用于获取邮件内容）
-    // #[allow(clippy::too_many_arguments)]
-    // pub async fn sync_folder(
-    //     &self,
-    //     account_id: i32,
-    //     folder: &str,
-    //     server_uids: Option<&[u32]>,
-    //     server_uids_with_flags: Option<&[(u32, Vec<String>)]>,
-    //     imap_client: Option<&mut AsyncImapClient>,
-    // ) -> Result<SyncResult> {
-    //     tracing::info!(
-    //         "开始同步文件夹: account_id={}, folder={}, server_uids={}",
-    //         account_id,
-    //         folder,
-    //         server_uids.map(|u| u.len()).unwrap_or(0)
-    //     );
-
-    //     // 如果没有提供服务器数据，返回空结果
-    //     let (server_uids, server_uids_with_flags) = match (server_uids, server_uids_with_flags) {
-    //         (Some(uids), Some(flags)) => (uids, flags),
-    //         _ => {
-    //             tracing::warn!("缺少服务器数据，跳过同步");
-    //             return Ok(SyncResult::empty(SyncStrategy::UidSearch));
-    //         }
-    //     };
-
-    //     // 1. 使用 ChangeDetector 检测变更
-    //     // 注意：这里暂时使用空 HashMap 作为 server_flags，None 作为 last_sync_uid
-    //     let empty_flags = std::collections::HashMap::new();
-    //     let change_detection_result = self
-    //         .change_detector
-    //         .detect_changes(
-    //             account_id,
-    //             folder,
-    //             server_uids,
-    //             &empty_flags, // server_flags - 暂时使用空 HashMap
-    //             None,         // last_sync_uid - 从本地状态推断
-    //         )
-    //         .await
-    //         .map_err(|e| MailError::Internal(format!("变更检测失败: {}", e)))?;
-
-    //     tracing::info!(
-    //         "变更检测结果: new={}, modified={}, deleted={}",
-    //         change_detection_result.new_emails.len(),
-    //         change_detection_result.modified_emails.len(),
-    //         change_detection_result.deleted_emails.len()
-    //     );
-
-    //     // 如果没有变更，直接返回
-    //     if !change_detection_result.has_changes() {
-    //         tracing::info!("无变更，跳过同步");
-    //         return Ok(SyncResult::empty(SyncStrategy::UidSearch));
-    //     }
-
-    //     // 2. 处理新邮件和修改的邮件
-    //     let new_emails_count = change_detection_result.new_emails.len();
-    //     let modified_emails_count = change_detection_result.modified_emails.len();
-
-    //     // 如果提供了 IMAP 客户端，获取邮件内容
-    //     if let Some(client) = imap_client {
-    //         // 合并新邮件和修改的邮件 UID
-    //         let all_uids: Vec<u32> = change_detection_result
-    //             .new_emails
-    //             .iter()
-    //             .chain(change_detection_result.modified_emails.iter())
-    //             .copied()
-    //             .collect();
-
-    //         tracing::info!("获取 {} 个邮件的内容", all_uids.len());
-
-    //         // 批量获取邮件
-    //         let mut mail_data_list = Vec::new();
-    //         for uid in all_uids {
-    //             match client.fetch_email(folder, uid).await {
-    //                 Ok(email_data) => {
-    //                     // 转换 EmailData → MailData
-    //                     let mail_data =
-    //                         crate::sync::mail_processor::from_imap_email(&email_data, folder);
-    //                     mail_data_list.push(mail_data);
-    //                 }
-    //                 Err(e) => {
-    //                     tracing::error!("获取邮件失败: uid={}, error={}", uid, e);
-    //                     // 继续处理下一个邮件
-    //                 }
-    //             }
-    //         }
-
-    //         // 使用 MailProcessor 批量处理邮件
-    //         if !mail_data_list.is_empty() {
-    //             let process_result = self
-    //                 .mail_processor
-    //                 .process_mails(account_id, folder, mail_data_list)
-    //                 .await
-    //                 .map_err(|e| MailError::Internal(format!("处理邮件失败: {}", e)))?;
-
-    //             tracing::info!(
-    //                 "邮件处理完成: success={}, failed={}, skipped={}",
-    //                 process_result.success_count,
-    //                 process_result.failed_count,
-    //                 process_result.skipped_count
-    //             );
-    //         }
-    //     } else {
-    //         tracing::warn!("未提供 IMAP 客户端，跳过邮件内容获取");
-    //     }
-
-    //     // 3. 更新已删除的邮件
-    //     if !change_detection_result.deleted_emails.is_empty() {
-    //         self.mail_processor
-    //             .delete_mails(account_id, folder, &change_detection_result.deleted_emails)
-    //             .await
-    //             .map_err(|e| MailError::Internal(format!("删除邮件失败: {}", e)))?;
-
-    //         tracing::info!(
-    //             "已删除 {} 个邮件",
-    //             change_detection_result.deleted_emails.len()
-    //         );
-    //     }
-
-    //     // 4. 更新同步状态
-    //     let total_synced = new_emails_count + modified_emails_count;
-    //     if total_synced > 0 {
-    //         // 更新同步完成状态
-    //         if let Err(e) = self
-    //             .folder_manager
-    //             .update_sync_completed(account_id, folder, total_synced as i32)
-    //             .await
-    //         {
-    //             tracing::warn!("更新同步状态失败: {}", e);
-    //         }
-    //     }
-
-    //     // 5. 更新 last_sync_uid（使用服务器 UID 中的最大值）
-    //     if let Some(&max_uid) = server_uids.iter().max()
-    //         && let Err(e) = self
-    //             .folder_manager
-    //             .update_last_sync_uid(account_id, folder, max_uid as i32)
-    //             .await
-    //     {
-    //         tracing::warn!("更新 last_sync_uid 失败: {}", e);
-    //     }
-
-    //     // 6. 返回同步结果
-    //     Ok(SyncResult {
-    //         strategy_used: SyncStrategy::UidSearch,
-    //         new_emails: new_emails_count,
-    //         modified_emails: modified_emails_count,
-    //         deleted_emails: change_detection_result.deleted_emails.len(),
-    //         flags_changed: 0,
-    //         duration_ms: 0, // TODO: 添加实际耗时统计
-    //     })
-    // }
-
     /// 停止同步
     ///
     /// # 参数
@@ -600,6 +378,18 @@ impl SyncManager {
     pub async fn stop_sync(&self, account_id: i32) -> Result<()> {
         tracing::info!("停止同步账号: {}", account_id);
         // TODO: 实现停止同步逻辑
+        //
+        // 当前状态：占位实现，仅记录日志
+        // 需要实现：
+        // 1. 设置停止标志，中断正在进行的同步操作
+        // 2. 关闭 IMAP 连接
+        // 3. 取消进行中的邮件获取操作
+        // 4. 清理同步状态
+        //
+        // 技术要点：
+        // - 需要使用 CancellationToken 或类似的协作式取消机制
+        // - 需要确保 IMAP 客户端正确断开连接
+        // - 需要处理停止操作的幂等性（多次调用安全）
         Ok(())
     }
 

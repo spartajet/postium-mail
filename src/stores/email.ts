@@ -594,7 +594,21 @@ export const useEmailStore = defineStore('email', () => {
         }
 
         // TODO: 显示桌面通知
-        // 可以在这里添加通知代码
+        //
+        // 需要实现：
+        // 1. 使用 Tauri 的通知 API (tauri-plugin-notification)
+        // 2. 显示发件人、主题、预览文本
+        // 3. 点击通知跳转到邮件详情
+        // 4. 尊重用户的通知偏好设置
+        // 5. 避免重复通知（同一封邮件只通知一次）
+        //
+        // 示例代码：
+        // import { sendNotification } from '@tauri-apps/plugin-notification'
+        // await sendNotification({
+        //   title: email.from,
+        //   body: email.subject,
+        //   sound: 'default'
+        // })
       })
 
       // 组件卸载时清理监听器
