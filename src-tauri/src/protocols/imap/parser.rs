@@ -761,6 +761,7 @@ pub fn parse_envelope(envelope: &Envelope) -> Result<MailEnvelope> {
         .and_then(|date_bytes| {
             // 将 Cow<[u8]> 转换为字符串
             let date_str = String::from_utf8_lossy(date_bytes.as_ref());
+            // tracing::debug!("解析 ENVELOPE 日期: raw='{}'", date_str);
             // 解析 RFC 2822 日期格式
             chrono::DateTime::parse_from_rfc2822(&date_str)
                 .ok()

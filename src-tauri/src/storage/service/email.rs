@@ -172,14 +172,29 @@ pub async fn list(
     folder: &str,
     page: u64,
     page_size: u64,
+    folder_mapping: &StandardFolder,
 ) -> Result<EmailListResponse> {
     let mut query = email::Entity::find().filter(email::Column::AccountId.eq(account_id));
 
+    // 获取映射的 IMAP 文件夹列表
+    let imap_folders = get_imap_folder_list(folder, folder_mapping);
+
     // 特殊处理星标文件夹
     if folder == "starred" {
+        tracing::debug!("查询星标邮件");
         query = query.filter(email::Column::IsStarred.eq(true));
-    } else {
+    } else if imap_folders.is_empty() {
+        // 未知文件夹，直接使用原值查询（向后兼容）
+        tracing::debug!("查询未知文件夹: {}", folder);
         query = query.filter(email::Column::Folder.eq(folder));
+    } else {
+        // 使用 OR 条件查询所有映射的文件夹
+        tracing::debug!("查询标准文件夹: {}, IMAP 文件夹列表: {:?}", folder, imap_folders);
+        let mut condition = Condition::any();
+        for imap_folder in imap_folders {
+            condition = condition.add(email::Column::Folder.eq(imap_folder));
+        }
+        query = query.filter(condition);
     }
 
     // 按接收时间倒序
@@ -212,10 +227,12 @@ pub async fn list(
         .into_iter()
         .map(|e| {
             let attachment_count = attachment_counts.get(&e.id).copied().unwrap_or(0);
+            // 将 IMAP 文件夹名映射为前端标准文件夹名
+            let standard_folder = folder_mapping.find_standard_type(&e.folder);
             EmailListItem {
                 id: e.id,
                 account_id: e.account_id,
-                folder: e.folder,
+                folder: standard_folder.to_string(),
                 subject: e.subject,
                 sender_name: e.sender_name,
                 sender_email: e.sender_email,
@@ -300,7 +317,11 @@ pub async fn list_status_by_folder(
 }
 
 /// 获取邮件详情（含附件）
-pub async fn get_detail(db: &DbConn, id: i32) -> Result<EmailDetail> {
+pub async fn get_detail(
+    db: &DbConn,
+    id: i32,
+    folder_mapping: &StandardFolder,
+) -> Result<EmailDetail> {
     let email_model = email::Entity::find_by_id(id)
         .one(db)
         .await
@@ -343,10 +364,13 @@ pub async fn get_detail(db: &DbConn, id: i32) -> Result<EmailDetail> {
         })
         .collect();
 
+    // 将 IMAP 文件夹名映射为前端标准文件夹名
+    let standard_folder = folder_mapping.find_standard_type(&email_model.folder);
+
     Ok(EmailDetail {
         id: email_model.id,
         account_id: email_model.account_id,
-        folder: email_model.folder,
+        folder: standard_folder.to_string(),
         uid: email_model.uid,
         message_id: email_model.message_id,
         subject: email_model.subject,
@@ -837,7 +861,7 @@ pub async fn save_batch_email_headers(
                 is_answered: Set(header.flags.answered),
                 is_deleted: Set(header.flags.deleted),
                 sent_at: Set(header.date.timestamp()),
-                received_at: Set(now),
+                received_at: Set(header.date.timestamp()),
                 created_at: Set(now),
                 updated_at: Set(now),
                 ..Default::default()
@@ -1083,101 +1107,97 @@ pub async fn get_folder_stats(
 ) -> Result<Vec<FolderStat>> {
     let mut stats = Vec::new();
 
-    // 收件箱 - 使用第一个 IMAP 名称作为主要名称
-    for imap_name in &folder_mapping.inbox {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+    // 统计标准文件夹（累加所有映射的 IMAP 文件夹）
 
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "inbox".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break; // 只使用第一个
+    // 收件箱
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
+    for imap_name in &folder_mapping.inbox {
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "inbox".to_string(),
+        imap_name: folder_mapping.inbox.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 已发送
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
     for imap_name in &folder_mapping.sent {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
-
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "sent".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break;
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "sent".to_string(),
+        imap_name: folder_mapping.sent.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 草稿箱
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
     for imap_name in &folder_mapping.drafts {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
-
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "drafts".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break;
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "drafts".to_string(),
+        imap_name: folder_mapping.drafts.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 垃圾邮件
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
     for imap_name in &folder_mapping.spam {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
-
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "spam".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break;
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "spam".to_string(),
+        imap_name: folder_mapping.spam.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 废纸篓
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
     for imap_name in &folder_mapping.trash {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
-
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "trash".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break;
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "trash".to_string(),
+        imap_name: folder_mapping.trash.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 归档
+    let (mut email_count, mut unread_count) = (0i64, 0i64);
     for imap_name in &folder_mapping.archive {
-        let email_count = count_by_folder(db, account_id, imap_name).await?;
-        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
-
-        stats.push(FolderStat {
-            id: 0,
-            account_id,
-            name: "archive".to_string(),
-            imap_name: imap_name.clone(),
-            email_count,
-            unread_count,
-        });
-        break;
+        email_count += count_by_folder(db, account_id, imap_name).await?;
+        unread_count += count_unread_by_folder(db, account_id, imap_name).await?;
     }
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "archive".to_string(),
+        imap_name: folder_mapping.archive.first().cloned().unwrap_or_default(),
+        email_count,
+        unread_count,
+    });
 
     // 添加星标邮件统计（虚拟文件夹）
     let starred_count = count_by_folder(db, account_id, "starred").await?;
@@ -1193,6 +1213,29 @@ pub async fn get_folder_stats(
     });
 
     Ok(stats)
+}
+
+/// 将前端标准文件夹名映射到 IMAP 文件夹名列表
+///
+/// # 参数
+///
+/// * `folder` - 前端传递的文件夹名（如 "inbox", "sent"）
+/// * `folder_mapping` - 服务商的文件夹映射配置
+///
+/// # 返回
+///
+/// 返回对应的 IMAP 文件夹名列表（如 ["Sent", "Sent Items"]）
+/// 如果是 "starred" 或未知文件夹，返回空列表
+fn get_imap_folder_list<'a>(folder: &str, folder_mapping: &'a StandardFolder) -> Vec<&'a str> {
+    match folder {
+        "inbox" => folder_mapping.inbox.iter().map(|s| s.as_str()).collect(),
+        "sent" => folder_mapping.sent.iter().map(|s| s.as_str()).collect(),
+        "drafts" => folder_mapping.drafts.iter().map(|s| s.as_str()).collect(),
+        "spam" => folder_mapping.spam.iter().map(|s| s.as_str()).collect(),
+        "trash" => folder_mapping.trash.iter().map(|s| s.as_str()).collect(),
+        "archive" => folder_mapping.archive.iter().map(|s| s.as_str()).collect(),
+        _ => vec![], // "starred" 或其他自定义文件夹
+    }
 }
 
 #[cfg(test)]
