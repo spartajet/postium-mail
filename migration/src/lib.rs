@@ -23,6 +23,7 @@ mod m20250323_0013_add_folder_type;
 mod m20250323_0014_merge_sync_states;
 mod m20250323_0015_drop_sync_states_table;
 mod m20250324_0016_remove_modseq_support;
+mod m20250327_0017_rename_to_sync_state;
 
 /// 数据库迁移器
 pub struct Migrator;
@@ -47,6 +48,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250323_0014_merge_sync_states::Migration),
             Box::new(m20250323_0015_drop_sync_states_table::Migration),
             Box::new(m20250324_0016_remove_modseq_support::Migration),
+            Box::new(m20250327_0017_rename_to_sync_state::Migration),
         ]
     }
 }
