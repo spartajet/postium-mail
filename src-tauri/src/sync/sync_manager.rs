@@ -73,6 +73,7 @@ impl SyncManager {
         let _ = self.emit_progress(
             account_id,
             SyncProgress {
+                account_id,
                 stage: SyncStage::Connecting,
                 folder: None,
                 current: 0,
@@ -143,6 +144,7 @@ impl SyncManager {
         let _ = self.emit_progress(
             account_id,
             SyncProgress {
+                account_id,
                 stage: SyncStage::SyncingFolders,
                 folder: None,
                 current: 0,
@@ -181,6 +183,7 @@ impl SyncManager {
             let _ = self.emit_progress(
                 account_id,
                 SyncProgress {
+                    account_id,
                     stage: SyncStage::SyncingEmails,
                     folder: Some(folder_name.clone()),
                     current: idx + 1,
@@ -283,6 +286,7 @@ impl SyncManager {
         let _ = self.emit_progress(
             account_id,
             SyncProgress {
+                account_id,
                 stage: SyncStage::Completed,
                 folder: None,
                 current: total_synced,
@@ -400,12 +404,10 @@ impl SyncManager {
     /// * `account_id` - 账号 ID
     /// * `progress` - 进度信息
     fn emit_progress(&self, account_id: i32, progress: SyncProgress) -> Result<()> {
-        // 使用时间戳代替 UUID 生成唯一事件 ID
-        let event_id = chrono::Utc::now().timestamp_millis();
-
+        // 使用前端期望的事件名称格式：sync-progress-{account_id}
         self.app_handle
             .emit(
-                &format!("sync://progress/{}/{}", account_id, event_id),
+                &format!("sync-progress-{}", account_id),
                 progress,
             )
             .map_err(|e| MailError::Internal(format!("发送进度事件失败: {}", e)))?;
@@ -454,6 +456,7 @@ mod tests {
     fn test_sync_progress_creation() {
         init_tracing();
         let progress = SyncProgress {
+            account_id: 1,
             stage: SyncStage::SyncingEmails,
             folder: Some("INBOX".to_string()),
             current: 10,
