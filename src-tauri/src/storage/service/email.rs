@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, StorageError};
 use crate::protocols::imap::EmailHeader;
+use crate::providers::StandardFolder;
 use crate::storage::models::{attachment, email};
 use crate::sync::change::EmailFlags;
 
@@ -1051,6 +1052,147 @@ fn serialize_addresses(addresses: &str) -> String {
         .collect();
 
     format!("[{}]", emails.join(","))
+}
+
+/// 文件夹统计信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderStat {
+    pub id: i32,
+    pub account_id: i32,
+    pub name: String,
+    pub imap_name: String,
+    pub email_count: i64,
+    pub unread_count: i64,
+}
+
+/// 获取账号的所有文件夹统计信息
+///
+/// # 参数
+///
+/// * `db` - 数据库连接
+/// * `account_id` - 账号 ID
+/// * `folder_mapping` - 文件夹映射配置
+///
+/// # 返回
+///
+/// 返回所有文件夹的统计信息列表
+pub async fn get_folder_stats(
+    db: &DbConn,
+    account_id: i32,
+    folder_mapping: &StandardFolder,
+) -> Result<Vec<FolderStat>> {
+    let mut stats = Vec::new();
+
+    // 收件箱 - 使用第一个 IMAP 名称作为主要名称
+    for imap_name in &folder_mapping.inbox {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "inbox".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break; // 只使用第一个
+    }
+
+    // 已发送
+    for imap_name in &folder_mapping.sent {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "sent".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break;
+    }
+
+    // 草稿箱
+    for imap_name in &folder_mapping.drafts {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "drafts".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break;
+    }
+
+    // 垃圾邮件
+    for imap_name in &folder_mapping.spam {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "spam".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break;
+    }
+
+    // 废纸篓
+    for imap_name in &folder_mapping.trash {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "trash".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break;
+    }
+
+    // 归档
+    for imap_name in &folder_mapping.archive {
+        let email_count = count_by_folder(db, account_id, imap_name).await?;
+        let unread_count = count_unread_by_folder(db, account_id, imap_name).await?;
+
+        stats.push(FolderStat {
+            id: 0,
+            account_id,
+            name: "archive".to_string(),
+            imap_name: imap_name.clone(),
+            email_count,
+            unread_count,
+        });
+        break;
+    }
+
+    // 添加星标邮件统计（虚拟文件夹）
+    let starred_count = count_by_folder(db, account_id, "starred").await?;
+    let starred_unread = count_unread_by_folder(db, account_id, "starred").await?;
+
+    stats.push(FolderStat {
+        id: 0,
+        account_id,
+        name: "starred".to_string(),
+        imap_name: "starred".to_string(),
+        email_count: starred_count,
+        unread_count: starred_unread,
+    });
+
+    Ok(stats)
 }
 
 #[cfg(test)]
