@@ -104,12 +104,11 @@ pub async fn sync_account_with_progress(
         .map_err(|e| format!("同步失败: {}", e))?;
 
     tracing::info!(
-        "同步完成: 账号 {}, 同步了 {} 封邮件, {} 个文件夹, {} 个错误, 耗时 {}ms",
-        account_id,
-        result.total_synced,
-        result.folders_synced,
-        result.errors,
-        result.duration_ms
+        "同步完成: 账号 {account_id}, 新邮件 {new_emails}, 修改邮件 {modified_emails}, 删除邮件 {deleted_emails}, 耗时 {duration_ms}ms",
+        new_emails = result.new_emails,
+        modified_emails = result.modified_emails,
+        deleted_emails = result.deleted_emails,
+        duration_ms = result.duration_ms,
     );
 
     Ok(())
@@ -166,7 +165,7 @@ pub async fn sync_account(
         .await
         .map_err(|e| format!("同步失败: {}", e))?;
 
-    Ok(result.total_synced)
+    Ok(result.new_emails)
 }
 
 /// 发送邮件

@@ -158,12 +158,12 @@ impl SyncState {
 
         match folder_sync_state::Entity::find()
             .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .filter(folder_sync_state::Column::ImapName.eq(folder))
+            .filter(folder_sync_state::Column::Folder.eq(folder))
             .one(self.db.as_ref())
             .await
         {
             Ok(Some(model)) => Ok(Some(FolderSyncState {
-                folder: model.imap_name,
+                folder: model.folder,
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
                 last_sync_uid: model.last_sync_uid.map(|v| v as i64),
@@ -191,7 +191,7 @@ impl SyncState {
         // 查找现有记录
         let existing = folder_sync_state::Entity::find()
             .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .filter(folder_sync_state::Column::ImapName.eq(folder))
+            .filter(folder_sync_state::Column::Folder.eq(folder))
             .one(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("查询文件夹同步状态失败: {}", e)))?;
@@ -215,7 +215,7 @@ impl SyncState {
             // 创建新记录
             let new_state = folder_sync_state::ActiveModel {
                 account_id: Set(account_id),
-                imap_name: Set(folder.to_string()),
+                folder: Set(folder.to_string()),
                 uidvalidity: Set(state.uidvalidity.map(|v| v as i64)),
                 uidnext: Set(state.uidnext.map(|v| v as i64)),
                 last_sync_uid: Set(state.last_sync_uid.map(|v| v as i32)),
@@ -241,7 +241,7 @@ impl SyncState {
 
         let models = folder_sync_state::Entity::find()
             .filter(folder_sync_state::Column::AccountId.eq(account_id))
-            .order_by_asc(folder_sync_state::Column::ImapName)
+            .order_by_asc(folder_sync_state::Column::Folder)
             .all(self.db.as_ref())
             .await
             .map_err(|e| MailError::Internal(format!("获取账号同步状态失败: {}", e)))?;
@@ -249,7 +249,7 @@ impl SyncState {
         let states = models
             .iter()
             .map(|model| FolderSyncState {
-                folder: model.imap_name.clone(),
+                folder: model.folder.clone(),
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
                 last_sync_uid: model.last_sync_uid.map(|v| v as i64),

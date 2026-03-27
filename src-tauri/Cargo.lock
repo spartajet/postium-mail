@@ -4213,6 +4213,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "itertools",
  "lettre",
  "mail-parser",
  "migration",

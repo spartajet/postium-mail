@@ -140,9 +140,6 @@ pub use sync_manager::SyncManager;
 
 pub use strcuts::{SyncProgress, SyncResult, SyncStage};
 
-// 策略模块
-pub use strategy::{IncrementalSyncEngine, SyncMetadata, SyncPreparation};
-
 // 变化检测模块
 pub use change::{
     ChangeDetectionResult, ChangeDetector, ChangeType, EmailFlags, UidSet, imap_flags,

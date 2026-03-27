@@ -4,15 +4,15 @@
 
 use crate::error::{MailError, Result};
 use crate::sync::SyncManager;
+use chrono::{DateTime, Utc};
 use sea_orm::DbConn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use chrono::{DateTime, Utc};
 
 /// 任务调度器
 ///
@@ -80,9 +80,9 @@ impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
             default_interval_minutes: 15, // 15分钟
-            min_interval_minutes: 5,     // 最小5分钟
-            max_concurrent_tasks: 10,    // 最多10个并发任务
-            task_start_delay_secs: 2,    // 每个任务延迟2秒启动
+            min_interval_minutes: 5,      // 最小5分钟
+            max_concurrent_tasks: 10,     // 最多10个并发任务
+            task_start_delay_secs: 2,     // 每个任务延迟2秒启动
         }
     }
 }
@@ -99,10 +99,7 @@ pub struct TaskStatus {
 
 impl TaskScheduler {
     /// 创建新的任务调度器
-    pub fn new(
-        db: Arc<DbConn>,
-        sync_manager: Arc<SyncManager>,
-    ) -> Self {
+    pub fn new(db: Arc<DbConn>, sync_manager: Arc<SyncManager>) -> Self {
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             handles: Arc::new(RwLock::new(HashMap::new())),
@@ -151,11 +148,7 @@ impl TaskScheduler {
     }
 
     /// 添加同步任务
-    pub async fn add_sync_task(
-        &self,
-        account_id: i32,
-        interval_minutes: u64,
-    ) -> Result<()> {
+    pub async fn add_sync_task(&self, account_id: i32, interval_minutes: u64) -> Result<()> {
         // 验证间隔
         if interval_minutes < self.config.min_interval_minutes {
             return Err(MailError::Internal(format!(
@@ -169,7 +162,8 @@ impl TaskScheduler {
             let tasks = self.tasks.read().await;
             if tasks.contains_key(&account_id) {
                 return Err(MailError::Internal(format!(
-                    "账号 {} 已存在同步任务", account_id
+                    "账号 {} 已存在同步任务",
+                    account_id
                 )));
             }
         }
@@ -180,9 +174,7 @@ impl TaskScheduler {
             interval_minutes,
             enabled: true,
             last_run: None,
-            next_run: Some(Utc::now() + chrono::Duration::seconds(
-                (interval_minutes * 60) as i64
-            )),
+            next_run: Some(Utc::now() + chrono::Duration::seconds((interval_minutes * 60) as i64)),
             task_type: TaskType::DeltaSync,
         };
 
@@ -198,8 +190,11 @@ impl TaskScheduler {
             handles.insert(account_id, handle);
         }
 
-        tracing::info!("✅ 已添加账号 {} 的定时同步任务 (间隔: {} 分钟)",
-            account_id, interval_minutes);
+        tracing::info!(
+            "✅ 已添加账号 {} 的定时同步任务 (间隔: {} 分钟)",
+            account_id,
+            interval_minutes
+        );
 
         Ok(())
     }
@@ -235,7 +230,8 @@ impl TaskScheduler {
             Ok(())
         } else {
             Err(MailError::Internal(format!(
-                "账号 {} 不存在同步任务", account_id
+                "账号 {} 不存在同步任务",
+                account_id
             )))
         }
     }
@@ -250,17 +246,14 @@ impl TaskScheduler {
             Ok(())
         } else {
             Err(MailError::Internal(format!(
-                "账号 {} 不存在同步任务", account_id
+                "账号 {} 不存在同步任务",
+                account_id
             )))
         }
     }
 
     /// 更新任务间隔
-    pub async fn update_task_interval(
-        &self,
-        account_id: i32,
-        interval_minutes: u64,
-    ) -> Result<()> {
+    pub async fn update_task_interval(&self, account_id: i32, interval_minutes: u64) -> Result<()> {
         // 重新创建任务
         self.remove_task(account_id).await?;
         self.add_sync_task(account_id, interval_minutes).await?;
@@ -294,13 +287,16 @@ impl TaskScheduler {
     pub async fn get_task_status(&self) -> Vec<TaskStatus> {
         let tasks = self.tasks.read().await;
 
-        tasks.values().map(|task| TaskStatus {
-            account_id: task.account_id,
-            interval_minutes: task.interval_minutes,
-            enabled: task.enabled,
-            last_run: task.last_run,
-            next_run: task.next_run,
-        }).collect()
+        tasks
+            .values()
+            .map(|task| TaskStatus {
+                account_id: task.account_id,
+                interval_minutes: task.interval_minutes,
+                enabled: task.enabled,
+                last_run: task.last_run,
+                next_run: task.next_run,
+            })
+            .collect()
     }
 
     /// 检查调度器是否正在运行
@@ -335,8 +331,11 @@ impl TaskScheduler {
             let mut timer = tokio::time::interval(interval);
             timer.tick().await; // 跳过第一次立即触发
 
-            tracing::info!("🔄 账号 {} 定时同步任务启动 (间隔: {}秒)",
-                account_id, interval.as_secs());
+            tracing::info!(
+                "🔄 账号 {} 定时同步任务启动 (间隔: {}秒)",
+                account_id,
+                interval.as_secs()
+            );
 
             while running.load(Ordering::Relaxed) {
                 timer.tick().await;
@@ -344,7 +343,8 @@ impl TaskScheduler {
                 // 检查任务是否启用
                 let enabled = {
                     let tasks_guard = tasks.read().await;
-                    tasks_guard.get(&account_id)
+                    tasks_guard
+                        .get(&account_id)
                         .map(|t| t.enabled)
                         .unwrap_or(false)
                 };
@@ -358,9 +358,13 @@ impl TaskScheduler {
 
                 match sync_manager.sync_account(account_id).await {
                     Ok(result) => {
+                        let sync_count =
+                            result.new_emails + result.modified_emails + result.deleted_emails;
                         tracing::info!(
                             "✅ 定时同步完成: account_id={}, synced={}, duration={}ms",
-                            account_id, result.total_synced, result.duration_ms
+                            account_id,
+                            sync_count,
+                            result.duration_ms
                         );
 
                         // 更新最后运行时间
@@ -370,8 +374,7 @@ impl TaskScheduler {
                         }
                     }
                     Err(e) => {
-                        tracing::error!("❌ 定时同步失败: account_id={}, error={}",
-                            account_id, e);
+                        tracing::error!("❌ 定时同步失败: account_id={}, error={}", account_id, e);
                         // 继续运行，不中断调度器
                     }
                 }
@@ -388,7 +391,9 @@ impl Default for TaskScheduler {
     fn default() -> Self {
         // 需要数据库和sync_manager，这里提供占位实现
         // 实际使用时应该使用 new() 方法
-        panic!("TaskScheduler::default() should not be used directly. Use TaskScheduler::new() instead.");
+        panic!(
+            "TaskScheduler::default() should not be used directly. Use TaskScheduler::new() instead."
+        );
     }
 }
 
@@ -444,8 +449,14 @@ mod tests {
         assert_eq!(deserialized, TaskType::DeltaSync);
 
         // 测试其他 TaskType
-        assert_eq!(serde_json::to_string(&TaskType::FullSync).unwrap(), "\"full_sync\"");
-        assert_eq!(serde_json::to_string(&TaskType::FolderSync).unwrap(), "\"folder_sync\"");
+        assert_eq!(
+            serde_json::to_string(&TaskType::FullSync).unwrap(),
+            "\"full_sync\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskType::FolderSync).unwrap(),
+            "\"folder_sync\""
+        );
     }
 
     #[test]

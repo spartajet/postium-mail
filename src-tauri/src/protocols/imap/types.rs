@@ -283,6 +283,16 @@ pub struct EmailHeader {
     pub flags: EmailFlags,
 }
 
+#[derive(Debug, Clone)]
+pub struct EmailStatusUid {
+    pub uid: i32,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_draft: bool,
+    pub is_answered: bool,
+    pub is_deleted: bool,
+}
+
 // ========== IMAP IDLE 支持 (RFC 2177) ==========
 
 /// IDLE 事件

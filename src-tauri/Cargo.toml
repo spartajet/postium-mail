@@ -27,8 +27,6 @@ name = "provider"
 path = "tests/provider/main.rs"
 
 [dependencies]
-# 错误处理
-anyhow = "1"
 # 邮件协议
 # imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
 async-imap = { version = "0.11", default-features = false, features = [
@@ -53,6 +51,7 @@ http-body-util = "0.1"
 # HTTP 服务器 (用于 OAuth 回调)
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+itertools = "0.14"
 lettre = "0.11"
 mail-parser = "0.11"
 migration = { path = "../migration" }
@@ -103,9 +102,9 @@ url = "2"
 ctor = "0.2"  # 用于在所有测试前初始化 tracing
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
-dotenvy = "0.15"
 anyhow = "1"
+dotenvy = "0.15"
+tauri-build = { version = "2", features = [] }
 
 [patch.ustc]
 # libsqlite3-sys = {git="https://github.com/rusqlite/rusqlite", tag="v0.30.1"}

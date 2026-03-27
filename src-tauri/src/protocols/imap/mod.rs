@@ -17,7 +17,6 @@
 //! - `tests` - 测试工具
 
 mod client;
-mod error;
 mod parser;
 
 mod types;
@@ -29,9 +28,6 @@ pub use client::{AsyncImapClient, ImapAuth, three_months_ago_imap_format};
 
 // 类型定义
 pub use types::*;
-
-// 错误类型
-pub use error::{ImapError, Result as ImapResult};
 
 // 向后兼容别名
 pub use AsyncImapClient as ImapClient;
