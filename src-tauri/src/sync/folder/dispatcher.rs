@@ -1,7 +1,7 @@
+use crate::error::Result;
 use crate::protocols::AsyncImapClient;
 use crate::storage::service::folder_aync_state::get_sync_state;
 use crate::sync::strcuts::SyncMode;
-use anyhow::Result;
 use sea_orm::DbConn;
 
 pub async fn determine_sync_mode(
@@ -23,6 +23,7 @@ pub async fn determine_sync_mode(
         })?;
     tracing::info!("获取文件夹元数据成功: {:?}", metadata);
     let server_uidvalidity = metadata.uidvalidity;
+    let server_last_uid = metadata.recent;
     tracing::debug!("服务器 UIDVALIDITY: {}", server_uidvalidity);
     tracing::debug!(
         "读取本地同步状态: {:?}",

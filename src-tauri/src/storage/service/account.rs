@@ -442,14 +442,7 @@ impl AccountRepository {
             .exec(db)
             .await;
 
-        // 3. 删除该账号的同步状态记录
-        use crate::storage::models::sync_state;
-        let _ = sync_state::Entity::delete_many()
-            .filter(sync_state::Column::AccountId.eq(id))
-            .exec(db)
-            .await;
-
-        // 4. 删除该账号的同步错误记录
+        // 3. 删除该账号的同步错误记录
         use crate::storage::models::sync_error;
         let _ = sync_error::Entity::delete_many()
             .filter(sync_error::Column::AccountId.eq(id))

@@ -142,7 +142,7 @@
 //!
 
 use super::types::{EmailAttachment, EmailData, EmailFlags};
-use anyhow::{Result, anyhow};
+use crate::error::{ImapError, Result};
 use mail_parser::MimeHeaders;
 
 /// 检测字符串是否包含大量乱码字符
@@ -390,7 +390,7 @@ pub fn parse_email_with_mail_parser(raw: &str, uid: u32) -> Result<EmailData> {
 
     let message = MessageParser::default().parse(raw.as_bytes());
 
-    let message = message.ok_or_else(|| anyhow!("邮件解析失败"))?;
+    let message = message.ok_or_else(|| ImapError::ParseError("邮件解析失败".to_string()))?;
 
     // 从原始邮件头中提取Subject字段并解码
     // mail_parser对RFC 2047 GBK编码的支持有问题，所以我们自己处理
@@ -554,7 +554,7 @@ pub fn parse_email_header_only(raw: &str, uid: u32) -> Result<super::types::Emai
 
     let message = MessageParser::default().parse(raw.as_bytes());
 
-    let message = message.ok_or_else(|| anyhow!("邮件头解析失败"))?;
+    let message = message.ok_or_else(|| ImapError::ParseError("邮件头解析失败".to_string()))?;
 
     // 从原始邮件头中提取Subject字段并解码
     let subject = extract_and_decode_subject(raw).unwrap_or_else(|| {

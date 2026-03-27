@@ -29,3 +29,4 @@ dist-ssr
 # OAuth 客户端凭证配置（包含敏感信息）
 .env
 src-tauri/.env
+target/

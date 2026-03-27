@@ -1,27 +1,28 @@
+//! 文件夹同步状态模型
+//!
+//! 存储文件夹的 IMAP 同步状态信息（UIDVALIDITY、UIDNEXT、同步时间等）
+
 use sea_orm::entity::prelude::*;
 use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "folder_sync_states")]
+#[sea_orm(table_name = "sync_state")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub account_id: i32,
-    pub imap_name: String,
-    /// 文件夹标准类型: inbox, sent, drafts, spam, trash, archive, other
-    pub folder_type: Option<String>,
+    /// 文件夹名称（IMAP 原始名称，通常是英文）
+    pub folder: String,
+    /// 文件夹昵称（IMAP UTF-7 编码的原始名称，如 &V4NXPpCuTvY-）
+    ///
+    /// 用于显示给用户，因为 IMAP UTF-7 编码的名称对用户不友好。
+    /// 可以后续通过 IMAP UTF-7 解码还原为可读的中文或其他语言名称。
+    pub folder_nick_name: Option<String>,
     pub uidvalidity: Option<i64>,
     pub uidnext: Option<i64>,
     pub synced_at: Option<i64>,
-    /// 同步进度字段（合并自 sync_states）
-    pub last_sync_uid: Option<i32>,   // 最后同步的 UID
-    pub highest_uid: Option<i32>,     // 文件夹最高 UID
-    pub total_emails: Option<i32>,    // 总邮件数
-    pub sync_count: i32,              // 已同步邮件数
-    pub is_first_sync: bool,          // 是否首次同步
-    pub error_count: i32,             // 连续错误次数
-    pub last_error: Option<String>,   // 最后错误信息
+    pub last_sync_uid: Option<i32>,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
 }

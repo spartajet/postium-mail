@@ -88,6 +88,18 @@ pub struct EmailListItem {
     pub received_at: i64,
 }
 
+/// 邮件状态信息（轻量级，仅包含核心状态字段）
+#[derive(Debug, Clone, Serialize, Deserialize, sea_orm::FromQueryResult)]
+pub struct EmailStatus {
+    pub id: i32,
+    pub uid: Option<i32>,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_draft: bool,
+    pub is_answered: bool,
+    pub is_deleted: bool,
+}
+
 /// 邮件列表响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailListResponse {
@@ -228,6 +240,62 @@ pub async fn list(
         page,
         page_size,
     })
+}
+
+/// 批量获取邮件状态信息（轻量级查询，仅返回核心状态字段）
+///
+/// # 参数
+///
+/// * `db` - 数据库连接
+/// * `account_id` - 账号 ID
+/// * `folder` - 文件夹名称（必需）
+///
+/// # 返回
+///
+/// 返回包含邮件状态信息的列表，仅包含：
+/// - id: 邮件 ID
+/// - uid: IMAP UID
+/// - is_read: 是否已读
+/// - is_starred: 是否星标
+/// - is_draft: 是否草稿
+/// - is_answered: 是否已回复
+/// - is_deleted: 是否已删除
+///
+/// # 示例
+///
+/// ```rust,no_run
+/// use crate::storage::service::email::list_status;
+///
+/// // 获取收件箱的邮件状态
+/// let inbox_statuses = list_status(&db, account_id, "INBOX").await?;
+///
+/// // 获取已发送文件夹的邮件状态
+/// let sent_statuses = list_status(&db, account_id, "Sent").await?;
+/// ```
+pub async fn list_status_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<Vec<EmailStatus>> {
+    // 只选择需要的列以提高查询性能
+    let results: Vec<EmailStatus> = email::Entity::find()
+        .select_only()
+        .filter(email::Column::AccountId.eq(account_id))
+        .filter(email::Column::Folder.eq(folder))
+        .column(email::Column::Id)
+        .column(email::Column::Uid)
+        .column(email::Column::IsRead)
+        .column(email::Column::IsStarred)
+        .column(email::Column::IsDraft)
+        .column(email::Column::IsAnswered)
+        .column(email::Column::IsDeleted)
+        .order_by_asc(email::Column::Uid)
+        .into_model::<EmailStatus>()
+        .all(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("获取邮件状态失败: {}", e)))?;
+
+    Ok(results)
 }
 
 /// 获取邮件详情（含附件）
@@ -783,6 +851,141 @@ pub async fn save_batch_email_headers(
         .map_err(|e| StorageError::Database(format!("批量保存邮件头失败: {}", e)))?;
 
     Ok(headers.len())
+}
+
+/// 批量更新邮件状态（根据 ID）
+///
+/// # 参数
+///
+/// * `db` - 数据库连接
+/// * `status` - 邮件状态列表，必须包含有效的 id 字段
+///
+/// # 返回
+///
+/// 返回成功更新的邮件数量
+///
+/// # 示例
+///
+/// ```rust,no_run
+/// use crate::storage::service::email::{batch_update_email_status, EmailStatus};
+///
+/// let statuses = vec![
+///     EmailStatus {
+///         id: 1,
+///         uid: Some(101),
+///         is_read: true,
+///         is_starred: false,
+///         is_draft: false,
+///         is_answered: false,
+///         is_deleted: false,
+///     },
+///     // ... 更多状态
+/// ];
+///
+/// let updated = batch_update_email_status(&db, &statuses).await?;
+/// ```
+pub async fn batch_update_email_status(db: &DbConn, status: &[EmailStatus]) -> Result<usize> {
+    if status.is_empty() {
+        return Ok(0);
+    }
+
+    let mut updated_count = 0;
+    let now = chrono::Utc::now().timestamp();
+
+    for item_status in status {
+        // 通过 ID 更新邮件状态
+        let result = email::Entity::update_many()
+            .filter(email::Column::Id.eq(item_status.id))
+            .col_expr(email::Column::IsRead, Expr::val(item_status.is_read))
+            .col_expr(email::Column::IsStarred, Expr::val(item_status.is_starred))
+            .col_expr(email::Column::IsDraft, Expr::val(item_status.is_draft))
+            .col_expr(
+                email::Column::IsAnswered,
+                Expr::val(item_status.is_answered),
+            )
+            .col_expr(email::Column::IsDeleted, Expr::val(item_status.is_deleted))
+            .col_expr(email::Column::UpdatedAt, Expr::val(now))
+            .exec(db)
+            .await
+            .map_err(|e| {
+                tracing::warn!("批量更新邮件状态失败: id={}, error={}", item_status.id, e);
+                StorageError::Database(format!(
+                    "批量更新邮件状态失败: id={}, error={}",
+                    item_status.id, e
+                ))
+            })?;
+
+        // 如果 rows_affected > 0，说明更新成功
+        if result.rows_affected > 0 {
+            updated_count += 1;
+        }
+    }
+
+    tracing::debug!(
+        "批量更新邮件状态完成: updated_count={}, total={}",
+        updated_count,
+        status.len()
+    );
+
+    Ok(updated_count)
+}
+
+/// 批量删除邮件（根据 ID 列表）
+///
+/// # 参数
+///
+/// * `db` - 数据库连接
+/// * `ids` - 要删除的邮件 ID 列表
+///
+/// # 返回
+///
+/// 返回成功删除的邮件数量
+///
+/// # 注意
+///
+/// 此方法会同时删除邮件及其关联的附件
+///
+/// # 示例
+///
+/// ```rust,no_run
+/// use crate::storage::service::email::batch_delete_by_ids;
+///
+/// let ids = vec![1, 2, 3, 4, 5];
+/// let deleted = batch_delete_by_ids(&db, &ids).await?;
+/// ```
+pub async fn batch_delete_by_ids(db: &DbConn, ids: &[i32]) -> Result<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+
+    // 1. 先删除关联的附件
+    let deleted_attachments = attachment::Entity::delete_many()
+        .filter(attachment::Column::EmailId.is_in(ids.iter().copied()))
+        .exec(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("批量删除附件失败: {}", e)))?;
+
+    tracing::debug!(
+        "批量删除邮件附件: attachment_count={}",
+        deleted_attachments.rows_affected
+    );
+
+    // 2. 删除邮件
+    let result = email::Entity::delete_many()
+        .filter(email::Column::Id.is_in(ids.iter().copied()))
+        .exec(db)
+        .await
+        .map_err(|e| StorageError::Database(format!("批量删除邮件失败: {}", e)))?;
+
+    let deleted_count = result.rows_affected;
+
+    tracing::debug!(
+        "批量删除邮件完成: deleted_count={}, requested={}",
+        deleted_count,
+        ids.len()
+    );
+
+    Ok(deleted_count as usize)
 }
 
 /// 从地址字符串中提取名称

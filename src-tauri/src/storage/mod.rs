@@ -200,10 +200,9 @@ pub mod service;
 // 重新导出常用类型
 pub use cache::{CacheManager, CounterCache, EmailContentCache, FolderListCache, MemoryCache};
 pub use database::{DatabaseConnection, Repository, establish_connection, init_database};
-pub use models::{account, attachment, email, folder_sync_state, sync_error, sync_state};
+pub use models::{account, attachment, email, folder_sync_state, sync_error};
 pub use search::{SearchResult, SearchService};
 pub use service::{
     AccountDto, AccountRepository, AttachmentInfo, CreateAccountRequest, EmailAddress, EmailDetail,
-    EmailListItem, EmailListResponse, EmailRepository, EmailSearchParams, SendEmailRequest,
-    UpdateAccountRequest,
+    EmailListItem, EmailListResponse, EmailSearchParams, SendEmailRequest, UpdateAccountRequest,
 };

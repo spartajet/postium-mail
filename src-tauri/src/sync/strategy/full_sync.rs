@@ -4,15 +4,12 @@
 //! 获取指定时间范围内的所有邮件进行完整同步。
 
 use crate::error::MailError;
-use crate::protocols::imap::{AsyncImapClient, FolderMetadata};
+use crate::protocols::imap::AsyncImapClient;
 use crate::storage::service::email::{delete_account_folder_emails, save_batch_email_headers};
-use crate::storage::service::folder_aync_state::save_or_update_sync_state;
-use crate::sync::strategy::FullSyncPreparation;
 use crate::sync::strcuts::{SyncResult, SyncStrategy};
 
 use crate::error::Result;
 use sea_orm::DbConn;
-use std::sync::Arc;
 
 /// 内部方法：同步单个文件夹
 ///
@@ -127,6 +124,6 @@ pub async fn sync_folder(
         deleted_emails: 0,
         flags_changed: 0,
         duration_ms: 0,
-        last_sync_uid: max_uid.clone(),
+        last_sync_uid: *max_uid,
     })
 }

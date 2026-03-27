@@ -6,7 +6,9 @@
 mod types;
 
 // 重新导出主要类型
-pub use types::{AuthError, ErrorSeverity, MailError, OAuthError, StorageError, SyncError};
+pub use types::{
+    AuthError, ErrorSeverity, ImapError, MailError, OAuthError, StorageError, SyncError,
+};
 
 /// 结果类型别名
 pub type Result<T> = std::result::Result<T, MailError>;

@@ -153,7 +153,11 @@
 //! - OAuth2 认证需要进一步实现（当前返回错误）
 
 use super::types::{EmailData, EmailFlags, FolderInfo, SpecialUse};
-use anyhow::{Result, anyhow};
+use crate::{
+    MailError,
+    error::{ImapError, Result},
+    protocols::imap::EmailStatusUid,
+};
 use async_imap::{Authenticator, Session};
 use chrono::Datelike;
 use futures::TryStreamExt;
@@ -262,19 +266,19 @@ impl AsyncImapClient {
         // 创建 TCP 连接
         let tcp = TcpStream::connect(format!("{}:{}", host, port))
             .await
-            .map_err(|e| anyhow!("连接 IMAP 服务器失败: {}", e))?;
+            .map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
 
         let connect_time = start.elapsed();
 
         // 创建 TLS 连接器并连接
         let tls_connector = native_tls::TlsConnector::builder()
             .build()
-            .map_err(|e| anyhow!("创建 TLS 连接器失败: {}", e))?;
+            .map_err(|e| ImapError::TlsConnectorFailed(e.to_string()))?;
         let tls_connector = tokio_native_tls::TlsConnector::from(tls_connector);
         let tls_stream = tls_connector
             .connect(host, tcp)
             .await
-            .map_err(|e| anyhow!("TLS 握手失败: {}", e))?;
+            .map_err(|e| ImapError::TlsHandshakeFailed(e.to_string()))?;
 
         // 创建 IMAP 客户端
         let client = async_imap::Client::new(tls_stream);
@@ -288,7 +292,7 @@ impl AsyncImapClient {
                 client
                     .login(email, pwd)
                     .await
-                    .map_err(|(e, _)| anyhow!("IMAP 密码登录失败: {}", e))?
+                    .map_err(|(e, _)| ImapError::PasswordLoginFailed(e.to_string()))?
             }
             ImapAuth::OAuth2 { .. } => {
                 // OAuth2/XOAUTH2 认证
@@ -297,7 +301,7 @@ impl AsyncImapClient {
                 client
                     .authenticate("XOAUTH2", auth)
                     .await
-                    .map_err(|e| anyhow!("IMAP OAuth2 登录失败: {:?}", e))?
+                    .map_err(|e| ImapError::OAuthLoginFailed(format!("{:?}", e)))?
             }
         };
 
@@ -317,19 +321,16 @@ impl AsyncImapClient {
     /// 异步列出服务器上的所有文件夹及其属性（RFC 6154）
     #[instrument(skip(self))]
     pub async fn list_folders_with_attributes(&mut self) -> Result<Vec<FolderInfo>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // 使用 list 命令获取文件夹列表（返回流）
         let folders: Vec<async_imap::types::Name> = session
             .list(None, Some("*"))
             .await
-            .map_err(|e| anyhow!("列出文件夹失败: {}", e))?
+            .map_err(|e| ImapError::ListFoldersFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Name>>()
             .await
-            .map_err(|e| anyhow!("收集文件夹列表失败: {}", e))?;
+            .map_err(|e| ImapError::CollectFoldersFailed(e.to_string()))?;
 
         let mut folder_infos = Vec::new();
 
@@ -354,19 +355,16 @@ impl AsyncImapClient {
     /// 异步列出服务器上的所有文件夹（仅返回名称）
     #[instrument(skip(self))]
     pub async fn list_folders(&mut self) -> Result<Vec<String>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // 使用 list 命令获取文件夹列表（返回流）
         let folders: Vec<async_imap::types::Name> = session
             .list(None, Some("*"))
             .await
-            .map_err(|e| anyhow!("列出文件夹失败: {}", e))?
+            .map_err(|e| ImapError::ListFoldersFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Name>>()
             .await
-            .map_err(|e| anyhow!("收集文件夹列表失败: {}", e))?;
+            .map_err(|e| ImapError::CollectFoldersFailed(e.to_string()))?;
 
         // 只返回文件夹名称
         let folder_names: Vec<String> = folders
@@ -380,16 +378,13 @@ impl AsyncImapClient {
 
     /// 选择文件夹并返回邮件数量
     pub async fn select_folder(&mut self, folder: &str) -> Result<usize> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         let mailbox = session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         Ok(mailbox.exists as usize)
     }
@@ -402,10 +397,7 @@ impl AsyncImapClient {
     ) -> Result<super::types::FolderMetadata> {
         use super::types::FolderMetadata;
 
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // 使用 EXAMINE 命令（只读模式）获取文件夹元数据
         // 这会正确返回 UIDNEXT 和 UIDVALIDITY
@@ -414,7 +406,7 @@ impl AsyncImapClient {
         let mailbox = session
             .examine(folder)
             .await
-            .map_err(|e| anyhow!("获取文件夹元数据失败: {}", e))?;
+            .map_err(|e| ImapError::FolderMetadataFailed(e.to_string()))?;
 
         // 详细日志：打印 Mailbox 结构的所有字段
         tracing::info!(
@@ -527,16 +519,13 @@ impl AsyncImapClient {
 
     /// 异步获取 UID 列表
     pub async fn list_uids(&mut self, folder: &str, limit: usize) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         let mailbox = session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // 记录邮箱信息
         tracing::info!(
@@ -551,7 +540,7 @@ impl AsyncImapClient {
         let uids = session
             .uid_search("ALL")
             .await
-            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+            .map_err(|e| ImapError::SearchFailed(e.to_string()))?;
 
         tracing::debug!("SEARCH ALL 返回 {} 个 UID", uids.len());
 
@@ -569,29 +558,122 @@ impl AsyncImapClient {
 
     /// 获取大于指定 UID 的邮件列表
     pub async fn list_uids_after(&mut self, folder: &str, min_uid: u32) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // SEARCH UID <min_uid:* 获取大于指定 UID 的邮件（返回 Result<HashSet<Seq>>）
         let search_cmd = format!("UID {}:{}", min_uid + 1, min_uid + 100000);
         let uids = session
             .uid_search(&search_cmd)
             .await
-            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+            .map_err(|e| ImapError::SearchFailed(e.to_string()))?;
 
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
         uid_list.sort();
         uid_list.reverse();
 
         Ok(uid_list)
+    }
+
+    pub async fn get_last_uid(&mut self, folder: &str) -> Result<u32> {
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
+
+        // SELECT 文件夹（返回 Result<Mailbox>）
+        session
+            .select(folder)
+            .await
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
+        let uids = session
+            .uid_search("* (UID)")
+            .await
+            .map_err(|e| ImapError::SearchFailed(e.to_string()))?;
+
+        if uids.is_empty() {
+            return Ok(0);
+        }
+
+        if uids.len() > 1 {
+            return Err(MailError::Imap(ImapError::EmailNotFound(0)));
+        }
+
+        let uid_list: Vec<u32> = uids.into_iter().collect();
+        let uid = uid_list[0];
+
+        Ok(uid)
+    }
+
+    pub async fn batch_fetch_flags(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<EmailStatusUid>> {
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
+
+        // SELECT 文件夹
+        session
+            .select(folder)
+            .await
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
+
+        // 构建 UID 范围（如 "101:110"）
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+
+        tracing::debug!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+
+        // 批量 FETCH 邮件头
+        // 使用 BODY.PEEK[HEADER] 不会设置已读标志
+        let messages = session
+            .uid_fetch(&uid_range, "(FLAGS UID)")
+            .await
+            .map_err(|e| ImapError::BatchFetchHeadersFailed(e.to_string()))?
+            .try_collect::<Vec<async_imap::types::Fetch>>()
+            .await
+            .map_err(|e| ImapError::CollectHeadersDataFailed(e.to_string()))?;
+
+        let mut status = Vec::new();
+
+        for message in messages {
+            let uid = message.uid.ok_or(ImapError::EmailMissingUid)?;
+
+            // 解析标志
+            let seen = message.flags().any(|f| f == async_imap::types::Flag::Seen);
+            let flagged = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Flagged);
+            let answered = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Answered);
+            let deleted = message
+                .flags()
+                .any(|f| f == async_imap::types::Flag::Deleted);
+            let draft = message.flags().any(|f| f == async_imap::types::Flag::Draft);
+            // let recent = message
+            //     .flags()
+            //     .any(|f| f == async_imap::types::Flag::Recent);
+
+            status.push(EmailStatusUid {
+                uid: uid as i32,
+                is_read: seen,
+                is_starred: flagged,
+                is_answered: answered,
+                is_deleted: deleted,
+                is_draft: draft,
+            });
+        }
+
+        tracing::debug!(
+            "批量获取邮件头完成: folder={}, count={}",
+            folder,
+            status.len()
+        );
+
+        Ok(status)
     }
 
     /// 获取指定时间范围内的邮件 UID 列表
@@ -601,22 +683,19 @@ impl AsyncImapClient {
         folder: &str,
         _since_timestamp: i64,
     ) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // 获取所有邮件 UID
         let uids = session
             .uid_search("ALL")
             .await
-            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+            .map_err(|e| ImapError::SearchFailed(e.to_string()))?;
 
         // 转换为向量并排序（最新在前）
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
@@ -629,10 +708,7 @@ impl AsyncImapClient {
     /// 获取指定时间范围内的邮件 UID 列表（使用 IMAP SINCE 命令）
     /// date_since: IMAP 日期格式，如 "01-Jan-2025"
     pub async fn list_uids_since(&mut self, folder: &str, date_since: &str) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         tracing::info!(
             "🔍 list_uids_since 开始: folder={}, date_since={}",
@@ -644,46 +720,20 @@ impl AsyncImapClient {
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
-        // // 首先获取总邮件数（用于诊断）
-        // let all_uids = session
-        //     .search("ALL")
-        //     .await
-        //     .map_err(|e| anyhow!("搜索所有邮件失败: {}", e))?;
-        // tracing::info!("📊 文件夹总邮件数: {}", all_uids.len());
-
-        // 使用 SINCE 命令搜索指定日期之后的邮件
-        // 注意：SINCE 命令的日期格式是 "01-Jan-2025"（不需要双引号，根据 RFC 3501）
         let search_cmd = format!("SINCE {}", date_since);
         tracing::info!("📤 使用 IMAP 搜索命令: '{}'", search_cmd);
 
         let uids = session
             .uid_search(&search_cmd)
             .await
-            .map_err(|e| anyhow!("搜索邮件失败: {}", e))?;
+            .map_err(|e| ImapError::SearchFailed(e.to_string()))?;
 
         tracing::info!(
             "📥 SINCE 命令返回 {} 个 UID (预期: 所有近三个月的邮件)",
             uids.len()
         );
-        // tracing::info!(
-        //     "📊 比例: {}/{} ({:.1}%)",
-        //     uids.len(),
-        //     all_uids.len(),
-        //     (uids.len() as f64 / all_uids.len() as f64) * 100.0
-        // );
-
-        // // 如果 SINCE 返回的结果太少，记录警告
-        // if all_uids.len() > 100 && uids.len() < all_uids.len() / 2 {
-        //     tracing::warn!(
-        //         "⚠️  SINCE 命令返回的邮件数量异常少！可能的原因:\n\
-        //          1. 日期格式不正确: '{}'\n\
-        //          2. IMAP 服务器不支持 SINCE 命令\n\
-        //          3. 服务器上的邮件确实都在近一个月内",
-        //         date_since
-        //     );
-        // }
 
         let mut uid_list: Vec<u32> = uids.into_iter().collect();
         uid_list.sort();
@@ -702,16 +752,13 @@ impl AsyncImapClient {
 
     /// 异步获取邮件数据
     pub async fn fetch_email(&mut self, folder: &str, uid: u32) -> Result<EmailData> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹（返回 Result<Mailbox>）
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // FETCH 邮件内容（使用 BODY.PEEK[] 不会自动设置 \Seen 标志）
         // RFC 3501: BODY.PEEK[] 不会将邮件标记为已读，RFC822.PEEK 是过时的语法
@@ -720,18 +767,16 @@ impl AsyncImapClient {
         let messages: Vec<async_imap::types::Fetch> = session
             .uid_fetch(&uid_str, "(BODY.PEEK[] FLAGS)")
             .await
-            .map_err(|e| anyhow!("获取邮件失败: {}", e))?
+            .map_err(|e| ImapError::FetchEmailFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
             .await
-            .map_err(|e| anyhow!("收集邮件数据失败: {}", e))?;
+            .map_err(|e| ImapError::CollectEmailDataFailed(e.to_string()))?;
 
         // 获取第一封邮件
-        let message = messages
-            .first()
-            .ok_or_else(|| anyhow!("邮件 {} 不存在", uid))?;
+        let message = messages.first().ok_or(ImapError::EmailNotFound(uid))?;
 
         // 解析邮件体
-        let body = message.body().ok_or_else(|| anyhow!("邮件体为空"))?;
+        let body = message.body().ok_or(ImapError::EmailBodyEmpty)?;
 
         // 尝试使用不同的编码解码邮件体
         let raw_email = decode_email_body(body)?;
@@ -799,16 +844,13 @@ impl AsyncImapClient {
         start_uid: u32,
         end_uid: u32,
     ) -> Result<Vec<super::types::EmailHeader>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // 构建 UID 范围（如 "101:110"）
         let uid_range = format!("{}:{}", start_uid, end_uid);
@@ -823,20 +865,20 @@ impl AsyncImapClient {
                 "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE UID)",
             )
             .await
-            .map_err(|e| anyhow!("批量获取邮件头失败: {}", e))?
+            .map_err(|e| ImapError::BatchFetchHeadersFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
             .await
-            .map_err(|e| anyhow!("收集邮件头数据失败: {}", e))?;
+            .map_err(|e| ImapError::CollectHeadersDataFailed(e.to_string()))?;
 
         let mut headers = Vec::new();
 
         for message in messages {
-            let uid = message.uid.ok_or_else(|| anyhow!("邮件缺少 UID"))?;
+            let uid = message.uid.ok_or(ImapError::EmailMissingUid)?;
 
             // 解析邮件头
             let header_body = message
                 .body()
-                .ok_or_else(|| anyhow!("邮件头为空 UID={}", uid))?;
+                .ok_or(ImapError::EmailHeaderEmptyByUid(uid))?;
             let raw_header = decode_email_body(header_body)?;
 
             // 使用 mail_parser 解析邮件头
@@ -887,33 +929,28 @@ impl AsyncImapClient {
         folder: &str,
         uid: u32,
     ) -> Result<super::types::EmailHeader> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // FETCH 邮件头（使用 BODY.PEEK[HEADER] 不会设置已读标志）
         let uid_str = uid.to_string();
         let messages: Vec<async_imap::types::Fetch> = session
             .uid_fetch(&uid_str, "(BODY.PEEK[HEADER] FLAGS)")
             .await
-            .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
+            .map_err(|e| ImapError::FetchHeaderFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
             .await
-            .map_err(|e| anyhow!("收集邮件头数据失败: {}", e))?;
+            .map_err(|e| ImapError::CollectHeadersDataFailed(e.to_string()))?;
 
-        let message = messages
-            .first()
-            .ok_or_else(|| anyhow!("邮件 {} 不存在", uid))?;
+        let message = messages.first().ok_or(ImapError::EmailNotFound(uid))?;
 
         // 解析邮件头
-        let header_body = message.body().ok_or_else(|| anyhow!("邮件头为空"))?;
+        let header_body = message.body().ok_or(ImapError::EmailHeaderEmpty)?;
         let raw_header = decode_email_body(header_body)?;
 
         // 使用 mail_parser 解析邮件头
@@ -951,16 +988,13 @@ impl AsyncImapClient {
     /// 仅获取邮件正文（用于后台填充）
     /// 使用 BODY[TEXT] 会设置已读标志
     pub async fn fetch_email_body(&mut self, folder: &str, uid: u32) -> Result<(String, String)> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         // SELECT 文件夹
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         // FETCH 邮件正文（使用 BODY[1.TEXT] 获取纯文本，BODY[1.HTML] 获取HTML）
         let uid_str = uid.to_string();
@@ -969,19 +1003,19 @@ impl AsyncImapClient {
         let text_messages: Vec<async_imap::types::Fetch> = session
             .uid_fetch(&uid_str, "BODY[1.TEXT]")
             .await
-            .map_err(|e| anyhow!("获取纯文本正文失败: {}", e))?
+            .map_err(|e| ImapError::FetchBodyFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
             .await
-            .map_err(|e| anyhow!("收集纯文本正文数据失败: {}", e))?;
+            .map_err(|e| ImapError::CollectBodyDataFailed(e.to_string()))?;
 
         // 再获取HTML正文
         let html_messages: Vec<async_imap::types::Fetch> = session
             .fetch(&uid_str, "BODY[1.HTML]")
             .await
-            .map_err(|e| anyhow!("获取HTML正文失败: {}", e))?
+            .map_err(|e| ImapError::FetchHtmlBodyFailed(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
             .await
-            .map_err(|e| anyhow!("收集HTML正文数据失败: {}", e))?;
+            .map_err(|e| ImapError::CollectHtmlBodyDataFailed(e.to_string()))?;
 
         // 解析纯文本正文
         let body_text = if let Some(msg) = text_messages.first() {
@@ -1010,15 +1044,12 @@ impl AsyncImapClient {
 
     /// 异步标记邮件为已读/未读
     pub async fn mark_as_read(&mut self, folder: &str, uid: u32, is_read: bool) -> Result<()> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         let uid_str = uid.to_string();
 
@@ -1028,18 +1059,18 @@ impl AsyncImapClient {
             session
                 .uid_store(&uid_str, "+FLAGS (\\Seen)")
                 .await
-                .map_err(|e| anyhow!("标记邮件失败: {}", e))?
+                .map_err(|e| ImapError::MarkEmailFailed(e.to_string()))?
                 .try_collect::<Vec<_>>()
                 .await
-                .map_err(|e| anyhow!("收集标记结果失败: {}", e))?;
+                .map_err(|e| ImapError::CollectMarkResultFailed(e.to_string()))?;
         } else {
             session
                 .uid_store(&uid_str, "-FLAGS (\\Seen)")
                 .await
-                .map_err(|e| anyhow!("标记邮件失败: {}", e))?
+                .map_err(|e| ImapError::MarkEmailFailed(e.to_string()))?
                 .try_collect::<Vec<_>>()
                 .await
-                .map_err(|e| anyhow!("收集标记结果失败: {}", e))?;
+                .map_err(|e| ImapError::CollectMarkResultFailed(e.to_string()))?;
         }
 
         Ok(())
@@ -1047,15 +1078,12 @@ impl AsyncImapClient {
 
     /// 异步设置星标
     pub async fn set_flag(&mut self, folder: &str, uid: u32, flagged: bool) -> Result<()> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         let uid_str = uid.to_string();
 
@@ -1063,18 +1091,18 @@ impl AsyncImapClient {
             session
                 .uid_store(&uid_str, "+FLAGS (\\Flagged)")
                 .await
-                .map_err(|e| anyhow!("设置标志失败: {}", e))?
+                .map_err(|e| ImapError::SetFlagFailed(e.to_string()))?
                 .try_collect::<Vec<_>>()
                 .await
-                .map_err(|e| anyhow!("收集设置标志结果失败: {}", e))?;
+                .map_err(|e| ImapError::CollectSetFlagResultFailed(e.to_string()))?;
         } else {
             session
                 .uid_store(&uid_str, "-FLAGS (\\Flagged)")
                 .await
-                .map_err(|e| anyhow!("设置标志失败: {}", e))?
+                .map_err(|e| ImapError::SetFlagFailed(e.to_string()))?
                 .try_collect::<Vec<_>>()
                 .await
-                .map_err(|e| anyhow!("收集设置标志结果失败: {}", e))?;
+                .map_err(|e| ImapError::CollectSetFlagResultFailed(e.to_string()))?;
         }
 
         Ok(())
@@ -1082,15 +1110,12 @@ impl AsyncImapClient {
 
     /// 异步删除邮件
     pub async fn delete_email(&mut self, folder: &str, uid: u32) -> Result<()> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         let uid_str = uid.to_string();
 
@@ -1098,19 +1123,19 @@ impl AsyncImapClient {
         session
             .uid_store(&uid_str, "+FLAGS (\\Deleted)")
             .await
-            .map_err(|e| anyhow!("标记删除失败: {}", e))?
+            .map_err(|e| ImapError::MarkDeleteFailed(e.to_string()))?
             .try_collect::<Vec<_>>()
             .await
-            .map_err(|e| anyhow!("收集标记删除结果失败: {}", e))?;
+            .map_err(|e| ImapError::CollectMarkDeleteResultFailed(e.to_string()))?;
 
         // 执行删除（返回流）
         session
             .expunge()
             .await
-            .map_err(|e| anyhow!("删除邮件失败: {}", e))?
+            .map_err(|e| ImapError::DeleteEmailFailed(e.to_string()))?
             .try_collect::<Vec<_>>()
             .await
-            .map_err(|e| anyhow!("收集删除结果失败: {}", e))?;
+            .map_err(|e| ImapError::CollectDeleteResultFailed(e.to_string()))?;
 
         Ok(())
     }
@@ -1121,51 +1146,47 @@ impl AsyncImapClient {
             session
                 .logout()
                 .await
-                .map_err(|e| anyhow!("登出失败: {}", e))?;
+                .map_err(|e| ImapError::LogoutFailed(e.to_string()))?;
         }
         Ok(())
     }
 
     /// 获取原始邮件头（用于诊断）
     pub async fn fetch_raw_header(&mut self, folder: &str, uid: u32) -> Result<String> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         let uid_str = uid.to_string();
         let messages = session
             .uid_fetch(&uid_str, "(RFC822.HEADER)")
             .await
-            .map_err(|e| anyhow!("获取邮件头失败: {}", e))?
+            .map_err(|e| ImapError::FetchHeaderFailed(e.to_string()))?
             .try_collect::<Vec<_>>()
             .await
-            .map_err(|e| anyhow!("收集邮件头失败: {}", e))?;
+            .map_err(|e| ImapError::CollectHeadersDataFailed(e.to_string()))?;
 
-        let message = messages
-            .first()
-            .ok_or_else(|| anyhow!("邮件 {} 不存在", uid))?;
+        let message = messages.first().ok_or(ImapError::EmailNotFound(uid))?;
 
         tracing::debug!("Fetch响应: {:?}", message);
 
         // 检查是否有RFC822.HEADER字段
         if let Some(header) = message.header() {
-            return String::from_utf8(header.to_vec())
-                .map_err(|e| anyhow!("解析邮件头编码失败: {}", e));
+            return String::from_utf8(header.to_vec()).map_err(|e| {
+                MailError::Imap(ImapError::ParseEmailHeaderEncodingFailed(e.to_string()))
+            });
         }
 
         // 尝试body方法
         if let Some(body) = message.body() {
-            return String::from_utf8(body.to_vec())
-                .map_err(|e| anyhow!("解析邮件头编码失败: {}", e));
+            return String::from_utf8(body.to_vec()).map_err(|e| {
+                MailError::Imap(ImapError::ParseEmailHeaderEncodingFailed(e.to_string()))
+            });
         }
-
-        Err(anyhow!("无法获取邮件头"))
+        Err(MailError::Imap(ImapError::CannotFetchEmailHeader))
     }
 
     // ========== IMAP IDLE 支持 (RFC 2177) ==========
@@ -1174,15 +1195,12 @@ impl AsyncImapClient {
     ///
     /// IDLE 允许服务器推送新邮件通知，而不是客户端轮询。
     pub async fn check_idle_support(&mut self) -> Result<bool> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         let capabilities = session
             .capabilities()
             .await
-            .map_err(|e| anyhow!("获取服务器能力失败: {}", e))?;
+            .map_err(|e| ImapError::CapabilityFailed(e.to_string()))?;
 
         let has_idle = capabilities.iter().any(|cap| {
             let cap_str = format!("{:?}", cap);
@@ -1200,21 +1218,18 @@ impl AsyncImapClient {
 
     /// 轮询降级策略
     pub async fn polling_fallback(&mut self, folder: &str, last_uid: u32) -> Result<Vec<u32>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         session
             .select(folder)
             .await
-            .map_err(|e| anyhow!("选择文件夹失败: {}", e))?;
+            .map_err(|e| ImapError::SelectFolderFailed(e.to_string()))?;
 
         let search_cmd = format!("UID {}:{}", last_uid + 1, "*");
         let uids = session
             .uid_search(&search_cmd)
             .await
-            .map_err(|e| anyhow!("搜索新邮件失败: {}", e))?;
+            .map_err(|e| ImapError::SearchNewEmailFailed(e.to_string()))?;
 
         let uid_list: Vec<u32> = uids.into_iter().collect();
 
@@ -1235,15 +1250,12 @@ impl AsyncImapClient {
         folder: &str,
         previous_count: usize,
     ) -> Result<(usize, bool)> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| anyhow!("IMAP 未连接"))?;
+        let session = self.session.as_mut().ok_or(ImapError::NotConnected)?;
 
         let status_response = session
             .status(folder, "(MESSAGES)")
             .await
-            .map_err(|e| anyhow!("获取文件夹状态失败: {}", e))?;
+            .map_err(|e| ImapError::FolderStatusFailed(e.to_string()))?;
 
         let current_count = status_response.exists as usize;
         let has_new = current_count > previous_count;
@@ -1388,5 +1400,5 @@ fn decode_email_body(bytes: &[u8]) -> Result<String> {
     tracing::warn!("无法确定邮件编码，使用UTF-8作为回退，可能存在乱码");
     std::str::from_utf8(bytes)
         .map(|s| s.to_string())
-        .map_err(|e| anyhow!("解码邮件编码失败: {}", e))
+        .map_err(|e| MailError::Imap(ImapError::DecodeEmailEncodingFailed(e.to_string())))
 }

@@ -61,8 +61,10 @@ pub struct SyncResult {
 
     /// 标志变更数量
     pub flags_changed: usize,
+
     /// 同步耗时（毫秒）
     pub duration_ms: u64,
+
     /// 最后同步的uid
     pub last_sync_uid: u32,
 }

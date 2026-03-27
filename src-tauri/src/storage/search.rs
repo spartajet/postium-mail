@@ -127,7 +127,7 @@
 //! - 未来考虑使用更安全的查询方式
 
 use crate::storage::models::email;
-use anyhow::{Context, Result};
+use crate::error::{MailError, Result, StorageError};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DbConn, DbBackend, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, Statement,
@@ -194,7 +194,7 @@ impl SearchService {
         let results = db
             .query_all_raw(Statement::from_string(DbBackend::Sqlite, &sql))
             .await
-            .context("FTS5 搜索失败")?;
+            .map_err(|e| MailError::Storage(StorageError::Database(format!("FTS5 搜索失败: {}", e))))?;
 
         let mut search_results = Vec::new();
         for row in results {
@@ -248,7 +248,7 @@ impl SearchService {
             .limit(50)
             .all(db)
             .await
-            .context("简单搜索失败")?;
+            .map_err(|e| MailError::Storage(StorageError::Database(format!("简单搜索失败: {}", e))))?;
 
         Ok(results)
     }

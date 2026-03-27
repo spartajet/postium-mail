@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 
 use crate::auth::http::callback_handler::{OAuthCallbackHandler, url_decode};
 use crate::command::{AuthManagerState, DatabaseState, KeyringState, OAuthSessionManagerState};
+use crate::error::Result;
 use crate::storage;
 
 /// OAuth 流程完成事件
@@ -56,7 +57,7 @@ impl OAuthHttpServer {
     }
 
     /// 启动服务器
-    pub async fn start(&self) -> Result<(), anyhow::Error> {
+    pub async fn start(&self) -> Result<()> {
         let mut running = self.running.lock().await;
         if *running {
             return Ok(());
@@ -66,7 +67,9 @@ impl OAuthHttpServer {
 
         // 绑定地址 (仅本地)
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|e| crate::error::MailError::Internal(format!("绑定端口 {} 失败: {}", self.port, e)))?;
         tracing::info!("OAuth HTTP 服务器启动: http://{}", addr);
 
         let app_handle = self.app_handle.clone();
@@ -152,7 +155,7 @@ impl OAuthHttpServer {
 async fn handle_request(
     req: Request<Incoming>,
     app_handle: tauri::AppHandle,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> std::result::Result<Response<Full<Bytes>>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path = uri.path();
@@ -199,13 +202,17 @@ async fn handle_request(
     tracing::info!("Error Description: {:?}", error_description);
     tracing::info!("=====================================");
 
-    handle_oauth_http_callback(
+    // 处理 OAuth 回调（失败不影响 HTTP 响应）
+    if let Err(e) = handle_oauth_http_callback(
         &app_handle,
         &code,
         &state,
         error.as_deref(),
         error_description.as_deref(),
-    );
+    ) {
+        tracing::error!("处理 OAuth 回调失败: {}", e);
+        // 继续返回响应，让用户看到页面
+    }
 
     // 返回 HTML 响应
     let html = if error.is_some() {
@@ -233,7 +240,7 @@ fn handle_oauth_http_callback(
     state: &str,
     error: Option<&str>,
     error_description: Option<&str>,
-) {
+) -> Result<()> {
     // 显示主窗口并聚焦
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.set_focus();
@@ -319,13 +326,7 @@ fn handle_oauth_http_callback(
         let email = session.email.clone();
 
         match callback_handler
-            .handle_callback(
-                db_state,
-                keyring_state,
-                &email,
-                &code_clone,
-                &state_clone,
-            )
+            .handle_callback(db_state, keyring_state, &email, &code_clone, &state_clone)
             .await
         {
             Ok(account) => {
@@ -368,6 +369,8 @@ fn handle_oauth_http_callback(
             }
         }
     });
+
+    Ok(())
 }
 
 /// OAuth 授权成功页面
@@ -523,4 +526,3 @@ p { opacity: 0.9; }
 </body>
 </html>
     "##;
-

@@ -4,9 +4,3 @@
 
 pub mod full_sync;
 pub mod incremental_sync;
-pub mod preparation;
-
-pub use incremental_sync::IncrementalSyncEngine;
-pub use preparation::{
-    FullSyncPreparation, IncrementalSyncPreparation, SyncMetadata, SyncPreparation,
-};
