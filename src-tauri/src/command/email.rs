@@ -15,8 +15,8 @@
 //! - `page`: 页码，从 0 开始
 //! - `limit`: 每页数量，建议 20-50
 
-use super::DatabaseState;
-use crate::storage::{self, service::email};
+use super::{DatabaseState, ProviderPoolState};
+use crate::storage::{self, service::email, service::AccountRepository};
 
 /// 分页获取邮件列表
 ///
@@ -272,4 +272,76 @@ pub async fn move_email_to_folder(
     email::move_to_folder(&db, email_id, &folder)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 获取文件夹统计信息
+///
+/// 获取指定账号的所有文件夹统计信息，包括邮件数量和未读邮件数量。
+///
+/// # 参数
+/// * `db_state` - 数据库连接状态
+/// * `provider_pool_state` - 服务商池状态
+/// * `account_id` - 账号 ID
+///
+/// # 返回
+/// 成功时返回文件夹统计列表（FolderStat），每项包含：
+/// - `id`: 文件夹 ID（暂未使用，固定为 0）
+/// - `account_id`: 账号 ID
+/// - `name`: 文件夹名称（前端显示名称，如 "inbox"）
+/// - `imap_name`: IMAP 文件夹名称（如 "INBOX"）
+/// - `email_count`: 邮件总数
+/// - `unread_count`: 未读邮件数量
+///
+/// 失败时返回错误信息字符串
+///
+/// # 文件夹列表
+/// 从账号的 provider 配置中获取标准文件夹映射：
+/// - `inbox`: 收件箱
+/// - `sent`: 已发送
+/// - `drafts`: 草稿箱
+/// - `spam`: 垃圾邮件
+/// - `trash`: 废纸篓
+/// - `archive`: 归档
+/// - `starred`: 星标邮件（虚拟文件夹）
+#[tauri::command]
+pub async fn get_folder_stats(
+    db_state: tauri::State<'_, DatabaseState>,
+    provider_pool_state: tauri::State<'_, ProviderPoolState>,
+    account_id: i32,
+) -> Result<Vec<email::FolderStat>, String> {
+    tracing::info!("获取文件夹统计: account_id={}", account_id);
+
+    let db = db_state.clone_conn();
+
+    // 获取账号信息
+    let account = AccountRepository::get_by_id(&db, account_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("获取账号信息失败: {}", e);
+            e.to_string()
+        })?
+        .ok_or_else(|| {
+            let msg = format!("账号 {} 不存在", account_id);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    // 获取服务商配置
+    let provider_pool = provider_pool_state.clone_pool();
+    let provider = provider_pool
+        .find_provider_by_id(&account.provider)
+        .ok_or_else(|| {
+            let msg = format!("未找到服务商: {}", account.provider);
+            tracing::error!("{}", msg);
+            msg
+        })?;
+
+    let folder_mapping = provider.folder_mapping();
+
+    email::get_folder_stats(&db, account_id, &folder_mapping)
+        .await
+        .map_err(|e| {
+            tracing::error!("获取文件夹统计失败: {}", e);
+            e.to_string()
+        })
 }
