@@ -31,6 +31,7 @@ pub struct SyncProgress {
 
 /// 同步阶段
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]  // 序列化为小写：connecting, syncing_emails, completed 等
 pub enum SyncStage {
     Connecting,
     SyncingFolders,
