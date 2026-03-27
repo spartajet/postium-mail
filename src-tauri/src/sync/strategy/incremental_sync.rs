@@ -9,11 +9,11 @@ use sea_orm::DbConn;
 use crate::MailError;
 use crate::error::{Result, StorageError};
 use crate::protocols::imap::{AsyncImapClient, EmailStatusUid};
+use crate::storage::service::aync_state::get_sync_state;
 use crate::storage::service::email::{
     EmailStatus, batch_delete_by_ids, batch_update_email_status, list_status_by_folder,
     save_batch_email_headers,
 };
-use crate::storage::service::folder_aync_state::get_sync_state;
 use crate::sync::SyncResult;
 use crate::sync::strcuts::SyncStrategy;
 

@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::protocols::AsyncImapClient;
-use crate::storage::service::folder_aync_state::get_sync_state;
+use crate::storage::service::aync_state::get_sync_state;
 use crate::sync::strcuts::SyncMode;
 use sea_orm::DbConn;
 
