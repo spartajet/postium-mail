@@ -20,7 +20,7 @@ pub struct FolderSyncState {
     /// UIDNEXT
     pub uidnext: Option<u64>,
     /// 上次同步的最高 UID
-    pub last_sync_uid: Option<i64>,
+    pub last_sync_uid: Option<u32>,
     /// 上次同步时间
     pub last_sync_time: Option<DateTime<Utc>>,
     /// 同步状态
@@ -63,7 +63,7 @@ impl FolderSyncState {
 
     /// 更新同步 UID
     pub fn update_last_sync_uid(&mut self, uid: u32) {
-        self.last_sync_uid = Some(uid as i64);
+        self.last_sync_uid = Some(uid);
         self.last_sync_time = Some(Utc::now());
     }
 }
@@ -167,7 +167,7 @@ impl SyncState {
                 folder: model.folder,
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
-                last_sync_uid: model.last_sync_uid.map(|v| v as i64),
+                last_sync_uid: model.last_sync_uid,
                 last_sync_time: model
                     .synced_at
                     .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)),
@@ -207,7 +207,7 @@ impl SyncState {
             let mut active_model: sync_state::ActiveModel = model.into();
             active_model.uidvalidity = Set(state.uidvalidity.map(|v| v as i64));
             active_model.uidnext = Set(state.uidnext.map(|v| v as i64));
-            active_model.last_sync_uid = Set(state.last_sync_uid.map(|v| v as i32));
+            active_model.last_sync_uid = Set(state.last_sync_uid);
             active_model.synced_at = Set(state.last_sync_time.map(|dt| dt.timestamp()));
             active_model.updated_at = Set(Some(now));
 
@@ -222,7 +222,7 @@ impl SyncState {
                 folder: Set(folder.to_string()),
                 uidvalidity: Set(state.uidvalidity.map(|v| v as i64)),
                 uidnext: Set(state.uidnext.map(|v| v as i64)),
-                last_sync_uid: Set(state.last_sync_uid.map(|v| v as i32)),
+                last_sync_uid: Set(state.last_sync_uid),
                 synced_at: Set(state.last_sync_time.map(|dt| dt.timestamp())),
                 created_at: Set(Some(now)),
                 updated_at: Set(Some(now)),
@@ -256,7 +256,7 @@ impl SyncState {
                 folder: model.folder.clone(),
                 uidvalidity: model.uidvalidity.map(|v| v as u64),
                 uidnext: model.uidnext.map(|v| v as u64),
-                last_sync_uid: model.last_sync_uid.map(|v| v as i64),
+                last_sync_uid: model.last_sync_uid,
                 last_sync_time: model
                     .synced_at
                     .map(|ts| DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)),

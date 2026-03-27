@@ -202,7 +202,10 @@ impl SyncManager {
                     .map_err(|e| MailError::Sync(SyncError::QuotaExceeded))?;
 
             let sync_result = match sync_mode {
-                crate::sync::strcuts::SyncMode::Full { uidvalidity } => {
+                crate::sync::strcuts::SyncMode::Full {
+                    uidvalidity,
+                    folder_nick_name,
+                } => {
                     let sync_result = sync_folder_full(
                         self.db.as_ref(),
                         account_id,
@@ -210,22 +213,33 @@ impl SyncManager {
                         &mut imap_client,
                     )
                     .await?;
+                    tracing::info!(
+                        "全量同步文件夹完成: folder={}, new_emails={}, last_sync_uid={}",
+                        folder_name,
+                        sync_result.new_emails,
+                        sync_result.last_sync_uid
+                    );
                     let state = save_or_update_sync_state(
                         self.db.as_ref(),
                         account_id,
                         folder_name,
                         uidvalidity,
-                        sync_result.last_sync_uid as i32,
+                        sync_result.last_sync_uid,
+                        folder_nick_name,
                     )
                     .await?;
                     tracing::info!(
-                        "全量同步文件夹完成: folder={}, new_emails={}",
+                        "全量同步文件夹完成: folder={}, new_emails={}, last_sync_uid={}",
                         folder_name,
-                        sync_result.new_emails
+                        sync_result.new_emails,
+                        sync_result.last_sync_uid
                     );
                     sync_result
                 }
-                crate::sync::strcuts::SyncMode::Incremental { last_sync_uid } => {
+                crate::sync::strcuts::SyncMode::Incremental {
+                    last_sync_uid,
+                    folder_nick_name,
+                } => {
                     let sync_result = sync_folder_increamental(
                         self.db.as_ref(),
                         account_id,
@@ -238,7 +252,7 @@ impl SyncManager {
                         self.db.as_ref(),
                         account_id,
                         folder_name,
-                        sync_result.last_sync_uid as i32,
+                        sync_result.last_sync_uid,
                     )
                     .await?;
                     tracing::info!(

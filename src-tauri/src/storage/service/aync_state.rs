@@ -208,7 +208,8 @@ pub async fn save_or_update_sync_state(
     account_id: i32,
     folder: &str,
     uidvalidity: u64,
-    last_sync_uid: i32,
+    last_sync_uid: u32,
+    folder_nick_name: String,
 ) -> Result<sync_state::Model> {
     let now = Utc::now().timestamp();
 
@@ -218,11 +219,19 @@ pub async fn save_or_update_sync_state(
         .filter(sync_state::Column::Folder.eq(folder))
         .one(db)
         .await?;
+    tracing::debug!(
+        "保存或更新文件夹同步状态: account_id={}, folder={}, uidvalidity={}, last_sync_uid={}, existing={}",
+        account_id,
+        folder,
+        uidvalidity,
+        last_sync_uid,
+        existing_state.is_some()
+    );
 
     if let Some(existing) = existing_state {
         // 更新现有记录
         let mut active: sync_state::ActiveModel = existing.into();
-        active.uidvalidity = Set(Some(uidvalidity as i64));
+        // active.uidvalidity = Set(Some(uidvalidity as i64));
         active.last_sync_uid = Set(Some(last_sync_uid));
         active.synced_at = Set(Some(now));
         active.updated_at = Set(Some(now));
@@ -247,12 +256,12 @@ pub async fn save_or_update_sync_state(
             id: ActiveValue::NotSet,
             account_id: Set(account_id),
             folder: Set(folder.to_string()),
-            folder_nick_name: Set(None),
             uidvalidity: Set(Some(uidvalidity as i64)),
             last_sync_uid: Set(Some(last_sync_uid)),
             synced_at: Set(Some(now)),
             created_at: Set(Some(now)),
             updated_at: Set(Some(now)),
+            folder_nick_name: Set(Some(folder_nick_name)),
             ..Default::default()
         };
 
@@ -277,7 +286,7 @@ pub async fn update_last_sync_uid(
     db: &DbConn,
     account_id: i32,
     folder: &str,
-    last_sync_uid: i32,
+    last_sync_uid: u32,
 ) -> Result<()> {
     if let Some(existing) = get_sync_state(db, account_id, folder).await? {
         let mut active: sync_state::ActiveModel = existing.into();

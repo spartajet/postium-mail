@@ -92,6 +92,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 rfc2047-decoder = "1"
+utf7-imap = "0.3"
 
 # sqlx = "=0.8.6"
 # sqlx-sqlite = "=0.8.6"

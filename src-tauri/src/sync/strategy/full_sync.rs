@@ -121,6 +121,14 @@ pub async fn sync_folder(
         &0
     };
 
+    tracing::info!(
+        "同步完成: account_id={}, folder={}, new_emails={}, last_sync_uid={}",
+        account_id,
+        folder,
+        uid_len,
+        max_uid
+    );
+
     // 6. 返回同步结果
     Ok(SyncResult {
         strategy_used: SyncStrategy::UidSearch,
