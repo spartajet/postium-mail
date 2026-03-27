@@ -25,10 +25,6 @@ pub async fn determine_sync_mode(
     let server_uidvalidity = metadata.uidvalidity;
     let server_last_uid = metadata.recent;
     tracing::debug!("服务器 UIDVALIDITY: {}", server_uidvalidity);
-    tracing::debug!(
-        "读取本地同步状态: {:?}",
-        get_sync_state(db, account_id, folder).await?
-    );
 
     if let Some(local_state) = get_sync_state(db, account_id, folder).await?
         && let Some(local_uidvalidity) = local_state.uidvalidity
