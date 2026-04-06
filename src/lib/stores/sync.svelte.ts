@@ -37,12 +37,12 @@ class SyncState {
     try {
       const result = await commands.syncAccount(accountId);
       if (result.status === 'error') {
-        this.syncing = false;
         this.error = result.error.message as string;
       }
     } catch (e: unknown) {
-      this.syncing = false;
       this.error = formatError(e);
+    } finally {
+      this.syncing = false;
     }
   }
 
