@@ -1,7 +1,7 @@
-import { getContext, setContext } from 'svelte';
-import { commands } from '$lib/bindings';
-import type { EmailDto, EmailDetail } from '$lib/bindings';
-import { formatError } from '$lib/utils/error.js';
+import { getContext, setContext } from "svelte";
+import { commands } from "$lib/bindings";
+import type { EmailDto, EmailDetail } from "$lib/bindings";
+import { formatError } from "$lib/utils/error.js";
 
 class EmailState {
   emails = $state<EmailDto[]>([]);
@@ -11,20 +11,47 @@ class EmailState {
   page = $state(1);
   limit = $state(50);
   loading = $state(false);
-  currentFolder = $state('INBOX');
+  currentFolder = $state("inbox");
 
   async loadEmails(accountId: number, folder: string, page = 1) {
     this.loading = true;
     this.currentFolder = folder;
     try {
-      const result = await commands.listEmails(accountId, folder, page, this.limit);
-      if (result.status === 'ok') {
+      const result = await commands.listEmails(
+        accountId,
+        folder,
+        page,
+        this.limit,
+      );
+      if (result.status === "ok") {
         this.emails = result.data.emails;
         this.total = result.data.total;
         this.page = result.data.page;
       }
     } catch (e: unknown) {
-      console.error('Failed to load emails:', e);
+      console.error("Failed to load emails:", e);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async loadEmailsByCategory(accountId: number, category: string, page = 1) {
+    this.loading = true;
+    this.currentFolder = category;
+    try {
+      const result = await commands.listEmailsByCategory(
+        accountId,
+        category,
+        page,
+        this.limit,
+      );
+      if (result.status === "ok") {
+        this.emails = result.data.emails;
+        this.total = result.data.total;
+        this.page = result.data.page;
+      }
+    } catch (e: unknown) {
+      console.error("Failed to load emails:", e);
     } finally {
       this.loading = false;
     }
@@ -34,17 +61,17 @@ class EmailState {
     this.selectedEmailId = id;
     try {
       const result = await commands.getEmail(id);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         this.selectedEmail = result.data;
         // 自动标记已读
         if (!this.selectedEmail.is_read) {
           await commands.markAsRead(id, true);
-          const email = this.emails.find(e => e.id === id);
+          const email = this.emails.find((e) => e.id === id);
           if (email) email.is_read = true;
         }
       }
     } catch (e: unknown) {
-      console.error('Failed to load email:', e);
+      console.error("Failed to load email:", e);
     }
   }
 
@@ -56,36 +83,36 @@ class EmailState {
   async toggleStar(emailId: number) {
     try {
       const result = await commands.toggleStar(emailId);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         const newState = result.data;
-        const email = this.emails.find(e => e.id === emailId);
+        const email = this.emails.find((e) => e.id === emailId);
         if (email) email.is_starred = newState;
         if (this.selectedEmail?.id === emailId) {
           this.selectedEmail.is_starred = newState;
         }
       }
     } catch (e: unknown) {
-      console.error('Failed to toggle star:', e);
+      console.error("Failed to toggle star:", e);
     }
   }
 
   async deleteEmails(ids: number[]) {
     try {
       const result = await commands.deleteEmails(ids);
-      if (result.status === 'ok') {
-        this.emails = this.emails.filter(e => !ids.includes(e.id));
+      if (result.status === "ok") {
+        this.emails = this.emails.filter((e) => !ids.includes(e.id));
         if (this.selectedEmailId && ids.includes(this.selectedEmailId)) {
           this.deselectEmail();
         }
         this.total -= ids.length;
       }
     } catch (e: unknown) {
-      console.error('Failed to delete emails:', e);
+      console.error("Failed to delete emails:", e);
     }
   }
 }
 
-const EMAIL_KEY = Symbol('email');
+const EMAIL_KEY = Symbol("email");
 
 export function createEmailState() {
   const state = new EmailState();

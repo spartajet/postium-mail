@@ -55,7 +55,7 @@
         const accountId = accountStore.activeAccountId;
         const folder = emailState.currentFolder;
         if (accountId) {
-            emailState.loadEmails(accountId, folder);
+            emailState.loadEmailsByCategory(accountId, folder);
         }
     });
 
