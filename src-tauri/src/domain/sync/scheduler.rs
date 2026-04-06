@@ -1,23 +1,27 @@
 use crate::domain::auth::AuthManager;
 use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
+use crate::domain::sync::SyncProgressEmitter;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::account_repo;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::AppHandle;
 
 /// 后台定时同步调度器
 pub struct SyncScheduler {
     db: DbConn,
     auth: Arc<AuthManager>,
+    app_handle: Option<AppHandle>,
     interval_minutes: u64,
     running: Arc<AtomicBool>,
 }
 
 impl SyncScheduler {
-    pub fn new(db: DbConn, auth: Arc<AuthManager>) -> Self {
+    pub fn new(db: DbConn, auth: Arc<AuthManager>, app_handle: Option<AppHandle>) -> Self {
         Self {
             db,
             auth,
+            app_handle,
             interval_minutes: 5,
             running: Arc::new(AtomicBool::new(false)),
         }
@@ -37,6 +41,7 @@ impl SyncScheduler {
 
         let db = self.db.clone();
         let auth = self.auth.clone();
+        let app_handle = self.app_handle.clone();
         let interval = self.interval_minutes;
         let running = self.running.clone();
 
@@ -60,7 +65,10 @@ impl SyncScheduler {
                     }
                 };
 
-                let orchestrator = SyncOrchestrator::new(db.clone(), auth.clone());
+                let mut orchestrator = SyncOrchestrator::new(db.clone(), auth.clone());
+                if let Some(ref ah) = app_handle {
+                    orchestrator = orchestrator.with_emitter(SyncProgressEmitter::new(ah.clone()));
+                }
 
                 for account in &accounts {
                     if !running.load(Ordering::Relaxed) {
