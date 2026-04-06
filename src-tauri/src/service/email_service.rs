@@ -1,6 +1,7 @@
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
 use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
+use crate::infrastructure::storage::entities::emails;
 use crate::infrastructure::storage::{DbConn, search};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -75,23 +76,64 @@ impl EmailService {
         let (emails, total) =
             email_repo::list_by_folder(&self.db, account_id, folder, page, limit).await?;
         Ok(EmailListResponse {
-            emails: emails
-                .into_iter()
-                .map(|e| EmailDto {
-                    id: e.id,
-                    account_id: e.account_id,
-                    folder: e.folder,
-                    uid: e.uid,
-                    subject: e.subject,
-                    sender_name: e.sender_name,
-                    sender_email: e.sender_email,
-                    preview: e.preview,
-                    is_read: e.is_read.unwrap_or(false),
-                    is_starred: e.is_starred.unwrap_or(false),
-                    sent_at: e.sent_at,
-                    has_attachments: false,
-                })
-                .collect(),
+            emails: convert_models(emails),
+            total,
+            page,
+            limit,
+        })
+    }
+
+    /// 按分类加载邮件（使用 provider 的 StandardFolder 映射解析实际 IMAP 文件夹）
+    ///
+    /// category 值域: "inbox", "starred", "sent", "drafts", "spam", "trash", "archive"
+    pub async fn list_by_category(
+        &self,
+        account_id: i32,
+        category: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<EmailListResponse, MailError> {
+        if category == "starred" {
+            let (emails, total) =
+                email_repo::list_starred(&self.db, account_id, page, limit).await?;
+            return Ok(EmailListResponse {
+                emails: convert_models(emails),
+                total,
+                page,
+                limit,
+            });
+        }
+
+        // 从 provider 获取文件夹映射
+        let account = account_repo::get_by_id(&self.db, account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(account_id))?;
+
+        let provider_pool = PROVIDER_POOL
+            .get()
+            .ok_or(MailError::ProviderNotSupported("未找到provider pool".into()))?
+            .clone();
+
+        let provider = provider_pool
+            .get(&account.provider)
+            .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
+
+        let folder_mapping = provider.folder_mapping();
+        let folders = resolve_category_folders(category, &folder_mapping);
+
+        if folders.is_empty() {
+            return Ok(EmailListResponse {
+                emails: vec![],
+                total: 0,
+                page,
+                limit,
+            });
+        }
+
+        let (emails, total) =
+            email_repo::list_by_folders(&self.db, account_id, &folders, page, limit).await?;
+        Ok(EmailListResponse {
+            emails: convert_models(emails),
             total,
             page,
             limit,
@@ -245,4 +287,38 @@ impl EmailService {
 
         Ok(deleted_count)
     }
+}
+
+/// 将 category 标识符解析为实际 IMAP 文件夹列表
+fn resolve_category_folders(category: &str, mapping: &crate::domain::providers::StandardFolder) -> Vec<String> {
+    match category {
+        "inbox" => mapping.inbox.clone(),
+        "sent" => mapping.sent.clone(),
+        "drafts" => mapping.drafts.clone(),
+        "spam" => mapping.spam.clone(),
+        "trash" => mapping.trash.clone(),
+        "archive" => mapping.archive.clone(),
+        _ => vec![],
+    }
+}
+
+/// 内部辅助：将 DB 模型转换为 DTO
+fn convert_models(emails: Vec<emails::Model>) -> Vec<EmailDto> {
+    emails
+        .into_iter()
+        .map(|e| EmailDto {
+            id: e.id,
+            account_id: e.account_id,
+            folder: e.folder,
+            uid: e.uid,
+            subject: e.subject,
+            sender_name: e.sender_name,
+            sender_email: e.sender_email,
+            preview: e.preview,
+            is_read: e.is_read.unwrap_or(false),
+            is_starred: e.is_starred.unwrap_or(false),
+            sent_at: e.sent_at,
+            has_attachments: false,
+        })
+        .collect()
 }

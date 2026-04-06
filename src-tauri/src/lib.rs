@@ -24,6 +24,7 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::account::update_account,
             command::account::delete_account,
             command::email::list_emails,
+            command::email::list_emails_by_category,
             command::email::get_email,
             command::email::search_emails,
             command::email::mark_as_read,

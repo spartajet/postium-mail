@@ -35,6 +35,55 @@ pub async fn list_by_folder(
     Ok((items, total))
 }
 
+/// 按多个文件夹查询邮件（用于 category → 多文件夹映射）
+pub async fn list_by_folders(
+    db: &DbConn,
+    account_id: i32,
+    folders: &[String],
+    page: usize,
+    limit: usize,
+) -> Result<(Vec<emails::Model>, u64), MailError> {
+    let query = emails::Entity::find()
+        .filter(emails::Column::AccountId.eq(account_id))
+        .filter(emails::Column::Folder.is_in(folders))
+        .filter(emails::Column::IsDeleted.eq(false));
+
+    let total = query.clone().count(db).await?;
+
+    let items = query
+        .order_by_desc(emails::Column::SentAt)
+        .offset(Some((page.saturating_sub(1).saturating_mul(limit)) as u64))
+        .limit(Some(limit as u64))
+        .all(db)
+        .await?;
+
+    Ok((items, total))
+}
+
+/// 查询星标邮件（跨所有文件夹）
+pub async fn list_starred(
+    db: &DbConn,
+    account_id: i32,
+    page: usize,
+    limit: usize,
+) -> Result<(Vec<emails::Model>, u64), MailError> {
+    let query = emails::Entity::find()
+        .filter(emails::Column::AccountId.eq(account_id))
+        .filter(emails::Column::IsStarred.eq(true))
+        .filter(emails::Column::IsDeleted.eq(false));
+
+    let total = query.clone().count(db).await?;
+
+    let items = query
+        .order_by_desc(emails::Column::SentAt)
+        .offset(Some((page.saturating_sub(1).saturating_mul(limit)) as u64))
+        .limit(Some(limit as u64))
+        .all(db)
+        .await?;
+
+    Ok((items, total))
+}
+
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<emails::Model>, MailError> {
     Ok(emails::Entity::find_by_id(id).one(db).await?)
 }

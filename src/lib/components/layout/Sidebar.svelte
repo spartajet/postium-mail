@@ -45,11 +45,11 @@
 
     function selectFolder(folderId: string) {
         activeFolder = folderId;
-        emailStore.currentFolder = folderId.toUpperCase();
+        emailStore.currentFolder = folderId;
         if (accountStore.activeAccountId) {
-            emailStore.loadEmails(
+            emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
-                folderId.toUpperCase(),
+                folderId,
             );
         }
         goto("/");
@@ -58,7 +58,7 @@
     async function handleSync() {
         if (accountStore.activeAccountId) {
             await syncStore.syncAccount(accountStore.activeAccountId);
-            await emailStore.loadEmails(
+            await emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
                 emailStore.currentFolder,
             );
