@@ -16,6 +16,7 @@ pub struct SyncProgressEvent {
 }
 
 /// 同步进度发射器 — 独立于 SyncOrchestrator
+#[derive(Clone)]
 pub struct SyncProgressEmitter {
     app_handle: AppHandle,
 }
@@ -27,7 +28,7 @@ impl SyncProgressEmitter {
 
     pub fn emit(&self, progress: SyncProgress) {
         let event = SyncProgressEvent { progress };
-        let _ = self.app_handle.emit("sync-progress", &event);
+        let _ = self.app_handle.emit("sync-progress-event", &event);
     }
 }
 

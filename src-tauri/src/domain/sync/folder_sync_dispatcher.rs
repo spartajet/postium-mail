@@ -2,7 +2,7 @@ use crate::domain::auth::AuthManager;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::folder_sync_full::sync_folder_full;
 use crate::domain::sync::folder_sync_increment::sync_folder_incremental;
-use crate::domain::sync::{SyncMode, SyncResult};
+use crate::domain::sync::{SyncMode, SyncProgress, SyncProgressEmitter, SyncResult, SyncStage};
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::database::DbConn;
@@ -13,11 +13,21 @@ use std::sync::Arc;
 pub struct SyncOrchestrator {
     db: DbConn,
     auth: Arc<AuthManager>,
+    emitter: Option<SyncProgressEmitter>,
 }
 
 impl SyncOrchestrator {
     pub fn new(db: DbConn, auth: Arc<AuthManager>) -> Self {
-        Self { db, auth }
+        Self {
+            db,
+            auth,
+            emitter: None,
+        }
+    }
+
+    pub fn with_emitter(mut self, emitter: SyncProgressEmitter) -> Self {
+        self.emitter = Some(emitter);
+        self
     }
 
     /// 同步账号的所有文件夹
@@ -77,10 +87,31 @@ impl SyncOrchestrator {
         );
 
         // 5. 同步每个文件夹
+        let total_folders = sync_folders.len();
+        if let Some(ref emitter) = self.emitter {
+            emitter.emit(SyncProgress {
+                account_id,
+                stage: SyncStage::SyncingFolders,
+                folder: None,
+                current: 0,
+                total: total_folders,
+                message: format!("发现 {} 个文件夹需要同步", total_folders),
+            });
+        }
 
         let mut sync_results = Vec::new();
 
-        for folder in &sync_folders {
+        for (idx, folder) in sync_folders.iter().enumerate() {
+            if let Some(ref emitter) = self.emitter {
+                emitter.emit(SyncProgress {
+                    account_id,
+                    stage: SyncStage::SyncingEmails,
+                    folder: Some(folder.clone()),
+                    current: idx + 1,
+                    total: total_folders,
+                    message: format!("正在同步文件夹 {} ({}/{})", folder, idx + 1, total_folders),
+                });
+            }
             tracing::debug!(account_id, folder = %folder, "开始同步文件夹");
             let sync_mode = self
                 .determine_sync_mode(account_id, folder, &mut client)
@@ -138,104 +169,6 @@ impl SyncOrchestrator {
 
         Ok(total_sync_result)
     }
-
-    // /// 同步单个文件夹
-    // async fn sync_folder(
-    //     &self,
-    //     client: &mut ImapClient,
-    //     account_id: i32,
-    //     folder: &str,
-    // ) -> Result<(usize, usize), MailError> {
-    //     let mailbox = match client.select_folder(folder).await {
-    //         Ok(m) => m,
-    //         Err(e) => {
-    //             tracing::debug!("跳过不可选文件夹 '{folder}': {e}");
-    //             return Ok((0, 0));
-    //         }
-    //     };
-
-    //     if mailbox.exists == 0 {
-    //         sync_repo::upsert_sync_state(
-    //             &self.db,
-    //             account_id,
-    //             folder,
-    //             mailbox.uid_next,
-    //             mailbox.uid_validity,
-    //         )
-    //         .await?;
-    //         return Ok((0, 0));
-    //     }
-
-    //     // 获取上次同步的 uidnext，从该点开始增量获取
-    //     let prev_uidnext: u32 = sync_repo::get_sync_state(&self.db, account_id, folder)
-    //         .await?
-    //         .and_then(|s| s.uidnext)
-    //         .unwrap_or(0);
-
-    //     // 如果有上次的 uidnext，从它开始；否则获取全部
-    //     let start_uid = if prev_uidnext > 0 { prev_uidnext } else { 0 };
-    //     let headers = client.fetch_uids(start_uid, 0).await?;
-
-    //     let mut new_count = 0usize;
-    //     let mut updated_count = 0usize;
-
-    //     for header in &headers {
-    //         let uid = header.uid;
-    //         if uid == 0 {
-    //             continue;
-    //         }
-
-    //         // 检查是否已存在
-    //         if email_repo::get_by_uid(&self.db, account_id, folder, uid)
-    //             .await?
-    //             .is_some()
-    //         {
-    //             updated_count += 1;
-    //             continue;
-    //         }
-
-    //         // 新邮件 — 获取完整内容并解析
-    //         match client.fetch_body(uid).await {
-    //             Ok(Some(body_bytes)) => {
-    //                 let model =
-    //                     build_email_model(account_id, folder, uid, header, Some(&body_bytes));
-    //                 email_repo::bulk_insert(&self.db, vec![model]).await?;
-    //                 new_count += 1;
-    //             }
-    //             Ok(None) => {
-    //                 // 无 body，只存 header
-    //                 let model = build_email_model(account_id, folder, uid, header, None);
-    //                 email_repo::bulk_insert(&self.db, vec![model]).await?;
-    //                 new_count += 1;
-    //             }
-    //             Err(e) => {
-    //                 sync_repo::log_error(
-    //                     &self.db,
-    //                     account_id,
-    //                     Some(folder.to_string()),
-    //                     "fetch_body",
-    //                     &e.to_string(),
-    //                     Some(uid),
-    //                 )
-    //                 .await
-    //                 .ok();
-    //                 tracing::warn!("获取邮件体 UID={uid} 失败: {e}");
-    //             }
-    //         }
-    //     }
-
-    //     // 更新 sync_state
-    //     sync_repo::upsert_sync_state(
-    //         &self.db,
-    //         account_id,
-    //         folder,
-    //         mailbox.uid_next,
-    //         mailbox.uid_validity,
-    //     )
-    //     .await?;
-
-    //     Ok((new_count, updated_count))
-    // }
 
     pub async fn determine_sync_mode(
         &self,

@@ -126,7 +126,11 @@ pub fn run() {
             builder.mount_events(app);
 
             // 启动后台同步调度器（每5分钟同步一次）
-            let mut scheduler = domain::sync::SyncScheduler::new(scheduler_db, scheduler_auth);
+            let mut scheduler = domain::sync::SyncScheduler::new(
+                scheduler_db,
+                scheduler_auth,
+                Some(app.handle().clone()),
+            );
             scheduler.start();
             app.manage(scheduler);
 

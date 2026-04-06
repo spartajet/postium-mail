@@ -36,16 +36,8 @@ impl SyncService {
             message: "正在连接...".into(),
         });
 
-        let orchestrator = SyncOrchestrator::new(self.db.clone(), self.auth.clone());
-
-        emitter.emit(SyncProgress {
-            account_id,
-            stage: SyncStage::SyncingFolders,
-            folder: None,
-            current: 0,
-            total: 0,
-            message: "正在同步文件夹...".into(),
-        });
+        let orchestrator = SyncOrchestrator::new(self.db.clone(), self.auth.clone())
+            .with_emitter(emitter.clone());
 
         match orchestrator.sync_account(account_id).await {
             Ok(result) => {
