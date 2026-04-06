@@ -1,27 +1,26 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "postium-mail",
-  "version": "0.1.0",
-  "identifier": "com.spartajet.postium-mail",
+  "version": "0.2.0",
+  "identifier": "com.guo.postium-mail",
   "build": {
-    "beforeDevCommand": "yarn dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "yarn build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../build"
   },
   "app": {
     "windows": [
       {
-        "title": "postium-mail",
+        "title": "Postium Mail",
         "width": 1600,
         "height": 1000,
         "decorations": false
       }
     ],
     "security": {
-      "csp": null
-    },
-    "withGlobalTauri": true
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https:; frame-src 'none';"
+    }
   },
   "bundle": {
     "active": true,
@@ -33,12 +32,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["com.spartajet.postium-mail"]
-      }
-    }
   }
 }
