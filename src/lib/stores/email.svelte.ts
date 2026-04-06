@@ -1,6 +1,6 @@
 import { getContext, setContext } from "svelte";
 import { commands } from "$lib/bindings";
-import type { EmailDto, EmailDetail } from "$lib/bindings";
+import type { EmailDto, EmailDetail, EmailCategory } from "$lib/bindings";
 import { formatError } from "$lib/utils/error.js";
 
 class EmailState {
@@ -11,11 +11,11 @@ class EmailState {
   page = $state(1);
   limit = $state(50);
   loading = $state(false);
-  currentFolder = $state("inbox");
+  currentFolder = $state<EmailCategory>("inbox");
 
   async loadEmails(accountId: number, folder: string, page = 1) {
     this.loading = true;
-    this.currentFolder = folder;
+    this.currentFolder = "inbox";
     try {
       const result = await commands.listEmails(
         accountId,
@@ -35,7 +35,11 @@ class EmailState {
     }
   }
 
-  async loadEmailsByCategory(accountId: number, category: string, page = 1) {
+  async loadEmailsByCategory(
+    accountId: number,
+    category: EmailCategory,
+    page = 1,
+  ) {
     this.loading = true;
     this.currentFolder = category;
     try {
