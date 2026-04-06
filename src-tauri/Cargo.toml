@@ -1,9 +1,8 @@
 [package]
 name = "postium-mail"
-version = "0.1.0"
-description = "A Tauri App"
-
+version = "0.2.0"
 edition = "2024"
+description = "A Tauri App"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,99 +13,73 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "postium_mail_lib"
 
-# 集成测试
-[[test]]
-harness = true
-name = "integration"
-path = "tests/integration/main.rs"
-
-# 服务商测试
-[[test]]
-harness = true
-name = "provider"
-path = "tests/provider/main.rs"
-
 [dependencies]
-# 邮件协议
-# imap = { version = "3.0.0-alpha.15" }  # 已弃用，改用 async-imap
-async-imap = { version = "0.11", default-features = false, features = [
-  "runtime-tokio"
-] }
-async-native-tls = "0.6"
-# 异步 trait 支持
-async-trait = "0.1"
-base64 = "0.22"
-# 时间处理
-chrono = "0.4"
-curl = "0.4"
-# 文件系统
-dirs = "6"
-# 环境变量
-dotenv = "0.15"
-encoding_rs = "0.8"  # 用于处理各种字符编码（GBK, GB2312等）
-futures = "0.3"
-getrandom = "0.4"
-hex = "0.4"
-http-body-util = "0.1"
-# HTTP 服务器 (用于 OAuth 回调)
-hyper = { version = "1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-itertools = "0.14"
-lettre = "0.11"
-mail-parser = "0.11"
-migration = { path = "../migration" }
-native-tls = "0.2"  # 保留用于旧的 imap_service.rs
-# OAuth 2.0 相关（最新版本）
-oauth2 = { version = "5", features = ["curl", "reqwest"] }
-# 全局静态变量
-once_cell = "1"
-# 随机数生成（用于重试抖动）
-rand = "0.8"
-# 正则表达式（用于解析RFC 2047编码）
-regex = "1"
-reqwest = { version = "0.13", features = ["form", "json"] }
-# 数据库相关
-sea-orm = { version = "2.0.0-rc.37", features = [
+# Tauri
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-keyring = "0.1"
+tauri-plugin-opener = "2"
+tauri-plugin-mcp-bridge = "0.10"
+
+# Specta (类型绑定)
+specta = { version = "=2.0.0-rc.24", features = ["chrono"] }
+specta-typescript = "0.0.11"
+tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
+
+postium-mail-migration = { path = "migration" }
+# Database
+sea-orm = { version = "2.0.0-rc.35", features = [
   "macros",
   "runtime-tokio-rustls",
   "sqlx-sqlite"
 ] }
-sea-orm-migration = "2.0.0-rc.37"
+sea-orm-migration = "2.0.0-rc.35"
+
+# Email Protocols
+async-imap = { version = "0.11", default-features = false, features = [
+  "runtime-tokio"
+] }
+# async-native-tls = "0.6"
+lettre = { version = "0.11", features = ["tokio1-native-tls"] }
+mail-parser = "0.11"
+
+# OAuth
+oauth2 = { version = "5", features = ["reqwest"] }
+
+async-trait = "0.1"
+futures = "0.3"
+# Async
+tokio = { version = "1", features = ["full"] }
+tokio-native-tls = "0.3"
+tokio-util = { version = "0.7", features = ["compat"] }
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# SHA-256 哈希（用于 PKCE）
-sha2 = "0.10"
-tauri = { version = "2", features = ["tray-icon"] }
-# Keyring 安全存储（系统原生密钥链）
-tauri-plugin-keyring = "0.1"
-tauri-plugin-opener = "2"
-tauri-plugin-positioner = "2"
-tauri-plugin-single-instance = "2"
+
+base64 = "0.22"
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+keyring = "3"
+regex = "1"
+reqwest = { version = "0.12", features = ["json"] }
 thiserror = "2"
-# 异步运行时
-tokio = { version = "1", features = ["full"] }
-tokio-native-tls = "0.3"  # Tokio TLS 支持
-tokio-util = { version = "0.7", features = ["compat"] }
-# 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
-rfc2047-decoder = "1"
+uuid = { version = "1", features = ["v4"] }
 utf7-imap = "0.3"
-
-# sqlx = "=0.8.6"
-# sqlx-sqlite = "=0.8.6"
-# sqlite-jieba-tokenizer = "=0.5.0"
-# libsqlite3-sys = "0.37.0"
-
-[dev-dependencies]
-# 全局测试设置
-ctor = "0.2"  # 用于在所有测试前初始化 tracing
+rfc2047-decoder = "1"
 
 [build-dependencies]
-anyhow = "1"
-dotenvy = "0.15"
 tauri-build = { version = "2", features = [] }
+dotenvy = "0.15"
 
-[patch.ustc]
-# libsqlite3-sys = {git="https://github.com/rusqlite/rusqlite", tag="v0.30.1"}
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-positioner = "2"

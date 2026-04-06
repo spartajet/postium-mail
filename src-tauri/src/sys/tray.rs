@@ -1,50 +1,25 @@
-//! 系统托盘模块
-//!
-//! 管理应用程序的系统托盘图标和菜单
+use tauri::{
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::TrayIconBuilder,
+    App, Emitter, Manager,
+};
 
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, Runtime};
+pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
+    let new_email_item = MenuItemBuilder::with_id("new_email", "写邮件").build(app)?;
+    let sync_item = MenuItemBuilder::with_id("sync", "同步").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
 
-/// 初始化系统托盘
-///
-/// # 参数
-///
-/// * `app` - Tauri 应用实例
-///
-/// # 返回
-///
-/// 成功返回 Ok(())
-pub fn init_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
-    // 创建菜单项
-    let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &new_email_item, &sync_item, &quit_item])
+        .build()?;
 
-    // 创建菜单
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-
-    // 创建系统托盘
-    let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+    let _tray = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.unminimize();
-                }
-            }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
-        })
+        .icon(app.default_window_icon().unwrap().clone())
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
-                button_state: tauri::tray::MouseButtonState::Up,
                 ..
             } = event
             {
@@ -52,40 +27,31 @@ pub fn init_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), Box<dyn st
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    let _ = window.unminimize();
                 }
+            }
+        })
+        .on_menu_event(move |app, event| {
+            tracing::debug!("托盘菜单事件: {}", event.id().as_ref());
+            match event.id().as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "new_email" => {
+                let _ = app.emit("tray-action", "compose");
+            }
+            "sync" => {
+                let _ = app.emit("tray-action", "sync");
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
             }
         })
         .build(app)?;
 
-    tracing::info!("系统托盘初始化完成");
-    setup_window_close_behavior(app);
-
     Ok(())
-}
-
-/// 设置窗口关闭事件处理
-///
-/// 当用户点击关闭按钮时，隐藏窗口而不是退出应用
-///
-/// # 参数
-///
-/// * `app` - Tauri 应用实例
-pub fn setup_window_close_behavior<R: Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let window_clone = window.clone();
-        window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window_clone.hide();
-                tracing::info!("窗口已隐藏到系统托盘");
-            }
-        });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // 托盘功能需要在实际应用中测试
-    // 这里只放置单元测试占位
 }

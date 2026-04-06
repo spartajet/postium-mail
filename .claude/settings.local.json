@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__mcp-server-context7__resolve-library-id",
+      "mcp__mcp-server-context7__query-docs",
+      "WebSearch",
+      "Bash(bun add:*)",
+      "Bash(npx shadcn-svelte@next init --defaults)",
+      "Bash(npx shadcn-svelte@next init)",
+      "Bash(npx shadcn-svelte@next init --yes)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(npx svelte-check:*)",
+      "Read(//d/Rust/nir-controller/nir-app/.claude/**)",
+      "Read(//d/Xuan/postium-mail/$HOME/.claude/**)",
+      "Read(//d/Xuan/postium-mail/$HOME/**)"
+    ]
+  }
+}
