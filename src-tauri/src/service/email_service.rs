@@ -1,4 +1,5 @@
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
+use crate::domain::providers::StandardFolder;
 use crate::error::MailError;
 use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
 use crate::infrastructure::storage::entities::emails;
@@ -6,6 +7,39 @@ use crate::infrastructure::storage::{DbConn, search};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
+
+// ─── 枚举 ───
+
+/// 邮件分类（前端侧边栏导航使用）
+///
+/// 每个变体对应 provider 的 `StandardFolder` 中的一组 IMAP 文件夹，
+/// `Starred` 例外 —— 它查询 `is_starred = true`（跨文件夹）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EmailCategory {
+    Inbox,
+    Starred,
+    Sent,
+    Drafts,
+    Spam,
+    Trash,
+    Archive,
+}
+
+impl EmailCategory {
+    /// 将分类解析为实际 IMAP 文件夹列表（Starred 返回空 vec，需单独处理）
+    pub fn resolve_folders(&self, mapping: &StandardFolder) -> Vec<String> {
+        match self {
+            Self::Inbox => mapping.inbox.clone(),
+            Self::Sent => mapping.sent.clone(),
+            Self::Drafts => mapping.drafts.clone(),
+            Self::Spam => mapping.spam.clone(),
+            Self::Trash => mapping.trash.clone(),
+            Self::Archive => mapping.archive.clone(),
+            Self::Starred => vec![],
+        }
+    }
+}
 
 // ─── DTO ───
 
@@ -84,16 +118,15 @@ impl EmailService {
     }
 
     /// 按分类加载邮件（使用 provider 的 StandardFolder 映射解析实际 IMAP 文件夹）
-    ///
-    /// category 值域: "inbox", "starred", "sent", "drafts", "spam", "trash", "archive"
     pub async fn list_by_category(
         &self,
         account_id: i32,
-        category: &str,
+        category: EmailCategory,
         page: usize,
         limit: usize,
     ) -> Result<EmailListResponse, MailError> {
-        if category == "starred" {
+        // Starred 是跨文件夹查询 is_starred 标记
+        if category == EmailCategory::Starred {
             let (emails, total) =
                 email_repo::list_starred(&self.db, account_id, page, limit).await?;
             return Ok(EmailListResponse {
@@ -119,7 +152,7 @@ impl EmailService {
             .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
 
         let folder_mapping = provider.folder_mapping();
-        let folders = resolve_category_folders(category, &folder_mapping);
+        let folders = category.resolve_folders(&folder_mapping);
 
         if folders.is_empty() {
             return Ok(EmailListResponse {
@@ -286,19 +319,6 @@ impl EmailService {
         );
 
         Ok(deleted_count)
-    }
-}
-
-/// 将 category 标识符解析为实际 IMAP 文件夹列表
-fn resolve_category_folders(category: &str, mapping: &crate::domain::providers::StandardFolder) -> Vec<String> {
-    match category {
-        "inbox" => mapping.inbox.clone(),
-        "sent" => mapping.sent.clone(),
-        "drafts" => mapping.drafts.clone(),
-        "spam" => mapping.spam.clone(),
-        "trash" => mapping.trash.clone(),
-        "archive" => mapping.archive.clone(),
-        _ => vec![],
     }
 }
 

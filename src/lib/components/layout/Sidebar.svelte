@@ -3,6 +3,7 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     import { getAccountState } from "$lib/stores/account.svelte";
     import { getEmailState } from "$lib/stores/email.svelte";
+    import type { EmailCategory } from "$lib/bindings";
     import { getSyncState } from "$lib/stores/sync.svelte";
     import type ComposeModal from "$lib/components/email/ComposeModal.svelte";
     import type AddAccountModal from "$lib/components/settings/AddAccountModal.svelte";
@@ -43,7 +44,7 @@
         accountStore.loadAccounts();
     });
 
-    function selectFolder(folderId: string) {
+    function selectFolder(folderId: EmailCategory) {
         activeFolder = folderId;
         emailStore.currentFolder = folderId;
         if (accountStore.activeAccountId) {
@@ -66,12 +67,12 @@
     }
 
     const folders = $derived([
-        { id: "inbox", label: t.sidebar.inbox, icon: Inbox },
-        { id: "starred", label: t.sidebar.starred, icon: Star },
-        { id: "sent", label: t.sidebar.sent, icon: Send },
-        { id: "drafts", label: t.sidebar.drafts, icon: FileText },
-        { id: "spam", label: t.sidebar.spam, icon: AlertCircle },
-        { id: "trash", label: t.sidebar.trash, icon: Trash2 },
+        { id: "inbox" as EmailCategory, label: t.sidebar.inbox, icon: Inbox },
+        { id: "starred" as EmailCategory, label: t.sidebar.starred, icon: Star },
+        { id: "sent" as EmailCategory, label: t.sidebar.sent, icon: Send },
+        { id: "drafts" as EmailCategory, label: t.sidebar.drafts, icon: FileText },
+        { id: "spam" as EmailCategory, label: t.sidebar.spam, icon: AlertCircle },
+        { id: "trash" as EmailCategory, label: t.sidebar.trash, icon: Trash2 },
     ]);
 
     const labels = $derived([

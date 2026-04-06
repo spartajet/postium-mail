@@ -11,12 +11,8 @@ export const commands = {
 	updateAccount: (request: UpdateAccountRequest) => typedError<AccountDto, MailError>(__TAURI_INVOKE("update_account", { request })),
 	deleteAccount: (id: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_account", { id })),
 	listEmails: (accountId: number, folder: string, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails", { accountId, folder, page, limit })),
-	/**
-	 *  按分类加载邮件列表
-	 * 
-	 *  category 值域: "inbox", "starred", "sent", "drafts", "spam", "trash", "archive"
-	 */
-	listEmailsByCategory: (accountId: number, category: string, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit })),
+	// 按分类加载邮件列表
+	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit })),
 	getEmail: (id: number) => typedError<EmailDetail, MailError>(__TAURI_INVOKE("get_email", { id })),
 	searchEmails: (query: string, accountId: number | null, limit: number | null) => typedError<SearchResult[], MailError>(__TAURI_INVOKE("search_emails", { query, accountId, limit })),
 	markAsRead: (emailId: number, isRead: boolean) => typedError<null, MailError>(__TAURI_INVOKE("mark_as_read", { emailId, isRead })),
@@ -87,6 +83,14 @@ export type CreateLabelRequest = {
 	name: string,
 	color: string,
 };
+
+/**
+ *  邮件分类（前端侧边栏导航使用）
+ * 
+ *  每个变体对应 provider 的 `StandardFolder` 中的一组 IMAP 文件夹，
+ *  `Starred` 例外 —— 它查询 `is_starred = true`（跨文件夹）。
+ */
+export type EmailCategory = "inbox" | "starred" | "sent" | "drafts" | "spam" | "trash" | "archive";
 
 export type EmailDetail = {
 	recipient_emails: string,
