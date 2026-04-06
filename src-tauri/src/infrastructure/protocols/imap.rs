@@ -243,13 +243,13 @@ impl ImapClient {
         folder: &str,
         uid_since: u32,
     ) -> Result<Vec<u32>, MailError> {
-        tracing::info!("📤 使用 IMAP 搜索命令: 'UID {}:*'", uid_since);
+        // tracing::info!("📤 使用 IMAP 搜索命令: 'UID {}:*'", uid_since);
         // SELECT 文件夹（返回 Result<Mailbox>）
         self.session
             .select(folder)
             .await
             .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
-        let search_cmd = format!("UID {}:*", uid_since);
+        let search_cmd = format!("UID {}:{}", uid_since, uid_since + 100);
         tracing::info!("📤 使用 IMAP 搜索命令: '{}'", search_cmd);
 
         let uids = self
