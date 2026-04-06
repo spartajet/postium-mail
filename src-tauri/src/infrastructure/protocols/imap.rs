@@ -132,7 +132,7 @@ impl ImapClient {
             user: email.to_string(),
             access_token: access_token.to_string(),
         };
-        tracing::debug!("IMAP: XOAUTH2 认证中: {:?}", authenticator);
+        // tracing::debug!("IMAP: XOAUTH2 认证中: {:?}", authenticator);
         // let base64_string = authenticator.generate_xoauth2_string(email, access_token);
         // tracing::info!(base64_string, "Base64 字符串已经生成");
         let session = client
