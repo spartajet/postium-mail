@@ -4,6 +4,7 @@
     import { getAccountState } from "$lib/stores/account.svelte";
     import { commands } from "$lib/bindings";
     import type { SearchResult } from "$lib/bindings";
+    import EmailContextMenu from "./EmailContextMenu.svelte";
     import {
         Search,
         RefreshCw,
@@ -22,6 +23,32 @@
     let searchQuery = $state("");
     let searchResults = $state<SearchResult[] | null>(null);
     let searching = $state(false);
+
+    // 右键菜单状态
+    let contextMenu = $state<{
+        visible: boolean;
+        x: number;
+        y: number;
+        emailId: number;
+        isRead: boolean;
+        isStarred: boolean;
+    }>({ visible: false, x: 0, y: 0, emailId: 0, isRead: false, isStarred: false });
+
+    function openContextMenu(e: MouseEvent, email: { id: number; is_read: boolean; is_starred: boolean }) {
+        e.preventDefault();
+        contextMenu = {
+            visible: true,
+            x: e.clientX,
+            y: e.clientY,
+            emailId: email.id,
+            isRead: email.is_read ?? false,
+            isStarred: email.is_starred ?? false,
+        };
+    }
+
+    function closeContextMenu() {
+        contextMenu.visible = false;
+    }
 
     // 自动加载邮件：当活跃账号或文件夹变化时触发
     $effect(() => {
@@ -164,6 +191,7 @@
                             ? 'active'
                             : ''}"
                         onclick={() => emailState.selectEmail(result.id)}
+                        oncontextmenu={(e) => openContextMenu(e, { id: result.id, is_read: true, is_starred: false })}
                     >
                         <div class="flex items-center justify-between gap-2">
                             <span
@@ -219,6 +247,7 @@
                         ? 'active'
                         : ''}"
                     onclick={() => emailState.selectEmail(email.id)}
+                    oncontextmenu={(e) => openContextMenu(e, email)}
                 >
                     <!-- Unread dot -->
                     {#if !email.is_read}
@@ -265,6 +294,18 @@
             {/each}
         {/if}
     </div>
+
+    <!-- 右键菜单 -->
+    {#if contextMenu.visible}
+        <EmailContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            emailId={contextMenu.emailId}
+            isRead={contextMenu.isRead}
+            isStarred={contextMenu.isStarred}
+            onClose={closeContextMenu}
+        />
+    {/if}
 </div>
 
 <style>
