@@ -17,8 +17,8 @@ name = "postium_mail_lib"
 # Tauri
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-keyring = "0.1"
+tauri-plugin-mcp-bridge = "0.11.0"
 tauri-plugin-opener = "2"
-tauri-plugin-mcp-bridge = "0.10"
 
 # Specta (类型绑定)
 specta = { version = "=2.0.0-rc.24", features = ["chrono"] }
@@ -63,23 +63,23 @@ dirs = "6"
 keyring = "3"
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
+rfc2047-decoder = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
-uuid = { version = "1", features = ["v4"] }
 utf7-imap = "0.3"
-rfc2047-decoder = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
 dotenvy = "0.15"
-
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
-codegen-units = 1
+tauri-build = { version = "2", features = [] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-positioner = "2"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true
+codegen-units = 1
