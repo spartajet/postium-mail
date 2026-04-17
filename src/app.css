@@ -352,6 +352,15 @@
     outline-offset: 2px; /* 边框与元素间距 */
 }
 
+/* 输入框及包含输入框的容器不显示 focus-visible outline，
+   改用边框颜色变化表示焦点状态，避免出现内部边框 */
+input:focus-visible,
+textarea:focus-visible,
+input:focus-visible ~ *,
+.search-container:focus-within {
+    outline: none;
+}
+
 /**
  * 骨架屏加载动画
  *

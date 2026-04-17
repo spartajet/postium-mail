@@ -67,7 +67,8 @@ impl ProviderPool {
 
     /// 列出所有服务商信息（给前端用，按 sort_order 排序）
     pub fn list_providers(&self) -> Vec<ProviderInfo> {
-        let mut list: Vec<ProviderInfo> = self.providers
+        let mut list: Vec<ProviderInfo> = self
+            .providers
             .values()
             .map(|p| p.provider_info().clone())
             .collect();

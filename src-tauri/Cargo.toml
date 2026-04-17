@@ -77,6 +77,7 @@ tauri-build = { version = "2", features = [] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-positioner = "2"
+tauri-plugin-window-state = "2"
 
 [profile.release]
 opt-level = "s"

@@ -274,4 +274,3 @@ pub async fn poll_oauth2(
     // 5. 返回当前状态
     manager.poll_oauth2(&state).await
 }
-

@@ -1,10 +1,10 @@
 use crate::domain::auth::AuthManager;
-use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
 use crate::domain::sync::SyncProgressEmitter;
+use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::account_repo;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
 
 /// 后台定时同步调度器

@@ -32,9 +32,19 @@
         emailId: number;
         isRead: boolean;
         isStarred: boolean;
-    }>({ visible: false, x: 0, y: 0, emailId: 0, isRead: false, isStarred: false });
+    }>({
+        visible: false,
+        x: 0,
+        y: 0,
+        emailId: 0,
+        isRead: false,
+        isStarred: false,
+    });
 
-    function openContextMenu(e: MouseEvent, email: { id: number; is_read: boolean; is_starred: boolean }) {
+    function openContextMenu(
+        e: MouseEvent,
+        email: { id: number; is_read: boolean; is_starred: boolean },
+    ) {
         e.preventDefault();
         contextMenu = {
             visible: true,
@@ -118,7 +128,7 @@
     <div class="border-b border-border px-4 py-3">
         <!-- Search input -->
         <div
-            class="search-container flex items-center gap-2 rounded-lg border border-border bg-glass px-3 py-2 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20"
+            class="search-container flex items-center gap-2 rounded-lg border border-border bg-glass px-3 py-2 transition-colors focus-within:border-primary"
         >
             <Search size={18} class="shrink-0 text-muted-foreground" />
             <input
@@ -191,7 +201,12 @@
                             ? 'active'
                             : ''}"
                         onclick={() => emailState.selectEmail(result.id)}
-                        oncontextmenu={(e) => openContextMenu(e, { id: result.id, is_read: true, is_starred: false })}
+                        oncontextmenu={(e) =>
+                            openContextMenu(e, {
+                                id: result.id,
+                                is_read: true,
+                                is_starred: false,
+                            })}
                     >
                         <div class="flex items-center justify-between gap-2">
                             <span

@@ -3,7 +3,10 @@ use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::entities::{email_labels, labels};
 use sea_orm::*;
 
-pub async fn list_by_account(db: &DbConn, account_id: i32) -> Result<Vec<labels::Model>, MailError> {
+pub async fn list_by_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<Vec<labels::Model>, MailError> {
     Ok(labels::Entity::find()
         .filter(labels::Column::AccountId.eq(account_id))
         .all(db)
@@ -53,7 +56,11 @@ pub async fn get_labels_for_email(
         .await?)
 }
 
-pub async fn add_label_to_email(db: &DbConn, email_id: i32, label_id: i32) -> Result<(), MailError> {
+pub async fn add_label_to_email(
+    db: &DbConn,
+    email_id: i32,
+    label_id: i32,
+) -> Result<(), MailError> {
     let now = chrono::Utc::now().timestamp();
     let model = email_labels::ActiveModel {
         email_id: Set(email_id),

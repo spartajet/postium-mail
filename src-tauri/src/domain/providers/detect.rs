@@ -1,7 +1,7 @@
 use crate::{domain::providers::pool::PROVIDER_POOL, error::MailError};
 
-use super::pool::ProviderPool;
 use super::ProviderInfo;
+use super::pool::ProviderPool;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
