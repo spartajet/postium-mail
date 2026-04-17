@@ -1,11 +1,74 @@
 <script lang="ts">
-  import EmailList from '$lib/components/email/EmailList.svelte';
-  import EmailDetail from '$lib/components/email/EmailDetail.svelte';
+    // ==================== 组件导入 ====================
+
+    // 导入邮件列表组件
+    // 功能：显示当前文件夹中的邮件列表，支持选择、搜索、分页等
+    import EmailList from "$lib/components/email/EmailList.svelte";
+
+    // 导入邮件详情组件
+    // 功能：显示选中邮件的完整内容，包括发件人、收件人、正文、附件等
+    import EmailDetail from "$lib/components/email/EmailDetail.svelte";
 </script>
 
+<!-- Postium Mail - 应用主页组件 +page.svelte
+本组件是应用的主页面，展示邮件列表和邮件详情的左右分栏布局。
+==================== 功能说明 ====================
+作为应用的默认路由页面（/），本组件负责： 1. 渲染邮件列表视图（左侧） 2.
+渲染邮件详情视图（右侧） 3. 提供标准的邮件客户端双栏布局 ====================
+组件结构 ==================== 整个页面分为两个主要区域： - 左侧：EmailList -
+显示当前文件夹的邮件列表 - 右侧：EmailDetail - 显示选中邮件的详细内容
+==================== 布局特点 ==================== 使用 Flexbox 实现响应式布局：
+- 邮件列表固定宽度，可独立滚动 - 邮件详情占据剩余空间，可独立滚动 -
+两栏高度自适应父容器（由 +layout.svelte 的 h-screen 限制） -->
+
+<!-- ==================== 页面布局 ==================== -->
+
+<!--
+  主容器：Flexbox 布局容器
+
+  类名说明：
+  - flex：启用弹性布局，子元素水平排列
+  - h-full：高度占满父容器（即 +layout.svelte 的主内容区）
+  - w-full：宽度占满父容器
+
+  布局效果：
+  - 左侧 EmailList 组件占据固定宽度（在组件内部定义）
+  - 右侧容器使用 flex-1 自动占据剩余空间
+  - 两栏都支持独立滚动，互不干扰
+-->
 <div class="flex h-full w-full">
-  <EmailList />
-  <div class="flex-1">
-    <EmailDetail />
-  </div>
+    <!--
+    左侧：邮件列表
+
+    EmailList 组件负责：
+    - 显示当前文件夹的邮件列表
+    - 处理邮件选择操作
+    - 支持搜索和过滤
+    - 显示邮件预览信息（发件人、主题、时间等）
+
+    宽度：在组件内部定义（通常为固定的像素值或百分比）
+    高度：自动占满父容器
+    滚动：列表内部独立滚动
+  -->
+    <EmailList />
+
+    <!--
+    右侧：邮件详情容器
+
+    类名说明：
+    - flex-1：弹性因子为 1，自动占据剩余的所有水平空间
+
+    EmailDetail 组件负责：
+    - 显示选中邮件的完整内容
+    - 支持邮件操作（回复、转发、删除、标记等）
+    - 显示附件列表
+    - 渲染邮件正文（支持 HTML 和纯文本）
+
+    宽度：占据除邮件列表外的所有空间
+    高度：自动占满父容器
+    滚动：详情内部独立滚动
+  -->
+    <div class="flex-1">
+        <EmailDetail />
+    </div>
 </div>

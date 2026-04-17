@@ -5,10 +5,228 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  列出所有账号
+	 * 
+	 *  获取当前用户的所有邮箱账号列表。此命令通常在应用启动时调用，
+	 *  用于在界面中显示用户的账号列表。
+	 * 
+	 *  功能说明：
+	 *  1. 从数据库查询所有账号记录
+	 *  2. 脱敏处理（不返回密码等敏感信息）
+	 *  3. 按创建时间或用户指定顺序排序
+	 *  4. 包含账号的同步状态和连接状态
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例，通过Tauri的State机制注入
+	 * 
+	 *  返回值：
+	 *  - Ok(Vec<AccountDto>): 账号列表，每个元素包含：
+	 *    - id: 账号唯一标识
+	 *    - email: 邮箱地址
+	 *    - provider: 服务商ID
+	 *    - display_name: 显示名称
+	 *    - is_active: 是否激活
+	 *    - sync_status: 同步状态（idle/syncing/error）
+	 *    - last_sync_time: 最后同步时间
+	 *  - Err(MailError): 查询失败时的错误信息
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const accounts = await invoke('list_accounts');
+	 *  accounts.forEach(account => {
+	 *    console.log(`${account.display_name} (${account.email})`);
+	 *  });
+	 *  ```
+	 */
 	listAccounts: () => typedError<AccountDto[], MailError>(__TAURI_INVOKE("list_accounts")),
+	/**
+	 *  获取指定账号详情
+	 * 
+	 *  根据账号ID获取单个账号的详细信息。
+	 *  此命令用于显示账号详情页面或编辑账号时的数据加载。
+	 * 
+	 *  功能说明：
+	 *  1. 根据ID查询账号
+	 *  2. 返回完整的账号信息（但不包含密码）
+	 *  3. 如果账号不存在，返回错误
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例
+	 *  - id: 账号的唯一标识符
+	 * 
+	 *  返回值：
+	 *  - Ok(AccountDto): 账号详细信息，包含：
+	 *    - 所有list_accounts返回的字段
+	 *    - 配置详情（IMAP/SMTP设置等）
+	 *  - Err(MailError):
+	 *    - NotFound: 账号不存在
+	 *    - DatabaseError: 数据库查询错误
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  try {
+	 *    const account = await invoke('get_account', { id: 1 });
+	 *    console.log('账号详情:', account);
+	 *  } catch (error) {
+	 *    console.error('账号不存在:', error);
+	 *  }
+	 *  ```
+	 */
 	getAccount: (id: number) => typedError<AccountDto, MailError>(__TAURI_INVOKE("get_account", { id })),
+	/**
+	 *  创建新账号
+	 * 
+	 *  添加一个新的邮箱账号到应用中。
+	 *  此命令是账号管理的核心功能，支持OAuth2和密码认证两种方式。
+	 * 
+	 *  功能说明：
+	 *  1. 验证邮箱地址格式
+	 *  2. 检测邮箱服务商（如果未指定）
+	 *  3. 验证认证信息（密码或OAuth2令牌）
+	 *  4. 连接IMAP/SMTP服务器验证配置
+	 *  5. 保存账号信息到数据库
+	 *  6. 初始化账号的文件夹结构
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例
+	 *  - request: CreateAccountRequest对象，包含：
+	 *    - email: 邮箱地址（必填）
+	 *    - provider: 服务商ID（可选，可自动检测）
+	 *    - display_name: 显示名称（可选，默认使用邮箱前缀）
+	 *    - password: 密码（OAuth2账号可不填）
+	 *    - oauth2_state: OAuth2状态（使用OAuth2时填入）
+	 *    - imap_config: 自定义IMAP配置（可选）
+	 *    - smtp_config: 自定义SMTP配置（可选）
+	 * 
+	 *  返回值：
+	 *  - Ok(AccountDto): 创建成功的账号信息
+	 *  - Err(MailError):
+	 *    - ValidationError: 邮箱格式错误或验证失败
+	 *    - AuthError: 认证失败
+	 *    - ConnectionError: 无法连接到邮件服务器
+	 *    - DatabaseError: 数据库保存失败
+	 * 
+	 *  使用场景：
+	 *  1. 用户手动添加账号（输入邮箱和密码）
+	 *  2. 通过OAuth2添加账号（调用start_oauth2后自动创建）
+	 *  3. 导入账号配置
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const account = await invoke('create_account', {
+	 *    request: {
+	 *      email: 'user@example.com',
+	 *      provider: 'example-provider',
+	 *      display_name: '我的邮箱',
+	 *      password: 'my-password'
+	 *    }
+	 *  });
+	 *  console.log('账号创建成功，ID:', account.id);
+	 *  ```
+	 */
 	createAccount: (request: CreateAccountRequest) => typedError<AccountDto, MailError>(__TAURI_INVOKE("create_account", { request })),
+	/**
+	 *  更新账号信息
+	 * 
+	 *  修改现有账号的配置信息。
+	 *  此命令用于更新账号的显示名称、服务器配置等非认证信息。
+	 * 
+	 *  注意事项：
+	 *  - 此命令不更新密码（使用update_account_password）
+	 *  - 更新OAuth2账号的认证信息需要重新授权
+	 *  - 修改服务器配置后会自动验证连接
+	 * 
+	 *  功能说明：
+	 *  1. 验证账号存在
+	 *  2. 更新账号的可修改字段
+	 *  3. 如果修改了服务器配置，验证新配置
+	 *  4. 保存更新到数据库
+	 *  5. 触发同步服务重新加载配置
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例
+	 *  - request: UpdateAccountRequest对象，包含：
+	 *    - id: 账号ID（必填）
+	 *    - display_name: 显示名称（可选）
+	 *    - is_active: 是否激活（可选）
+	 *    - imap_config: IMAP服务器配置（可选）
+	 *    - smtp_config: SMTP服务器配置（可选）
+	 *    - sync_enabled: 是否启用同步（可选）
+	 *    - sync_interval: 同步间隔（可选）
+	 * 
+	 *  返回值：
+	 *  - Ok(AccountDto): 更新后的账号信息
+	 *  - Err(MailError):
+	 *    - NotFound: 账号不存在
+	 *    - ValidationError: 配置无效
+	 *    - ConnectionError: 新配置无法连接
+	 *    - DatabaseError: 数据库更新失败
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const updated = await invoke('update_account', {
+	 *    request: {
+	 *      id: 1,
+	 *      display_name: '新的显示名称',
+	 *      sync_interval: 300  // 每5分钟同步一次
+	 *    }
+	 *  });
+	 *  ```
+	 */
 	updateAccount: (request: UpdateAccountRequest) => typedError<AccountDto, MailError>(__TAURI_INVOKE("update_account", { request })),
+	/**
+	 *  删除账号
+	 * 
+	 *  从应用中永久删除指定的邮箱账号及其所有相关数据。
+	 * 
+	 *  ⚠️ 警告：此操作不可逆！
+	 *  删除账号时会同时删除：
+	 *  - 账号配置信息
+	 *  - 所有同步的邮件数据
+	 *  - 邮件文件夹结构
+	 *  - 标签和分类
+	 *  - 同步历史记录
+	 * 
+	 *  功能说明：
+	 *  1. 验证账号存在
+	 *  2. 停止该账号的同步任务
+	 *  3. 清理数据库中的相关数据
+	 *  4. 清理认证信息
+	 *  5. 删除账号记录
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例
+	 *  - id: 要删除的账号ID
+	 * 
+	 *  返回值：
+	 *  - Ok(()): 删除成功
+	 *  - Err(MailError):
+	 *    - NotFound: 账号不存在
+	 *    - DatabaseError: 数据库删除失败
+	 *    - SyncError: 无法停止同步任务
+	 * 
+	 *  安全提示：
+	 *  - 建议在前端添加确认对话框
+	 *  - 可以添加"软删除"功能（标记为已删除而非立即删除）
+	 *  - 考虑添加"导出数据"选项，让用户删除前备份数据
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  import { confirm } from '@tauri-apps/api/dialog';
+	 * 
+	 *  const confirmed = await confirm('确定要删除此账号吗？此操作不可撤销！');
+	 *  if (confirmed) {
+	 *    await invoke('delete_account', { id: 1 });
+	 *    console.log('账号已删除');
+	 *  }
+	 *  ```
+	 */
 	deleteAccount: (id: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_account", { id })),
 	listEmails: (accountId: number, folder: string, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails", { accountId, folder, page, limit })),
 	// 按分类加载邮件列表
@@ -22,10 +240,239 @@ export const commands = {
 	sendEmail: (request: SendEmailRequest) => typedError<string, MailError>(__TAURI_INVOKE("send_email", { request })),
 	syncAccount: (accountId: number) => typedError<null, MailError>(__TAURI_INVOKE("sync_account", { accountId })),
 	getFolderStats: (accountId: number) => typedError<FolderStat[], MailError>(__TAURI_INVOKE("get_folder_stats", { accountId })),
+	/**
+	 *  检测邮箱服务商
+	 * 
+	 *  根据用户提供的邮箱地址，自动识别并返回对应的邮箱服务商信息。
+	 *  此命令在用户添加账号时调用，用于简化配置流程。
+	 * 
+	 *  功能说明：
+	 *  1. 解析邮箱地址的域名部分
+	 *  2. 在ProviderPool中查找匹配的服务商配置
+	 *  3. 返回服务商ID、支持的协议、服务器配置等信息
+	 * 
+	 *  支持的服务商示例：
+	 *  - Gmail (gmail.com)
+	 *  - Outlook (outlook.com, hotmail.com)
+	 *  - QQ邮箱 (qq.com)
+	 *  - 163邮箱 (163.com)
+	 *  - 126邮箱 (126.com)
+	 *  等等
+	 * 
+	 *  参数：
+	 *  - email: 用户的邮箱地址（例如: user@example.com）
+	 *  - pool: ProviderPool实例，包含所有服务商的配置信息
+	 * 
+	 *  返回值：
+	 *  - Ok(ProviderDetectionResult): 检测到的服务商信息，包含：
+	 *    - provider_id: 服务商唯一标识
+	 *    - provider_name: 服务商名称
+	 *    - imap_config: IMAP服务器配置（可选）
+	 *    - smtp_config: SMTP服务器配置（可选）
+	 *    - supports_oauth2: 是否支持OAuth2认证
+	 *  - Err(MailError): 检测失败时的错误信息
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const result = await invoke('detect_provider', { email: 'user@gmail.com' });
+	 *  console.log(result.provider_id); // 输出: 'gmail'
+	 *  ```
+	 */
 	detectProvider: (email: string) => typedError<ProviderDetectionResult, MailError>(__TAURI_INVOKE("detect_provider", { email })),
+	/**
+	 *  列出所有邮箱服务商
+	 * 
+	 *  返回应用程序支持的所有邮箱服务商的完整列表。
+	 *  此命令通常用于：
+	 *  1. 在用户界面中显示服务商选择器
+	 *  2. 让用户查看支持的服务商列表
+	 *  3. 作为调试工具验证服务商配置
+	 * 
+	 *  功能说明：
+	 *  1. 从ProviderPool中获取所有已配置的服务商
+	 *  2. 返回每个服务商的基本信息和能力
+	 * 
+	 *  参数：
+	 *  - 无
+	 * 
+	 *  返回值：
+	 *  - Ok(Vec<ProviderInfo>): 服务商列表，每个元素包含：
+	 *    - id: 服务商唯一标识
+	 *    - name: 服务商显示名称
+	 *    - icon: 服务商图标URL
+	 *    - domains: 支持的邮箱域名列表
+	 *    - supports_oauth2: 是否支持OAuth2
+	 *  - Err(MailError): 获取失败时的错误信息
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const providers = await invoke('list_providers');
+	 *  providers.forEach(p => console.log(p.name));
+	 *  ```
+	 */
 	listProviders: () => typedError<ProviderInfo[], MailError>(__TAURI_INVOKE("list_providers")),
+	/**
+	 *  启动OAuth2授权流程
+	 * 
+	 *  为指定的邮箱账号启动OAuth2授权流程。此命令会：
+	 *  1. 生成授权URL和回调端点
+	 *  2. 在本地启动HTTP服务器监听回调
+	 *  3. 返回授权URL供前端打开浏览器
+	 * 
+	 *  工作流程：
+	 *  1. 生成随机的state参数，用于防止CSRF攻击
+	 *  2. 启动本地HTTP服务器（默认监听随机端口）
+	 *  3. 构建OAuth2授权URL，包含必要的参数
+	 *  4. 返回URL和本地回调地址
+	 *  5. 前端打开授权URL，用户在浏览器中完成授权
+	 *  6. 服务提供商重定向到本地回调地址
+	 *  7. 本地服务器接收授权码
+	 * 
+	 *  参数：
+	 *  - manager: OAuth2Manager实例，管理OAuth2流程
+	 *  - provider_id: 服务商ID（如'gmail'、'outlook'）
+	 *  - email: 用户的邮箱地址
+	 *  - display_name: 可选，账号显示名称（用于UI展示）
+	 * 
+	 *  返回值：
+	 *  - Ok(OAuth2AuthUrl): 授权URL信息，包含：
+	 *    - url: 授权URL，需要在浏览器中打开
+	 *    - port: 本地回调服务器端口号
+	 *    - state: 用于后续轮询的状态标识
+	 *  - Err(MailError): 启动失败时的错误信息
+	 * 
+	 *  安全说明：
+	 *  - 使用PKCE增强安全性
+	 *  - state参数用于防止CSRF攻击
+	 *  - 授权码通过本地回调获取，不经过第三方
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  const { url, state } = await invoke('start_oauth2', {
+	 *    provider_id: 'gmail',
+	 *    email: 'user@gmail.com',
+	 *    display_name: '我的Gmail'
+	 *  });
+	 *  // 打开浏览器进行授权
+	 *  window.open(url, '_blank');
+	 *  ```
+	 */
 	startOauth2: (providerId: string, email: string, displayName: string | null) => typedError<OAuth2AuthUrl, MailError>(__TAURI_INVOKE("start_oauth2", { providerId, email, displayName })),
+	/**
+	 *  轮询OAuth2授权状态
+	 * 
+	 *  定期查询OAuth2授权流程的状态，检查用户是否已完成授权。
+	 *  前端需要调用此命令来获取授权结果。
+	 * 
+	 *  工作流程：
+	 *  1. 前端定时调用此命令（例如每秒一次）
+	 *  2. 后端检查本地HTTP服务器是否接收到回调
+	 *  3. 如果收到授权码，交换访问令牌
+	 *  4. 如果授权成功，自动创建账号并保存凭证
+	 *  5. 返回授权状态给前端
+	 * 
+	 *  状态说明：
+	 *  - Pending: 等待用户完成授权
+	 *  - Success: 授权成功，账号已创建
+	 *  - Failed: 授权失败或被取消
+	 *  - Expired: 授权流程超时
+	 * 
+	 *  参数：
+	 *  - manager: OAuth2Manager实例，管理OAuth2流程
+	 *  - state: 启动OAuth2时返回的状态标识
+	 * 
+	 *  返回值：
+	 *  - Ok(OAuth2PollResult): 轮询结果，包含：
+	 *    - status: 授权状态（pending/success/failed/expired）
+	 *    - account_id: 授权成功时的账号ID（仅success状态）
+	 *    - error: 失败时的错误信息（仅failed状态）
+	 *  - Err(MailError): 轮询过程出错
+	 * 
+	 *  使用建议：
+	 *  - 使用指数退避策略，避免过于频繁的轮询
+	 *  - 收到success或failed状态后停止轮询
+	 *  - 设置超时时间（如5分钟），超时后停止轮询
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 * 
+	 *  async function pollOAuth2State(state: string) {
+	 *    const result = await invoke('poll_oauth2', { state });
+	 *    if (result.status === 'success') {
+	 *      console.log('授权成功，账号ID:', result.account_id);
+	 *      // 跳转到账号列表
+	 *    } else if (result.status === 'failed') {
+	 *      console.error('授权失败:', result.error);
+	 *    } else if (result.status === 'pending') {
+	 *      // 继续轮询
+	 *      setTimeout(() => pollOAuth2State(state), 1000);
+	 *    }
+	 *  }
+	 *  ```
+	 */
 	pollOauth2: (state: string) => typedError<OAuth2PollResult, MailError>(__TAURI_INVOKE("poll_oauth2", { state })),
+	/**
+	 *  更新账号密码
+	 * 
+	 *  修改账号的登录密码。
+	 *  此命令用于账号密码过期或用户主动修改密码的场景。
+	 * 
+	 *  功能说明：
+	 *  1. 验证账号存在
+	 *  2. 验证新密码格式
+	 *  3. 使用新密码连接服务器验证
+	 *  4. 更新数据库中的密码（加密存储）
+	 *  5. 更新认证管理器中的凭证
+	 *  6. 重启同步任务（如果正在同步）
+	 * 
+	 *  参数：
+	 *  - service: AccountService实例
+	 *  - id: 账号ID
+	 *  - password: 新密码（明文，会在服务端加密）
+	 * 
+	 *  返回值：
+	 *  - Ok(()): 密码更新成功
+	 *  - Err(MailError):
+	 *    - NotFound: 账号不存在
+	 *    - ValidationError: 密码格式无效
+	 *    - AuthError: 新密码无法登录
+	 *    - DatabaseError: 数据库更新失败
+	 * 
+	 *  安全说明：
+	 *  - 密码在传输过程中使用加密通道（Tauri IPC）
+	 *  - 密码在数据库中加密存储
+	 *  - 不会记录密码到日志
+	 *  - OAuth2账号无法使用此命令（需要重新授权）
+	 * 
+	 *  使用场景：
+	 *  1. 用户定期更换密码
+	 *  2. 密码被重置后更新
+	 *  3. 密码输入错误后更正
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 *  import { open } from '@tauri-apps/api/dialog';
+	 * 
+	 *  // 假设有一个输入框让用户输入新密码
+	 *  const newPassword = await open({
+	 *    title: '输入新密码',
+	 *    multiple: false
+	 *  });
+	 * 
+	 *  if (newPassword) {
+	 *    await invoke('update_account_password', {
+	 *      id: 1,
+	 *      password: newPassword
+	 *    });
+	 *    console.log('密码更新成功');
+	 *  }
+	 *  ```
+	 */
 	updateAccountPassword: (id: number, password: string) => typedError<null, MailError>(__TAURI_INVOKE("update_account_password", { id, password })),
 	listLabels: (accountId: number) => typedError<LabelDto[], MailError>(__TAURI_INVOKE("list_labels", { accountId })),
 	createLabel: (request: CreateLabelRequest) => typedError<LabelDto, MailError>(__TAURI_INVOKE("create_label", { request })),
@@ -43,17 +490,48 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  账号数据传输对象
+ * 
+ *  这是账号信息对外展示的标准格式，用于前后端数据交换。
+ *  不包含敏感信息如密码和认证 token。
+ * 
+ *  # 字段说明
+ * 
+ *  - `id`: 账号在数据库中的唯一标识
+ *  - `name`: 账号名称（用户自定义的昵称）
+ *  - `email`: 邮箱地址，作为账号的唯一标识
+ *  - `display_name`: 发送邮件时显示的名称（可选）
+ *  - `provider`: 邮件服务提供商（如 "gmail", "outlook", "qq"）
+ *  - `color`: 账号在界面显示的主题颜色（可选，十六进制颜色值）
+ *  - `sync_enabled`: 是否启用自动同步
+ *  - `auth_type`: 认证类型（"password" 或 "OAuth2"）
+ *  - `account_type`: 账号类型（如 "personal", "work"）
+ *  - `last_sync_at`: 上次同步的时间戳（Unix 时间戳，秒）
+ *  - `created_at`: 账号创建时间（Unix 时间戳，秒）
+ */
 export type AccountDto = {
+	// 数据库主键 ID
 	id: number,
+	// 账号名称
 	name: string,
+	// 邮箱地址
 	email: string,
+	// 显示名称（用于发送邮件时）
 	display_name: string | null,
+	// 邮件服务提供商标识
 	provider: string,
+	// 账号主题颜色
 	color: string | null,
+	// 是否启用同步
 	sync_enabled: boolean,
+	// 认证类型
 	auth_type: string,
+	// 账号类型
 	account_type: string,
+	// 上次同步时间
 	last_sync_at: number | null,
+	// 创建时间
 	created_at: number,
 };
 
@@ -61,63 +539,228 @@ export type AccountType = "Personal" | "Enterprise";
 
 export type AuthType = "Password" | "OAuth2";
 
+/**
+ *  创建账号请求
+ * 
+ *  前端调用创建账号 API 时传递的参数。
+ * 
+ *  # 必填字段
+ * 
+ *  - `name`: 账号名称
+ *  - `email`: 邮箱地址
+ *  - `provider`: 服务提供商标识
+ *  - `auth_type`: 认证类型
+ *  - `password`: 账号密码或认证凭证
+ * 
+ *  # 可选字段
+ * 
+ *  - `display_name`: 显示名称
+ *  - `color`: 主题颜色
+ *  - `imap_host/smtp_host`: 自定义服务器地址（如果提供商不支持自动配置）
+ *  - `imap_port/smtp_port`: 自定义服务器端口
+ *  - `imap_ssl_mode/smtp_ssl_mode`: SSL 模式
+ *  - `account_type`: 账号类型
+ */
 export type CreateAccountRequest = {
+	// 账号名称（用户自定义）
 	name: string,
+	// 邮箱地址
 	email: string,
+	// 发送邮件时的显示名称
 	display_name: string | null,
+	// 邮件服务提供商
 	provider: string,
+	// 认证类型："password" 或 "OAuth2"
 	auth_type: string,
+	// 账号密码或初始凭证
 	password: string,
+	// IMAP 服务器地址（可选）
 	imap_host: string | null,
+	// IMAP 服务器端口（可选）
 	imap_port: number | null,
+	// IMAP SSL 模式（可选）
 	imap_ssl_mode: string | null,
+	// SMTP 服务器地址（可选）
 	smtp_host: string | null,
+	// SMTP 服务器端口（可选）
 	smtp_port: number | null,
+	// SMTP SSL 模式（可选）
 	smtp_ssl_mode: string | null,
+	// 账号主题颜色（可选）
 	color: string | null,
+	// 账号类型（可选）
 	account_type: string | null,
 };
 
+/**
+ *  创建标签请求
+ * 
+ *  前端调用创建标签 API 时传递的参数。
+ * 
+ *  # 必填字段
+ * 
+ *  - `account_id`: 所属账号 ID
+ *  - `name`: 标签名称
+ *  - `color`: 标签颜色
+ * 
+ *  # 使用示例
+ * 
+ *  ```typescript,ignore
+ *  const req: CreateLabelRequest = {
+ *      account_id: 1,
+ *      name: '重要',
+ *      color: '#ff5722'
+ *  };
+ *  const label = await createLabel(req);
+ *  ```
+ */
 export type CreateLabelRequest = {
+	// 所属账号 ID
 	account_id: number,
+	// 标签名称
 	name: string,
+	// 标签颜色
 	color: string,
 };
 
 /**
  *  邮件分类（前端侧边栏导航使用）
  * 
- *  每个变体对应 provider 的 `StandardFolder` 中的一组 IMAP 文件夹，
- *  `Starred` 例外 —— 它查询 `is_starred = true`（跨文件夹）。
+ *  每个变体对应一个 IMAP 文件夹组（通过 Provider 的 StandardFolder 映射）。
+ *  这样设计的好处是前端不需要关心具体的 IMAP 文件夹名称，而是使用统一的分类。
+ * 
+ *  # 变体说明
+ * 
+ *  - `Inbox`: 收件箱，显示新收到的邮件
+ *  - `Starred`: 星标邮件，查询所有文件夹中标记为星标的邮件（跨文件夹）
+ *  - `Sent`: 已发送，显示已发送的邮件
+ *  - `Drafts`: 草稿箱，显示未发送的草稿
+ *  - `Spam`: 垃圾邮件，显示被标记为垃圾的邮件
+ *  - `Trash`: 已删除，显示已删除但未永久删除的邮件
+ *  - `Archive`: 归档，显示已归档的邮件
+ * 
+ *  # 使用示例
+ * 
+ *  ```rust,ignore
+ *  // 查询收件箱邮件
+ *  let response = email_service.list_by_category(
+ *      account_id,
+ *      EmailCategory::Inbox,
+ *      page,
+ *      limit
+ *  ).await?;
+ *  ```
  */
-export type EmailCategory = "inbox" | "starred" | "sent" | "drafts" | "spam" | "trash" | "archive";
+export type EmailCategory = 
+// 收件箱
+"inbox" | 
+// 星标邮件（跨文件夹查询）
+"starred" | 
+// 已发送
+"sent" | 
+// 草稿箱
+"drafts" | 
+// 垃圾邮件
+"spam" | 
+// 已删除
+"trash" | 
+// 归档
+"archive";
 
+/**
+ *  邮件详情
+ * 
+ *  包含邮件的完整信息，包括正文内容。
+ * 
+ *  # 字段说明
+ * 
+ *  - `email`: 邮件基本信息（EmailDto 的扁平化版本）
+ *  - `recipient_emails`: 收件人邮箱列表（逗号分隔）
+ *  - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
+ *  - `body_text`: 纯文本正文
+ *  - `body_html`: HTML 格式正文
+ */
 export type EmailDetail = {
+	// 收件人邮箱列表（逗号分隔）
 	recipient_emails: string,
+	// 抄送邮箱列表（可选）
 	cc_emails: string | null,
+	// 纯文本正文
 	body_text: string | null,
+	// HTML 正文
 	body_html: string | null,
-} & (EmailDto);
+} & 
+// 邮件基本信息
+(EmailDto);
 
+/**
+ *  邮件数据传输对象
+ * 
+ *  这是邮件列表项的标准格式，用于前端展示邮件列表。
+ *  不包含邮件正文，只包含摘要信息。
+ * 
+ *  # 字段说明
+ * 
+ *  - `id`: 数据库主键
+ *  - `account_id`: 所属账号 ID
+ *  - `folder`: 所在文件夹名称（IMAP 文件夹）
+ *  - `uid`: IMAP 服务器上的 UID（用于同步）
+ *  - `subject`: 邮件主题
+ *  - `sender_name`: 发送人姓名
+ *  - `sender_email`: 发送人邮箱
+ *  - `preview`: 邮件内容预览（前 100 字符）
+ *  - `is_read`: 是否已读
+ *  - `is_starred`: 是否星标
+ *  - `sent_at`: 发送时间（Unix 时间戳，秒）
+ *  - `has_attachments`: 是否有附件（暂时固定为 false）
+ */
 export type EmailDto = {
+	// 数据库主键
 	id: number,
+	// 所属账号 ID
 	account_id: number,
+	// IMAP 文件夹名称
 	folder: string,
+	// IMAP 服务器 UID
 	uid: number,
+	// 邮件主题
 	subject: string | null,
+	// 发送人姓名
 	sender_name: string | null,
+	// 发送人邮箱
 	sender_email: string,
+	// 邮件内容预览
 	preview: string | null,
+	// 是否已读
 	is_read: boolean,
+	// 是否星标
 	is_starred: boolean,
+	// 发送时间
 	sent_at: number,
+	// 是否有附件
 	has_attachments: boolean,
 };
 
+/**
+ *  邮件列表响应
+ * 
+ *  分页查询的响应格式，包含邮件列表和分页信息。
+ * 
+ *  # 字段说明
+ * 
+ *  - `emails`: 当前页的邮件列表
+ *  - `total`: 总邮件数
+ *  - `page`: 当前页码（从 1 开始）
+ *  - `limit`: 每页数量
+ */
 export type EmailListResponse = {
+	// 当前页的邮件列表
 	emails: EmailDto[],
+	// 总邮件数
 	total: number,
+	// 当前页码
 	page: number,
+	// 每页数量
 	limit: number,
 };
 
@@ -127,10 +770,26 @@ export type FolderStat = {
 	unread: number,
 };
 
+/**
+ *  标签数据传输对象
+ * 
+ *  这是标签信息对外展示的标准格式，用于前后端数据交换。
+ * 
+ *  # 字段说明
+ * 
+ *  - `id`: 标签在数据库中的唯一标识
+ *  - `account_id`: 所属账号 ID，标签是账号级别的资源
+ *  - `name`: 标签名称（用户自定义，如"工作"、"重要"）
+ *  - `color`: 标签颜色（十六进制颜色值，如 "#ff5722"）
+ */
 export type LabelDto = {
+	// 数据库主键 ID
 	id: number,
+	// 所属账号 ID
 	account_id: number,
+	// 标签名称
 	name: string,
+	// 标签颜色（十六进制）
 	color: string,
 };
 
@@ -181,13 +840,50 @@ export type SearchResult = {
 	rank: number,
 };
 
+/**
+ *  发送邮件请求
+ * 
+ *  前端调用发送邮件 API 时传递的参数。
+ * 
+ *  # 字段说明
+ * 
+ *  - `account_id`: 发送账号 ID
+ *  - `to`: 收件人邮箱列表
+ *  - `cc`: 抄送邮箱列表
+ *  - `bcc`: 密送邮箱列表
+ *  - `subject`: 邮件主题
+ *  - `body_html`: HTML 格式的邮件正文
+ *  - `body_text`: 纯文本格式的邮件正文
+ * 
+ *  # 使用示例
+ * 
+ *  ```typescript,ignore
+ *  const req: SendEmailRequest = {
+ *      account_id: 1,
+ *      to: ['user@example.com'],
+ *      cc: ['cc@example.com'],
+ *      bcc: [],
+ *      subject: 'Hello',
+ *      body_html: '<p>Hello World</p>',
+ *      body_text: 'Hello World'
+ *  };
+ *  await sendEmail(req);
+ *  ```
+ */
 export type SendEmailRequest = {
+	// 发送账号 ID
 	account_id: number,
+	// 收件人邮箱列表
 	to: string[],
+	// 抄送邮箱列表
 	cc: string[],
+	// 密送邮箱列表
 	bcc: string[],
+	// 邮件主题
 	subject: string,
+	// HTML 正文
 	body_html: string,
+	// 纯文本正文
 	body_text: string,
 };
 
@@ -206,16 +902,58 @@ export type SyncProgressEvent = {
 
 export type SyncStage = "Connecting" | "SyncingFolders" | "SyncingEmails" | "Completed" | "Error";
 
+/**
+ *  更新账号请求
+ * 
+ *  用于更新账号的部分信息，所有字段都是可选的。
+ *  只更新提供的字段，未提供的字段保持不变。
+ * 
+ *  # 可更新字段
+ * 
+ *  - `name`: 账号名称
+ *  - `display_name`: 显示名称
+ *  - `color`: 主题颜色
+ *  - `sync_enabled`: 同步开关
+ * 
+ *  # 注意事项
+ * 
+ *  - 邮箱地址（email）不可更新，需要删除后重新创建
+ *  - 密码更新使用专门的 `update_password` 方法
+ *  - 认证信息不可通过此方法更新
+ */
 export type UpdateAccountRequest = {
+	// 账号 ID（必填）
 	id: number,
+	// 新的账号名称
 	name: string | null,
+	// 新的显示名称
 	display_name: string | null,
+	// 新的主题颜色
 	color: string | null,
+	// 是否启用同步
 	sync_enabled: boolean | null,
 };
 
+/**
+ *  更新标签请求
+ * 
+ *  用于更新标签的部分信息，所有字段都是可选的。
+ *  只更新提供的字段，未提供的字段保持不变。
+ * 
+ *  # 可更新字段
+ * 
+ *  - `name`: 标签名称
+ *  - `color`: 标签颜色
+ * 
+ *  # 注意事项
+ * 
+ *  - 标签 ID 不能更新，需要删除后重新创建
+ *  - 所属账号 ID 不能更新
+ */
 export type UpdateLabelRequest = {
+	// 新的标签名称
 	name: string | null,
+	// 新的标签颜色
 	color: string | null,
 };
 
