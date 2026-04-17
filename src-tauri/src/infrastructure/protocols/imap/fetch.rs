@@ -3,7 +3,7 @@ use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
 use futures::{StreamExt, TryStreamExt};
 use mail_parser::MessageParser;
 
-use super::parser::{self, extract_headers_from_message, ParsedHeaders};
+use super::parser::{self, ParsedHeaders, extract_headers_from_message};
 use super::{ImapClient, RawEmailHeader};
 
 impl ImapClient {
@@ -118,7 +118,6 @@ impl ImapClient {
     /// 按 UID 范围获取邮件头
     ///
     /// 使用 `BODY.PEEK[HEADER]` + `mail_parser` 解析邮件头。
-    #[allow(dead_code)]
     pub async fn fetch_uids(
         &mut self,
         start: u32,
@@ -367,7 +366,9 @@ impl ImapClient {
                 is_draft: draft,
                 is_answered: answered,
                 is_deleted: deleted,
-                sent_at: h.map(|h| h.sent_at).unwrap_or_else(|| fallback_date.timestamp()),
+                sent_at: h
+                    .map(|h| h.sent_at)
+                    .unwrap_or_else(|| fallback_date.timestamp()),
                 received_at,
                 created_at: now,
             });
