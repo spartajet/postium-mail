@@ -1,18 +1,16 @@
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
-use crate::infrastructure::protocols::utils::{
-    extract_email_from_address, extract_name_from_address,
-};
 use futures::{StreamExt, TryStreamExt};
 use mail_parser::MessageParser;
 
-use super::parser;
+use super::parser::{self, extract_headers_from_message, ParsedHeaders};
 use super::{ImapClient, RawEmailHeader};
 
 impl ImapClient {
     /// 批量获取邮件头（用于骨架同步，不获取正文）
     ///
-    /// 使用 UID FETCH 命令批量获取多个邮件的头信息，避免设置已读标志。
+    /// 使用 `BODY.PEEK[HEADER]` 获取 RFC822 原始头部，再通过 `mail_parser` 解析。
+    /// BODYSTRUCTURE 用于提取附件 section_path。
     pub async fn batch_fetch_email_headers(
         &mut self,
         folder: &str,
@@ -33,7 +31,7 @@ impl ImapClient {
             .session
             .uid_fetch(
                 &uid_range,
-                "(FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE UID)",
+                "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER] BODYSTRUCTURE UID)",
             )
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?
@@ -43,6 +41,7 @@ impl ImapClient {
 
         tracing::debug!("获取邮件头message count: {}", fetches.len());
 
+        let now_ts = chrono::Utc::now().timestamp();
         let mut headers = Vec::new();
 
         for fetch in fetches {
@@ -61,35 +60,49 @@ impl ImapClient {
             let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
             let recent = fetch.flags().any(|f| f == async_imap::types::Flag::Recent);
 
-            let mail_envelope = fetch
-                .envelope()
-                .and_then(|enve| parser::parse_envelope(enve).ok());
+            // 使用 mail_parser 解析 BODY.PEEK[HEADER] 中的原始 RFC822 头部
+            let raw_header = fetch.header();
 
-            if let Some(enve) = mail_envelope {
-                let attachments = fetch
-                    .bodystructure()
-                    .map(|bs| parser::extract_attachments(bs, ""))
-                    .unwrap_or_default();
+            if let Some(raw) = raw_header {
+                if let Some(parsed) = parser::parse_headers_from_raw(raw, now_ts) {
+                    let attachments = fetch
+                        .bodystructure()
+                        .map(|bs| parser::extract_attachments(bs, ""))
+                        .unwrap_or_default();
 
-                tracing::trace!(uid, attachment_count = attachments.len(), "解析附件完成");
+                    tracing::trace!(uid, attachment_count = attachments.len(), "解析附件完成");
 
-                headers.push(EmailHeader {
-                    uid,
-                    subject: enve.subject,
-                    from: enve.from,
-                    to: enve.to,
-                    cc: enve.cc,
-                    date: enve.date,
-                    flags: super::super::types::EmailFlags {
-                        seen,
-                        flagged,
-                        answered,
-                        deleted,
-                        draft,
-                        recent,
-                    },
-                    attachments,
-                });
+                    // 优先使用 INTERNALDATE 作为邮件日期（服务器端时间，更可靠）
+                    let date = fetch
+                        .internal_date()
+                        .map(|d| d.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|| {
+                            chrono::DateTime::from_timestamp(parsed.sent_at, 0)
+                                .unwrap_or_else(chrono::Utc::now)
+                        });
+
+                    headers.push(EmailHeader {
+                        uid,
+                        subject: parsed.subject.unwrap_or_default(),
+                        from: parsed.from_display,
+                        to: parsed.to_display,
+                        cc: parsed.cc_emails.unwrap_or_default(),
+                        date,
+                        flags: super::super::types::EmailFlags {
+                            seen,
+                            flagged,
+                            answered,
+                            deleted,
+                            draft,
+                            recent,
+                        },
+                        attachments,
+                    });
+                } else {
+                    tracing::warn!(uid, "mail_parser 解析邮件头失败，跳过");
+                }
+            } else {
+                tracing::warn!(uid, "BODY.PEEK[HEADER] 为空，跳过");
             }
         }
 
@@ -103,6 +116,9 @@ impl ImapClient {
     }
 
     /// 按 UID 范围获取邮件头
+    ///
+    /// 使用 `BODY.PEEK[HEADER]` + `mail_parser` 解析邮件头。
+    #[allow(dead_code)]
     pub async fn fetch_uids(
         &mut self,
         start: u32,
@@ -119,60 +135,53 @@ impl ImapClient {
 
         let mut fetches = self
             .session
-            .uid_fetch(&range, "(ENVELOPE FLAGS UID)")
+            .uid_fetch(&range, "(FLAGS BODY.PEEK[HEADER] UID)")
             .await
             .map_err(|e| MailError::ImapConnectionFailed(format!("获取邮件头失败: {e}")))?;
 
+        let now_ts = chrono::Utc::now().timestamp();
         let mut headers = Vec::new();
         while let Some(fetch_result) = fetches.next().await {
             let fetch = fetch_result
                 .map_err(|e| MailError::ImapConnectionFailed(format!("解析邮件头失败: {e}")))?;
             let uid = fetch.uid.unwrap_or(0);
-            let envelope = match fetch.envelope() {
-                Some(e) => e,
-                None => {
+
+            if let Some(raw) = fetch.header() {
+                if let Some(parsed) = parser::parse_headers_from_raw(raw, now_ts) {
+                    let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
                     headers.push(RawEmailHeader {
                         uid,
-                        flags: fetch.flags().map(|f| format!("{f:?}")).collect(),
+                        flags,
+                        subject: parsed.subject,
+                        from: Some(parsed.from_display).filter(|s| !s.is_empty()),
+                        to: Some(parsed.to_display).filter(|s| !s.is_empty()),
+                        date: parsed.sent_at.to_string().into(),
+                        message_id: parsed.message_id,
+                    });
+                } else {
+                    let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
+                    headers.push(RawEmailHeader {
+                        uid,
+                        flags,
                         subject: None,
                         from: None,
                         to: None,
                         date: None,
                         message_id: None,
                     });
-                    continue;
                 }
-            };
-            let subject = envelope
-                .subject
-                .as_ref()
-                .map(|s| parser::cow_bytes_to_string(s.as_ref()));
-            let from = envelope
-                .from
-                .as_ref()
-                .and_then(|addrs| addrs.first().and_then(|a| parser::address_to_string(a)));
-            let to = envelope
-                .to
-                .as_ref()
-                .and_then(|addrs| addrs.first().and_then(|a| parser::address_to_string(a)));
-            let date = envelope
-                .date
-                .as_ref()
-                .map(|s| parser::cow_bytes_to_string(s.as_ref()));
-            let message_id = envelope
-                .message_id
-                .as_ref()
-                .map(|s| parser::cow_bytes_to_string(s.as_ref()));
-            let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
-            headers.push(RawEmailHeader {
-                uid,
-                flags,
-                subject,
-                from,
-                to,
-                date,
-                message_id,
-            });
+            } else {
+                let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
+                headers.push(RawEmailHeader {
+                    uid,
+                    flags,
+                    subject: None,
+                    from: None,
+                    to: None,
+                    date: None,
+                    message_id: None,
+                });
+            }
         }
         tracing::debug!(count = headers.len(), "IMAP: 获取邮件头完成");
         Ok(headers)
@@ -236,8 +245,8 @@ impl ImapClient {
 
     /// 按 UID 范围批量获取完整邮件（包含正文）
     ///
-    /// 与 `batch_fetch_email_headers` 类似，但额外获取 BODY.PEEK[] 并用
-    /// `mail_parser` 解析出纯文本/HTML 正文、预览文本等。
+    /// 使用 `mail_parser` 统一解析所有邮件头和正文内容，
+    /// BODYSTRUCTURE 仅用于提取附件 section_path（IMAP 按需下载所需）。
     ///
     /// # 注意
     ///
@@ -262,12 +271,13 @@ impl ImapClient {
             uid_range
         );
 
-        // 批量 FETCH：ENVELOPE + FLAGS + BODYSTRUCTURE + BODY.PEEK[] + INTERNALDATE + UID
+        // 批量 FETCH：FLAGS + BODYSTRUCTURE + BODY.PEEK[] + INTERNALDATE + UID
+        // 不再使用 ENVELOPE，所有邮件头通过 mail_parser 从 BODY.PEEK[] 解析
         let fetches = self
             .session
             .uid_fetch(
                 &uid_range,
-                "(FLAGS INTERNALDATE ENVELOPE BODYSTRUCTURE BODY.PEEK[1] BODY.PEEK[2] UID)",
+                "(FLAGS INTERNALDATE BODYSTRUCTURE BODY.PEEK[] UID)",
             )
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?
@@ -301,70 +311,27 @@ impl ImapClient {
             // ─── INTERNALDATE → received_at ───
             let received_at = fetch.internal_date().map(|d| d.timestamp()).unwrap_or(now);
 
-            // ─── ENVELOPE ───
-            let mail_envelope = fetch
-                .envelope()
-                .and_then(|enve| parser::parse_envelope(enve).ok());
-
-            // ─── BODY.PEEK[] → 解析正文 ───
+            // ─── BODY.PEEK[] → mail_parser 统一解析 ───
             let mut body_text: Option<String> = None;
             let mut body_html: Option<String> = None;
             let mut preview: Option<String> = None;
-            let mut sender_name: Option<String> = None;
-            let mut sender_email = String::new();
-            let mut recipient_emails = String::new();
-            let mut message_id: Option<String> = None;
-            let mut sent_at = now;
+            let mut headers: Option<ParsedHeaders> = None;
 
-            if let Some(raw) = fetch.body()
-                && let Some(msg) = mail_parser::MessageParser::default().parse(raw)
-            {
-                body_text = msg.body_text(0).map(|t| t.to_string());
-                body_html = msg.body_html(0).map(|t| t.to_string());
-                preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
-
-                sender_name = msg
-                    .from()
-                    .and_then(|a| a.first().and_then(|p| p.name().map(|n| n.to_string())));
-                sender_email = msg
-                    .from()
-                    .and_then(|a| a.first().and_then(|p| p.address().map(|a| a.to_string())))
-                    .unwrap_or_default();
-                recipient_emails = msg
-                    .to()
-                    .map(|addr| {
-                        addr.iter()
-                            .filter_map(|a| a.address().map(|a| a.to_string()))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                message_id = msg.message_id().map(|s| s.to_string());
-                sent_at = msg.date().map(|d| d.to_timestamp()).unwrap_or(now);
+            if let Some(raw) = fetch.body() {
+                // 单次解析，同时提取头部和正文
+                if let Some(msg) = mail_parser::MessageParser::default().parse(raw) {
+                    body_text = msg.body_text(0).map(|t| t.to_string());
+                    body_html = msg.body_html(0).map(|t| t.to_string());
+                    preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
+                    headers = Some(extract_headers_from_message(&msg, now));
+                }
             }
 
-            // ENVELOPE 兜底：当 body 解析失败时从 ENVELOPE 取地址信息
-            if let Some(enve) = &mail_envelope {
-                if sender_email.is_empty() {
-                    sender_email = extract_email_from_address(&enve.from);
-                }
-                if sender_name.is_none() {
-                    sender_name = extract_name_from_address(&enve.from);
-                }
-                if recipient_emails.is_empty() {
-                    recipient_emails = enve.to.clone();
-                }
-                if message_id.is_none() {
-                    message_id = fetch.envelope().and_then(|e| {
-                        e.message_id
-                            .as_ref()
-                            .map(|m| String::from_utf8_lossy(m.as_ref()).into_owned())
-                    });
-                }
-                if sent_at == now {
-                    sent_at = enve.date.timestamp();
-                }
-            }
+            // 使用 INTERNALDATE 作为 fallback
+            let fallback_date = fetch
+                .internal_date()
+                .map(|d| d.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now);
 
             // ─── BODYSTRUCTURE → 附件 ───
             let attachments = fetch
@@ -374,21 +341,9 @@ impl ImapClient {
 
             tracing::trace!(uid, attachment_count = attachments.len(), "解析附件完成");
 
-            // ─── ENVELOPE 中的 cc / bcc ───
-            let cc_emails = mail_envelope.as_ref().and_then(|e| {
-                if e.cc.is_empty() {
-                    None
-                } else {
-                    Some(e.cc.clone())
-                }
-            });
-            let bcc_emails = mail_envelope.as_ref().and_then(|e| {
-                if e.bcc.is_empty() {
-                    None
-                } else {
-                    Some(e.bcc.clone())
-                }
-            });
+            // ─── 组装 WholeEmailDto ───
+            let h = headers.as_ref();
+            let subject = h.and_then(|h| h.subject.clone()).filter(|s| !s.is_empty());
 
             emails.push(WholeEmailDto {
                 // 数据库侧字段，暂用默认值，由调用者持久化后填充
@@ -396,16 +351,13 @@ impl ImapClient {
                 account_id: 0,
                 folder: folder.to_string(),
                 uid,
-                message_id,
-                sender_name,
-                sender_email,
-                recipient_emails,
-                cc_emails,
-                bcc_emails,
-                subject: mail_envelope
-                    .as_ref()
-                    .map(|e| e.subject.clone())
-                    .filter(|s| !s.is_empty()),
+                message_id: h.and_then(|h| h.message_id.clone()),
+                sender_name: h.and_then(|h| h.sender_name.clone()),
+                sender_email: h.map(|h| h.sender_email.clone()).unwrap_or_default(),
+                recipient_emails: h.map(|h| h.recipient_emails.clone()).unwrap_or_default(),
+                cc_emails: h.and_then(|h| h.cc_emails.clone()),
+                bcc_emails: h.and_then(|h| h.bcc_emails.clone()),
+                subject,
                 preview,
                 body_text,
                 body_html,
@@ -415,7 +367,7 @@ impl ImapClient {
                 is_draft: draft,
                 is_answered: answered,
                 is_deleted: deleted,
-                sent_at,
+                sent_at: h.map(|h| h.sent_at).unwrap_or_else(|| fallback_date.timestamp()),
                 received_at,
                 created_at: now,
             });

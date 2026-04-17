@@ -1,100 +1,123 @@
-use crate::error::MailError;
-use crate::infrastructure::protocols::types::{AttachmentInfo, MailEnvelope};
-use crate::infrastructure::protocols::utils::format_address_list;
-use async_imap::imap_proto::{self, Envelope};
+use crate::infrastructure::protocols::types::AttachmentInfo;
+use async_imap::imap_proto;
 
-/// 从 Cow<[u8]> 转为可读 String
-pub fn cow_bytes_to_string(cow: &[u8]) -> String {
-    String::from_utf8_lossy(cow).into_owned()
+use mail_parser::MessageParser;
+
+// ──────────────────────────────────────────────
+// mail_parser 辅助函数
+// ──────────────────────────────────────────────
+
+/// 使用 mail_parser 解析后的邮件头部信息
+#[derive(Debug, Clone)]
+pub struct ParsedHeaders {
+    pub subject: Option<String>,
+    pub sender_name: Option<String>,
+    pub sender_email: String,
+    /// "Name <email>" 格式的发件人显示字符串
+    pub from_display: String,
+    /// "Name <email>" 格式的收件人显示字符串
+    pub to_display: String,
+    /// 逗号分隔的收件人邮箱
+    pub recipient_emails: String,
+    pub cc_emails: Option<String>,
+    pub bcc_emails: Option<String>,
+    pub message_id: Option<String>,
+    /// Unix 时间戳（秒）
+    pub sent_at: i64,
 }
 
-/// 从 Address 提取显示名
-pub fn address_to_string(addr: &imap_proto::Address<'_>) -> Option<String> {
-    addr.name
-        .as_ref()
-        .map(|n| cow_bytes_to_string(n))
-        .or_else(|| addr.adl.as_ref().map(|m| cow_bytes_to_string(m)))
-        .or_else(|| {
-            let mailbox = addr.mailbox.as_ref().map(|m| cow_bytes_to_string(m));
-            let host = addr.host.as_ref().map(|h| cow_bytes_to_string(h));
-            match (mailbox, host) {
-                (Some(m), Some(h)) => Some(format!("{m}@{h}")),
-                (Some(m), None) => Some(m),
-                _ => None,
-            }
-        })
-}
-
-/// 解析 IMAP ENVELOPE 响应
+/// 使用 mail_parser 解析原始 RFC822 数据，提取邮件头字段
 ///
-/// 从服务器返回的 ENVELOPE 数据中提取邮件头信息，包括：
-/// - Subject: 邮件主题（使用自定义 RFC 2047 解码器）
-/// - From: 发件人地址列表
-/// - To: 收件人地址列表
-/// - Cc: 抄送地址列表
-/// - Bcc: 密送地址列表
-pub fn parse_envelope(envelope: &Envelope) -> Result<MailEnvelope, MailError> {
-    // 解析 Subject 字段
-    let subject = envelope
-        .subject
-        .as_ref()
-        .map(|subject| {
-            let subject_str = String::from_utf8_lossy(subject.as_ref());
-            match rfc2047_decoder::decode(subject_str.as_bytes()) {
-                Ok(decoded) => decoded,
-                Err(_) => subject_str.into_owned(),
-            }
-        })
-        .unwrap_or_default();
-
-    let from = envelope
-        .from
-        .as_ref()
-        .map(|addrs| format_address_list(addrs.as_slice()))
-        .unwrap_or_default();
-
-    let to = envelope
-        .to
-        .as_ref()
-        .map(|addrs| format_address_list(addrs.as_slice()))
-        .unwrap_or_default();
-
-    let cc = envelope
-        .cc
-        .as_ref()
-        .map(|addrs| format_address_list(addrs.as_slice()))
-        .unwrap_or_default();
-
-    let bcc = envelope
-        .bcc
-        .as_ref()
-        .map(|addrs| format_address_list(addrs.as_slice()))
-        .unwrap_or_default();
-
-    // 解析日期 (RFC 2822 格式)
-    let date = envelope
-        .date
-        .as_ref()
-        .and_then(|date_bytes| {
-            let date_str = String::from_utf8_lossy(date_bytes.as_ref());
-            chrono::DateTime::parse_from_rfc2822(&date_str)
-                .ok()
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-        })
-        .unwrap_or_else(|| {
-            tracing::warn!("IMAP ENVELOPE 日期解析失败，使用当前时间");
-            chrono::Utc::now()
-        });
-
-    Ok(MailEnvelope {
-        subject,
-        from,
-        to,
-        cc,
-        bcc,
-        date,
-    })
+/// `fallback_ts`：当邮件中无 Date 头时使用的时间戳
+pub fn parse_headers_from_raw(raw: &[u8], fallback_ts: i64) -> Option<ParsedHeaders> {
+    let msg = MessageParser::default().parse(raw)?;
+    Some(extract_headers_from_message(&msg, fallback_ts))
 }
+
+/// 从已解析的 mail_parser Message 中提取邮件头字段
+///
+/// 供调用方在已经拥有 `Message` 对象时使用，避免重复解析。
+pub fn extract_headers_from_message(
+    msg: &mail_parser::Message<'_>,
+    fallback_ts: i64,
+) -> ParsedHeaders {
+
+    let subject = msg.subject().map(|s| s.to_string());
+    let message_id = msg.message_id().map(|s| s.to_string());
+    let sent_at = msg.date().map(|d| d.to_timestamp()).unwrap_or(fallback_ts);
+
+    // From
+    let sender_name = msg
+        .from()
+        .and_then(|a| a.first().and_then(|p| p.name().map(|n| n.to_string())));
+    let sender_email = msg
+        .from()
+        .and_then(|a| a.first().and_then(|p| p.address().map(|a| a.to_string())))
+        .unwrap_or_default();
+    let from_display = format_mp_address_display(msg.from());
+
+    // To
+    let to_display = format_mp_address_display(msg.to());
+    let recipient_emails = format_mp_address_emails(msg.to());
+
+    // CC / BCC
+    let cc_emails = format_mp_address_opt(msg.cc());
+    let bcc_emails = format_mp_address_opt(msg.bcc());
+
+    ParsedHeaders {
+        subject,
+        sender_name,
+        sender_email,
+        from_display,
+        to_display,
+        recipient_emails,
+        cc_emails,
+        bcc_emails,
+        message_id,
+        sent_at,
+    }
+}
+
+/// 将 mail_parser 地址格式化为 "Name <email>" 显示字符串（空时返回空字符串）
+fn format_mp_address_display(addr: Option<&mail_parser::Address>) -> String {
+    addr.map(|a| {
+        a.iter()
+            .filter_map(|p| match (p.name(), p.address()) {
+                (Some(name), Some(email)) => Some(format!("{name} <{email}>")),
+                (None, Some(email)) => Some(email.to_string()),
+                (Some(name), None) => Some(name.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+    .unwrap_or_default()
+}
+
+/// 同 `format_mp_address_display`，但空字符串时返回 None
+fn format_mp_address_opt(addr: Option<&mail_parser::Address>) -> Option<String> {
+    let s = format_mp_address_display(addr);
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// 从 mail_parser 地址中提取逗号分隔的邮箱地址
+fn format_mp_address_emails(addr: Option<&mail_parser::Address>) -> String {
+    addr.map(|a| {
+        a.iter()
+            .filter_map(|p| p.address().map(|a| a.to_string()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+    .unwrap_or_default()
+}
+
+// ──────────────────────────────────────────────
+// BODYSTRUCTURE 附件提取（仍需保留，用于 IMAP section_path）
+// ──────────────────────────────────────────────
 
 /// 从 BODYSTRUCTURE 中递归提取附件信息
 ///
