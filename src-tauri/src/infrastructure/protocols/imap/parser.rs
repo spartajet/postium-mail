@@ -204,6 +204,14 @@ pub fn is_attachment(common: &imap_proto::BodyContentCommon<'_>) -> bool {
     false
 }
 
+/// 对可能包含 RFC 2047 编码的字符串进行解码
+fn decode_rfc2047(raw: &str) -> String {
+    match rfc2047_decoder::decode(raw.as_bytes()) {
+        Ok(decoded) => decoded,
+        Err(_) => raw.to_string(),
+    }
+}
+
 /// 从 BODYSTRUCTURE 的单部分节点构建 AttachmentInfo
 pub fn build_attachment_info(
     common: &imap_proto::BodyContentCommon<'_>,
@@ -220,7 +228,7 @@ pub fn build_attachment_info(
                 params
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("filename"))
-                    .map(|(_, v)| v.clone().into_owned())
+                    .map(|(_, v)| decode_rfc2047(&v.clone().into_owned()))
             })
         })
         .or_else(|| {
@@ -228,7 +236,7 @@ pub fn build_attachment_info(
                 params
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("name"))
-                    .map(|(_, v)| v.clone().into_owned())
+                    .map(|(_, v)| decode_rfc2047(&v.clone().into_owned()))
             })
         });
 
