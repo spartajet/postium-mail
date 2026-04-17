@@ -11,11 +11,7 @@ impl SohuMailProvider {
                 id: "sohu".into(),
                 name: "搜狐邮箱".into(),
                 account_type: AccountType::Personal,
-                domains: vec![
-                    "sohu.com".into(),
-                    "vip.sohu.com".into(),
-                    "sohu.net".into(),
-                ],
+                domains: vec!["sohu.com".into(), "vip.sohu.com".into(), "sohu.net".into()],
                 auth_type: AuthType::Password,
                 color: Some("#DA1F26".into()),
                 icon: Some("sohu".into()),

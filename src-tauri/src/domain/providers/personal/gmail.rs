@@ -70,16 +70,10 @@ impl MailProvider for GmailProvider {
     fn folder_mapping(&self) -> StandardFolder {
         StandardFolder {
             inbox: vec!["INBOX".into()],
-            sent: vec![
-                "[Gmail]/Sent Mail".into(),
-                "[Gmail]/&XfJT0ZCuTvY-".into(),
-            ],
+            sent: vec!["[Gmail]/Sent Mail".into(), "[Gmail]/&XfJT0ZCuTvY-".into()],
             drafts: vec!["[Gmail]/Drafts".into(), "Drafts".into()],
             spam: vec!["[Gmail]/Spam".into(), "[Gmail]/&g0l6Pw-".into()],
-            trash: vec![
-                "[Gmail]/Trash".into(),
-                "[Gmail]/&V4NXPpCuTvY-".into(),
-            ],
+            trash: vec!["[Gmail]/Trash".into(), "[Gmail]/&V4NXPpCuTvY-".into()],
             archive: vec!["[Gmail]/All Mail".into(), "Archive".into()],
         }
     }

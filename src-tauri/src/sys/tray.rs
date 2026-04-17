@@ -1,7 +1,7 @@
 use tauri::{
+    App, Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    App, Emitter, Manager,
 };
 
 pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
@@ -33,22 +33,22 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(move |app, event| {
             tracing::debug!("托盘菜单事件: {}", event.id().as_ref());
             match event.id().as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                "show" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                 }
-            }
-            "new_email" => {
-                let _ = app.emit("tray-action", "compose");
-            }
-            "sync" => {
-                let _ = app.emit("tray-action", "sync");
-            }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
+                "new_email" => {
+                    let _ = app.emit("tray-action", "compose");
+                }
+                "sync" => {
+                    let _ = app.emit("tray-action", "sync");
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
             }
         })
         .build(app)?;

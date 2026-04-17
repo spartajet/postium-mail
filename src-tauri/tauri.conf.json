@@ -10,12 +10,14 @@
     "frontendDist": "../build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Postium Mail",
         "width": 1600,
         "height": 1000,
-        "decorations": false
+        "decorations": false,
+        "visible": false
       }
     ],
     "security": {

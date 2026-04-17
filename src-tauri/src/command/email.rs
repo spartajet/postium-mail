@@ -1,6 +1,8 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
-use crate::service::email_service::{EmailCategory, EmailDetail, EmailListResponse, SendEmailRequest};
+use crate::service::email_service::{
+    EmailCategory, EmailDetail, EmailListResponse, SendEmailRequest,
+};
 
 #[tauri::command]
 #[specta::specta]
@@ -28,7 +30,9 @@ pub async fn list_emails_by_category(
     limit: usize,
 ) -> Result<EmailListResponse, MailError> {
     tracing::debug!(account_id, category = ?category, page, limit, "命令: 按分类列出邮件");
-    let result = service.list_by_category(account_id, category.clone(), page, limit).await?;
+    let result = service
+        .list_by_category(account_id, category.clone(), page, limit)
+        .await?;
     tracing::debug!(account_id, category = ?category, total = result.total, returned = result.emails.len(), "分类邮件列表");
     Ok(result)
 }

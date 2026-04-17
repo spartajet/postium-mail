@@ -1,8 +1,8 @@
 use crate::domain::providers::SmtpServerConfig;
 use crate::domain::providers::SslMode;
 use crate::error::MailError;
-use lettre::message::header::ContentType;
 use lettre::message::MultiPart;
+use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 

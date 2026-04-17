@@ -200,6 +200,7 @@ pub fn run() {
 
     // ========== 步骤 8: 构建 Tauri 应用 ==========
     let mut app_builder = tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         // 窗口定位器插件：支持窗口位置管理
         .plugin(tauri_plugin_positioner::init())
         // URL 打开器插件：支持在浏览器中打开链接
@@ -244,6 +245,11 @@ pub fn run() {
             // ========== 步骤 8.2: 设置系统托盘 ==========
             // 在系统托盘中显示应用图标，支持最小化和退出功能
             sys::tray::setup_tray(app)?;
+            if let Some(main_window) = app.get_webview_window("main")
+                && let Ok(()) = main_window.show()
+            {
+                tracing::info!("窗体加载成功");
+            }
 
             tracing::info!("Postium Mail 启动完成");
             Ok(())
