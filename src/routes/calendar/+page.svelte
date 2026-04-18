@@ -213,7 +213,7 @@
             </button>
             <!-- 当前月份标签（如 "2024年1月"） -->
             <span
-                class="min-w-[140px] text-center text-sm font-medium text-foreground"
+                class="min-w-35 text-center text-sm font-medium text-foreground"
                 >{monthLabel}</span
             >
             <!-- 下个月按钮 -->

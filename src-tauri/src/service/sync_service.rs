@@ -1,3 +1,19 @@
+//！ ═════════════════════════════════════════════════════════════════════════
+//！ 同步服务模块 (Sync Service)
+//！ ═════════════════════════════════════════════════════════════════════════
+//！
+//！ 本模块负责与邮件服务器（IMAP/SMTP）的同步操作，包括：
+//！ 1. 账号同步 - 从邮件服务器拉取新邮件、同步邮件状态
+//！ 2. 进度通知 - 通过 Tauri 事件系统向前端推送同步进度
+//！ 3. 文件夹统计 - 提供各文件夹的邮件数量统计
+//！
+//！ 设计特点：
+//！ - 使用 SyncOrchestrator 编排复杂的同步流程
+//！ - 通过 Tauri 事件系统实时通知前端同步进度
+//！ - 支持分阶段同步（连接、列出文件夹、同步邮件等）
+//！ - 提供详细的同步结果统计
+//！ ═════════════════════════════════════════════════════════════════════════
+
 use crate::domain::auth::AuthManager;
 use crate::domain::sync::SyncProgressEmitter;
 use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
@@ -6,22 +22,6 @@ use crate::error::MailError;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::repository::email_repo;
 use std::sync::Arc;
-
-// ═════════════════════════════════════════════════════════════════════════
-// 同步服务模块 (Sync Service)
-// ═════════════════════════════════════════════════════════════════════════
-//
-// 本模块负责与邮件服务器（IMAP/SMTP）的同步操作，包括：
-// 1. 账号同步 - 从邮件服务器拉取新邮件、同步邮件状态
-// 2. 进度通知 - 通过 Tauri 事件系统向前端推送同步进度
-// 3. 文件夹统计 - 提供各文件夹的邮件数量统计
-//
-// 设计特点：
-// - 使用 SyncOrchestrator 编排复杂的同步流程
-// - 通过 Tauri 事件系统实时通知前端同步进度
-// - 支持分阶段同步（连接、列出文件夹、同步邮件等）
-// - 提供详细的同步结果统计
-// ═════════════════════════════════════════════════════════════════════════
 
 /// 同步服务
 ///
@@ -203,15 +203,6 @@ impl SyncService {
             }
         }
     }
-
-    // /// 同步账号（静默模式）
-    // ///
-    /// 这个方法不发送进度事件，适合后台定时同步。
-    // /// 当前已注释，暂不使用。
-    // pub async fn sync_account(&self, account_id: i32) -> Result<SyncResult, MailError> {
-    //     let orchestrator = SyncOrchestrator::new(self.db.clone(), self.auth.clone());
-    //     orchestrator.sync_account(account_id).await
-    // }
 
     /// 获取账号的文件夹统计信息
     ///

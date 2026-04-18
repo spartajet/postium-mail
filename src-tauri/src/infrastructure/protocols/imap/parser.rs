@@ -41,7 +41,6 @@ pub fn extract_headers_from_message(
     msg: &mail_parser::Message<'_>,
     fallback_ts: i64,
 ) -> ParsedHeaders {
-
     let subject = msg.subject().map(|s| s.to_string());
     let message_id = msg.message_id().map(|s| s.to_string());
     let sent_at = msg.date().map(|d| d.to_timestamp()).unwrap_or(fallback_ts);
@@ -97,11 +96,7 @@ fn format_mp_address_display(addr: Option<&mail_parser::Address>) -> String {
 /// 同 `format_mp_address_display`，但空字符串时返回 None
 fn format_mp_address_opt(addr: Option<&mail_parser::Address>) -> Option<String> {
     let s = format_mp_address_display(addr);
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    if s.is_empty() { None } else { Some(s) }
 }
 
 /// 从 mail_parser 地址中提取逗号分隔的邮箱地址
@@ -228,7 +223,7 @@ pub fn build_attachment_info(
                 params
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("filename"))
-                    .map(|(_, v)| decode_rfc2047(&v.clone().into_owned()))
+                    .map(|(_, v)| decode_rfc2047(&v.clone()))
             })
         })
         .or_else(|| {
@@ -236,7 +231,7 @@ pub fn build_attachment_info(
                 params
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("name"))
-                    .map(|(_, v)| decode_rfc2047(&v.clone().into_owned()))
+                    .map(|(_, v)| decode_rfc2047(&v.clone()))
             })
         });
 

@@ -177,7 +177,7 @@
         <!-- Nodes: 工作流节点渲染 -->
         {#each nodes as node (node.id)}
             <button
-                class="workflow-node absolute flex w-[180px] flex-col rounded-lg border-2 p-3 text-left transition-all {typeColors[
+                class="workflow-node absolute flex w-45 flex-col rounded-lg border-2 p-3 text-left transition-all {typeColors[
                     node.type
                 ]} {selectedNode === node.id
                     ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
