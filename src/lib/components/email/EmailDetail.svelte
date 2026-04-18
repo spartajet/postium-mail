@@ -451,7 +451,7 @@
                 每行前面的 "• " 前缀会被移除后重新渲染为无序列表
               -->
                             <ul class="space-y-1">
-                                {#each aiSummary.split("\n") as line}
+                                {#each aiSummary.split("\n") as line, i (i)}
                                     <li class="text-sm text-foreground/80">
                                         {line.replace("• ", "")}
                                     </li>
@@ -660,7 +660,7 @@
 
             <!-- AI 功能按钮列表 -->
             <div class="flex items-center gap-1">
-                {#each aiActions as action}
+                {#each aiActions as action, i (i)}
                     <!--
             单个 AI 操作按钮
             悬停时显示主题色背景和文字

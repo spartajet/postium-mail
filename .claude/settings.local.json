@@ -12,7 +12,8 @@
       "Bash(grep:*)",
       "Bash(grep -rn \"fn first\\\\|fn iter\" /c/Users/guo/.cargo/registry/src/mirrors.ustc.edu.cn-38d0e5eb5da2abae/mail-parser-0.11.2/src/ --include=*.rs)",
       "Bash(cargo build:*)",
-      "Bash(cargo clippy:*)"
+      "Bash(cargo clippy:*)",
+      "Bash(yarn install *)"
     ]
   },
   "model": "Opus",

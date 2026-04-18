@@ -172,7 +172,7 @@
 -->
 <div
     bind:this={menuEl}
-    class="fixed z-[100] min-w-[180px] rounded-lg border border-border bg-card py-1 shadow-lg"
+    class="fixed z-100 min-w-45 rounded-lg border border-border bg-card py-1 shadow-lg"
     style={menuStyle}
 >
     <!-- ==================== 邮件回复/转发操作 ==================== -->
