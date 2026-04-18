@@ -1,60 +1,59 @@
-///
-/// 邮件操作命令模块
-///
-/// 本模块提供与邮件收发、搜索、管理相关的 Tauri 命令。
-/// 这些命令允许前端用户对邮件执行完整的操作，包括：
-///
-/// 主要功能分类：
-/// 1. 邮件列表获取：
-///    - list_emails: 获取指定文件夹中的邮件列表（支持分页）
-///    - list_emails_by_category: 按分类获取邮件（收件箱、已发送、草稿箱等）
-///
-/// 2. 邮件详情和搜索：
-///    - get_email: 获取单封邮件的完整详情（包含正文、附件等）
-///    - search_emails: 全文搜索邮件（支持跨账号搜索）
-///
-/// 3. 邮件状态操作：
-///    - mark_as_read: 标记邮件为已读/未读
-///    - toggle_star: 切换邮件的星标状态（收藏）
-///
-/// 4. 邮件管理：
-///    - delete_emails: 删除一封或多封邮件（移动到垃圾箱或永久删除）
-///    - move_email_to_folder: 移动邮件到指定文件夹
-///
-/// 5. 邮件发送：
-///    - send_email: 发送新邮件（支持附件、抄送、密送等）
-///
-/// 架构说明：
-/// - 这些命令充当应用层的控制器，接收前端请求并转发给 EmailService
-/// - 命令函数不包含业务逻辑，只负责参数验证、日志记录和结果返回
-/// - 使用 tauri::State 注入 EmailService 实例，实现依赖注入
-///
-/// 数据流：
-/// 前端 invoke 调用 → 命令函数 → EmailService → 数据库/IMAP/SMTP
-///
-/// 性能优化：
-/// - list_emails 和 list_emails_by_category 支持分页，避免一次性加载大量邮件
-/// - search_emails 支持限制结果数量
-/// - 邮件列表只返回基本信息，详情需要单独调用 get_email
-///
-/// 错误处理：
-/// - 所有命令返回 Result<T, MailError>
-/// - MailError 包含详细的错误信息，便于前端展示给用户
-///
-/// 安全说明：
-/// - 邮件内容在传输过程中通过 Tauri IPC 通道加密
-/// - 敏感操作（如删除）建议在前端添加确认对话框
-///
-/// 依赖项：
-/// - EmailService: 邮件服务层，处理邮件的业务逻辑
-/// - EmailListResponse: 邮件列表响应（包含邮件数组和总数）
-/// - EmailDetail: 邮件详细信息
-/// - EmailCategory: 邮件分类枚举
-/// - SendEmailRequest: 发送邮件请求
-/// - SearchResult: 搜索结果
-///
+//!
+//! 邮件操作命令模块
+//!
+//! 本模块提供与邮件收发、搜索、管理相关的 Tauri 命令。
+//! 这些命令允许前端用户对邮件执行完整的操作，包括：
+//!
+//! 主要功能分类：
+//! 1. 邮件列表获取：
+//!    - list_emails: 获取指定文件夹中的邮件列表（支持分页）
+//!    - list_emails_by_category: 按分类获取邮件（收件箱、已发送、草稿箱等）
+//!
+//! 2. 邮件详情和搜索：
+//!    - get_email: 获取单封邮件的完整详情（包含正文、附件等）
+//!    - search_emails: 全文搜索邮件（支持跨账号搜索）
+//!
+//! 3. 邮件状态操作：
+//!    - mark_as_read: 标记邮件为已读/未读
+//!    - toggle_star: 切换邮件的星标状态（收藏）
+//!
+//! 4. 邮件管理：
+//!    - delete_emails: 删除一封或多封邮件（移动到垃圾箱或永久删除）
+//!    - move_email_to_folder: 移动邮件到指定文件夹
+//!
+//! 5. 邮件发送：
+//!    - send_email: 发送新邮件（支持附件、抄送、密送等）
+//!
+//! 架构说明：
+//! - 这些命令充当应用层的控制器，接收前端请求并转发给 EmailService
+//! - 命令函数不包含业务逻辑，只负责参数验证、日志记录和结果返回
+//! - 使用 tauri::State 注入 EmailService 实例，实现依赖注入
+//!
+//! 数据流：
+//! 前端 invoke 调用 → 命令函数 → EmailService → 数据库/IMAP/SMTP
+//!
+//! 性能优化：
+//! - list_emails 和 list_emails_by_category 支持分页，避免一次性加载大量邮件
+//! - search_emails 支持限制结果数量
+//! - 邮件列表只返回基本信息，详情需要单独调用 get_email
+//!
+//! 错误处理：
+//! - 所有命令返回 Result<T, MailError>
+//! - MailError 包含详细的错误信息，便于前端展示给用户
+//!
+//! 安全说明：
+//! - 邮件内容在传输过程中通过 Tauri IPC 通道加密
+//! - 敏感操作（如删除）建议在前端添加确认对话框
+//!
+//! 依赖项：
+//! - EmailService: 邮件服务层，处理邮件的业务逻辑
+//! - EmailListResponse: 邮件列表响应（包含邮件数组和总数）
+//! - EmailDetail: 邮件详细信息
+//! - EmailCategory: 邮件分类枚举
+//! - SendEmailRequest: 发送邮件请求
+//! - SearchResult: 搜索结果
+//!
 
-use crate::domain::sync::FolderStat;
 use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
 use crate::service::email_service::{

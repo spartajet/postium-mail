@@ -65,8 +65,8 @@ pub enum MailError {
     #[error("IMAP 错误: {0}")]
     ImapError(String),
 
-    #[error("邮件缺少 UID")]
-    EmailMissingUid(),
+    #[error("邮件缺少 UID: {0}")]
+    EmailMissingUid(String),
 }
 
 // SeaORM 错误转换
