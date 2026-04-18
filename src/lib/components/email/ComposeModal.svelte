@@ -140,9 +140,8 @@
                 // 发送成功：关闭模态框并重置表单
                 close();
             }
-        } catch (e: any) {
-            // 捕获异常：显示错误信息
-            error = e.toString();
+        } catch (e: unknown) {
+            error = e instanceof Error ? e.message : String(e);
         } finally {
             // 无论成功或失败，都结束发送中状态
             sending = false;

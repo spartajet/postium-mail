@@ -4,9 +4,9 @@
   "version": "0.2.0",
   "identifier": "com.guo.postium-mail",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "yarn build",
     "frontendDist": "../build"
   },
   "app": {
