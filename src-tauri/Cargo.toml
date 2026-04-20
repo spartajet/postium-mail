@@ -71,6 +71,11 @@ url = "2"
 utf7-imap = "0.3"
 uuid = { version = "1", features = ["v4"] }
 
+[dev-dependencies]
+mockall = "0.13"
+tempfile = "3"
+tokio-test = "0.4"
+
 [build-dependencies]
 dotenvy = "0.15"
 tauri-build = { version = "2", features = [] }
@@ -84,8 +89,3 @@ opt-level = "s"
 strip = true
 lto = true
 codegen-units = 1
-
-[dev-dependencies]
-mockall = "0.13"
-tokio-test = "0.4"
-tempfile = "3"
