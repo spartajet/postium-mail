@@ -616,3 +616,54 @@ pub trait MailProvider: Send + Sync {
         format!("http://127.0.0.1:{}/oauth/callback", port)
     }
 }
+
+#[cfg(test)]
+mod standard_folder_tests {
+    use super::StandardFolder;
+
+    fn default_folders() -> StandardFolder {
+        StandardFolder::default_english()
+    }
+
+    #[test]
+    fn test_find_inbox() {
+        let folders = default_folders();
+        assert_eq!(folders.find_standard_type("INBOX"), "inbox");
+    }
+
+    #[test]
+    fn test_find_sent() {
+        let folders = default_folders();
+        assert_eq!(folders.find_standard_type("Sent"), "sent");
+        assert_eq!(folders.find_standard_type("Sent Items"), "sent");
+    }
+
+    #[test]
+    fn test_find_spam() {
+        let folders = default_folders();
+        assert_eq!(folders.find_standard_type("Spam"), "spam");
+        assert_eq!(folders.find_standard_type("Junk"), "spam");
+    }
+
+    #[test]
+    fn test_find_unknown_folder() {
+        let folders = default_folders();
+        assert_eq!(folders.find_standard_type("MyCustomFolder"), "other");
+    }
+
+    #[test]
+    fn test_list_all_folders() {
+        let folders = default_folders();
+        let all = folders.list();
+        assert!(all.contains(&"INBOX".to_string()));
+        assert!(all.contains(&"Sent".to_string()));
+        assert!(all.contains(&"Drafts".to_string()));
+    }
+
+    #[test]
+    fn test_case_insensitive_match() {
+        let folders = default_folders();
+        assert_eq!(folders.find_standard_type("trash"), "trash");
+        assert_eq!(folders.find_standard_type("TRASH"), "trash");
+    }
+}
