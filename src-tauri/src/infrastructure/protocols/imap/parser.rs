@@ -247,3 +247,82 @@ pub fn build_attachment_info(
         content_id: other.id.as_ref().map(|id| id.clone().into_owned()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_headers_from_basic_email() {
+        let raw = b"From: Alice <alice@example.com>\r\n\
+                    To: Bob <bob@example.com>\r\n\
+                    Subject: Hello World\r\n\
+                    Date: Mon, 20 Apr 2026 10:00:00 +0800\r\n\
+                    Message-ID: <msg123@example.com>\r\n\
+                    \r\n\
+                    Body text here";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert_eq!(result.subject.as_deref(), Some("Hello World"));
+        assert_eq!(result.sender_email, "alice@example.com");
+        assert_eq!(result.sender_name.as_deref(), Some("Alice"));
+        assert_eq!(result.recipient_emails, "bob@example.com");
+        assert_eq!(result.message_id.as_deref(), Some("msg123@example.com"));
+        assert!(result.sent_at > 0);
+    }
+
+    #[test]
+    fn test_parse_headers_missing_date_uses_fallback() {
+        let raw = b"From: alice@example.com\r\n\
+                    Subject: No Date\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 1745126400).expect("应成功解析");
+
+        assert_eq!(result.sent_at, 1745126400);
+        assert_eq!(result.subject.as_deref(), Some("No Date"));
+    }
+
+    #[test]
+    fn test_parse_headers_with_cc_and_bcc() {
+        let raw = b"From: alice@example.com\r\n\
+                    To: bob@example.com\r\n\
+                    Cc: charlie@example.com\r\n\
+                    Bcc: secret@example.com\r\n\
+                    Subject: With CC\r\n\
+                    Date: Mon, 20 Apr 2026 12:00:00 +0000\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert!(result.cc_emails.is_some());
+        assert!(result.cc_emails.as_ref().unwrap().contains("charlie@example.com"));
+        assert!(result.bcc_emails.is_some());
+        assert!(result.bcc_emails.as_ref().unwrap().contains("secret@example.com"));
+    }
+
+    #[test]
+    fn test_parse_headers_empty_sender_email() {
+        let raw = b"Subject: No From\r\n\
+                    Date: Mon, 20 Apr 2026 12:00:00 +0000\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert_eq!(result.sender_email, "");
+    }
+
+    #[test]
+    fn test_parse_headers_multiple_recipients() {
+        let raw = b"From: alice@example.com\r\n\
+                    To: bob@example.com, charlie@example.com\r\n\
+                    Subject: Multi\r\n\
+                    Date: Mon, 20 Apr 2026 12:00:00 +0000\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert!(result.recipient_emails.contains("bob@example.com"));
+        assert!(result.recipient_emails.contains("charlie@example.com"));
+    }
+}
