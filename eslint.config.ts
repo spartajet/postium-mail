@@ -43,4 +43,17 @@ export default defineConfig([
       "svelte/no-at-html-tags": "off",
     },
   },
+  {
+    files: ["e2e/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.mocha,
+        browser: "readonly",
+        expect: "readonly",
+        $: "readonly",
+        $$: "readonly",
+      },
+    },
+  },
 ]);
