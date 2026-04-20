@@ -53,3 +53,65 @@ jobs:
 
       - name: Run frontend tests
         run: yarn test
+
+  e2e-tests:
+    name: E2E Tests (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    needs: [rust-tests, frontend-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Linux: install webkit2gtk-driver + xvfb
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev webkit2gtk-driver xvfb
+
+      # Windows: install matching Edge Driver
+      - name: Install msedgedriver (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          "$($PWD.Path)" >> $env:GITHUB_PATH
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Install E2E dependencies
+        working-directory: e2e
+        run: yarn install --frozen-lockfile
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      # Linux: run with xvfb for headless display
+      - name: Run E2E tests (Linux)
+        if: matrix.platform == 'ubuntu-latest'
+        working-directory: e2e
+        run: xvfb-run yarn test
+
+      # Windows: run directly
+      - name: Run E2E tests (Windows)
+        if: matrix.platform == 'windows-latest'
+        working-directory: e2e
+        run: yarn test
