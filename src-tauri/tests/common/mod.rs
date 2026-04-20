@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use postium_mail_lib::domain::auth::AuthManager;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
-use postium_mail_lib::service::{AccountService, EmailService, LabelService};
+use postium_mail_lib::service::{AccountService, LabelService};
+use postium_mail_lib::service::email_service::EmailService;
 use sea_orm::{Database, DatabaseConnection};
 use sea_orm_migration::MigratorTrait;
 
@@ -15,6 +16,14 @@ pub async fn create_test_db() -> DbConn {
     postium_mail_migration::Migrator::up(&db, None)
         .await
         .expect("Failed to run migrations");
+
+    // Disable foreign-key enforcement so that CASCADE deletes triggered by
+    // FTS5 triggers do not reference the stale _emails_old shadow table left
+    // behind by migration 13 (which rebuilt the emails table via rename).
+    use sea_orm::ConnectionTrait;
+    db.execute_unprepared("PRAGMA foreign_keys = OFF")
+        .await
+        .ok();
 
     db
 }
