@@ -1,131 +1,131 @@
-# Postium Mail E2E Stabilization Design
+# Postium Mail E2E 稳定化设计
 
-Date: 2026-06-21
-Status: Approved for planning
+日期：2026-06-21
+状态：已批准进入计划阶段
 
-## Goal
+## 目标
 
-Stabilize the existing Tauri E2E framework so it can be used as a reliable Linux CI gate and a repeatable local regression suite.
+稳定现有 Tauri E2E 测试框架，使它可以作为可靠的 Linux CI 门禁，并成为本地可重复运行的回归测试套件。
 
-This work upgrades the current WebdriverIO + tauri-driver setup from a smoke harness into a stable test platform with isolated data, deterministic fixtures, stable selectors, independent specs, and useful failure artifacts.
+本工作会把当前 WebdriverIO + tauri-driver 从冒烟测试脚手架升级为稳定的测试平台，具备隔离数据、确定性测试数据、稳定选择器、独立用例和可诊断失败产物。
 
-## Scope
+## 范围
 
-In scope:
+包含：
 
-- Run E2E tests against an isolated per-run app data directory.
-- Enable a dedicated E2E runtime mode with `POSTIUM_E2E=1`.
-- Seed deterministic local data at app startup in E2E mode.
-- Seed at least 2 accounts and at least 48 emails.
-- Add only the `data-testid` anchors needed by E2E tests.
-- Rewrite page objects to use stable selectors and explicit waits.
-- Rewrite current E2E specs so tests are independent and do not silently skip required actions.
-- Add one account-switching test and one email-list scrolling test.
-- Make Linux E2E the required CI target for this phase.
-- Capture screenshots, logs, reports, and failed run data directories.
-- Document local E2E setup and troubleshooting.
+- E2E 测试运行在每次独立的应用数据目录中。
+- 增加专用 E2E 运行模式：`POSTIUM_E2E=1`。
+- E2E 模式下应用启动时自动插入确定性本地测试数据。
+- 至少 seed 2 个账号和 48 封邮件。
+- 只添加 E2E 必需的 `data-testid` 锚点。
+- 重写 page object，使用稳定选择器和显式等待。
+- 重写当前 E2E specs，使测试相互独立，并且不静默跳过必要操作。
+- 增加 1 条账号切换测试和 1 条邮件列表滚动测试。
+- 本阶段让 Linux E2E 成为必过 CI 目标。
+- 捕获截图、日志、报告和失败 run 的数据目录。
+- 补充本地 E2E 运行和排障文档。
 
-Out of scope:
+不包含：
 
-- Real IMAP, SMTP, OAuth, or remote mail-provider tests.
-- Full Rust command/service test expansion.
-- Full Vitest store/component test expansion.
-- Windows E2E stabilization as a required CI gate.
-- Large business-flow expansion beyond stabilizing the current suite plus account switching and scrolling.
-- Removing `data-testid` attributes from production DOM.
+- 真实 IMAP、SMTP、OAuth 或远程邮件服务商测试。
+- 完整扩展 Rust command/service 测试。
+- 完整扩展 Vitest store/component 测试。
+- 将 Windows E2E 稳定化为必过 CI 门禁。
+- 除稳定当前测试套件、账号切换和滚动测试之外的大型业务流扩展。
+- 从生产 DOM 中移除 `data-testid` 属性。
 
-## Design Principles
+## 设计原则
 
-Default E2E tests should use the real internal application chain and avoid external services.
+默认 E2E 测试应使用真实的应用内部链路，并避开外部服务。
 
-The following should be real:
+以下链路应保持真实：
 
-- Tauri app startup
+- Tauri 应用启动
 - Svelte UI
 - Tauri commands
 - Rust services
-- SQLite database
-- Frontend stores and routing
+- SQLite 数据库
+- 前端 stores 和路由
 
-The following should be avoided in default E2E:
+以下外部依赖默认 E2E 不参与：
 
-- Real IMAP servers
-- Real SMTP sending
-- Real OAuth flows
-- Real system keyring dependencies
-- Live network mail-provider behavior
+- 真实 IMAP 服务
+- 真实 SMTP 发送
+- 真实 OAuth 流程
+- 真实系统 keyring 依赖
+- 线上邮件服务商网络行为
 
-The test data source is deterministic local seed data, not mocked frontend API responses. This preserves E2E value while removing unstable external dependencies.
+测试数据来源是确定性的本地 seed 数据，不是 mock 前端 API response。这样既保留 E2E 的价值，又移除不稳定的外部依赖。
 
-## Runtime Architecture
+## 运行架构
 
-The E2E run uses a dedicated data path controlled by environment variables.
+E2E 每次运行使用由环境变量控制的专用数据路径。
 
 ```text
 WDIO onPrepare
-  -> create .e2e-data/run-<timestamp>-<pid>
-  -> set POSTIUM_E2E=1
-  -> set POSTIUM_DATA_DIR=<absolute run dir>
-  -> build Tauri debug app
+  -> 创建 .e2e-data/run-<timestamp>-<pid>
+  -> 设置 POSTIUM_E2E=1
+  -> 设置 POSTIUM_DATA_DIR=<absolute run dir>
+  -> 构建 Tauri debug app
 
 tauri-driver
-  -> start the app binary
+  -> 启动 app binary
 
 Tauri app run()
-  -> detect POSTIUM_E2E=1
-  -> require POSTIUM_DATA_DIR
+  -> 检测 POSTIUM_E2E=1
+  -> 要求 POSTIUM_DATA_DIR 存在
   -> init_database(POSTIUM_DATA_DIR)
-  -> run migrations
+  -> 运行 migrations
   -> seed_e2e_data(db)
-  -> start normal app services and window
+  -> 启动正常应用服务和窗口
 
 WDIO specs
-  -> wait for app readiness
-  -> interact through stable data-testid selectors
-  -> assert deterministic seed state
+  -> 等待 app ready
+  -> 通过稳定 data-testid 选择器交互
+  -> 断言确定性 seed 状态
 ```
 
-## Data Directory Resolution
+## 数据目录解析
 
-Rust startup should stop hard-coding `~/.postium` directly inside `run()`.
+Rust 启动逻辑不应继续在 `run()` 中直接硬编码 `~/.postium`。
 
-Introduce a small resolver:
+新增一个小的解析函数：
 
 ```rust
 fn resolve_data_dir() -> PathBuf
 ```
 
-Behavior:
+行为：
 
-- Normal mode: use the current `~/.postium` path.
-- E2E mode: if `POSTIUM_E2E=1`, use `POSTIUM_DATA_DIR`.
-- E2E mode without `POSTIUM_DATA_DIR`: fail startup with a clear message.
+- 普通模式：继续使用当前 `~/.postium` 路径。
+- E2E 模式：如果 `POSTIUM_E2E=1`，使用 `POSTIUM_DATA_DIR`。
+- E2E 模式缺少 `POSTIUM_DATA_DIR`：启动失败，并给出明确错误。
 
-This keeps production behavior unchanged while making E2E data isolation explicit.
+这样可以保持生产行为不变，同时让 E2E 数据隔离变成显式行为。
 
-## E2E Seed Data
+## E2E Seed 数据
 
-Seed data is inserted by Rust at app startup only when `POSTIUM_E2E=1`.
+Seed 数据只在 `POSTIUM_E2E=1` 时由 Rust 在应用启动阶段插入。
 
-Recommended module location:
+建议模块位置：
 
 ```text
 src-tauri/src/infrastructure/testing/e2e_seed.rs
 ```
 
-The seed module should be idempotent:
+Seed 模块必须幂等：
 
-- Check for the primary test account.
-- If it exists, assume seed has already run and skip insertion.
-- If it does not exist, insert all E2E accounts and emails.
+- 检查主测试账号是否存在。
+- 如果存在，认为 seed 已执行，跳过插入。
+- 如果不存在，插入全部 E2E 账号和邮件。
 
-The seed should use existing repository/entity patterns where practical. Raw SQL should be avoided unless needed for schema-specific behavior.
+Seed 应尽量使用现有 repository/entity 模式。除非遇到 schema 特定行为，否则避免裸 SQL。
 
-### Accounts
+### 账号
 
-Insert 2 fixed accounts:
+插入 2 个固定账号。
 
-Primary account:
+主账号：
 
 - email: `primary.e2e@postium.test`
 - name: `Primary E2E`
@@ -134,7 +134,7 @@ Primary account:
 - sync_enabled: `false`
 - color: `#2563eb`
 
-Secondary account:
+次账号：
 
 - email: `secondary.e2e@postium.test`
 - name: `Secondary E2E`
@@ -143,11 +143,11 @@ Secondary account:
 - sync_enabled: `false`
 - color: `#16a34a`
 
-### Emails
+### 邮件
 
-Insert at least 48 fixed emails.
+插入至少 48 封固定邮件。
 
-Primary account: 36 emails
+主账号：36 封
 
 - Inbox: 24
 - Sent: 5
@@ -155,16 +155,16 @@ Primary account: 36 emails
 - Drafts: 2
 - Trash: 1
 
-Secondary account: 12 emails
+次账号：12 封
 
 - Inbox: 8
 - Sent: 2
 - Starred: 1
 - Drafts: 1
 
-The seed must use fixed subjects, senders, bodies, folder values, read states, star states, and timestamps. Timestamps should be deterministic and sorted so list ordering is predictable.
+Seed 必须使用固定 subject、sender、body、folder、read state、star state 和 timestamp。Timestamp 应保持确定性并可排序，使列表顺序可预测。
 
-Required subject examples:
+必需 subject 示例：
 
 - `Primary Inbox Message 01`
 - `Primary Inbox Message 24`
@@ -177,22 +177,22 @@ Required subject examples:
 - `Draft Proposal Outline`
 - `Trash Cleanup Notice`
 
-The first scrolling test should use `Primary Inbox Message 24` as the bottom-list target.
+第一条滚动测试使用 `Primary Inbox Message 24` 作为列表底部目标。
 
-## Selector Strategy
+## 选择器策略
 
-E2E selectors should not depend on Tailwind classes, DOM position, or translated UI text.
+E2E 选择器不应依赖 Tailwind class、DOM 位置或翻译后的 UI 文案。
 
-Priority:
+优先级：
 
 1. `data-testid`
-2. stable `aria-label`
+2. 稳定的 `aria-label`
 3. role/name
-4. visible text for seed-content assertions only
+4. 可见文本仅用于 seed 内容断言，不用于主交互定位
 
-Required anchors for this phase:
+本阶段必需锚点如下。
 
-Sidebar:
+Sidebar：
 
 - `sidebar`
 - `compose-button`
@@ -205,7 +205,7 @@ Sidebar:
 - `account-option-secondary`
 - `active-account-label`
 
-Email list:
+Email list：
 
 - `email-list`
 - `email-search-input`
@@ -213,7 +213,7 @@ Email list:
 - `email-empty-state`
 - `email-refresh-button`
 
-Email detail:
+Email detail：
 
 - `email-detail`
 - `email-detail-empty`
@@ -223,7 +223,7 @@ Email detail:
 - `email-star-button`
 - `email-delete-button`
 
-Compose modal:
+Compose modal：
 
 - `compose-modal`
 - `compose-to-input`
@@ -233,43 +233,43 @@ Compose modal:
 - `compose-send-button`
 - `compose-close-button`
 
-Settings:
+Settings：
 
 - `settings-page`
 - `theme-light`
 - `theme-dark`
 - `theme-system`
 
-## Page Object Design
+## Page Object 设计
 
-Add a shared selector helper:
+新增共享选择器 helper：
 
 ```text
 e2e/helpers/selectors.js
 ```
 
-Example:
+示例：
 
 ```js
 export const byTestId = (id) => $(`[data-testid="${id}"]`);
 export const allByTestId = (id) => $$(`[data-testid="${id}"]`);
 ```
 
-Page objects should:
+Page object 应满足：
 
-- Use `data-testid` as the main selector mechanism.
-- Expose `waitForReady()` methods for major UI regions.
-- Use `waitForDisplayed` and `browser.waitUntil`.
-- Fail when required elements are missing.
-- Avoid `if (element) { ... }` around required UI.
-- Avoid `browser.pause()` as the primary synchronization mechanism.
-- Avoid selecting inputs by position.
+- 使用 `data-testid` 作为主选择器机制。
+- 为主要 UI 区域暴露 `waitForReady()` 方法。
+- 使用 `waitForDisplayed` 和 `browser.waitUntil`。
+- 必需元素缺失时直接失败。
+- 避免对必需 UI 使用 `if (element) { ... }`。
+- 避免把 `browser.pause()` 作为主要同步机制。
+- 避免按位置选择 input。
 
-## Spec Design
+## Spec 设计
 
-Rewrite current specs around deterministic state and independent test setup.
+围绕确定性状态和独立 setup 重写当前 specs。
 
-Recommended specs:
+推荐 specs：
 
 ```text
 e2e/test/specs/smoke.e2e.js
@@ -280,74 +280,74 @@ e2e/test/specs/compose.e2e.js
 e2e/test/specs/theme.e2e.js
 ```
 
-Smoke:
+Smoke：
 
-- App launches.
-- Sidebar appears.
-- Email list appears.
-- Primary seed account is active.
-- Primary inbox seed mail is visible.
+- App 启动。
+- Sidebar 出现。
+- Email list 出现。
+- 主 seed 账号处于激活状态。
+- 主账号 inbox seed 邮件可见。
 
-Navigation:
+Navigation：
 
-- Inbox shows primary inbox messages.
-- Sent shows primary sent messages.
-- Starred shows starred messages.
-- Required folder buttons are visible and clickable.
+- Inbox 显示主账号 inbox 邮件。
+- Sent 显示主账号 sent 邮件。
+- Starred 显示星标邮件。
+- 必需 folder 按钮可见并可点击。
 
-Account switching:
+Account switching：
 
-- Default active account is primary.
-- Open account switcher.
-- Switch to secondary.
-- Verify `Secondary Inbox Message 01` appears.
-- Verify primary-only inbox message is not displayed.
-- Switch back to primary.
-- Verify primary inbox messages appear.
+- 默认激活账号是主账号。
+- 打开账号切换器。
+- 切换到次账号。
+- 验证 `Secondary Inbox Message 01` 出现。
+- 验证主账号专属 inbox 邮件不显示。
+- 切回主账号。
+- 验证主账号 inbox 邮件出现。
 
-Email list:
+Email list：
 
-- Search for `Quarterly Planning`.
-- Verify deterministic matching subjects appear.
-- Clear search and verify normal inbox returns.
-- Scroll the email list to `Primary Inbox Message 24`.
-- Click it and verify the detail pane shows the same subject.
+- 搜索 `Quarterly Planning`。
+- 验证确定性匹配 subject 出现。
+- 清空搜索并验证普通 inbox 恢复。
+- 滚动邮件列表到 `Primary Inbox Message 24`。
+- 点击它，并验证 detail pane 显示同一 subject。
 
-Compose:
+Compose：
 
-- Open compose modal.
-- Fill recipient, subject, and body.
-- Verify values are entered.
-- Close modal.
-- Reopen modal in a fresh test and verify it starts from clean state.
+- 打开 compose modal。
+- 填写 recipient、subject 和 body。
+- 验证值已输入。
+- 关闭 modal。
+- 在独立测试中重新打开 modal，并验证它从干净状态开始。
 
-Theme:
+Theme：
 
-- Navigate to settings.
-- Switch to dark and verify `html.dark`.
-- Switch to light and verify `html.dark` is removed.
-- Click system theme and verify the control is usable.
+- 进入 settings。
+- 切换到 dark，并验证 `html.dark`。
+- 切换到 light，并验证 `html.dark` 被移除。
+- 点击 system theme，并验证控件可用。
 
-## WDIO Lifecycle
+## WDIO 生命周期
 
-`e2e/wdio.conf.js` should manage the test runtime explicitly.
+`e2e/wdio.conf.js` 应显式管理测试运行环境。
 
-Responsibilities:
+职责：
 
-- Create `.e2e-data/run-<timestamp>-<pid>`.
-- Pass `POSTIUM_E2E=1` and `POSTIUM_DATA_DIR` to the Tauri build/app process.
-- Use `WDIO_PORT` with default `4444`.
-- Build the debug app before tests.
-- Check that the app binary exists after build.
-- Start `tauri-driver`.
-- Wait for `127.0.0.1:<port>` to accept connections.
-- Kill `tauri-driver` on completion or interruption.
-- Delete the run data directory on success.
-- Preserve the run data directory on failure.
+- 创建 `.e2e-data/run-<timestamp>-<pid>`。
+- 将 `POSTIUM_E2E=1` 和 `POSTIUM_DATA_DIR` 传给 Tauri build/app 进程。
+- 使用 `WDIO_PORT`，默认值为 `4444`。
+- 测试前构建 debug app。
+- 构建后检查 app binary 存在。
+- 启动 `tauri-driver`。
+- 等待 `127.0.0.1:<port>` 可连接。
+- 测试完成或中断时 kill `tauri-driver`。
+- 成功时删除本次 run 数据目录。
+- 失败时保留本次 run 数据目录。
 
-## Failure Artifacts
+## 失败产物
 
-Create:
+创建目录：
 
 ```text
 e2e/artifacts/
@@ -356,100 +356,100 @@ e2e/artifacts/
 └── reports/
 ```
 
-Capture:
+捕获：
 
-- Screenshot for each failed test.
-- WDIO report output.
-- Driver and app logs where practical.
-- Failed `.e2e-data/run-*` directory.
+- 每个失败测试的截图。
+- WDIO report 输出。
+- 可行时保留 driver 和 app 日志。
+- 失败的 `.e2e-data/run-*` 目录。
 
-Successful runs may clean the run data directory. Failed runs should keep it for local investigation and CI upload.
+成功运行可以清理 run 数据目录。失败运行应保留它，供本地排查和 CI 上传。
 
-## CI Design
+## CI 设计
 
-Linux E2E is the required target for this phase.
+Linux E2E 是本阶段必过目标。
 
-Recommended CI structure:
+推荐 CI 结构：
 
 - Rust tests
 - Frontend tests
 - Linux E2E tests
 
-Windows E2E should not be a required gate in this phase. It can be removed from the required matrix or moved to a separate non-blocking job. The recommended first step is to remove Windows from the required E2E matrix and restore it in a later stabilization phase.
+Windows E2E 本阶段不应作为必过门禁。它可以从必过 matrix 中移除，或移动到单独的非阻塞 job。建议第一步从必过 E2E matrix 中移除 Windows，并在后续稳定化阶段恢复。
 
-Linux E2E should:
+Linux E2E 应：
 
-- Install Tauri Linux dependencies.
-- Install `webkitgtk-webdriver` and `xvfb`.
-- Install `tauri-driver`.
-- Run E2E under `xvfb-run`.
-- Upload `e2e/artifacts/**` always.
-- Upload `.e2e-data/**` on failure.
+- 安装 Tauri Linux 依赖。
+- 安装 `webkitgtk-webdriver` 和 `xvfb`。
+- 安装 `tauri-driver`。
+- 使用 `xvfb-run` 运行 E2E。
+- 始终上传 `e2e/artifacts/**`。
+- 仅失败时上传 `.e2e-data/**`。
 
-## Documentation
+## 文档
 
-Add local E2E documentation, either in `README.md` or `docs/testing/e2e.md`.
+新增本地 E2E 文档，位置可以是 `README.md` 或 `docs/testing/e2e.md`。
 
-Document:
+文档应说明：
 
-- Required local dependencies.
-- `cargo install tauri-driver --locked`.
-- `bun install` in root and `e2e`.
-- `bun run test:e2e`.
-- E2E environment variables.
-- Artifact locations.
-- How to inspect a failed `.e2e-data` directory.
-- Linux CI is the only required E2E gate for this phase.
+- 本地必需依赖。
+- `cargo install tauri-driver --locked`。
+- 在根目录和 `e2e` 下运行 `bun install`。
+- `bun run test:e2e`。
+- E2E 环境变量。
+- 产物位置。
+- 如何检查失败的 `.e2e-data` 目录。
+- Linux CI 是本阶段唯一必过 E2E 门禁。
 
-## Risks
+## 风险
 
-Seed/schema mismatch:
+Seed 和 schema 不匹配：
 
-- Mitigation: use repository/entity paths where practical and keep seed fields explicit.
+- 缓解：尽量使用 repository/entity 路径，并显式填写 seed 字段。
 
-Folder semantics mismatch:
+文件夹语义不匹配：
 
-- Mitigation: assert only currently supported folder/category behavior in this phase.
+- 缓解：本阶段只断言当前已支持的 folder/category 行为。
 
-`data-testid` in production DOM:
+生产 DOM 中存在 `data-testid`：
 
-- Mitigation: accept this for stability in phase one; optional stripping can be considered later.
+- 缓解：第一阶段接受它以换取稳定性；后续如有需要再考虑剥离。
 
-Scrolling flakiness:
+滚动测试 flaky：
 
-- Mitigation: test only that the bottom target becomes visible and clickable, not exact pixel positions.
+- 缓解：只测试底部目标变为可见且可点击，不断言精确像素位置。
 
-Linux display environment differences:
+Linux 图形环境差异：
 
-- Mitigation: continue using `xvfb-run`; defer Windows stabilization.
+- 缓解：继续使用 `xvfb-run`；Windows 稳定化推迟到后续阶段。
 
-## Acceptance Criteria
+## 验收标准
 
-- Local E2E does not read or write `~/.postium`.
-- Local E2E uses a run-specific `.e2e-data/run-*` directory.
-- E2E mode fails clearly if `POSTIUM_E2E=1` and `POSTIUM_DATA_DIR` is missing.
-- Seed creates at least 2 accounts.
-- Seed creates at least 48 emails.
-- Primary account has at least 24 inbox emails.
-- Existing E2E specs use `data-testid` as primary selectors.
-- Tests do not silently skip required actions with `if (element)`.
-- Tests do not depend on state left by earlier `it` blocks.
-- There is an account-switching E2E test.
-- There is an email-list scrolling E2E test.
-- Failed E2E tests save screenshots.
-- CI uploads E2E artifacts.
-- CI uploads failed run data directories.
-- Linux E2E passes as a required gate.
-- Windows E2E is not required for this phase.
+- 本地 E2E 不读写 `~/.postium`。
+- 本地 E2E 使用本次运行专属的 `.e2e-data/run-*` 目录。
+- 如果 `POSTIUM_E2E=1` 但缺少 `POSTIUM_DATA_DIR`，E2E 模式会明确失败。
+- Seed 创建至少 2 个账号。
+- Seed 创建至少 48 封邮件。
+- 主账号至少有 24 封 inbox 邮件。
+- 现有 E2E specs 使用 `data-testid` 作为主选择器。
+- 测试不再通过 `if (element)` 静默跳过必需操作。
+- 测试不依赖前一个 `it` 留下的状态。
+- 存在账号切换 E2E 测试。
+- 存在邮件列表滚动 E2E 测试。
+- 失败的 E2E 测试会保存截图。
+- CI 上传 E2E artifacts。
+- CI 上传失败 run 的数据目录。
+- Linux E2E 作为必过门禁通过。
+- Windows E2E 本阶段不是必过项。
 
-## Implementation Order
+## 实施顺序
 
-1. Add Rust data directory resolution for E2E mode.
-2. Add Rust E2E seed module with 2 accounts and at least 48 emails.
-3. Add required `data-testid` anchors.
-4. Upgrade WDIO lifecycle and artifact handling.
-5. Rewrite page objects around `data-testid` and explicit waits.
-6. Rewrite specs for smoke, navigation, account switching, email list scrolling, compose, and theme.
-7. Simplify CI to Linux-required E2E and artifact upload.
-8. Add local E2E documentation.
+1. 增加 Rust E2E 模式数据目录解析。
+2. 增加 Rust E2E seed 模块，包含 2 个账号和至少 48 封邮件。
+3. 添加必需的 `data-testid` 锚点。
+4. 升级 WDIO 生命周期和 artifact 处理。
+5. 围绕 `data-testid` 和显式等待重写 page objects。
+6. 重写 smoke、navigation、account switching、email list scrolling、compose 和 theme specs。
+7. 简化 CI，使 Linux E2E 成为必过项并上传 artifacts。
+8. 添加本地 E2E 文档。
 
