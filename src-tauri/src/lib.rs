@@ -32,7 +32,7 @@ pub mod infrastructure;
 pub mod service;
 pub mod sys;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use tauri::Manager;
 
@@ -41,6 +41,20 @@ use crate::domain::providers::pool::init_provider_pool;
 // 在 Debug 模式下，TypeScript 绑定文件导出到前端项目的 bindings.ts
 #[cfg(debug_assertions)]
 const EXPORT_DIR: &str = "../src/lib/bindings.ts";
+
+fn resolve_data_dir() -> PathBuf {
+    let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
+
+    if e2e_enabled {
+        let data_dir = std::env::var("POSTIUM_DATA_DIR")
+            .expect("POSTIUM_E2E=1 时必须设置 POSTIUM_DATA_DIR");
+        return PathBuf::from(data_dir);
+    }
+
+    dirs::home_dir()
+        .expect("无法获取数据目录")
+        .join(".postium")
+}
 
 ///
 /// 创建 tauri-specta 构建器
@@ -145,7 +159,7 @@ pub fn run() {
     // 使用 block_on 在同步上下文中执行异步初始化
     let db = tauri::async_runtime::block_on(async {
         // 获取用户主目录，创建应用数据目录
-        let data_dir = dirs::home_dir().expect("无法获取数据目录").join(".postium");
+        let data_dir = resolve_data_dir();
 
         // 确保数据目录存在，如果不存在则创建
         std::fs::create_dir_all(&data_dir).expect("无法创建数据目录");
