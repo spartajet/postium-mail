@@ -254,6 +254,7 @@
 -->
 <div
     data-testid="email-list"
+    data-search-mode={searchResults !== null ? "true" : "false"}
     class="list-panel flex h-full w-95 shrink-0 flex-col border-r border-border bg-elevated/80"
 >
     <!-- ==================== 搜索栏 + 工具栏 ==================== -->
@@ -347,7 +348,10 @@
               - 搜索模式：显示搜索结果数量
               - 正常模式：显示当前文件夹邮件数量
             -->
-            <span class="ml-auto text-xs text-muted-foreground">
+            <span
+                data-testid="email-result-count"
+                class="ml-auto text-xs text-muted-foreground"
+            >
                 {searchResults !== null
                     ? searchResults.length
                     : emailState.emails.length}

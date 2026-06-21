@@ -9,6 +9,7 @@ describe('Email list', () => {
 
   it('搜索 Quarterly Planning 并显示固定结果', async () => {
     await emailPage.search('Quarterly Planning');
+    expect(await emailPage.resultCountText()).toContain('3');
     await waitForText('Quarterly Planning Alpha');
     await waitForText('Quarterly Planning Beta');
     await waitForText('Quarterly Planning Archive');
