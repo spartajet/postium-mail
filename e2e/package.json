@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.2.23",
   "scripts": {
     "test": "wdio run wdio.conf.js"
   },

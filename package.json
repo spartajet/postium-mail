@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "description": "",
   "type": "module",
+  "packageManager": "bun@1.2.23",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -10,9 +11,13 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:all": "cd src-tauri && cargo test && cd .. && yarn test"
+    "test": "bun run test:frontend",
+    "test:rust": "cd src-tauri && cargo test",
+    "test:frontend": "svelte-kit sync && vitest run",
+    "test:watch": "svelte-kit sync && vitest",
+    "test:e2e": "cd e2e && bun run test",
+    "test:all": "bun run test:rust && bun run test:frontend",
+    "test:ci": "bun run test:rust && bun run test:frontend"
   },
   "license": "MIT",
   "dependencies": {
