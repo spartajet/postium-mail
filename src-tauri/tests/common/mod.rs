@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use postium_mail_lib::domain::auth::AuthManager;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
-use postium_mail_lib::service::{AccountService, LabelService};
 use postium_mail_lib::service::email_service::EmailService;
+use postium_mail_lib::service::{AccountService, LabelService};
 use sea_orm::{Database, DatabaseConnection};
 use sea_orm_migration::MigratorTrait;
 
@@ -29,6 +29,7 @@ pub async fn create_test_db() -> DbConn {
 }
 
 /// Holds ready-to-use service instances backed by an in-memory test database.
+#[allow(dead_code)]
 pub struct TestServices {
     pub db: DbConn,
     pub auth: Arc<AuthManager>,
@@ -37,6 +38,7 @@ pub struct TestServices {
     pub label_service: LabelService,
 }
 
+#[allow(dead_code)]
 impl TestServices {
     /// Create a full set of services backed by a fresh in-memory database.
     pub async fn new() -> Self {
