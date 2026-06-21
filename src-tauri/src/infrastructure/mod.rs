@@ -104,3 +104,6 @@ pub mod protocols;
 ///
 /// 提供数据持久化功能，包括数据库管理、实体定义和仓库模式。
 pub mod storage;
+
+/// 测试和 E2E 运行时辅助模块。
+pub mod testing;
