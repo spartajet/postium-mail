@@ -65,7 +65,10 @@
     });
 </script>
 
-<div class="flex h-full flex-col overflow-y-auto bg-background">
+<div
+    data-testid="settings-page"
+    class="flex h-full flex-col overflow-y-auto bg-background"
+>
     <!-- 页面头部：返回按钮、标题图标、标题 -->
     <div class="flex items-center gap-3 border-b border-border px-6 py-4">
         <button
@@ -106,6 +109,7 @@
                     >
                         <!-- 浅色主题按钮 -->
                         <button
+                            data-testid="theme-light"
                             class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors {themeStore.theme ===
                             'light'
                                 ? 'bg-primary text-primary-foreground'
@@ -117,6 +121,7 @@
                         </button>
                         <!-- 深色主题按钮 -->
                         <button
+                            data-testid="theme-dark"
                             class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors {themeStore.theme ===
                             'dark'
                                 ? 'bg-primary text-primary-foreground'
@@ -128,6 +133,7 @@
                         </button>
                         <!-- 跟随系统主题按钮 -->
                         <button
+                            data-testid="theme-system"
                             class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors {themeStore.theme ===
                             'system'
                                 ? 'bg-primary text-primary-foreground'

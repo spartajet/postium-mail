@@ -253,6 +253,7 @@
   - bg-elevated/80：半透明的高亮背景色（玻璃态效果）
 -->
 <div
+    data-testid="email-list"
     class="list-panel flex h-full w-95 shrink-0 flex-col border-r border-border bg-elevated/80"
 >
     <!-- ==================== 搜索栏 + 工具栏 ==================== -->
@@ -281,6 +282,7 @@
               - placeholder 使用国际化文本
             -->
             <input
+                data-testid="email-search-input"
                 type="text"
                 placeholder={t.email.search}
                 bind:value={searchQuery}
@@ -322,6 +324,7 @@
         <div class="mt-3 flex items-center gap-1">
             <!-- 同步/刷新按钮 -->
             <button
+                data-testid="email-refresh-button"
                 class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.sidebar.sync}
             >
@@ -365,6 +368,7 @@
                   显示搜索图标和"无邮件"提示文本
                 -->
                 <div
+                    data-testid="email-empty-state"
                     class="flex h-full flex-col items-center justify-center py-12 text-muted-foreground"
                 >
                     <Search size={48} class="mb-4 opacity-30" />
@@ -384,6 +388,8 @@
                       - 根据是否选中添加 active 样式类
                     -->
                     <button
+                        data-testid="email-item"
+                        data-subject={result.subject || "(No Subject)"}
                         class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
                         result.id
                             ? 'active'
@@ -447,6 +453,7 @@
               展示邮件图标和空状态提示文本
             -->
             <div
+                data-testid="email-empty-state"
                 class="flex h-full flex-col items-center justify-center py-12 text-muted-foreground"
             >
                 <Mail size={48} class="mb-4 opacity-30" strokeWidth={1} />
@@ -476,6 +483,8 @@
                   - oncontextmenu：打开右键上下文菜单
                 -->
                 <button
+                    data-testid="email-item"
+                    data-subject={email.subject || "(No Subject)"}
                     class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
                     email.id
                         ? 'active'

@@ -267,6 +267,7 @@
           - backdrop-blur-md：毛玻璃模糊效果
         -->
         <div
+            data-testid="compose-modal"
             class="flex h-[70vh] w-140 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl backdrop-blur-md"
         >
             <!-- ==================== 标题栏 ==================== -->
@@ -284,6 +285,7 @@
                 </h3>
                 <!-- 关闭按钮 -->
                 <button
+                    data-testid="compose-close-button"
                     class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                     onclick={close}
                     aria-label="Close"
@@ -308,6 +310,7 @@
                     >
                     <!-- 收件人输入框 -->
                     <input
+                        data-testid="compose-to-input"
                         type="text"
                         bind:value={to}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
@@ -323,6 +326,7 @@
                     >
                     <!-- 抄送输入框 -->
                     <input
+                        data-testid="compose-cc-input"
                         type="text"
                         bind:value={cc}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
@@ -337,6 +341,7 @@
                     >
                     <!-- 主题输入框 -->
                     <input
+                        data-testid="compose-subject-input"
                         type="text"
                         bind:value={subject}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
@@ -352,7 +357,10 @@
               占据模态框的剩余空间（flex-1）
               overflow-hidden 防止编辑器溢出
             -->
-            <div class="flex-1 overflow-hidden">
+            <div
+                data-testid="compose-body-editor"
+                class="flex-1 overflow-hidden"
+            >
                 <!--
                   富文本编辑器组件
                   bind:this 将组件实例绑定到 richEditor 变量
@@ -388,6 +396,7 @@
                   - 显示发送中/发送文本（根据状态切换）
                 -->
                 <button
+                    data-testid="compose-send-button"
                     class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
                     onclick={handleSend}
                     disabled={sending || !to || !subject}

@@ -308,7 +308,12 @@
   - flex-1：占据剩余空间（在主页面中与左侧 EmailList 分配空间）
   - bg-background：应用主题背景色
 -->
-<div class="detail-panel flex h-full flex-1 flex-col bg-background">
+<div
+    data-testid={emailState.selectedEmail
+        ? "email-detail"
+        : "email-detail-empty"}
+    class="detail-panel flex h-full flex-1 flex-col bg-background"
+>
     {#if emailState.selectedEmail}
         <!-- ==================== 邮件详情内容 ==================== -->
 
@@ -339,10 +344,13 @@
 
         <!--
       邮件主题区域
-      显示邮件的完整主题行，字体较大、加粗
+        显示邮件的完整主题行，字体较大、加粗
     -->
         <div class="border-b border-border px-5 py-4">
-            <h2 class="text-xl font-semibold text-foreground">
+            <h2
+                data-testid="email-subject"
+                class="text-xl font-semibold text-foreground"
+            >
                 {emailState.selectedEmail.subject || "(No Subject)"}
             </h2>
         </div>
@@ -372,7 +380,10 @@
                 <!-- 第一行：发件人名称 + 邮箱地址 -->
                 <div class="flex items-center gap-2">
                     <!-- 发件人显示名称 -->
-                    <span class="text-sm font-medium text-foreground">
+                    <span
+                        data-testid="email-sender"
+                        class="text-sm font-medium text-foreground"
+                    >
                         {emailState.selectedEmail.sender_name ||
                             emailState.selectedEmail.sender_email}
                     </span>
@@ -469,7 +480,7 @@
         优先使用 HTML 格式渲染（富文本邮件），否则降级为纯文本
         HTML 内容经过 DOMPurify 净化，防止 XSS 攻击
       -->
-            <div class="px-5 py-4">
+            <div data-testid="email-body" class="px-5 py-4">
                 {#if emailState.selectedEmail.body_html}
                     <!--
             HTML 格式邮件正文
@@ -606,6 +617,7 @@
         悬停时变红色（删除警告色）
       -->
             <button
+                data-testid="email-star-button"
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-glass-hover {emailState
                     .selectedEmail.is_starred
                     ? 'text-yellow-400'
@@ -634,6 +646,7 @@
         悬停时变红色（destructive 警告色），提示危险操作
       -->
             <button
+                data-testid="email-delete-button"
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-destructive"
                 title={t.common.delete}
                 onclick={handleDelete}

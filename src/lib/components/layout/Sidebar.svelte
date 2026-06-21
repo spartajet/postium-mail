@@ -134,6 +134,13 @@
         }
     }
 
+    function handleAccountSwitch(accountId: number) {
+        accountStore.setActive(accountId);
+        emailStore.deselectEmail();
+        emailStore.loadEmailsByCategory(accountId, emailStore.currentFolder);
+        showAccountDropdown = false;
+    }
+
     // ==================== 文件夹配置列表 ====================
 
     // 邮件文件夹导航项配置
@@ -194,6 +201,7 @@
   - backdrop-blur-md：中等程度的背景模糊（毛玻璃效果）
 -->
 <aside
+    data-testid="sidebar"
     class="flex h-full w-65 shrink-0 flex-col border-r border-border bg-glass backdrop-blur-md"
 >
     <!-- ==================== 顶部区域：Logo + 同步按钮 ==================== -->
@@ -240,6 +248,7 @@
     <div class="relative px-3">
         <!-- 账户选择触发按钮：显示当前活动账户邮箱首字母和邮箱地址 -->
         <button
+            data-testid="account-switcher"
             class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-glass-hover"
             onclick={() => (showAccountDropdown = !showAccountDropdown)}
         >
@@ -251,7 +260,9 @@
                     "?"}
             </div>
             <!-- 账户邮箱地址：超长时截断显示 -->
-            <span class="flex-1 truncate text-muted-foreground"
+            <span
+                data-testid="active-account-label"
+                class="flex-1 truncate text-muted-foreground"
                 >{accountStore.activeAccount?.email ||
                     t.sidebar.allAccounts}</span
             >
@@ -281,14 +292,17 @@
                       - 点击切换活动账户并关闭下拉菜单
                     -->
                     <button
+                        data-testid={account.email ===
+                        "primary.e2e@postium.test"
+                            ? "account-option-primary"
+                            : account.email === "secondary.e2e@postium.test"
+                              ? "account-option-secondary"
+                              : undefined}
                         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {account.id ===
                         accountStore.activeAccountId
                             ? 'bg-primary/10 text-primary'
                             : 'text-foreground'}"
-                        onclick={() => {
-                            accountStore.setActive(account.id);
-                            showAccountDropdown = false;
-                        }}
+                        onclick={() => handleAccountSwitch(account.id)}
                     >
                         <!-- 账户头像缩略图 -->
                         <div
@@ -329,6 +343,7 @@
     -->
     <div class="px-4 py-3">
         <button
+            data-testid="compose-button"
             class="compose-btn flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-all"
             onclick={() => getComposeModal?.()?.show()}
         >
@@ -354,6 +369,7 @@
                   - 点击切换文件夹并加载对应邮件
                 -->
                 <button
+                    data-testid={`folder-${folder.id}`}
                     class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors {activeFolder ===
                     folder.id
                         ? 'active'
@@ -437,6 +453,7 @@
     -->
     <div class="border-t border-border px-3 py-2">
         <button
+            data-testid="settings-nav"
             class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors"
             onclick={() => {
                 activeFolder = "";
