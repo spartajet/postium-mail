@@ -28,6 +28,8 @@ let hasFailure = false;
 // keep track of the `tauri-driver` child process
 let tauriDriver;
 let exit = false;
+let closingDriver;
+let driverClosed = false;
 let driverLogStream;
 
 function ensureDir(dir) {
@@ -124,10 +126,82 @@ function writeDriverLog(event) {
   );
 }
 
+async function startTauriDriver() {
+  if (tauriDriver) return;
+
+  ensureDir(logsDir);
+  driverLogStream = fs.createWriteStream(driverLogPath, {
+    flags: 'a',
+  });
+
+  writeDriverLog({
+    event: 'start',
+    runId,
+    appPath,
+    driverPath,
+    runDataDir,
+    wdioPort,
+    pid: process.pid,
+  });
+
+  tauriDriver = spawn(
+    driverPath,
+    ['--port', String(wdioPort)],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        POSTIUM_E2E: '1',
+        POSTIUM_DATA_DIR: runDataDir,
+      },
+    }
+  );
+
+  tauriDriver.stdout.pipe(process.stdout);
+  tauriDriver.stderr.pipe(process.stderr);
+  tauriDriver.stdout.pipe(driverLogStream, { end: false });
+  tauriDriver.stderr.pipe(driverLogStream, { end: false });
+
+  tauriDriver.on('error', (error) => {
+    writeDriverLog({
+      event: 'error',
+      message: error.message,
+      stack: error.stack,
+    });
+    console.error('tauri-driver error:', error);
+    process.exit(1);
+  });
+
+  tauriDriver.on('exit', (code, signal) => {
+    writeDriverLog({
+      event: 'exit',
+      code,
+      signal,
+      expected: exit,
+    });
+    if (!exit) {
+      hasFailure = true;
+      console.error('tauri-driver exited unexpectedly:', { code, signal });
+      process.exit(1);
+    }
+  });
+
+  await waitForPort(wdioPort);
+}
+
 export const config = {
   host: '127.0.0.1',
   port: wdioPort,
-  specs: ['./test/specs/**/*.js'],
+  specs: [
+    [
+      './test/specs/smoke.e2e.js',
+      './test/specs/account-switching.e2e.js',
+      './test/specs/email-list.e2e.js',
+      './test/specs/navigation.e2e.js',
+      './test/specs/compose.e2e.js',
+      './test/specs/theme.e2e.js',
+    ],
+  ],
   maxInstances: 1,
 
   capabilities: [
@@ -186,68 +260,8 @@ export const config = {
     if (!fs.existsSync(appPath)) {
       throw new Error(`Tauri app binary not found: ${appPath}`);
     }
-  },
 
-  // Start tauri-driver before each session
-  beforeSession: async () => {
-    ensureDir(logsDir);
-    driverLogStream = fs.createWriteStream(driverLogPath, {
-      flags: 'a',
-    });
-
-    writeDriverLog({
-      event: 'start',
-      runId,
-      appPath,
-      driverPath,
-      runDataDir,
-      wdioPort,
-      pid: process.pid,
-    });
-
-    tauriDriver = spawn(
-      driverPath,
-      ['--port', String(wdioPort)],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          POSTIUM_E2E: '1',
-          POSTIUM_DATA_DIR: runDataDir,
-        },
-      }
-    );
-
-    tauriDriver.stdout.pipe(process.stdout);
-    tauriDriver.stderr.pipe(process.stderr);
-    tauriDriver.stdout.pipe(driverLogStream);
-    tauriDriver.stderr.pipe(driverLogStream);
-
-    tauriDriver.on('error', (error) => {
-      writeDriverLog({
-        event: 'error',
-        message: error.message,
-        stack: error.stack,
-      });
-      console.error('tauri-driver error:', error);
-      process.exit(1);
-    });
-
-    tauriDriver.on('exit', (code, signal) => {
-      writeDriverLog({
-        event: 'exit',
-        code,
-        signal,
-        expected: exit,
-      });
-      if (!exit) {
-        hasFailure = true;
-        console.error('tauri-driver exited unexpectedly:', { code, signal });
-        process.exit(1);
-      }
-    });
-
-    await waitForPort(wdioPort);
+    await startTauriDriver();
   },
 
   afterTest: async (test, context, { error }) => {
@@ -258,42 +272,101 @@ export const config = {
     await browser.saveScreenshot(path.join(screenshotsDir, `${safeTitle}.png`));
   },
 
-  // Cleanup tauri-driver after session
-  afterSession: () => {
-    closeTauriDriver();
-  },
-
-  onComplete: () => {
-    closeTauriDriver();
+  onComplete: async () => {
+    await closeTauriDriver();
     cleanupRunData();
   },
 };
 
-function closeTauriDriver() {
-  exit = true;
-  tauriDriver?.kill();
-  writeDriverLog({
-    event: 'close-request',
+function driverExitState() {
+  return {
+    exitCode: tauriDriver?.exitCode ?? null,
+    signalCode: tauriDriver?.signalCode ?? null,
+  };
+}
+
+function waitForDriverExit(timeoutMs = 5000) {
+  if (!tauriDriver || tauriDriver.exitCode !== null) {
+    return Promise.resolve(driverExitState());
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve({
+        ...driverExitState(),
+        timeoutMs,
+      });
+    }, timeoutMs);
+
+    tauriDriver.once('exit', (code, signal) => {
+      clearTimeout(timeout);
+      resolve({
+        exitCode: code,
+        signalCode: signal,
+      });
+    });
   });
-  driverLogStream?.end();
+}
+
+function endDriverLogStream() {
+  if (
+    !driverLogStream ||
+    driverLogStream.destroyed ||
+    driverLogStream.writableEnded
+  ) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    driverLogStream.end(resolve);
+  });
+}
+
+async function closeTauriDriver() {
+  if (driverClosed) return;
+  if (closingDriver) {
+    await closingDriver;
+    return;
+  }
+
+  exit = true;
+  closingDriver = (async () => {
+    writeDriverLog({
+      event: 'close-request',
+    });
+
+    let closeResult = driverExitState();
+    if (tauriDriver && tauriDriver.exitCode === null) {
+      tauriDriver.kill();
+      closeResult = await waitForDriverExit();
+    }
+
+    writeDriverLog({
+      event: 'close-complete',
+      ...closeResult,
+    });
+    await endDriverLogStream();
+    driverClosed = true;
+  })();
+
+  await closingDriver;
 }
 
 function onShutdown(fn) {
-  const cleanup = () => {
+  const cleanup = async () => {
     try {
-      fn();
+      await fn();
     } finally {
       process.exit();
     }
   };
-  process.on('exit', cleanup);
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-  process.on('SIGHUP', cleanup);
-  process.on('SIGBREAK', cleanup);
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
+  process.once('SIGHUP', cleanup);
+  process.once('SIGBREAK', cleanup);
 }
 
-onShutdown(() => {
-  closeTauriDriver();
+onShutdown(async () => {
+  await closeTauriDriver();
   cleanupRunData();
 });
