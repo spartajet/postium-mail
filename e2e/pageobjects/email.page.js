@@ -9,6 +9,7 @@ import {
 class EmailPage {
   get list() { return byTestId('email-list'); }
   get searchInput() { return byTestId('email-search-input'); }
+  get resultCount() { return byTestId('email-result-count'); }
   get emailItems() { return allByTestId('email-item'); }
   get activeEmailItem() { return $('[data-testid="email-item"].active'); }
   get detail() { return byTestId('email-detail'); }
@@ -28,7 +29,23 @@ class EmailPage {
   async search(query) {
     await this.searchInput.waitForDisplayed({ timeout: 10000 });
     await this.searchInput.setValue(query);
+    await this.waitForSearchMode();
     await waitForText(query.split(' ')[0]);
+  }
+
+  async waitForSearchMode() {
+    await browser.waitUntil(
+      async () => (await this.list.getAttribute('data-search-mode')) === 'true',
+      {
+        timeout: 10000,
+        timeoutMsg: '邮件列表未进入搜索模式',
+      }
+    );
+  }
+
+  async resultCountText() {
+    await this.resultCount.waitForDisplayed({ timeout: 10000 });
+    return elementText(await this.resultCount);
   }
 
   async clearSearch() {
