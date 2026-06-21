@@ -43,6 +43,12 @@ impl Default for ProviderPool {
         pool.register(Arc::new(
             super::enterprise::microsoft_365::Microsoft365Provider::new(),
         ));
+        pool.register(Arc::new(super::enterprise::custom::CustomProvider::new(
+            "imap.postium.test",
+            993,
+            "smtp.postium.test",
+            465,
+        )));
         pool
     }
 }
