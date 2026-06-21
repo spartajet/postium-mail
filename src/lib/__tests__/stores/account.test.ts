@@ -1,23 +1,40 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock Tauri invoke
-const mockInvoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: mockInvoke,
-}));
-
-// Mock @tauri-apps/api/event (used by bindings)
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(),
-  once: vi.fn(),
-  emit: vi.fn(),
-}));
+import {
+  createMockResult,
+  expectOk,
+  type MockCommandResult,
+  mockInvoke,
+} from "../mocks/tauri";
 
 // Import after mock
 const { invoke } = await import("@tauri-apps/api/core");
 
-function createMockResult<T>(data: T) {
-  return { status: "ok" as const, data };
+type Account = {
+  id: number;
+  name: string;
+  email: string;
+  display_name: string | null;
+  provider: string;
+  color: string | null;
+  sync_enabled: boolean;
+  auth_type: string;
+  account_type: string;
+  last_sync_at: number | null;
+  created_at: number;
+};
+
+type ProviderDetection = {
+  detected: boolean;
+  provider_id: string;
+  provider_name: string;
+  auth_types: string;
+};
+
+function invokeMock<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<MockCommandResult<T>> {
+  return invoke<MockCommandResult<T>>(command, args);
 }
 
 describe("AccountState invoke 测试", () => {
@@ -43,10 +60,11 @@ describe("AccountState invoke 测试", () => {
     ];
     mockInvoke.mockResolvedValue(createMockResult(accounts));
 
-    const result = await invoke("list_accounts");
+    const result = await invokeMock<Account[]>("list_accounts");
     expect(result.status).toBe("ok");
+    expectOk(result);
     expect(result.data).toHaveLength(1);
-    expect(result.data[0].email).toBe("user@gmail.com");
+    expect(result.data[0]!.email).toBe("user@gmail.com");
   });
 
   it("getAccount 获取指定账号详情", async () => {
@@ -65,8 +83,9 @@ describe("AccountState invoke 测试", () => {
     };
     mockInvoke.mockResolvedValue(createMockResult(account));
 
-    const result = await invoke("get_account", { id: 1 });
+    const result = await invokeMock<Account>("get_account", { id: 1 });
     expect(result.status).toBe("ok");
+    expectOk(result);
     expect(result.data.id).toBe(1);
     expect(result.data.email).toBe("user@gmail.com");
     expect(mockInvoke).toHaveBeenCalledWith("get_account", { id: 1 });
@@ -74,7 +93,7 @@ describe("AccountState invoke 测试", () => {
 
   it("deleteAccount 调用删除命令", async () => {
     mockInvoke.mockResolvedValue(createMockResult(null));
-    await invoke("delete_account", { id: 1 });
+    await invokeMock<null>("delete_account", { id: 1 });
     expect(mockInvoke).toHaveBeenCalledWith("delete_account", { id: 1 });
   });
 
@@ -111,8 +130,9 @@ describe("AccountState invoke 测试", () => {
       account_type: null,
     };
 
-    const result = await invoke("create_account", { request });
+    const result = await invokeMock<Account>("create_account", { request });
     expect(result.status).toBe("ok");
+    expectOk(result);
     expect(result.data.email).toBe("user@qq.com");
     expect(mockInvoke).toHaveBeenCalledWith("create_account", { request });
   });
@@ -126,7 +146,10 @@ describe("AccountState invoke 测试", () => {
         auth_types: "Password",
       }),
     );
-    const result = await invoke("detect_provider", { email: "user@gmail.com" });
+    const result = await invokeMock<ProviderDetection>("detect_provider", {
+      email: "user@gmail.com",
+    });
+    expectOk(result);
     expect(result.data.detected).toBe(true);
     expect(result.data.provider_id).toBe("gmail");
     expect(mockInvoke).toHaveBeenCalledWith("detect_provider", {
@@ -139,7 +162,7 @@ describe("AccountState invoke 测试", () => {
       status: "error",
       error: { type: "NotFound", message: "账号不存在: 999" },
     });
-    const result = await invoke("get_account", { id: 999 });
+    const result = await invokeMock<Account>("get_account", { id: 999 });
     expect(result.status).toBe("error");
   });
 });

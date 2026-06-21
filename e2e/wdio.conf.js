@@ -4,6 +4,10 @@ import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const isWindows = process.platform === 'win32';
+const appBinary = isWindows ? 'postium-mail.exe' : 'postium-mail';
+const tauriDriverBinary = isWindows ? 'tauri-driver.exe' : 'tauri-driver';
+const cargoBinDir = path.resolve(os.homedir(), '.cargo', 'bin');
 
 // keep track of the `tauri-driver` child process
 let tauriDriver;
@@ -19,7 +23,7 @@ export const config = {
     {
       maxInstances: 1,
       'tauri:options': {
-        application: '../src-tauri/target/debug/postium-mail',
+        application: path.resolve(__dirname, '..', 'src-tauri', 'target', 'debug', appBinary),
       },
     },
   ],
@@ -34,21 +38,25 @@ export const config = {
 
   // Build the app before tests
   onPrepare: () => {
-    spawnSync(
-      'yarn',
-      ['tauri', 'build', '--debug', '--no-bundle'],
+    const build = spawnSync(
+      'bun',
+      ['run', 'tauri', 'build', '--debug', '--no-bundle'],
       {
         cwd: path.resolve(__dirname, '..'),
         stdio: 'inherit',
         shell: true,
       }
     );
+
+    if (build.status !== 0) {
+      throw new Error(`Tauri debug build failed with status ${build.status}`);
+    }
   },
 
   // Start tauri-driver before each session
   beforeSession: () => {
     tauriDriver = spawn(
-      path.resolve(os.homedir(), '.cargo', 'bin', 'tauri-driver'),
+      path.resolve(cargoBinDir, tauriDriverBinary),
       [],
       { stdio: [null, process.stdout, process.stderr] }
     );

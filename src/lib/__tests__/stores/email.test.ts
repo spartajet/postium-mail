@@ -1,23 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock Tauri invoke
-const mockInvoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: mockInvoke,
-}));
-
-// Mock @tauri-apps/api/event (used by bindings)
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(),
-  once: vi.fn(),
-  emit: vi.fn(),
-}));
+import {
+  createMockResult,
+  expectOk,
+  type MockCommandResult,
+  mockInvoke,
+} from "../mocks/tauri";
 
 // Import after mock
 const { invoke } = await import("@tauri-apps/api/core");
 
-function createMockResult<T>(data: T) {
-  return { status: "ok" as const, data };
+type Email = {
+  id: number;
+  account_id: number;
+  folder: string;
+  uid: number;
+  subject: string;
+  sender_name: string;
+  sender_email: string;
+  preview: string;
+  is_read: boolean;
+  is_starred: boolean;
+  sent_at: number;
+  has_attachments: boolean;
+};
+
+type EmailList = {
+  emails: Email[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+type EmailDetail = Email & {
+  recipient_emails: string;
+  cc_emails: string | null;
+  body_text: string;
+  body_html: string;
+};
+
+function invokeMock<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<MockCommandResult<T>> {
+  return invoke<MockCommandResult<T>>(command, args);
 }
 
 describe("EmailState invoke 测试", () => {
@@ -49,7 +74,7 @@ describe("EmailState invoke 测试", () => {
     };
     mockInvoke.mockResolvedValue(createMockResult(mockData));
 
-    const result = await invoke("list_emails", {
+    const result = await invokeMock<EmailList>("list_emails", {
       accountId: 1,
       folder: "INBOX",
       page: 1,
@@ -63,6 +88,7 @@ describe("EmailState invoke 测试", () => {
       limit: 50,
     });
     expect(result.status).toBe("ok");
+    expectOk(result);
     expect(result.data.emails).toHaveLength(1);
   });
 
@@ -71,7 +97,7 @@ describe("EmailState invoke 测试", () => {
       createMockResult({ emails: [], total: 0, page: 1, limit: 50 }),
     );
 
-    await invoke("list_emails_by_category", {
+    await invokeMock<EmailList>("list_emails_by_category", {
       accountId: 1,
       category: "inbox",
       page: 1,
@@ -110,11 +136,12 @@ describe("EmailState invoke 测试", () => {
       .mockResolvedValueOnce(createMockResult(emailDetail))
       .mockResolvedValueOnce(createMockResult(null));
 
-    const result = await invoke("get_email", { id: 1 });
+    const result = await invokeMock<EmailDetail>("get_email", { id: 1 });
+    expectOk(result);
     expect(result.data.is_read).toBe(false);
 
     // 标记已读使用 emailId 参数名（与 bindings 中的签名一致）
-    await invoke("mark_as_read", { emailId: 1, isRead: true });
+    await invokeMock<null>("mark_as_read", { emailId: 1, isRead: true });
     expect(mockInvoke).toHaveBeenCalledWith("mark_as_read", {
       emailId: 1,
       isRead: true,
@@ -123,13 +150,15 @@ describe("EmailState invoke 测试", () => {
 
   it("toggleStar 调用正确", async () => {
     mockInvoke.mockResolvedValue(createMockResult(true));
-    const result = await invoke("toggle_star", { emailId: 1 });
+    const result = await invokeMock<boolean>("toggle_star", { emailId: 1 });
+    expectOk(result);
     expect(result.data).toBe(true);
   });
 
   it("deleteEmails 调用正确", async () => {
     mockInvoke.mockResolvedValue(createMockResult(2));
-    const result = await invoke("delete_emails", { emailIds: [1, 2] });
+    const result = await invokeMock<number>("delete_emails", { emailIds: [1, 2] });
+    expectOk(result);
     expect(result.data).toBe(2);
   });
 
@@ -138,7 +167,7 @@ describe("EmailState invoke 测试", () => {
       status: "error",
       error: { type: "EmailNotFound", message: "邮件不存在: 999" },
     });
-    const result = await invoke("get_email", { id: 999 });
+    const result = await invokeMock<EmailDetail>("get_email", { id: 999 });
     expect(result.status).toBe("error");
   });
 });

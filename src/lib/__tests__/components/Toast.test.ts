@@ -28,22 +28,22 @@ describe("ToastState store 逻辑测试", () => {
 		const id = toastState.show("Hello");
 
 		expect(toastState.toasts).toHaveLength(1);
-		expect(toastState.toasts[0].id).toBe(id);
-		expect(toastState.toasts[0].message).toBe("Hello");
+		expect(toastState.toasts[0]!.id).toBe(id);
+		expect(toastState.toasts[0]!.message).toBe("Hello");
 	});
 
 	it("show() 默认类型为 info，默认时长为 3000ms", () => {
 		toastState.show("默认消息");
 
-		expect(toastState.toasts[0].type).toBe("info");
-		expect(toastState.toasts[0].duration).toBe(3000);
+		expect(toastState.toasts[0]!.type).toBe("info");
+		expect(toastState.toasts[0]!.duration).toBe(3000);
 	});
 
 	it("show() 可以自定义类型和时长", () => {
 		toastState.show("自定义消息", "error", 5000);
 
-		expect(toastState.toasts[0].type).toBe("error");
-		expect(toastState.toasts[0].duration).toBe(5000);
+		expect(toastState.toasts[0]!.type).toBe("error");
+		expect(toastState.toasts[0]!.duration).toBe(5000);
 	});
 
 	it("show() 返回自增的唯一 ID", () => {
@@ -73,33 +73,33 @@ describe("ToastState store 逻辑测试", () => {
 	it("success() 创建 success 类型消息，时长 3000ms", () => {
 		toastState.success("保存成功");
 
-		expect(toastState.toasts[0].type).toBe("success");
-		expect(toastState.toasts[0].message).toBe("保存成功");
-		expect(toastState.toasts[0].duration).toBe(3000);
+		expect(toastState.toasts[0]!.type).toBe("success");
+		expect(toastState.toasts[0]!.message).toBe("保存成功");
+		expect(toastState.toasts[0]!.duration).toBe(3000);
 	});
 
 	it("error() 创建 error 类型消息，时长 5000ms", () => {
 		toastState.error("网络错误");
 
-		expect(toastState.toasts[0].type).toBe("error");
-		expect(toastState.toasts[0].message).toBe("网络错误");
-		expect(toastState.toasts[0].duration).toBe(5000);
+		expect(toastState.toasts[0]!.type).toBe("error");
+		expect(toastState.toasts[0]!.message).toBe("网络错误");
+		expect(toastState.toasts[0]!.duration).toBe(5000);
 	});
 
 	it("info() 创建 info 类型消息，时长 3000ms", () => {
 		toastState.info("提示信息");
 
-		expect(toastState.toasts[0].type).toBe("info");
-		expect(toastState.toasts[0].message).toBe("提示信息");
-		expect(toastState.toasts[0].duration).toBe(3000);
+		expect(toastState.toasts[0]!.type).toBe("info");
+		expect(toastState.toasts[0]!.message).toBe("提示信息");
+		expect(toastState.toasts[0]!.duration).toBe(3000);
 	});
 
 	it("warning() 创建 warning 类型消息，时长 4000ms", () => {
 		toastState.warning("存储空间不足");
 
-		expect(toastState.toasts[0].type).toBe("warning");
-		expect(toastState.toasts[0].message).toBe("存储空间不足");
-		expect(toastState.toasts[0].duration).toBe(4000);
+		expect(toastState.toasts[0]!.type).toBe("warning");
+		expect(toastState.toasts[0]!.message).toBe("存储空间不足");
+		expect(toastState.toasts[0]!.duration).toBe(4000);
 	});
 
 	// ==================== dismiss() 方法 ====================
@@ -145,14 +145,14 @@ describe("ToastState store 逻辑测试", () => {
 
 		toastState.dismiss(id1);
 		expect(toastState.toasts).toHaveLength(1);
-		expect(toastState.toasts[0].type).toBe("error");
+		expect(toastState.toasts[0]!.type).toBe("error");
 
 		toastState.warning("新警告");
 		expect(toastState.toasts).toHaveLength(2);
 
 		toastState.dismiss(id2);
 		expect(toastState.toasts).toHaveLength(1);
-		expect(toastState.toasts[0].type).toBe("warning");
+		expect(toastState.toasts[0]!.type).toBe("warning");
 	});
 
 	it("快捷方法返回的 ID 可用于 dismiss", () => {
@@ -165,7 +165,7 @@ describe("ToastState store 逻辑测试", () => {
 	it("Toast 接口字段完整", () => {
 		toastState.show("完整测试", "warning", 6000);
 
-		const toast = toastState.toasts[0];
+		const toast = toastState.toasts[0]!;
 		expect(toast).toHaveProperty("id");
 		expect(toast).toHaveProperty("type");
 		expect(toast).toHaveProperty("message");
