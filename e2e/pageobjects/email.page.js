@@ -1,4 +1,10 @@
-import { allByTestId, byTestId, waitForText } from '../helpers/selectors.js';
+import {
+  allByTestId,
+  byTestId,
+  elementText,
+  pageText,
+  waitForText,
+} from '../helpers/selectors.js';
 
 class EmailPage {
   get list() { return byTestId('email-list'); }
@@ -27,7 +33,13 @@ class EmailPage {
 
   async clearSearch() {
     await this.searchInput.waitForDisplayed({ timeout: 10000 });
-    await this.searchInput.setValue('');
+    await browser.execute(() => {
+      // eslint-disable-next-line no-undef
+      const input = document.querySelector('[data-testid="email-search-input"]');
+      if (!input) return;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   }
 
   async clickEmail(index = 0) {
@@ -54,9 +66,17 @@ class EmailPage {
   }
 
   async findEmailBySubject(subject) {
+    const itemBySubject = await $(`[data-testid="email-item"][data-subject="${subject}"]`);
+    if (await itemBySubject.isExisting()) return itemBySubject;
+
     const items = await this.emailItems;
     for (const item of items) {
-      const text = await item.getText();
+      if (!(await item.isExisting())) continue;
+
+      const dataSubject = await item.getAttribute('data-subject').catch(() => '');
+      if (dataSubject === subject) return item;
+
+      const text = await item.getText().catch(() => '');
       if (text.includes(subject)) return item;
     }
     throw new Error(`未找到邮件: ${subject}`);
@@ -66,7 +86,7 @@ class EmailPage {
     await this.list.waitForDisplayed({ timeout: 10000 });
     await browser.waitUntil(
       async () => {
-        const bodyText = await $('body').getText();
+        const bodyText = await pageText();
         if (bodyText.includes(subject)) return true;
         await browser.execute(() => {
           // eslint-disable-next-line no-undef
@@ -85,6 +105,11 @@ class EmailPage {
   async hasEmails() {
     const items = await this.emailItems;
     return items.length > 0;
+  }
+
+  async detailSubjectText() {
+    await this.detailSubject.waitForDisplayed({ timeout: 10000 });
+    return elementText(await this.detailSubject);
   }
 }
 
