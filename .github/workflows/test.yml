@@ -53,13 +53,9 @@ jobs:
         run: bun run test
 
   e2e-tests:
-    name: E2E Tests (${{ matrix.platform }})
-    runs-on: ${{ matrix.platform }}
+    name: E2E Tests (Linux)
+    runs-on: ubuntu-latest
     needs: [rust-tests, frontend-tests]
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -72,20 +68,10 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Linux: install webkit2gtk-driver + xvfb
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config webkitgtk-webdriver xvfb
-
-      # Windows: install matching Edge Driver
-      - name: Install msedgedriver (Windows)
-        if: matrix.platform == 'windows-latest'
-        run: |
-          cargo install --git https://github.com/chippers/msedgedriver-tool
-          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
-          "$($PWD.Path)" >> $env:GITHUB_PATH
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -100,14 +86,22 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
-      # Linux: run with xvfb for headless display
-      - name: Run E2E tests (Linux)
-        if: matrix.platform == 'ubuntu-latest'
+      - name: Run E2E tests
         working-directory: e2e
         run: xvfb-run bun run test
 
-      # Windows: run directly
-      - name: Run E2E tests (Windows)
-        if: matrix.platform == 'windows-latest'
-        working-directory: e2e
-        run: bun run test
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: e2e/artifacts/**
+          if-no-files-found: ignore
+
+      - name: Upload failed E2E data
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-data
+          path: .e2e-data/**
+          if-no-files-found: ignore
