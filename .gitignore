@@ -13,3 +13,4 @@ vite.config.ts.timestamp-*
 .idea/
 .e2e-data/
 e2e/artifacts/
+.superpowers
