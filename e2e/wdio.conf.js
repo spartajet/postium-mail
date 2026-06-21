@@ -19,6 +19,8 @@ const artifactsDir = path.resolve(__dirname, 'artifacts');
 const screenshotsDir = path.join(artifactsDir, 'screenshots');
 const reportsDir = path.join(artifactsDir, 'reports');
 const logsDir = path.join(artifactsDir, 'logs');
+const driverLogPath = path.join(logsDir, `tauri-driver-${runId}.log`);
+const environmentLogPath = path.join(logsDir, `environment-${runId}.json`);
 const appPath = path.resolve(rootDir, 'src-tauri', 'target', 'debug', appBinary);
 const driverPath = path.resolve(cargoBinDir, tauriDriverBinary);
 let hasFailure = false;
@@ -64,6 +66,64 @@ function cleanupRunData() {
   }
 }
 
+function runCommand(command, args = []) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    shell: true,
+  });
+
+  return {
+    command: [command, ...args].join(' '),
+    status: result.status,
+    stdout: result.stdout?.trim() ?? '',
+    stderr: result.stderr?.trim() ?? '',
+  };
+}
+
+function writeEnvironmentSnapshot() {
+  const snapshot = {
+    runId,
+    rootDir,
+    appPath,
+    driverPath,
+    runDataDir,
+    wdioPort,
+    platform: process.platform,
+    arch: process.arch,
+    node: process.version,
+    bun: runCommand('bun', ['--version']),
+    tauriDriver: runCommand(driverPath, ['--version']),
+    webkitWebDriver: runCommand('WebKitWebDriver', ['--version']),
+    webkitWebdriverLowercase: runCommand('webkitwebdriver', ['--version']),
+    env: {
+      DISPLAY: process.env.DISPLAY ?? '',
+      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '',
+      XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE ?? '',
+      GDK_BACKEND: process.env.GDK_BACKEND ?? '',
+      WEBKIT_DISABLE_COMPOSITING_MODE: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? '',
+    },
+  };
+
+  fs.writeFileSync(environmentLogPath, `${JSON.stringify(snapshot, null, 2)}\n`);
+}
+
+function writeDriverLog(event) {
+  if (
+    !driverLogStream ||
+    driverLogStream.destroyed ||
+    driverLogStream.writableEnded
+  ) {
+    return;
+  }
+
+  driverLogStream.write(
+    JSON.stringify({
+      ...event,
+      timestamp: event.timestamp ?? new Date().toISOString(),
+    }) + '\n'
+  );
+}
+
 export const config = {
   host: '127.0.0.1',
   port: wdioPort,
@@ -102,6 +162,7 @@ export const config = {
     ensureDir(screenshotsDir);
     ensureDir(reportsDir);
     ensureDir(logsDir);
+    writeEnvironmentSnapshot();
 
     const build = spawnSync(
       'bun',
@@ -130,8 +191,18 @@ export const config = {
   // Start tauri-driver before each session
   beforeSession: async () => {
     ensureDir(logsDir);
-    driverLogStream = fs.createWriteStream(path.join(logsDir, 'tauri-driver.log'), {
+    driverLogStream = fs.createWriteStream(driverLogPath, {
       flags: 'a',
+    });
+
+    writeDriverLog({
+      event: 'start',
+      runId,
+      appPath,
+      driverPath,
+      runDataDir,
+      wdioPort,
+      pid: process.pid,
     });
 
     tauriDriver = spawn(
@@ -153,13 +224,25 @@ export const config = {
     tauriDriver.stderr.pipe(driverLogStream);
 
     tauriDriver.on('error', (error) => {
+      writeDriverLog({
+        event: 'error',
+        message: error.message,
+        stack: error.stack,
+      });
       console.error('tauri-driver error:', error);
       process.exit(1);
     });
 
-    tauriDriver.on('exit', (code) => {
+    tauriDriver.on('exit', (code, signal) => {
+      writeDriverLog({
+        event: 'exit',
+        code,
+        signal,
+        expected: exit,
+      });
       if (!exit) {
-        console.error('tauri-driver exited with code:', code);
+        hasFailure = true;
+        console.error('tauri-driver exited unexpectedly:', { code, signal });
         process.exit(1);
       }
     });
@@ -189,6 +272,9 @@ export const config = {
 function closeTauriDriver() {
   exit = true;
   tauriDriver?.kill();
+  writeDriverLog({
+    event: 'close-request',
+  });
   driverLogStream?.end();
 }
 
