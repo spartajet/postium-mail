@@ -1,66 +1,21 @@
-/**
- * Settings page object for Postium Mail
- * Handles theme switching and account management
- */
+import sidebarPage from './sidebar.page.js';
+import { byTestId } from '../helpers/selectors.js';
+
 class SettingsPage {
-  get settingsNavButton() {
-    return $$('button.nav-item').find(async (btn) => {
-      const text = await btn.getText();
-      return text.includes('设置') || text.includes('Settings');
-    });
-  }
+  get page() { return byTestId('settings-page'); }
+  get settingsNavButton() { return byTestId('settings-nav'); }
+  get lightThemeButton() { return byTestId('theme-light'); }
+  get darkThemeButton() { return byTestId('theme-dark'); }
+  get systemThemeButton() { return byTestId('theme-system'); }
+  get themeButtons() { return $$('[data-testid^="theme-"]'); }
 
-  // Theme buttons
-  get themeButtons() {
-    return $$('button').filter(async (btn) => {
-      const text = await btn.getText();
-      return (
-        text.includes('浅色') || text.includes('Light') ||
-        text.includes('深色') || text.includes('Dark') ||
-        text.includes('系统') || text.includes('System')
-      );
-    });
-  }
-
-  get lightThemeButton() {
-    return $$('button').find(async (btn) => {
-      const text = await btn.getText();
-      return text.includes('浅色') || text.includes('Light');
-    });
-  }
-
-  get darkThemeButton() {
-    return $$('button').find(async (btn) => {
-      const text = await btn.getText();
-      return text.includes('深色') || text.includes('Dark');
-    });
-  }
-
-  get systemThemeButton() {
-    return $$('button').find(async (btn) => {
-      const text = await btn.getText();
-      return text.includes('系统') || text.includes('System');
-    });
-  }
-
-  // Account management
-  get addAccountButton() {
-    return $$('button').find(async (btn) => {
-      const text = await btn.getText();
-      return text.includes('添加账号') || text.includes('Add Account');
-    });
-  }
-
-  get accountCards() {
-    return $$('div.flex.items-center.gap-3.rounded-lg.border');
+  async waitForReady() {
+    await this.page.waitForDisplayed({ timeout: 10000 });
   }
 
   async navigateToSettings() {
-    const btn = await this.settingsNavButton;
-    if (btn) {
-      await btn.click();
-      await browser.pause(1000);
-    }
+    await sidebarPage.clickSettings();
+    await this.waitForReady();
   }
 
   async isDarkMode() {
