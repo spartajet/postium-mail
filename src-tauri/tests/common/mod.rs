@@ -43,7 +43,7 @@ impl TestServices {
     /// Create a full set of services backed by a fresh in-memory database.
     pub async fn new() -> Self {
         let db = create_test_db().await;
-        let auth = Arc::new(AuthManager::default());
+        let auth = Arc::new(AuthManager::in_memory());
 
         Self {
             account_service: AccountService::new(db.clone(), auth.clone()),

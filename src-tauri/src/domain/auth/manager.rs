@@ -25,7 +25,9 @@ use crate::domain::auth::token_cache::TokenCache;
 use crate::domain::providers::AuthType;
 use crate::error::MailError;
 use crate::infrastructure::auth::oauth2::OAuth2Manager;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -85,6 +87,14 @@ pub struct AuthManager {
 
     /// OAuth2 管理器（懒加载）
     oauth2_manager: OnceLock<Arc<OAuth2Manager>>,
+
+    /// 密码/refresh_token 存储后端
+    credential_store: CredentialStore,
+}
+
+enum CredentialStore {
+    Keyring,
+    Memory(Mutex<HashMap<String, String>>),
 }
 
 impl Default for AuthManager {
@@ -94,6 +104,8 @@ impl Default for AuthManager {
             token_cache: TokenCache::new(),
             // 创建未初始化的 oauth2_manager
             oauth2_manager: OnceLock::new(),
+            // 生产默认使用系统 Keyring
+            credential_store: CredentialStore::Keyring,
         }
     }
 }
@@ -134,6 +146,18 @@ impl AuthManager {
     pub fn set_oauth2_manager(&self, manager: Arc<OAuth2Manager>) {
         // 使用 OnceLock.set 方法，如果已经设置过则忽略
         let _ = self.oauth2_manager.set(manager);
+    }
+
+    /// 创建使用内存凭据存储的认证管理器。
+    ///
+    /// 主要用于自动化测试和无系统 Keyring 的 headless 环境。生产代码应使用
+    /// `AuthManager::default()`，继续通过系统 Keyring 保存敏感凭据。
+    pub fn in_memory() -> Self {
+        Self {
+            token_cache: TokenCache::new(),
+            oauth2_manager: OnceLock::new(),
+            credential_store: CredentialStore::Memory(Mutex::new(HashMap::new())),
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -345,6 +369,15 @@ impl AuthManager {
     pub fn get_password(&self, email: &str) -> Result<String, MailError> {
         tracing::debug!(email, "Keyring: 获取密码");
 
+        if let CredentialStore::Memory(store) = &self.credential_store {
+            return store
+                .lock()
+                .map_err(|e| MailError::KeyringError(format!("{}", e)))?
+                .get(email)
+                .cloned()
+                .ok_or_else(|| MailError::KeyringError("凭据不存在".into()));
+        }
+
         // Keyring 的服务名称（应用标识）
         let service = "postium-mail";
 
@@ -393,6 +426,14 @@ impl AuthManager {
     /// ```
     pub fn save_password(&self, email: &str, password: &str) -> Result<(), MailError> {
         tracing::debug!(email, "Keyring: 保存密码");
+
+        if let CredentialStore::Memory(store) = &self.credential_store {
+            store
+                .lock()
+                .map_err(|e| MailError::KeyringError(format!("{}", e)))?
+                .insert(email.to_string(), password.to_string());
+            return Ok(());
+        }
 
         // Keyring 的服务名称
         let service = "postium-mail";
@@ -443,6 +484,14 @@ impl AuthManager {
     /// ```
     pub fn delete_password(&self, email: &str) -> Result<(), MailError> {
         tracing::debug!(email, "Keyring: 删除密码");
+
+        if let CredentialStore::Memory(store) = &self.credential_store {
+            store
+                .lock()
+                .map_err(|e| MailError::KeyringError(format!("{}", e)))?
+                .remove(email);
+            return Ok(());
+        }
 
         // Keyring 的服务名称
         let service = "postium-mail";
