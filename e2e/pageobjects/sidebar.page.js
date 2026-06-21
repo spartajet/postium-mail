@@ -1,4 +1,4 @@
-import { byTestId } from '../helpers/selectors.js';
+import { byTestId, elementText } from '../helpers/selectors.js';
 
 class SidebarPage {
   get root() { return byTestId('sidebar'); }
@@ -60,6 +60,11 @@ class SidebarPage {
     const folder = byTestId(`folder-${folderName.toLowerCase()}`);
     await folder.waitForDisplayed({ timeout: 10000 });
     await folder.click();
+  }
+
+  async activeAccountText() {
+    await this.activeAccountLabel.waitForDisplayed({ timeout: 10000 });
+    return elementText(await this.activeAccountLabel);
   }
 }
 

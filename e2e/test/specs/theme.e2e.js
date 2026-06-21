@@ -1,51 +1,32 @@
-import settingsPage from '../../pageobjects/settings.page.js';
+import { waitForAppReady } from '../../helpers/app.js';
 import sidebarPage from '../../pageobjects/sidebar.page.js';
+import settingsPage from '../../pageobjects/settings.page.js';
 
 describe('Theme Switching', () => {
-  it('should navigate to settings page', async () => {
-    await browser.pause(1000);
-    await settingsPage.navigateToSettings();
-    await browser.pause(1000);
+  beforeEach(async () => {
+    await waitForAppReady();
+    await sidebarPage.clickSettings();
+    await settingsPage.waitForReady();
   });
 
-  it('should switch to dark theme', async () => {
-    const darkBtn = await settingsPage.darkThemeButton;
-    if (darkBtn) {
-      await darkBtn.click();
-      await browser.pause(500);
-
-      const isDark = await settingsPage.isDarkMode();
-      expect(isDark).toBe(true);
-    }
+  it('切换到深色主题', async () => {
+    await settingsPage.darkThemeButton.click();
+    await browser.waitUntil(() => settingsPage.isDarkMode(), {
+      timeout: 5000,
+      timeoutMsg: '深色主题未生效',
+    });
   });
 
-  it('should switch to light theme', async () => {
-    const lightBtn = await settingsPage.lightThemeButton;
-    if (lightBtn) {
-      await lightBtn.click();
-      await browser.pause(500);
-
-      const isDark = await settingsPage.isDarkMode();
-      expect(isDark).toBe(false);
-    }
+  it('切换到浅色主题', async () => {
+    await settingsPage.lightThemeButton.click();
+    await browser.waitUntil(async () => !(await settingsPage.isDarkMode()), {
+      timeout: 5000,
+      timeoutMsg: '浅色主题未生效',
+    });
   });
 
-  it('should switch to system theme', async () => {
-    const systemBtn = await settingsPage.systemThemeButton;
-    if (systemBtn) {
-      await systemBtn.click();
-      await browser.pause(500);
-      // System theme follows OS preference - just verify the button is clickable
-      expect(systemBtn).toBeTruthy();
-    }
-  });
-
-  it('should return to main view after settings', async () => {
-    // Click inbox to navigate back
-    const inbox = await sidebarPage.inboxFolder;
-    if (inbox) {
-      await inbox.click();
-      await browser.pause(500);
-    }
+  it('系统主题按钮可点击', async () => {
+    await settingsPage.systemThemeButton.click();
+    await expect(settingsPage.systemThemeButton).toBeDisplayed();
   });
 });
