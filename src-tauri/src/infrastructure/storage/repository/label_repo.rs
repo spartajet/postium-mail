@@ -32,6 +32,11 @@ pub async fn update(
 }
 
 pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
+    email_labels::Entity::delete_many()
+        .filter(email_labels::Column::LabelId.eq(id))
+        .exec(db)
+        .await?;
+
     labels::Entity::delete_by_id(id).exec(db).await?;
     Ok(())
 }
@@ -61,6 +66,15 @@ pub async fn add_label_to_email(
     email_id: i32,
     label_id: i32,
 ) -> Result<(), MailError> {
+    let existing = email_labels::Entity::find()
+        .filter(email_labels::Column::EmailId.eq(email_id))
+        .filter(email_labels::Column::LabelId.eq(label_id))
+        .one(db)
+        .await?;
+    if existing.is_some() {
+        return Ok(());
+    }
+
     let now = chrono::Utc::now().timestamp();
     let model = email_labels::ActiveModel {
         email_id: Set(email_id),
