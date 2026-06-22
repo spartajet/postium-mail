@@ -10,3 +10,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vscode/
 .test_mail_accounts.json
+.idea/
+.e2e-data/
+e2e/artifacts/
+.superpowers

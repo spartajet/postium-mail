@@ -54,7 +54,9 @@ impl MailProvider for GoogleWorkspaceProvider {
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
         Some(OAuthConfig {
-            client_id: env!("GOOGLE_CLIENT_ID").to_string(),
+            client_id: option_env!("GOOGLE_CLIENT_ID")
+                .unwrap_or_default()
+                .to_string(),
             client_secret: option_env!("GOOGLE_CLIENT_SECRET").map(|s| s.to_string()),
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),

@@ -43,6 +43,12 @@ impl Default for ProviderPool {
         pool.register(Arc::new(
             super::enterprise::microsoft_365::Microsoft365Provider::new(),
         ));
+        pool.register(Arc::new(super::enterprise::custom::CustomProvider::new(
+            "imap.postium.test",
+            993,
+            "smtp.postium.test",
+            465,
+        )));
         pool
     }
 }
@@ -67,7 +73,8 @@ impl ProviderPool {
 
     /// 列出所有服务商信息（给前端用，按 sort_order 排序）
     pub fn list_providers(&self) -> Vec<ProviderInfo> {
-        let mut list: Vec<ProviderInfo> = self.providers
+        let mut list: Vec<ProviderInfo> = self
+            .providers
             .values()
             .map(|p| p.provider_info().clone())
             .collect();
