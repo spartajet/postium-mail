@@ -11,11 +11,7 @@ impl SinaMailProvider {
                 id: "sina".into(),
                 name: "新浪邮箱".into(),
                 account_type: AccountType::Personal,
-                domains: vec![
-                    "sina.com".into(),
-                    "sina.cn".into(),
-                    "vip.sina.com".into(),
-                ],
+                domains: vec!["sina.com".into(), "sina.cn".into(), "vip.sina.com".into()],
                 auth_type: AuthType::Password,
                 color: Some("#E6162D".into()),
                 icon: Some("sina".into()),

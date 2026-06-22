@@ -1,7 +1,7 @@
 use crate::{domain::providers::pool::PROVIDER_POOL, error::MailError};
 
-use super::pool::ProviderPool;
 use super::ProviderInfo;
+use super::pool::ProviderPool;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -42,4 +42,78 @@ pub fn list_providers() -> Result<Vec<ProviderInfo>, MailError> {
         ))?
         .clone();
     Ok(provider_pool.list_providers())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::providers::pool::ProviderPool;
+
+    fn create_test_pool() -> ProviderPool {
+        ProviderPool::default()
+    }
+
+    #[test]
+    fn test_detect_gmail() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@gmail.com", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("gmail"));
+    }
+
+    #[test]
+    fn test_detect_qq_mail() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@qq.com", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("qq"));
+    }
+
+    #[test]
+    fn test_detect_163_mail() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@163.com", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("yi"));
+    }
+
+    #[test]
+    fn test_detect_outlook() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@outlook.com", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("outlook"));
+    }
+
+    #[test]
+    fn test_detect_unknown_domain() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@unknown-custom-domain.xyz", &pool);
+        assert!(!result.detected);
+        assert!(result.provider_id.is_none());
+        assert!(result.provider_name.is_none());
+    }
+
+    #[test]
+    fn test_detect_case_insensitive() {
+        let pool = create_test_pool();
+        let result = detect_provider("User@GMAIL.COM", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("gmail"));
+    }
+
+    #[test]
+    fn test_detect_empty_email() {
+        let pool = create_test_pool();
+        let result = detect_provider("", &pool);
+        assert!(!result.detected);
+    }
+
+    #[test]
+    fn test_detect_yahoo() {
+        let pool = create_test_pool();
+        let result = detect_provider("user@yahoo.com", &pool);
+        assert!(result.detected);
+        assert_eq!(result.provider_id.as_deref(), Some("yahoo"));
+    }
 }

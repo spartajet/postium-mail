@@ -65,8 +65,8 @@ pub enum MailError {
     #[error("IMAP 错误: {0}")]
     ImapError(String),
 
-    #[error("邮件缺少 UID")]
-    EmailMissingUid(),
+    #[error("邮件缺少 UID: {0}")]
+    EmailMissingUid(String),
 }
 
 // SeaORM 错误转换
@@ -80,5 +80,36 @@ impl From<sea_orm::DbErr> for MailError {
 impl From<serde_json::Error> for MailError {
     fn from(err: serde_json::Error) -> Self {
         MailError::InvalidParam(err.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mail_error_display() {
+        let err = MailError::AccountNotFound(42);
+        assert_eq!(err.to_string(), "账户不存在: 42");
+
+        let err = MailError::AuthFailed("bad token".to_string());
+        assert!(err.to_string().contains("bad token"));
+
+        let err = MailError::InvalidParam("missing field".to_string());
+        assert!(err.to_string().contains("missing field"));
+    }
+
+    #[test]
+    fn test_from_db_error() {
+        let db_err = sea_orm::DbErr::RecordNotFound("not found".to_string());
+        let mail_err: MailError = db_err.into();
+        assert!(matches!(mail_err, MailError::DatabaseError(_)));
+    }
+
+    #[test]
+    fn test_from_json_error() {
+        let json_err = serde_json::from_str::<i32>("not a number").unwrap_err();
+        let mail_err: MailError = json_err.into();
+        assert!(matches!(mail_err, MailError::InvalidParam(_)));
     }
 }
