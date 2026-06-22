@@ -73,7 +73,7 @@ import { formatError } from "$lib/utils/error.js";
  * - 状态字段使用 $state 标记，支持响应式更新
  * - activeAccount 是派生状态，根据 activeAccountId 自动计算
  */
-class AccountState {
+export class AccountState {
   /** 所有账号列表（响应式状态） */
   accounts = $state<AccountDto[]>([]);
 

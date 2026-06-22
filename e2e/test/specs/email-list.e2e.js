@@ -1,5 +1,5 @@
 import { waitForAppReady } from '../../helpers/app.js';
-import { waitForText } from '../../helpers/selectors.js';
+import { waitForText, waitForTextGone } from '../../helpers/selectors.js';
 import emailPage from '../../pageobjects/email.page.js';
 
 describe('Email list', () => {
@@ -19,5 +19,19 @@ describe('Email list', () => {
     await emailPage.scrollToSubject('Primary Inbox Message 24');
     await emailPage.clickEmailBySubject('Primary Inbox Message 24');
     expect(await emailPage.detailSubjectText()).toContain('Primary Inbox Message 24');
+  });
+
+  it('在详情页切换星标并删除当前邮件', async () => {
+    const subject = 'Primary Inbox Message 23';
+
+    await emailPage.scrollToSubject(subject);
+    await emailPage.clickEmailBySubject(subject);
+    expect(await emailPage.isStarredInDetail()).toBe(false);
+
+    await emailPage.toggleStarInDetail();
+    expect(await emailPage.isStarredInDetail()).toBe(true);
+
+    await emailPage.deleteOpenEmail();
+    await waitForTextGone(subject);
   });
 });
