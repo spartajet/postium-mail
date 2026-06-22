@@ -1,81 +1,146 @@
 /* stylelint-disable at-rule-no-unkown */
+
+/**
+ * Postium Mail 全局样式文件
+ *
+ * 本文件定义了应用的全局样式系统，包括：
+ * 1. Tailwind CSS 主题配置 - 定义颜色、间距、圆角等设计令牌
+ * 2. 主题变量系统 - 支持亮色和暗色主题切换
+ * 3. 基础样式层 - 设置全局默认样式
+ * 4. 自定义动画效果 - 玻璃态背景球体浮动动画、骨架屏加载动画
+ * 5. UI 组件样式 - 滚动条、焦点环、选中效果等
+ *
+ * 设计理念：
+ * - 采用 Tailwind CSS v4 的 @theme 指令进行主题配置
+ * - 支持深色模式（通过 .dark 类名切换）
+ * - 使用玻璃态（Glassmorphism）设计语言
+ * - 包含可访问性考虑（减少动画、焦点环）
+ */
+
 @import "tailwindcss";
 
+/**
+ * Tailwind CSS 主题配置
+ *
+ * 使用 @theme 指令定义自定义设计令牌，这些变量可以在组件中
+ * 通过 Tailwind 工具类（如 bg-background、text-foreground）直接使用。
+ */
 @theme {
-    /* Light theme (default) */
-    --color-background: #f8fafc;
-    --color-foreground: #0f172a;
-    --color-card: #ffffff;
-    --color-card-foreground: #0f172a;
-    --color-popover: #ffffff;
-    --color-popover-foreground: #0f172a;
-    --color-primary: #7c3aed;
-    --color-primary-foreground: #ffffff;
-    --color-secondary: #a78bfa;
-    --color-secondary-foreground: #1e1b4b;
-    --color-muted: #f1f5f9;
-    --color-muted-foreground: #64748b;
-    --color-accent: #f1f5f9;
-    --color-accent-foreground: #0f172a;
-    --color-destructive: #f43f5e;
-    --color-destructive-foreground: #ffffff;
-    --color-border: #e2e8f0;
-    --color-input: #e2e8f0;
-    --color-ring: #7c3aed;
-    --radius: 0.5rem;
+    /* ==================== 亮色主题变量（默认） ==================== */
 
-    /* Semantic colors */
-    --color-success: #10b981;
-    --color-warning: #f59e0b;
-    --color-info: #3b82f6;
-    --color-rose: #f43f5e;
+    /* 基础颜色 - 背景和前景 */
+    --color-background: #f8fafc; /* 主背景色：浅蓝灰色 */
+    --color-foreground: #0f172a; /* 主前景色：深蓝灰色文字 */
 
-    /* Glassmorphism surfaces */
-    --color-glass: #f0f4f8;
-    --color-glass-hover: #e8edf2;
-    --color-glass-active: #dee4ea;
-    --color-elevated: #ffffff;
+    /* 卡片和弹出层颜色 */
+    --color-card: #ffffff; /* 卡片背景：纯白色 */
+    --color-card-foreground: #0f172a; /* 卡片文字 */
+    --color-popover: #ffffff; /* 弹出层背景 */
+    --color-popover-foreground: #0f172a; /* 弹出层文字 */
 
-    /* Label colors */
-    --color-label-urgent: #ef4444;
-    --color-label-work: #3b82f6;
-    --color-label-personal: #10b981;
-    --color-label-finance: #f59e0b;
-    --color-label-travel: #8b5cf6;
-    --color-label-newsletter: #06b6d4;
+    /* 交互颜色 - 主要和次要按钮 */
+    --color-primary: #7c3aed; /* 主色调：紫色 */
+    --color-primary-foreground: #ffffff; /* 主色文字 */
+    --color-secondary: #a78bfa; /* 次要色：浅紫色 */
+    --color-secondary-foreground: #1e1b4b; /* 次要色文字 */
+
+    /* 静态/禁用状态颜色 */
+    --color-muted: #f1f5f9; /* 静态背景 */
+    --color-muted-foreground: #64748b; /* 静态文字 */
+
+    /* 强调颜色 - 悬停、高亮 */
+    --color-accent: #f1f5f9; /* 强调背景 */
+    --color-accent-foreground: #0f172a; /* 强调文字 */
+
+    /* 语义颜色 - 警告、错误 */
+    --color-destructive: #f43f5e; /* 破坏性操作：玫瑰红 */
+    --color-destructive-foreground: #ffffff; /* 破坏性文字 */
+
+    /* 边框和输入框颜色 */
+    --color-border: #e2e8f0; /* 边框颜色 */
+    --color-input: #e2e8f0; /* 输入框边框 */
+    --color-ring: #7c3aed; /* 焦点环颜色 */
+
+    /* 圆角 */
+    --radius: 0.5rem; /* 默认圆角：8px */
+
+    /* ==================== 语义颜色 ==================== */
+    /* 用于表示不同状态和类型的颜色 */
+    --color-success: #10b981; /* 成功状态：绿色 */
+    --color-warning: #f59e0b; /* 警告状态：琥珀色 */
+    --color-info: #3b82f6; /* 信息状态：蓝色 */
+    --color-rose: #f43f5e; /* 玫瑰色（用于强调） */
+
+    /* ==================== 玻璃态表面颜色 ==================== */
+    /* 用于实现毛玻璃效果的表面颜色 */
+    --color-glass: #f0f4f8; /* 玻璃表面基础色 */
+    --color-glass-hover: #e8edf2; /* 玻璃表面悬停色 */
+    --color-glass-active: #dee4ea; /* 玻璃表面激活色 */
+    --color-elevated: #ffffff; /* 抬升表面（卡片、模态框） */
+
+    /* ==================== 标签颜色 ==================== */
+    /* 用于邮件标签和分类的颜色 */
+    --color-label-urgent: #ef4444; /* 紧急标签：红色 */
+    --color-label-work: #3b82f6; /* 工作标签：蓝色 */
+    --color-label-personal: #10b981; /* 个人标签：绿色 */
+    --color-label-finance: #f59e0b; /* 财务标签：琥珀色 */
+    --color-label-travel: #8b5cf6; /* 旅行标签：紫色 */
+    --color-label-newsletter: #06b6d4; /* 订阅标签：青色 */
 }
 
+/**
+ * 暗色主题配置
+ *
+ * 当 <html> 或 <body> 元素带有 .dark 类时，以下变量会覆盖亮色主题变量。
+ * 通过这种方式实现主题切换，无需修改组件代码。
+ */
 .dark {
-    --color-background: #0f0f23;
-    --color-foreground: #e2e8f0;
-    --color-card: #161631;
+    /* 基础颜色 - 深色背景和浅色文字 */
+    --color-background: #0f0f23; /* 主背景：深蓝紫色 */
+    --color-foreground: #e2e8f0; /* 主前景：浅灰色文字 */
+
+    /* 卡片和弹出层 */
+    --color-card: #161631; /* 卡片背景：较深的蓝紫色 */
     --color-card-foreground: #e2e8f0;
-    --color-popover: #1a1a35;
+    --color-popover: #1a1a35; /* 弹出层背景 */
     --color-popover-foreground: #e2e8f0;
-    --color-primary: #a78bfa;
+
+    /* 交互颜色 */
+    --color-primary: #a78bfa; /* 主色调：更亮的紫色 */
     --color-primary-foreground: #0f0f23;
-    --color-secondary: #3b2d5e;
+    --color-secondary: #3b2d5e; /* 次要色：深紫色 */
     --color-secondary-foreground: #e2e8f0;
+
+    /* 静态状态 */
     --color-muted: #1a1a35;
     --color-muted-foreground: #94a3b8;
+
+    /* 强调颜色 */
     --color-accent: #1a1a35;
     --color-accent-foreground: #e2e8f0;
+
+    /* 破坏性颜色保持不变 */
     --color-destructive: #f43f5e;
     --color-destructive-foreground: #e2e8f0;
-    --color-border: #252545;
+
+    /* 边框和输入框 - 深色背景下的边框更明显 */
+    --color-border: #252545; /* 深色边框 */
     --color-input: #252545;
     --color-ring: #a78bfa;
 
+    /* 语义颜色保持不变，因为它们在深色背景下依然清晰 */
     --color-success: #10b981;
     --color-warning: #f59e0b;
     --color-info: #3b82f6;
     --color-rose: #f43f5e;
 
-    --color-glass: #1a1a35;
-    --color-glass-hover: #222245;
-    --color-glass-active: #2a2a55;
-    --color-elevated: #161631;
+    /* 玻璃态表面 - 深色背景下的玻璃效果 */
+    --color-glass: #1a1a35; /* 深色玻璃 */
+    --color-glass-hover: #222245; /* 悬停时稍亮 */
+    --color-glass-active: #2a2a55; /* 激活时更亮 */
+    --color-elevated: #161631; /* 抬升表面 */
 
+    /* 标签颜色保持不变 */
     --color-label-urgent: #ef4444;
     --color-label-work: #3b82f6;
     --color-label-personal: #10b981;
@@ -84,172 +149,280 @@
     --color-label-newsletter: #06b6d4;
 }
 
+/**
+ * 基础样式层
+ *
+ * 使用 Tailwind 的 @layer 指令定义基础样式，这些样式会自动注入
+ * 到生成的 CSS 的 base 层中，确保在组件样式之前加载。
+ */
 @layer base {
+    /* 为所有元素添加边框颜色（默认透明，由具体组件控制显示） */
     * {
         @apply border-border;
     }
 
+    /* 全局 body 样式 */
     body {
+        /* 应用背景和前景颜色 */
         @apply bg-background text-foreground;
+
+        /* 字体栈：优先使用 Inter，回退到系统字体 */
         font-family:
             "Inter",
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            Roboto,
-            Oxygen,
+            /* 主要字体 */ -apple-system,
+            /* Apple 系统字体 */ BlinkMacSystemFont,
+            /* macOS Chrome */ "Segoe UI",
+            /* Windows 系统 */ Roboto,
+            /* Android */ Oxygen,
             Ubuntu,
             Cantarell,
             sans-serif;
-        font-size: 16px;
-        line-height: 1.5;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        overflow: hidden;
-        user-select: none;
+
+        /* 排版设置 */
+        font-size: 16px; /* 基准字体大小 */
+        line-height: 1.5; /* 行高 */
+
+        /* 字体渲染优化 */
+        -webkit-font-smoothing: antialiased; /* Webkit 浏览器抗锯齿 */
+        -moz-osx-font-smoothing: grayscale; /* Firefox 灰度渲染 */
+
+        /* 布局限制 */
+        overflow: hidden; /* 防止整个页面滚动（内部组件独立滚动） */
+        user-select: none; /* 防止文本选择（桌面应用风格） */
     }
 }
 
-/* Glassmorphism background orbs */
+/**
+ * 玻璃态背景球体动画
+ *
+ * 创建三个漂浮的渐变球体作为动态背景，营造现代感的视觉效果。
+ * 球体使用高斯模糊和低透明度，不会干扰内容阅读。
+ */
 .bg-orbs {
+    /* 固定定位，覆盖整个视口 */
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
+
+    /* 隐藏溢出内容 */
     overflow: hidden;
+
+    /* 确保背景球体不会拦截鼠标事件 */
     pointer-events: none;
+
+    /* 最底层，低于所有内容 */
     z-index: 0;
 }
 
 .orb {
+    /* 绝对定位，通过各自的位置样式调整 */
     position: absolute;
+
+    /* 圆形 */
     border-radius: 50%;
+
+    /* 高斯模糊，创造柔和的渐变效果 */
     filter: blur(80px);
+
+    /* 低透明度，确保不影响内容可读性 */
     opacity: 0.3;
+
+    /* 应用浮动动画，20秒一个循环 */
     animation: float 20s ease-in-out infinite;
 }
 
+/* 暗色模式下球体更明显，因为背景更深 */
 .dark .orb {
     opacity: 0.5;
 }
 
+/* 球体 1：紫色渐变，位于右上角 */
 .orb-1 {
     width: 600px;
     height: 600px;
     background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
-    top: -200px;
+    top: -200px; /* 部分超出视口 */
     right: -200px;
-    animation-delay: 0s;
+    animation-delay: 0s; /* 立即开始动画 */
 }
 
+/* 球体 2：紫红渐变，位于左下角 */
 .orb-2 {
     width: 400px;
     height: 400px;
     background: linear-gradient(135deg, #a78bfa 0%, #f43f5e 100%);
     bottom: -100px;
     left: -100px;
-    animation-delay: -5s;
+    animation-delay: -5s; /* 延迟 5 秒开始 */
 }
 
+/* 球体 3：紫蓝渐变，居中 */
 .orb-3 {
     width: 300px;
     height: 300px;
     background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
-    animation-delay: -10s;
+    transform: translate(-50%, -50%); /* 居中对齐 */
+    animation-delay: -10s; /* 延迟 10 秒开始 */
 }
 
+/**
+ * 浮动动画关键帧
+ *
+ * 球体通过位移和缩放组合，创造自然的漂浮效果。
+ * 使用 ease-in-out 缓动函数使运动更平滑。
+ */
 @keyframes float {
     0%,
     100% {
+        /* 起始和结束状态：原始位置和大小 */
         transform: translate(0, 0) scale(1);
     }
     25% {
+        /* 向右上方移动，稍微放大 */
         transform: translate(30px, -30px) scale(1.05);
     }
     50% {
+        /* 向左下方移动，稍微缩小 */
         transform: translate(-20px, 20px) scale(0.95);
     }
     75% {
+        /* 向右下方移动，稍微放大 */
         transform: translate(20px, 30px) scale(1.02);
     }
 }
 
-/* Scrollbar */
+/**
+ * 自定义滚动条样式
+ *
+ * 为 Webkit 浏览器（Chrome、Edge、Safari）和 Firefox 提供统一的
+ * 细滚动条样式，符合现代设计趋势。
+ */
+
+/* Webkit 滚动条整体样式 */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 8px; /* 垂直滚动条宽度 */
+    height: 8px; /* 水平滚动条高度 */
 }
 
+/* Webkit 滚动条轨道 */
 ::-webkit-scrollbar-track {
-    background: transparent;
+    background: transparent; /* 透明轨道 */
 }
 
+/* Webkit 滚动条滑块 */
 ::-webkit-scrollbar-thumb {
-    background: var(--color-border);
-    border-radius: 9999px;
+    background: var(--color-border); /* 滑块颜色使用边框色 */
+    border-radius: 9999px; /* 完全圆角，形成圆形滑块 */
 }
 
+/* Webkit 滚动条滑块悬停效果 */
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-muted-foreground);
+    background: var(--color-muted-foreground); /* 悬停时变深 */
 }
 
+/* Firefox 滚动条样式（使用 CSS Scrollbars 标准） */
 * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-border) transparent;
+    scrollbar-width: thin; /* 细滚动条 */
+    scrollbar-color: var(--color-border) transparent; /* 滑块和轨道颜色 */
 }
 
-/* Selection */
+/**
+ * 文本选中样式
+ *
+ * 当用户选中文字时，使用主色调作为背景色，白色文字，
+ * 确保选中内容清晰可见。
+ */
 ::selection {
-    background: var(--color-primary);
-    color: white;
+    background: var(--color-primary); /* 主色调背景 */
+    color: white; /* 白色文字 */
 }
 
-/* Focus ring */
+/**
+ * 焦点环样式
+ *
+ * 使用 :focus-visible 伪类确保只有通过键盘导航时才显示焦点环，
+ * 避免鼠标点击时出现不必要的轮廓。
+ */
 :focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
+    outline: 2px solid var(--color-primary); /* 2px 实线主色调边框 */
+    outline-offset: 2px; /* 边框与元素间距 */
 }
 
-/* Skeleton loading */
+/* 输入框及包含输入框的容器不显示 focus-visible outline，
+   改用边框颜色变化表示焦点状态，避免出现内部边框 */
+input:focus-visible,
+textarea:focus-visible,
+input:focus-visible ~ *,
+.search-container:focus-within {
+    outline: none;
+}
+
+/**
+ * 骨架屏加载动画
+ *
+ * 用于内容加载占位符，通过渐变背景和动画创建扫描效果，
+ * 提升加载体验。
+ */
 .skeleton {
+    /* 渐变背景：三种状态颜色交替 */
     background: linear-gradient(
         90deg,
-        var(--color-glass) 25%,
-        var(--color-glass-hover) 50%,
-        var(--color-glass) 75%
+        /* 从左到右 */ var(--color-glass) 25%,
+        /* 25% 位置：基础色 */ var(--color-glass-hover) 50%,
+        /* 50% 位置：稍亮色 */ var(--color-glass) 75% /* 75% 位置：回到基础色 */
     );
+
+    /* 背景大小：200% 宽度，实现扫描效果 */
     background-size: 200% 100%;
+
+    /* 动画：1.5秒循环 */
     animation: skeleton-loading 1.5s infinite;
+
+    /* 圆角 */
     border-radius: 6px;
 }
 
+/* 骨架屏文本行占位符 */
 .skeleton-text {
-    height: 14px;
-    margin-bottom: 8px;
+    height: 14px; /* 模拟文本行高度 */
+    margin-bottom: 8px; /* 行间距 */
 }
 
+/**
+ * 骨架屏加载动画关键帧
+ *
+ * 通过移动背景位置，创建光标扫描效果。
+ */
 @keyframes skeleton-loading {
     0% {
-        background-position: 200% 0;
+        background-position: 200% 0; /* 从右侧开始 */
     }
     100% {
-        background-position: -200% 0;
+        background-position: -200% 0; /* 移动到左侧 */
     }
 }
 
-/* Reduced motion */
+/**
+ * 减少动画（无障碍支持）
+ *
+ * 尊重用户的系统偏好设置（prefers-reduced-motion），
+ * 当用户在系统设置中开启"减少动画"时，禁用所有动画效果。
+ */
 @media (prefers-reduced-motion: reduce) {
+    /* 禁用所有元素的动画和过渡 */
     *,
     *::before,
     *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important; /* 动画时间设为极短 */
+        animation-iteration-count: 1 !important; /* 只执行一次 */
+        transition-duration: 0.01ms !important; /* 过渡时间设为极短 */
     }
+
+    /* 特别禁用背景球体动画 */
     .orb {
         animation: none;
     }

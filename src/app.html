@@ -1,13 +1,47 @@
 <!doctype html>
+<!--
+  SvelteKit 应用主入口模板文件
+
+  本文件定义了 Postium Mail 应用的 HTML 结构框架。
+  作为 Tauri 桌面应用的前端入口，负责：
+  1. 加载应用的 CSS 和 JavaScript 资源
+  2. 设置应用的基本元数据和视口配置
+  3. 注入 SvelteKit 渲染的内容
+
+  注意：由于使用 Tauri，此应用运行在 SPA（单页应用）模式下，
+  通过 src/routes/+layout.ts 配置禁用了 SSR。
+-->
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Postium Mail</title>
-    %sveltekit.head%
-  </head>
-  <body class="overflow-hidden" data-sveltekit-preload-data="hover">
-    <div style="display: contents">%sveltekit.body%</div>
-  </body>
+    <!-- HTML 头部区域：包含元数据、资源链接和配置信息 -->
+    <head>
+        <!-- 设置</head>字符编码为 UTF-8，确保多语言字符正确显示 -->
+        <meta charset="utf-8" />
+
+        <!-- 加载应用图标（favicon），显示在浏览器标签页和任务栏 -->
+        <link rel="icon" href="%sveltekit.assets%/favicon.png" />
+
+        <!-- 视口配置：确保应用在桌面窗口中正确缩放和显示 -->
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+        <!-- 应用标题：显示在浏览器标签页 -->
+        <title>Postium Mail</title>
+
+        <!-- SvelteKit 占位符：注入页面特定的头部内容（如脚本、样式、meta 标签等） -->
+        %sveltekit.head%
+    </head>
+
+    <!-- HTML 主体区域：包含应用的可视化内容 -->
+    <!--
+    data-sveltekit-preload-data="hover"：优化性能配置
+    - 当鼠标悬停在链接上时，自动预加载目标页面的数据
+    - 在 Tauri 桌面应用中，这可以实现更流畅的页面切换体验
+    - 由于是本地应用，数据加载速度很快
+  -->
+    <body class="overflow-hidden" data-sveltekit-preload-data="hover">
+        <!--
+      SvelteKit 主体占位符：注入路由组件的渲染内容
+      style="display: contents"：使容器在布局中不可见，只渲染子元素
+    -->
+        <div style="display: contents">%sveltekit.body%</div>
+    </body>
 </html>

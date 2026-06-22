@@ -137,19 +137,6 @@ pub struct AttachmentInfo {
     pub content_id: Option<String>,
 }
 
-/// 邮件信封信息
-///
-/// 从 IMAP ENVELOPE 响应中提取的邮件头信息。
-#[derive(Debug, Clone)]
-pub struct MailEnvelope {
-    pub subject: String,
-    pub from: String,
-    pub to: String,
-    pub cc: String,
-    pub bcc: String,
-    pub date: chrono::DateTime<chrono::Utc>,
-}
-
 /// 完整邮件 DTO
 ///
 /// 包含邮件的所有字段，用于邮件详情展示和完整数据传输。
@@ -158,8 +145,7 @@ pub struct MailEnvelope {
 /// # 与其他结构体的关系
 ///
 /// - `EmailHeader`: 轻量级邮件头，仅用于骨架同步
-/// - `MailEnvelope`: IMAP 信封信息，仅包含邮件头地址信息
-/// - `EmailDto`（本结构体）: 完整邮件数据，包含正文、附件等所有字段
+/// - `WholeEmailDto`（本结构体）: 完整邮件数据，包含正文、附件等所有字段
 ///
 /// # 字段分组
 ///
