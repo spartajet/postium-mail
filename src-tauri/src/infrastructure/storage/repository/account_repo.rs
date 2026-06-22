@@ -22,7 +22,10 @@ pub async fn get_by_email(db: &DbConn, email: &str) -> Result<Option<accounts::M
         .await?)
 }
 
-pub async fn create(db: &DbConn, model: accounts::ActiveModel) -> Result<accounts::Model, MailError> {
+pub async fn create(
+    db: &DbConn,
+    model: accounts::ActiveModel,
+) -> Result<accounts::Model, MailError> {
     Ok(model.insert(db).await?)
 }
 

@@ -54,7 +54,9 @@ impl MailProvider for Microsoft365Provider {
 
     fn oauth_config(&self) -> Option<OAuthConfig> {
         Some(OAuthConfig {
-            client_id: env!("MICROSOFT_CLIENT_ID").to_string(),
+            client_id: option_env!("MICROSOFT_CLIENT_ID")
+                .unwrap_or_default()
+                .to_string(),
             client_secret: option_env!("MICROSOFT_CLIENT_SECRET").map(|s| s.to_string()),
             auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
             token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
