@@ -47,4 +47,4 @@ bun run test:e2e
 
 E2E 测试默认不连接真实 IMAP、SMTP、OAuth 或远程邮件服务。测试运行时会设置 `POSTIUM_E2E=1`，并在隔离目录中 seed 两个账号和固定邮件数据，从而覆盖账号切换、邮件列表滚动、搜索、导航、写邮件弹窗和主题切换等流程。
 
-更多说明见 [docs/testing/e2e.md](docs/testing/e2e.md)。
+更多说明见 [测试现状总览](docs/testing/overview.md) 和 [E2E 测试指南](docs/testing/e2e.md)。
