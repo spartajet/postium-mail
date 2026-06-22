@@ -32,6 +32,34 @@ async fn test_create_account() {
 }
 
 #[tokio::test]
+async fn test_create_account_saves_password() {
+    let svc = TestServices::new().await;
+    let req = CreateAccountRequest {
+        name: "Credential Account".to_string(),
+        email: "credential@gmail.com".to_string(),
+        display_name: None,
+        provider: "gmail".to_string(),
+        auth_type: "Password".to_string(),
+        password: "initial_password".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+
+    let created = svc.account_service.create(req).await.unwrap();
+
+    assert_eq!(
+        svc.auth.get_password(&created.email).unwrap(),
+        "initial_password"
+    );
+}
+
+#[tokio::test]
 async fn test_list_accounts_empty() {
     let svc = TestServices::new().await;
     let result = svc.account_service.list().await;
@@ -105,6 +133,38 @@ async fn test_update_account() {
 }
 
 #[tokio::test]
+async fn test_update_password_replaces_stored_password() {
+    let svc = TestServices::new().await;
+    let req = CreateAccountRequest {
+        name: "Password Update".to_string(),
+        email: "password-update@outlook.com".to_string(),
+        display_name: None,
+        provider: "outlook".to_string(),
+        auth_type: "Password".to_string(),
+        password: "old_password".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+    let created = svc.account_service.create(req).await.unwrap();
+
+    svc.account_service
+        .update_password(created.id, "new_password".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        svc.auth.get_password(&created.email).unwrap(),
+        "new_password"
+    );
+}
+
+#[tokio::test]
 async fn test_delete_account() {
     let svc = TestServices::new().await;
     let req = CreateAccountRequest {
@@ -125,6 +185,11 @@ async fn test_delete_account() {
     };
     let created = svc.account_service.create(req).await.unwrap();
     let delete_result = svc.account_service.delete(created.id).await;
-    assert!(delete_result.is_ok(), "删除账号应成功: {:?}", delete_result.err());
+    assert!(
+        delete_result.is_ok(),
+        "删除账号应成功: {:?}",
+        delete_result.err()
+    );
     assert!(svc.account_service.get(created.id).await.is_err());
+    assert!(svc.auth.get_password(&created.email).is_err());
 }
