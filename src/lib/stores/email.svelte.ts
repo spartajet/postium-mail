@@ -82,7 +82,7 @@ import { formatError } from "$lib/utils/error.js";
  * - selectedEmail 在选择邮件时自动加载完整详情
  * - 选择邮件时会自动标记为已读
  */
-class EmailState {
+export class EmailState {
   /** 当前文件夹的邮件列表（响应式状态） */
   emails = $state<EmailDto[]>([]);
 

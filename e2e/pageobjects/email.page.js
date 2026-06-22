@@ -82,6 +82,29 @@ class EmailPage {
     );
   }
 
+  async isStarredInDetail() {
+    await this.starButton.waitForDisplayed({ timeout: 10000 });
+    return (await this.starButton.getAttribute('data-starred')) === 'true';
+  }
+
+  async toggleStarInDetail() {
+    await this.starButton.waitForDisplayed({ timeout: 10000 });
+    await this.starButton.click();
+    await browser.waitUntil(
+      async () => (await this.isStarredInDetail()) === true,
+      {
+        timeout: 10000,
+        timeoutMsg: '邮件详情星标状态未更新为已星标',
+      }
+    );
+  }
+
+  async deleteOpenEmail() {
+    await this.deleteButton.waitForDisplayed({ timeout: 10000 });
+    await this.deleteButton.click();
+    await this.detailEmpty.waitForDisplayed({ timeout: 10000 });
+  }
+
   async findEmailBySubject(subject) {
     const itemBySubject = await $(`[data-testid="email-item"][data-subject="${subject}"]`);
     if (await itemBySubject.isExisting()) return itemBySubject;
