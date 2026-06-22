@@ -618,6 +618,9 @@
       -->
             <button
                 data-testid="email-star-button"
+                data-starred={emailState.selectedEmail.is_starred
+                    ? "true"
+                    : "false"}
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-glass-hover {emailState
                     .selectedEmail.is_starred
                     ? 'text-yellow-400'
