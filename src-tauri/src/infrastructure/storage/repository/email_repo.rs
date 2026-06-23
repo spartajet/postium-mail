@@ -255,6 +255,19 @@ where
     Ok(delete_result.rows_affected)
 }
 
+pub fn delete_by_account_tx(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: i32,
+) -> rusqlite::Result<u64> {
+    tx.execute(
+        "DELETE FROM attachments
+         WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?1)",
+        [account_id],
+    )?;
+    let deleted = tx.execute("DELETE FROM emails WHERE account_id = ?1", [account_id])?;
+    Ok(deleted as u64)
+}
+
 /// 批量保存邮件头
 ///
 /// 从 IMAP 同步的邮件头批量保存到数据库。
