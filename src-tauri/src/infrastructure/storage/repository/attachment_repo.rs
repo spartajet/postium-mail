@@ -2,6 +2,10 @@ use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::attachments;
 
+pub const INSERT_ATTACHMENT_SQL: &str = "INSERT INTO attachments (
+        email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+
 #[derive(Clone, Debug)]
 pub struct AttachmentWrite {
     pub email_id: i32,
@@ -30,27 +34,22 @@ fn map_attachment(row: &rusqlite::Row<'_>) -> rusqlite::Result<attachments::Mode
     })
 }
 
-pub fn insert_attachment_tx(
-    tx: &rusqlite::Transaction<'_>,
+pub fn execute_attachment_insert(
+    stmt: &mut rusqlite::Statement<'_>,
     model: &AttachmentWrite,
-) -> rusqlite::Result<i32> {
-    tx.execute(
-        "INSERT INTO attachments (
-            email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![
-            model.email_id,
-            &model.filename,
-            &model.content_type,
-            model.size,
-            &model.section_path,
-            &model.disposition,
-            &model.content_id,
-            &model.path,
-            model.created_at,
-        ],
-    )?;
-    Ok(tx.last_insert_rowid() as i32)
+) -> rusqlite::Result<()> {
+    stmt.execute(rusqlite::params![
+        model.email_id,
+        &model.filename,
+        &model.content_type,
+        model.size,
+        &model.section_path,
+        &model.disposition,
+        &model.content_id,
+        &model.path,
+        model.created_at,
+    ])?;
+    Ok(())
 }
 
 pub async fn list_by_email(
@@ -107,23 +106,9 @@ pub async fn bulk_insert(db: &DbConn, models: Vec<AttachmentWrite>) -> Result<()
     }
 
     db.transaction(move |tx| {
-        let mut stmt = tx.prepare(
-            "INSERT INTO attachments (
-                email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )?;
+        let mut stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
         for model in models {
-            stmt.execute(rusqlite::params![
-                model.email_id,
-                model.filename,
-                model.content_type,
-                model.size,
-                model.section_path,
-                model.disposition,
-                model.content_id,
-                model.path,
-                model.created_at,
-            ])?;
+            execute_attachment_insert(&mut stmt, &model)?;
         }
         Ok(())
     })
