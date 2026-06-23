@@ -6,7 +6,10 @@ use postium_mail_lib::infrastructure::storage::entities::{
 };
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::label_service::CreateLabelRequest;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    Statement,
+};
 
 #[tokio::test]
 async fn test_create_account() {
@@ -424,4 +427,162 @@ async fn test_delete_account_removes_local_account_data_without_foreign_keys() {
             .unwrap(),
         1
     );
+}
+
+#[tokio::test]
+async fn test_delete_account_rolls_back_local_data_when_account_row_delete_fails() {
+    let svc = TestServices::new().await;
+
+    let account = svc
+        .account_service
+        .create(CreateAccountRequest {
+            name: "Rollback Delete".to_string(),
+            email: "rollback-delete@example.com".to_string(),
+            display_name: None,
+            provider: "gmail".to_string(),
+            auth_type: "Password".to_string(),
+            password: "password".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl_mode: None,
+            color: None,
+            account_type: None,
+        })
+        .await
+        .unwrap();
+    let email_id =
+        insert_test_email(&svc, account.id, TestEmail::new(903, "keep after rollback")).await;
+    let label = svc
+        .label_service
+        .create_label(CreateLabelRequest {
+            account_id: account.id,
+            name: "rollback label".to_string(),
+            color: "#0000ff".to_string(),
+        })
+        .await
+        .unwrap();
+    svc.label_service
+        .add_label_to_email(email_id, label.id)
+        .await
+        .unwrap();
+
+    let now = chrono::Utc::now().timestamp();
+    attachments::Entity::insert(attachments::ActiveModel {
+        email_id: Set(email_id),
+        filename: Set(Some("rollback.txt".to_string())),
+        content_type: Set(Some("text/plain".to_string())),
+        size: Set(56),
+        section_path: Set("2".to_string()),
+        disposition: Set(Some("attachment".to_string())),
+        content_id: Set(None),
+        path: Set(None),
+        created_at: Set(now),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+    sync_state::Entity::insert(sync_state::ActiveModel {
+        account_id: Set(account.id),
+        folder: Set("INBOX".to_string()),
+        folder_nick_name: Set(None),
+        uidvalidity: Set(Some(1)),
+        uidnext: Set(Some(2)),
+        synced_at: Set(Some(now)),
+        last_sync_uid: Set(Some(1)),
+        created_at: Set(Some(now)),
+        updated_at: Set(Some(now)),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+    sync_errors::Entity::insert(sync_errors::ActiveModel {
+        account_id: Set(account.id),
+        folder: Set(Some("INBOX".to_string())),
+        error_type: Set("test".to_string()),
+        error_message: Set("rollback error row".to_string()),
+        uid: Set(Some(1)),
+        stack_trace: Set(None),
+        resolved: Set(Some(false)),
+        created_at: Set(now),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+
+    svc.db
+        .execute_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!(
+                r#"
+            CREATE TRIGGER fail_delete_account
+            BEFORE DELETE ON accounts
+            WHEN OLD.id = {}
+            BEGIN
+                SELECT RAISE(ABORT, 'forced account delete failure');
+            END;
+            "#,
+                account.id
+            ),
+        ))
+        .await
+        .unwrap();
+
+    assert!(svc.account_service.delete(account.id).await.is_err());
+
+    assert!(svc.account_service.get(account.id).await.is_ok());
+    assert_eq!(
+        emails::Entity::find()
+            .filter(emails::Column::AccountId.eq(account.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        attachments::Entity::find()
+            .filter(attachments::Column::EmailId.eq(email_id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        labels::Entity::find()
+            .filter(labels::Column::AccountId.eq(account.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        email_labels::Entity::find()
+            .filter(email_labels::Column::EmailId.eq(email_id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sync_errors::Entity::find()
+            .filter(sync_errors::Column::AccountId.eq(account.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(svc.auth.get_password(&account.email).unwrap(), "password");
 }

@@ -39,7 +39,10 @@ pub async fn update(
     Ok(model.update(db).await?)
 }
 
-pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
+pub async fn delete<C>(db: &C, id: i32) -> Result<(), MailError>
+where
+    C: ConnectionTrait,
+{
     accounts::Entity::delete_by_id(id).exec(db).await?;
     Ok(())
 }

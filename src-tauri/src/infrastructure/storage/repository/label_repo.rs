@@ -1,6 +1,6 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::{email_labels, emails, labels};
+use crate::infrastructure::storage::entities::{email_labels, labels};
 use sea_orm::*;
 
 pub async fn list_by_account(
@@ -41,36 +41,33 @@ pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
     Ok(())
 }
 
-pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
-    let email_ids = emails::Entity::find()
-        .select_only()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .column(emails::Column::Id)
-        .into_tuple::<i32>()
-        .all(db)
-        .await?;
+pub async fn delete_by_account<C>(db: &C, account_id: i32) -> Result<(), MailError>
+where
+    C: ConnectionTrait,
+{
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        r#"
+        DELETE FROM email_labels
+        WHERE email_id IN (
+            SELECT id FROM emails WHERE account_id = ?
+        )
+        "#,
+        [account_id.into()],
+    ))
+    .await?;
 
-    if !email_ids.is_empty() {
-        email_labels::Entity::delete_many()
-            .filter(email_labels::Column::EmailId.is_in(email_ids))
-            .exec(db)
-            .await?;
-    }
-
-    let label_ids = labels::Entity::find()
-        .select_only()
-        .filter(labels::Column::AccountId.eq(account_id))
-        .column(labels::Column::Id)
-        .into_tuple::<i32>()
-        .all(db)
-        .await?;
-
-    if !label_ids.is_empty() {
-        email_labels::Entity::delete_many()
-            .filter(email_labels::Column::LabelId.is_in(label_ids))
-            .exec(db)
-            .await?;
-    }
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        r#"
+        DELETE FROM email_labels
+        WHERE label_id IN (
+            SELECT id FROM labels WHERE account_id = ?
+        )
+        "#,
+        [account_id.into()],
+    ))
+    .await?;
 
     labels::Entity::delete_many()
         .filter(labels::Column::AccountId.eq(account_id))

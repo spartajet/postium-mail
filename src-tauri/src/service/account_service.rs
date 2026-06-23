@@ -3,7 +3,7 @@ use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::entities::accounts;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, label_repo, sync_repo};
-use sea_orm::Set;
+use sea_orm::{Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -424,10 +424,12 @@ impl AccountService {
             .await?
             .ok_or(MailError::AccountNotFound(id))?;
 
-        label_repo::delete_by_account(&self.db, id).await?;
-        email_repo::delete_by_account(&self.db, id).await?;
-        sync_repo::delete_by_account(&self.db, id).await?;
-        account_repo::delete(&self.db, id).await?;
+        let transaction = self.db.begin().await?;
+        label_repo::delete_by_account(&transaction, id).await?;
+        email_repo::delete_by_account(&transaction, id).await?;
+        sync_repo::delete_by_account(&transaction, id).await?;
+        account_repo::delete(&transaction, id).await?;
+        transaction.commit().await?;
 
         let _ = self.auth.delete_password(&account.email);
 

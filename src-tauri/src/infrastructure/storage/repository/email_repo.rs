@@ -231,21 +231,21 @@ pub async fn delete_by_folder(
     Ok(delete_result.rows_affected)
 }
 
-pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<u64, MailError> {
-    let email_ids = emails::Entity::find()
-        .select_only()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .column(emails::Column::Id)
-        .into_tuple::<i32>()
-        .all(db)
-        .await?;
-
-    if !email_ids.is_empty() {
-        attachments::Entity::delete_many()
-            .filter(attachments::Column::EmailId.is_in(email_ids))
-            .exec(db)
-            .await?;
-    }
+pub async fn delete_by_account<C>(db: &C, account_id: i32) -> Result<u64, MailError>
+where
+    C: ConnectionTrait,
+{
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        r#"
+        DELETE FROM attachments
+        WHERE email_id IN (
+            SELECT id FROM emails WHERE account_id = ?
+        )
+        "#,
+        [account_id.into()],
+    ))
+    .await?;
 
     let delete_result = emails::Entity::delete_many()
         .filter(emails::Column::AccountId.eq(account_id))
