@@ -64,17 +64,45 @@ async fn schema_creates_fts_triggers_that_track_email_changes() {
 }
 
 #[tokio::test]
-async fn init_database_removes_existing_database_files_before_recreating_schema() {
+async fn init_database_preserves_existing_database_data() {
+    let temp = tempdir().unwrap();
+
+    let first_db = init_database(temp.path()).await.unwrap();
+
+    first_db
+        .call(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (
+                    name, email, provider, auth_type, account_type, created_at, updated_at
+                ) VALUES ('Persisted', 'persisted@example.com', 'custom', 'password', 'personal', 1, 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(first_db);
+
+    let reopened_db = init_database(temp.path()).await.unwrap();
+
+    let account_count = reopened_db
+        .call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM accounts WHERE email = 'persisted@example.com'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(account_count, 1);
+}
+
+#[tokio::test]
+async fn init_database_creates_database_when_missing() {
     let temp = tempdir().unwrap();
     let db_path = temp.path().join("postium.sqlite");
-    let wal_path = temp.path().join("postium.sqlite-wal");
-    let shm_path = temp.path().join("postium.sqlite-shm");
-    let old_wal_bytes = b"old wal bytes";
-    let old_shm_bytes = b"old shm bytes";
-
-    std::fs::write(&db_path, b"old database bytes").unwrap();
-    std::fs::write(&wal_path, old_wal_bytes).unwrap();
-    std::fs::write(&shm_path, old_shm_bytes).unwrap();
 
     let db = init_database(temp.path()).await.unwrap();
 
@@ -91,10 +119,4 @@ async fn init_database_removes_existing_database_files_before_recreating_schema(
     .unwrap();
 
     assert!(db_path.exists());
-    if wal_path.exists() {
-        assert_ne!(std::fs::read(&wal_path).unwrap(), old_wal_bytes);
-    }
-    if shm_path.exists() {
-        assert_ne!(std::fs::read(&shm_path).unwrap(), old_shm_bytes);
-    }
 }

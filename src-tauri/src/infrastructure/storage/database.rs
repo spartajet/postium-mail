@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::error::MailError;
 
@@ -10,8 +10,7 @@ pub struct DbConn {
 }
 
 impl DbConn {
-    pub async fn open_reset(db_path: &Path) -> Result<Self, MailError> {
-        reset_database_files(db_path)?;
+    pub async fn open_or_create(db_path: &Path) -> Result<Self, MailError> {
         let conn = tokio_rusqlite::Connection::open(db_path).await?;
         let db = Self { inner: conn };
         db.initialize_schema().await?;
@@ -63,25 +62,6 @@ pub async fn init_database(data_dir: &Path) -> Result<DbConn, MailError> {
     let db_path = data_dir.join("postium.sqlite");
     std::fs::create_dir_all(data_dir).map_err(|err| MailError::DatabaseError(err.to_string()))?;
 
-    tracing::info!("重建数据库: {}", db_path.display());
-    DbConn::open_reset(&db_path).await
-}
-
-fn reset_database_files(db_path: &Path) -> Result<(), MailError> {
-    for path in database_files(db_path) {
-        match std::fs::remove_file(&path) {
-            Ok(()) => tracing::debug!("已删除旧数据库文件: {}", path.display()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => return Err(MailError::DatabaseError(err.to_string())),
-        }
-    }
-    Ok(())
-}
-
-fn database_files(db_path: &Path) -> [PathBuf; 3] {
-    [
-        db_path.to_path_buf(),
-        PathBuf::from(format!("{}-wal", db_path.display())),
-        PathBuf::from(format!("{}-shm", db_path.display())),
-    ]
+    tracing::info!("打开数据库: {}", db_path.display());
+    DbConn::open_or_create(&db_path).await
 }
