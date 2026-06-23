@@ -1,6 +1,6 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
@@ -23,7 +23,7 @@ CREATE TABLE accounts (
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE emails (
+CREATE TABLE IF NOT EXISTS emails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     folder TEXT NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE emails (
     updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE attachments (
+CREATE TABLE IF NOT EXISTS attachments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email_id INTEGER NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
     filename TEXT,
@@ -62,7 +62,7 @@ CREATE TABLE attachments (
     created_at INTEGER NOT NULL
 );
 
-CREATE TABLE labels (
+CREATE TABLE IF NOT EXISTS labels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE labels (
     created_at INTEGER NOT NULL
 );
 
-CREATE TABLE email_labels (
+CREATE TABLE IF NOT EXISTS email_labels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email_id INTEGER NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
     label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
@@ -78,7 +78,7 @@ CREATE TABLE email_labels (
     UNIQUE(email_id, label_id)
 );
 
-CREATE TABLE sync_state (
+CREATE TABLE IF NOT EXISTS sync_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     folder TEXT NOT NULL,
@@ -91,7 +91,7 @@ CREATE TABLE sync_state (
     updated_at INTEGER
 );
 
-CREATE TABLE sync_errors (
+CREATE TABLE IF NOT EXISTS sync_errors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     folder TEXT,
@@ -103,18 +103,18 @@ CREATE TABLE sync_errors (
     created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_emails_account ON emails(account_id);
-CREATE INDEX idx_emails_folder ON emails(folder);
-CREATE INDEX idx_emails_sent_at ON emails(sent_at DESC);
-CREATE INDEX idx_emails_is_read ON emails(is_read);
-CREATE INDEX idx_attachments_email ON attachments(email_id);
-CREATE INDEX idx_labels_account ON labels(account_id);
-CREATE INDEX idx_email_labels_email ON email_labels(email_id);
-CREATE INDEX idx_email_labels_label ON email_labels(label_id);
-CREATE UNIQUE INDEX idx_sync_state_account_folder ON sync_state(account_id, folder);
-CREATE INDEX idx_sync_errors_account ON sync_errors(account_id);
+CREATE INDEX IF NOT EXISTS idx_emails_account ON emails(account_id);
+CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
+CREATE INDEX IF NOT EXISTS idx_emails_sent_at ON emails(sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_emails_is_read ON emails(is_read);
+CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
+CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
+CREATE INDEX IF NOT EXISTS idx_email_labels_email ON email_labels(email_id);
+CREATE INDEX IF NOT EXISTS idx_email_labels_label ON email_labels(label_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_state_account_folder ON sync_state(account_id, folder);
+CREATE INDEX IF NOT EXISTS idx_sync_errors_account ON sync_errors(account_id);
 
-CREATE VIRTUAL TABLE emails_fts USING fts5(
+CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(
     subject,
     sender_email,
     preview,
@@ -122,17 +122,17 @@ CREATE VIRTUAL TABLE emails_fts USING fts5(
     content_rowid='id'
 );
 
-CREATE TRIGGER emails_fts_ai AFTER INSERT ON emails BEGIN
+CREATE TRIGGER IF NOT EXISTS emails_fts_ai AFTER INSERT ON emails BEGIN
     INSERT INTO emails_fts(rowid, subject, sender_email, preview)
     VALUES (new.id, new.subject, new.sender_email, new.preview);
 END;
 
-CREATE TRIGGER emails_fts_ad AFTER DELETE ON emails BEGIN
+CREATE TRIGGER IF NOT EXISTS emails_fts_ad AFTER DELETE ON emails BEGIN
     INSERT INTO emails_fts(emails_fts, rowid, subject, sender_email, preview)
     VALUES ('delete', old.id, old.subject, old.sender_email, old.preview);
 END;
 
-CREATE TRIGGER emails_fts_au AFTER UPDATE ON emails BEGIN
+CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN
     INSERT INTO emails_fts(emails_fts, rowid, subject, sender_email, preview)
     VALUES ('delete', old.id, old.subject, old.sender_email, old.preview);
     INSERT INTO emails_fts(rowid, subject, sender_email, preview)
