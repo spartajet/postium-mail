@@ -98,4 +98,21 @@ describe("AccountState 状态行为", () => {
     expect(state.activeAccountId).toBeNull();
     expect(state.activeAccount).toBeNull();
   });
+
+  it("deleteAccount 收到后端错误时保留账号并记录错误", async () => {
+    mockInvoke.mockRejectedValue({
+      type: "DatabaseError",
+      message: "删除账号失败",
+    });
+    const state = new AccountState();
+    state.accounts = [...accounts];
+    state.activeAccountId = 1;
+
+    await state.deleteAccount(1);
+
+    expect(state.accounts.map((account) => account.id)).toEqual([1, 2]);
+    expect(state.activeAccountId).toBe(1);
+    expect(state.error).toBe("删除账号失败");
+    expect(mockInvoke).toHaveBeenCalledWith("delete_account", { id: 1 });
+  });
 });
