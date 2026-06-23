@@ -311,12 +311,12 @@ impl AccountService {
             // IMAP 服务器配置
             imap_host: req.imap_host,
             imap_port: req.imap_port,
-            imap_ssl: None,
+            imap_ssl: Some(true),
             imap_ssl_mode: req.imap_ssl_mode,
             // SMTP 服务器配置
             smtp_host: req.smtp_host,
             smtp_port: req.smtp_port,
-            smtp_ssl: None,
+            smtp_ssl: Some(true),
             smtp_ssl_mode: req.smtp_ssl_mode,
             // 其他属性
             color: req.color,
@@ -529,12 +529,12 @@ impl AccountService {
             // IMAP 服务器配置
             imap_host: Some(params.imap_host),
             imap_port: Some(params.imap_port as i32),
-            imap_ssl: None,
+            imap_ssl: Some(true),
             imap_ssl_mode: Some(params.imap_ssl_mode),
             // SMTP 服务器配置
             smtp_host: Some(params.smtp_host),
             smtp_port: Some(params.smtp_port as i32),
-            smtp_ssl: None,
+            smtp_ssl: Some(true),
             smtp_ssl_mode: Some(params.smtp_ssl_mode),
             // 其他属性
             color: params.color,

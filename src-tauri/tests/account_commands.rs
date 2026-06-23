@@ -1,7 +1,7 @@
 mod common;
 
 use common::{TestEmail, TestServices, count_where, insert_test_email};
-use postium_mail_lib::service::account_service::CreateAccountRequest;
+use postium_mail_lib::service::account_service::{CreateAccountRequest, CreateOAuth2AccountParams};
 use postium_mail_lib::service::label_service::CreateLabelRequest;
 
 #[tokio::test]
@@ -58,6 +58,65 @@ async fn test_create_account_saves_password() {
         svc.auth.get_password(&created.email).unwrap(),
         "initial_password"
     );
+}
+
+#[tokio::test]
+async fn test_create_account_paths_persist_ssl_defaults() {
+    let svc = TestServices::new().await;
+
+    let created = svc
+        .account_service
+        .create(CreateAccountRequest {
+            name: "SSL Default".to_string(),
+            email: "ssl-default@gmail.com".to_string(),
+            display_name: None,
+            provider: "gmail".to_string(),
+            auth_type: "Password".to_string(),
+            password: "initial_password".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl_mode: None,
+            color: None,
+            account_type: None,
+        })
+        .await
+        .unwrap();
+
+    let oauth_created = svc
+        .account_service
+        .create_oauth2_account(CreateOAuth2AccountParams {
+            email: "oauth-ssl-default@gmail.com".to_string(),
+            display_name: None,
+            provider_id: "gmail".to_string(),
+            imap_host: "imap.gmail.com".to_string(),
+            imap_port: 993,
+            imap_ssl_mode: "TLS".to_string(),
+            smtp_host: "smtp.gmail.com".to_string(),
+            smtp_port: 465,
+            smtp_ssl_mode: "TLS".to_string(),
+            color: None,
+        })
+        .await
+        .unwrap();
+
+    let ssl_flags = svc
+        .db
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT imap_ssl, smtp_ssl FROM accounts WHERE id IN (?1, ?2) ORDER BY id ASC",
+            )?;
+            stmt.query_map(rusqlite::params![created.id, oauth_created.id], |row| {
+                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(ssl_flags, vec![(Some(1), Some(1)), (Some(1), Some(1))]);
 }
 
 #[tokio::test]
