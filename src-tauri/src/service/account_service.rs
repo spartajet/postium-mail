@@ -1,7 +1,7 @@
 use crate::domain::auth::AuthManager;
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::accounts;
+use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, label_repo, sync_repo};
 use sea_orm::{Set, TransactionTrait};
 use serde::{Deserialize, Serialize};

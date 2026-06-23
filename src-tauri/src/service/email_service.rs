@@ -1,7 +1,7 @@
 use crate::domain::providers::StandardFolder;
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
-use crate::infrastructure::storage::entities::emails;
+use crate::infrastructure::storage::models::emails;
 use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
 use crate::infrastructure::storage::{DbConn, search};
 use serde::{Deserialize, Serialize};

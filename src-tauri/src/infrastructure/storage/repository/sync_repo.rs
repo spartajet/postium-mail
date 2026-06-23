@@ -1,6 +1,6 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::{sync_errors, sync_state};
+use crate::infrastructure::storage::models::{sync_errors, sync_state};
 use sea_orm::*;
 
 pub async fn upsert_sync_state(

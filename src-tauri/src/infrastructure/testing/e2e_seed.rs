@@ -1,6 +1,6 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::DbConn;
-use crate::infrastructure::storage::entities::{accounts, emails};
+use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::account_repo;
 use sea_orm::{ActiveModelTrait, ActiveValue::NotSet, EntityTrait, Set};
 

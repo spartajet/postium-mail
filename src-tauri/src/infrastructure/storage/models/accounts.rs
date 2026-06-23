@@ -1,0 +1,23 @@
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct Model {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub provider: String,
+    pub imap_host: Option<String>,
+    pub imap_port: Option<i32>,
+    pub imap_ssl: Option<bool>,
+    pub imap_ssl_mode: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<i32>,
+    pub smtp_ssl: Option<bool>,
+    pub smtp_ssl_mode: Option<String>,
+    pub color: Option<String>,
+    pub sync_enabled: Option<bool>,
+    pub last_sync_at: Option<i64>,
+    pub auth_type: Option<String>,
+    pub account_type: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}

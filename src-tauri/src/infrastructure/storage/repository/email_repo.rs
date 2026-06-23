@@ -7,7 +7,7 @@ use crate::infrastructure::protocols::utils::{
     extract_email_from_address, extract_name_from_address, serialize_addresses,
 };
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::{attachments, emails};
+use crate::infrastructure::storage::models::{attachments, emails};
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
 

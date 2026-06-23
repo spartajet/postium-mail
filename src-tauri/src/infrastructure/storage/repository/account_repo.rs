@@ -1,6 +1,6 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::accounts;
+use crate::infrastructure::storage::models::accounts;
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
 

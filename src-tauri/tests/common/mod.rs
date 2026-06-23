@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use postium_mail_lib::domain::auth::AuthManager;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
-use postium_mail_lib::infrastructure::storage::entities::emails;
+use postium_mail_lib::infrastructure::storage::models::emails;
 use postium_mail_lib::service::email_service::EmailService;
 use postium_mail_lib::service::{AccountService, LabelService};
 use sea_orm::{Database, DatabaseConnection, EntityTrait, Set};
