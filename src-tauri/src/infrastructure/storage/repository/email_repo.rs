@@ -231,6 +231,30 @@ pub async fn delete_by_folder(
     Ok(delete_result.rows_affected)
 }
 
+pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<u64, MailError> {
+    let email_ids = emails::Entity::find()
+        .select_only()
+        .filter(emails::Column::AccountId.eq(account_id))
+        .column(emails::Column::Id)
+        .into_tuple::<i32>()
+        .all(db)
+        .await?;
+
+    if !email_ids.is_empty() {
+        attachments::Entity::delete_many()
+            .filter(attachments::Column::EmailId.is_in(email_ids))
+            .exec(db)
+            .await?;
+    }
+
+    let delete_result = emails::Entity::delete_many()
+        .filter(emails::Column::AccountId.eq(account_id))
+        .exec(db)
+        .await?;
+
+    Ok(delete_result.rows_affected)
+}
+
 /// 批量保存邮件头
 ///
 /// 从 IMAP 同步的邮件头批量保存到数据库。

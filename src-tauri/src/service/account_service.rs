@@ -2,7 +2,7 @@ use crate::domain::auth::AuthManager;
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::entities::accounts;
-use crate::infrastructure::storage::repository::account_repo;
+use crate::infrastructure::storage::repository::{account_repo, email_repo, label_repo, sync_repo};
 use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -420,16 +420,15 @@ impl AccountService {
     pub async fn delete(&self, id: i32) -> Result<(), MailError> {
         tracing::info!(id, "删除账号");
 
-        // 检查账号是否存在
         let account = account_repo::get_by_id(&self.db, id)
             .await?
             .ok_or(MailError::AccountNotFound(id))?;
 
-        // 从数据库删除账号
+        label_repo::delete_by_account(&self.db, id).await?;
+        email_repo::delete_by_account(&self.db, id).await?;
+        sync_repo::delete_by_account(&self.db, id).await?;
         account_repo::delete(&self.db, id).await?;
 
-        // 从系统 Keyring 删除密码/token
-        // 使用 _ 忽略错误，因为 Keyring 可能不存在或已被删除
         let _ = self.auth.delete_password(&account.email);
 
         Ok(())

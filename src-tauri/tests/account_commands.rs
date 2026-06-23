@@ -1,7 +1,12 @@
 mod common;
 
-use common::TestServices;
+use common::{TestEmail, TestServices, insert_test_email};
+use postium_mail_lib::infrastructure::storage::entities::{
+    attachments, email_labels, emails, labels, sync_errors, sync_state,
+};
 use postium_mail_lib::service::account_service::CreateAccountRequest;
+use postium_mail_lib::service::label_service::CreateLabelRequest;
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 
 #[tokio::test]
 async fn test_create_account() {
@@ -192,4 +197,231 @@ async fn test_delete_account() {
     );
     assert!(svc.account_service.get(created.id).await.is_err());
     assert!(svc.auth.get_password(&created.email).is_err());
+}
+
+#[tokio::test]
+async fn test_delete_account_removes_local_account_data_without_foreign_keys() {
+    let svc = TestServices::new().await;
+
+    let account_a = svc
+        .account_service
+        .create(CreateAccountRequest {
+            name: "Delete A".to_string(),
+            email: "delete-a@example.com".to_string(),
+            display_name: None,
+            provider: "gmail".to_string(),
+            auth_type: "Password".to_string(),
+            password: "password-a".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl_mode: None,
+            color: None,
+            account_type: None,
+        })
+        .await
+        .unwrap();
+    let account_b = svc
+        .account_service
+        .create(CreateAccountRequest {
+            name: "Keep B".to_string(),
+            email: "keep-b@example.com".to_string(),
+            display_name: None,
+            provider: "gmail".to_string(),
+            auth_type: "Password".to_string(),
+            password: "password-b".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl_mode: None,
+            color: None,
+            account_type: None,
+        })
+        .await
+        .unwrap();
+
+    let email_a = insert_test_email(&svc, account_a.id, TestEmail::new(901, "delete me")).await;
+    let email_b = insert_test_email(&svc, account_b.id, TestEmail::new(902, "keep me")).await;
+
+    let label_a = svc
+        .label_service
+        .create_label(CreateLabelRequest {
+            account_id: account_a.id,
+            name: "delete label".to_string(),
+            color: "#ff0000".to_string(),
+        })
+        .await
+        .unwrap();
+    let label_b = svc
+        .label_service
+        .create_label(CreateLabelRequest {
+            account_id: account_b.id,
+            name: "keep label".to_string(),
+            color: "#00ff00".to_string(),
+        })
+        .await
+        .unwrap();
+
+    svc.label_service
+        .add_label_to_email(email_a, label_a.id)
+        .await
+        .unwrap();
+    svc.label_service
+        .add_label_to_email(email_b, label_b.id)
+        .await
+        .unwrap();
+
+    let now = chrono::Utc::now().timestamp();
+    attachments::Entity::insert(attachments::ActiveModel {
+        email_id: Set(email_a),
+        filename: Set(Some("delete.txt".to_string())),
+        content_type: Set(Some("text/plain".to_string())),
+        size: Set(12),
+        section_path: Set("2".to_string()),
+        disposition: Set(Some("attachment".to_string())),
+        content_id: Set(None),
+        path: Set(None),
+        created_at: Set(now),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+    attachments::Entity::insert(attachments::ActiveModel {
+        email_id: Set(email_b),
+        filename: Set(Some("keep.txt".to_string())),
+        content_type: Set(Some("text/plain".to_string())),
+        size: Set(34),
+        section_path: Set("2".to_string()),
+        disposition: Set(Some("attachment".to_string())),
+        content_id: Set(None),
+        path: Set(None),
+        created_at: Set(now),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+
+    sync_state::Entity::insert(sync_state::ActiveModel {
+        account_id: Set(account_a.id),
+        folder: Set("INBOX".to_string()),
+        folder_nick_name: Set(None),
+        uidvalidity: Set(Some(1)),
+        uidnext: Set(Some(2)),
+        synced_at: Set(Some(now)),
+        last_sync_uid: Set(Some(1)),
+        created_at: Set(Some(now)),
+        updated_at: Set(Some(now)),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+    sync_errors::Entity::insert(sync_errors::ActiveModel {
+        account_id: Set(account_a.id),
+        folder: Set(Some("INBOX".to_string())),
+        error_type: Set("test".to_string()),
+        error_message: Set("delete error row".to_string()),
+        uid: Set(Some(1)),
+        stack_trace: Set(None),
+        resolved: Set(Some(false)),
+        created_at: Set(now),
+        ..Default::default()
+    })
+    .exec(&svc.db)
+    .await
+    .unwrap();
+
+    svc.account_service.delete(account_a.id).await.unwrap();
+
+    assert!(svc.account_service.get(account_a.id).await.is_err());
+    assert!(svc.auth.get_password(&account_a.email).is_err());
+
+    assert_eq!(
+        emails::Entity::find()
+            .filter(emails::Column::AccountId.eq(account_a.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        attachments::Entity::find()
+            .filter(attachments::Column::EmailId.eq(email_a))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        labels::Entity::find()
+            .filter(labels::Column::AccountId.eq(account_a.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        email_labels::Entity::find()
+            .filter(email_labels::Column::EmailId.eq(email_a))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        email_labels::Entity::find()
+            .filter(email_labels::Column::LabelId.eq(label_a.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sync_state::Entity::find()
+            .filter(sync_state::Column::AccountId.eq(account_a.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sync_errors::Entity::find()
+            .filter(sync_errors::Column::AccountId.eq(account_a.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        0
+    );
+
+    assert!(svc.account_service.get(account_b.id).await.is_ok());
+    assert_eq!(
+        emails::Entity::find()
+            .filter(emails::Column::AccountId.eq(account_b.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        attachments::Entity::find()
+            .filter(attachments::Column::EmailId.eq(email_b))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        labels::Entity::find()
+            .filter(labels::Column::AccountId.eq(account_b.id))
+            .count(&svc.db)
+            .await
+            .unwrap(),
+        1
+    );
 }
