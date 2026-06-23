@@ -387,31 +387,29 @@ pub async fn mark_as_read(db: &DbConn, id: i32, is_read: bool) -> Result<(), Mai
 }
 
 pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool, MailError> {
-    db.call(move |conn| {
-        let current =
-            match conn.query_row("SELECT is_starred FROM emails WHERE id = ?1", [id], |row| {
-                row.get::<_, Option<i64>>(0)
-            }) {
-                Ok(value) => value,
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    return Err(rusqlite::Error::QueryReturnedNoRows);
-                }
-                Err(err) => return Err(err),
+    let new_state = db
+        .call(move |conn| {
+            let current =
+                match conn.query_row("SELECT is_starred FROM emails WHERE id = ?1", [id], |row| {
+                    row.get::<_, Option<i64>>(0)
+                }) {
+                    Ok(value) => Some(value),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(err) => return Err(err),
+                };
+            let Some(current) = current else {
+                return Ok(None);
             };
-        let new_state = !opt_int_to_bool(current).unwrap_or(false);
-        conn.execute(
-            "UPDATE emails SET is_starred = ?1 WHERE id = ?2",
-            rusqlite::params![bool_to_int(new_state), id],
-        )?;
-        Ok(new_state)
-    })
-    .await
-    .map_err(|err| match err {
-        MailError::DatabaseError(message) if message.contains("Query returned no rows") => {
-            MailError::EmailNotFound(id)
-        }
-        other => other,
-    })
+            let new_state = !opt_int_to_bool(current).unwrap_or(false);
+            conn.execute(
+                "UPDATE emails SET is_starred = ?1 WHERE id = ?2",
+                rusqlite::params![bool_to_int(new_state), id],
+            )?;
+            Ok(Some(new_state))
+        })
+        .await?;
+
+    new_state.ok_or(MailError::EmailNotFound(id))
 }
 
 pub async fn soft_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize, MailError> {
@@ -502,6 +500,36 @@ pub async fn delete_by_folder(
         let deleted = conn.execute(
             "DELETE FROM emails WHERE account_id = ?1 AND folder = ?2",
             rusqlite::params![account_id, folder],
+        )?;
+        Ok(deleted as u64)
+    })
+    .await
+}
+
+pub async fn delete_folder_contents(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<u64, MailError> {
+    let folder = folder.to_string();
+    db.transaction(move |tx| {
+        tx.execute(
+            "DELETE FROM email_labels
+             WHERE email_id IN (
+                SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2
+             )",
+            rusqlite::params![account_id, &folder],
+        )?;
+        tx.execute(
+            "DELETE FROM attachments
+             WHERE email_id IN (
+                SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2
+             )",
+            rusqlite::params![account_id, &folder],
+        )?;
+        let deleted = tx.execute(
+            "DELETE FROM emails WHERE account_id = ?1 AND folder = ?2",
+            rusqlite::params![account_id, &folder],
         )?;
         Ok(deleted as u64)
     })
@@ -687,28 +715,115 @@ pub async fn save_batch_emails(
 pub(crate) async fn update_body(
     db: &DbConn,
     account_id: i32,
+    folder: &str,
     uid: u32,
     body_text: String,
     body_html: String,
 ) -> Result<(), MailError> {
     let preview: Option<String> = Some(body_text.chars().take(200).collect());
     let now = chrono::Utc::now().timestamp();
+    let folder = folder.to_string();
 
     db.call(move |conn| {
         conn.execute(
             "UPDATE emails
              SET body_text = ?1, body_html = ?2, preview = ?3, updated_at = ?4
-             WHERE account_id = ?5 AND uid = ?6",
+             WHERE account_id = ?5 AND folder = ?6 AND uid = ?7",
             rusqlite::params![
                 body_text,
                 body_html,
                 preview,
                 now,
                 account_id,
+                folder,
                 i64::from(uid)
             ],
         )?;
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn create_account(db: &DbConn) -> i32 {
+        let now = chrono::Utc::now().timestamp();
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (
+                    name, email, provider, imap_host, imap_port, imap_ssl, imap_ssl_mode,
+                    smtp_host, smtp_port, smtp_ssl, smtp_ssl_mode, auth_type, account_type,
+                    created_at, updated_at
+                ) VALUES (
+                    'Test', 'test@example.com', 'gmail', 'imap.example.com', 993, 1, 'SSL',
+                    'smtp.example.com', 465, 1, 'SSL', 'Password', 'personal', ?1, ?1
+                )",
+                [now],
+            )?;
+            Ok(conn.last_insert_rowid() as i32)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn insert_email(db: &DbConn, account_id: i32, folder: &str, uid: u32, body: &str) -> i32 {
+        let now = chrono::Utc::now().timestamp();
+        let folder = folder.to_string();
+        let body = body.to_string();
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO emails (
+                    account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, NULL, 'Subject', 'Sender', 'sender@example.com',
+                    'recipient@example.com', NULL, NULL, NULL, ?4, NULL,
+                    0, 0, 0, 0, 0, ?5, ?5, ?5, ?5
+                )",
+                rusqlite::params![account_id, folder, i64::from(uid), body, now],
+            )?;
+            Ok(conn.last_insert_rowid() as i32)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn body_text(db: &DbConn, id: i32) -> Option<String> {
+        db.call(move |conn| {
+            conn.query_row("SELECT body_text FROM emails WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn update_body_updates_only_matching_folder_when_uid_repeats() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+        let inbox_id = insert_email(&db, account_id, "INBOX", 42, "inbox body").await;
+        let sent_id = insert_email(&db, account_id, "Sent", 42, "sent body").await;
+
+        update_body(
+            &db,
+            account_id,
+            "INBOX",
+            42,
+            "updated inbox body".to_string(),
+            "<p>updated inbox body</p>".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            body_text(&db, inbox_id).await.as_deref(),
+            Some("updated inbox body")
+        );
+        assert_eq!(body_text(&db, sent_id).await.as_deref(), Some("sent body"));
+    }
 }

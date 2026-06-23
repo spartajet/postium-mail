@@ -5,7 +5,7 @@ use crate::{
         protocols::{imap::ImapClient, utils::three_months_ago_imap_format},
         storage::{
             DbConn,
-            repository::{attachment_repo, email_repo, sync_repo},
+            repository::{email_repo, sync_repo},
         },
     },
 };
@@ -145,7 +145,7 @@ async fn fetch_emails_body(
     imap_client.select_folder(folder).await?;
     for uid in uids {
         if let Ok((body_text, body_html)) = imap_client.fetch_body(*uid).await {
-            email_repo::update_body(&db, account_id, *uid, body_text, body_html).await?;
+            email_repo::update_body(&db, account_id, folder, *uid, body_text, body_html).await?;
             tracing::debug!("已更新邮件正文: account_id={}, uid={}", account_id, uid);
         }
     }
@@ -162,28 +162,7 @@ pub async fn delete_account_folder_emails(
     account_id: i32,
     folder: &str,
 ) -> Result<usize, MailError> {
-    // 1. 先获取该账号、该文件夹的所有邮件 ID
-
-    let email_ids = email_repo::get_ids_by_folder(&db, account_id, folder).await?;
-    tracing::debug!(
-        "获取到邮件数量: account_id={}, folder={}, email_ids len={}",
-        account_id,
-        folder,
-        email_ids.len()
-    );
-
-    // 2. 删除这些邮件的附件
-    for email_id in &email_ids {
-        attachment_repo::delete_by_email(&db, *email_id).await?;
-    }
-    tracing::debug!(
-        "已删除邮件附件: account_id={}, email_ids len={}",
-        account_id,
-        email_ids.len()
-    );
-
-    // 3. 删除所有邮件
-    let deleted_count = email_repo::delete_by_folder(&db, account_id, folder).await? as usize;
+    let deleted_count = email_repo::delete_folder_contents(&db, account_id, folder).await? as usize;
 
     tracing::info!(
         "已删除账号文件夹的所有邮件: account_id={}, folder={}, count={}",
