@@ -97,7 +97,10 @@ pub async fn list_unresolved_errors(
         .await?)
 }
 
-pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
+pub async fn delete_by_account<C>(db: &C, account_id: i32) -> Result<(), MailError>
+where
+    C: ConnectionTrait,
+{
     sync_errors::Entity::delete_many()
         .filter(sync_errors::Column::AccountId.eq(account_id))
         .exec(db)
