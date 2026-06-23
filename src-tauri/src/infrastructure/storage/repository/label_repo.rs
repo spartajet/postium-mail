@@ -96,26 +96,18 @@ pub async fn update(db: &DbConn, id: i32, model: LabelWrite) -> Result<labels::M
 }
 
 pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
-    db.call(move |conn| {
-        conn.execute("DELETE FROM email_labels WHERE label_id = ?1", [id])?;
-        conn.execute("DELETE FROM labels WHERE id = ?1", [id])?;
-        Ok(())
-    })
-    .await
+    db.transaction(move |tx| delete_tx(tx, id)).await
+}
+
+pub fn delete_tx(tx: &rusqlite::Transaction<'_>, id: i32) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM email_labels WHERE label_id = ?1", [id])?;
+    tx.execute("DELETE FROM labels WHERE id = ?1", [id])?;
+    Ok(())
 }
 
 pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
-    db.call(move |conn| {
-        conn.execute(
-            "DELETE FROM email_labels
-             WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?1)
-                OR label_id IN (SELECT id FROM labels WHERE account_id = ?1)",
-            [account_id],
-        )?;
-        conn.execute("DELETE FROM labels WHERE account_id = ?1", [account_id])?;
-        Ok(())
-    })
-    .await
+    db.transaction(move |tx| delete_by_account_tx(tx, account_id))
+        .await
 }
 
 pub fn delete_by_account_tx(

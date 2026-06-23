@@ -170,15 +170,8 @@ pub async fn list_unresolved_errors(
 }
 
 pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
-    db.call(move |conn| {
-        conn.execute(
-            "DELETE FROM sync_errors WHERE account_id = ?1",
-            [account_id],
-        )?;
-        conn.execute("DELETE FROM sync_state WHERE account_id = ?1", [account_id])?;
-        Ok(())
-    })
-    .await
+    db.transaction(move |tx| delete_by_account_tx(tx, account_id))
+        .await
 }
 
 pub fn delete_by_account_tx(
