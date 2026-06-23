@@ -13,6 +13,15 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "postium_mail_lib"
 
+[[bin]]
+name = "postium-mail"
+path = "src/main.rs"
+required-features = ["app"]
+
+[features]
+default = []
+app = []
+
 [dependencies]
 # Tauri
 tauri = { version = "2", features = ["tray-icon"] }
@@ -25,14 +34,9 @@ specta = { version = "=2.0.0-rc.24", features = ["chrono"] }
 specta-typescript = "0.0.11"
 tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
 
-postium-mail-migration = { path = "migration" }
 # Database
-sea-orm = { version = "2.0.0-rc.35", features = [
-  "macros",
-  "runtime-tokio-rustls",
-  "sqlx-sqlite"
-] }
-sea-orm-migration = "2.0.0-rc.35"
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+tokio-rusqlite = "0.7"
 
 # Email Protocols
 async-imap = { version = "0.11", default-features = false, features = [

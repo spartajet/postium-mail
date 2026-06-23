@@ -93,11 +93,13 @@
 /// 认证基础设施模块
 ///
 /// 提供 OAuth2 认证的底层实现，包括授权流程、令牌管理和回调处理。
+#[cfg(feature = "app")]
 pub mod auth;
 
 /// 通信协议模块
 ///
 /// 实现 IMAP 和 SMTP 网络协议，用于邮件的收发操作。
+#[cfg(feature = "app")]
 pub mod protocols;
 
 /// 数据存储模块
@@ -106,4 +108,5 @@ pub mod protocols;
 pub mod storage;
 
 /// 测试和 E2E 运行时辅助模块。
+#[cfg(feature = "app")]
 pub mod testing;
