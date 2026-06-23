@@ -1,6 +1,8 @@
 pub mod database;
-pub mod entities;
+pub mod models;
+#[cfg(feature = "app")]
 pub mod repository;
+#[cfg(feature = "app")]
 pub mod search;
 
 pub use database::DbConn;
