@@ -7,10 +7,20 @@ use crate::infrastructure::protocols::utils::{
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::emails;
 use crate::infrastructure::storage::repository::attachment_repo::{
-    AttachmentWrite, insert_attachment_tx,
+    AttachmentWrite, INSERT_ATTACHMENT_SQL, execute_attachment_insert,
 };
 use crate::infrastructure::storage::row::{bool_to_int, opt_bool_to_int, opt_int_to_bool};
 use rusqlite::types::Value;
+
+const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
+        account_id, folder, uid, message_id, subject, sender_name, sender_email,
+        recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+        is_read, is_starred, is_draft, is_answered, is_deleted,
+        sent_at, received_at, created_at, updated_at
+     ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+     )";
 
 #[derive(Clone, Debug)]
 pub struct EmailWrite {
@@ -73,43 +83,35 @@ fn placeholders(count: usize) -> String {
         .join(",")
 }
 
-fn insert_email_tx(tx: &rusqlite::Transaction<'_>, model: &EmailWrite) -> rusqlite::Result<i32> {
-    tx.execute(
-        "INSERT INTO emails (
-            account_id, folder, uid, message_id, subject, sender_name, sender_email,
-            recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
-            is_read, is_starred, is_draft, is_answered, is_deleted,
-            sent_at, received_at, created_at, updated_at
-         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
-         )",
-        rusqlite::params![
-            model.account_id,
-            &model.folder,
-            i64::from(model.uid),
-            &model.message_id,
-            &model.subject,
-            &model.sender_name,
-            &model.sender_email,
-            &model.recipient_emails,
-            &model.cc_emails,
-            &model.bcc_emails,
-            &model.preview,
-            &model.body_text,
-            &model.body_html,
-            opt_bool_to_int(model.is_read),
-            opt_bool_to_int(model.is_starred),
-            opt_bool_to_int(model.is_draft),
-            opt_bool_to_int(model.is_answered),
-            opt_bool_to_int(model.is_deleted),
-            model.sent_at,
-            model.received_at,
-            model.created_at,
-            model.updated_at,
-        ],
-    )?;
-    Ok(tx.last_insert_rowid() as i32)
+fn execute_email_insert(
+    stmt: &mut rusqlite::Statement<'_>,
+    model: &EmailWrite,
+) -> rusqlite::Result<()> {
+    stmt.execute(rusqlite::params![
+        model.account_id,
+        &model.folder,
+        i64::from(model.uid),
+        &model.message_id,
+        &model.subject,
+        &model.sender_name,
+        &model.sender_email,
+        &model.recipient_emails,
+        &model.cc_emails,
+        &model.bcc_emails,
+        &model.preview,
+        &model.body_text,
+        &model.body_html,
+        opt_bool_to_int(model.is_read),
+        opt_bool_to_int(model.is_starred),
+        opt_bool_to_int(model.is_draft),
+        opt_bool_to_int(model.is_answered),
+        opt_bool_to_int(model.is_deleted),
+        model.sent_at,
+        model.received_at,
+        model.created_at,
+        model.updated_at,
+    ])?;
+    Ok(())
 }
 
 pub async fn list_by_folder(
@@ -291,7 +293,9 @@ pub async fn get_by_uid(
 
 pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, MailError> {
     db.transaction(move |tx| {
-        let id = insert_email_tx(tx, &model)?;
+        let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        execute_email_insert(&mut insert_stmt, &model)?;
+        let id = tx.last_insert_rowid() as i32;
         let mut stmt = tx.prepare(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
@@ -311,8 +315,9 @@ pub async fn bulk_insert(db: &DbConn, models: Vec<EmailWrite>) -> Result<(), Mai
     }
 
     db.transaction(move |tx| {
+        let mut stmt = tx.prepare(INSERT_EMAIL_SQL)?;
         for model in &models {
-            insert_email_tx(tx, model)?;
+            execute_email_insert(&mut stmt, model)?;
         }
         Ok(())
     })
@@ -373,8 +378,8 @@ pub async fn update(db: &DbConn, id: i32, model: EmailWrite) -> Result<emails::M
 pub async fn mark_as_read(db: &DbConn, id: i32, is_read: bool) -> Result<(), MailError> {
     db.call(move |conn| {
         conn.execute(
-            "UPDATE emails SET is_read = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![bool_to_int(is_read), chrono::Utc::now().timestamp(), id],
+            "UPDATE emails SET is_read = ?1 WHERE id = ?2",
+            rusqlite::params![bool_to_int(is_read), id],
         )?;
         Ok(())
     })
@@ -395,8 +400,8 @@ pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool, MailError> {
             };
         let new_state = !opt_int_to_bool(current).unwrap_or(false);
         conn.execute(
-            "UPDATE emails SET is_starred = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![bool_to_int(new_state), chrono::Utc::now().timestamp(), id],
+            "UPDATE emails SET is_starred = ?1 WHERE id = ?2",
+            rusqlite::params![bool_to_int(new_state), id],
         )?;
         Ok(new_state)
     })
@@ -417,12 +422,11 @@ pub async fn soft_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize, MailError>
     db.call(move |conn| {
         let sql = format!(
             "UPDATE emails
-             SET is_deleted = 1, updated_at = ?
+             SET is_deleted = 1
              WHERE id IN ({})",
             placeholders(ids.len())
         );
-        let mut values = Vec::with_capacity(ids.len() + 1);
-        values.push(Value::from(chrono::Utc::now().timestamp()));
+        let mut values = Vec::with_capacity(ids.len());
         values.extend(ids.into_iter().map(Value::from));
         conn.execute(&sql, rusqlite::params_from_iter(values.iter()))
     })
@@ -433,8 +437,8 @@ pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<(), Ma
     let folder = folder.to_string();
     db.call(move |conn| {
         conn.execute(
-            "UPDATE emails SET folder = ?1, updated_at = ?2 WHERE id = ?3",
-            rusqlite::params![folder, chrono::Utc::now().timestamp(), id],
+            "UPDATE emails SET folder = ?1 WHERE id = ?2",
+            rusqlite::params![folder, id],
         )?;
         Ok(())
     })
@@ -589,12 +593,15 @@ pub async fn save_batch_email_headers(
         .collect();
 
     db.transaction(move |tx| {
+        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
         for (email, attachments) in &writes {
-            let email_id = insert_email_tx(tx, email)?;
+            execute_email_insert(&mut email_stmt, email)?;
+            let email_id = tx.last_insert_rowid() as i32;
             for attachment in attachments {
                 let mut attachment = attachment.clone();
                 attachment.email_id = email_id;
-                insert_attachment_tx(tx, &attachment)?;
+                execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
         }
         Ok(writes.len())
@@ -661,12 +668,15 @@ pub async fn save_batch_emails(
         .collect();
 
     db.transaction(move |tx| {
+        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
         for (email, attachments) in &writes {
-            let email_id = insert_email_tx(tx, email)?;
+            execute_email_insert(&mut email_stmt, email)?;
+            let email_id = tx.last_insert_rowid() as i32;
             for attachment in attachments {
                 let mut attachment = attachment.clone();
                 attachment.email_id = email_id;
-                insert_attachment_tx(tx, &attachment)?;
+                execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
         }
         Ok(writes.len())
