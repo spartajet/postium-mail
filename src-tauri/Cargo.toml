@@ -16,11 +16,6 @@ name = "postium_mail_lib"
 [[bin]]
 name = "postium-mail"
 path = "src/main.rs"
-required-features = ["app"]
-
-[features]
-default = []
-app = []
 
 [dependencies]
 # Tauri

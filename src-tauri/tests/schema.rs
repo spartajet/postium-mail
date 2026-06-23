@@ -69,10 +69,12 @@ async fn init_database_removes_existing_database_files_before_recreating_schema(
     let db_path = temp.path().join("postium.sqlite");
     let wal_path = temp.path().join("postium.sqlite-wal");
     let shm_path = temp.path().join("postium.sqlite-shm");
+    let old_wal_bytes = b"old wal bytes";
+    let old_shm_bytes = b"old shm bytes";
 
     std::fs::write(&db_path, b"old database bytes").unwrap();
-    std::fs::write(&wal_path, b"old wal bytes").unwrap();
-    std::fs::write(&shm_path, b"old shm bytes").unwrap();
+    std::fs::write(&wal_path, old_wal_bytes).unwrap();
+    std::fs::write(&shm_path, old_shm_bytes).unwrap();
 
     let db = init_database(temp.path()).await.unwrap();
 
@@ -89,6 +91,10 @@ async fn init_database_removes_existing_database_files_before_recreating_schema(
     .unwrap();
 
     assert!(db_path.exists());
-    assert!(!wal_path.exists() || std::fs::metadata(&wal_path).unwrap().len() >= 0);
-    assert!(!shm_path.exists() || std::fs::metadata(&shm_path).unwrap().len() >= 0);
+    if wal_path.exists() {
+        assert_ne!(std::fs::read(&wal_path).unwrap(), old_wal_bytes);
+    }
+    if shm_path.exists() {
+        assert_ne!(std::fs::read(&shm_path).unwrap(), old_shm_bytes);
+    }
 }

@@ -25,31 +25,23 @@
 /// - 所有服务都使用 Arc 包装以支持跨线程共享
 ///
 // 导入子模块
-#[cfg(feature = "app")]
 pub mod command;
-#[cfg(feature = "app")]
 pub mod domain;
 pub mod error;
 pub mod infrastructure;
-#[cfg(feature = "app")]
 pub mod service;
-#[cfg(feature = "app")]
 pub mod sys;
 
-#[cfg(feature = "app")]
 use std::{path::PathBuf, sync::Arc};
 
-#[cfg(feature = "app")]
 use tauri::Manager;
 
-#[cfg(feature = "app")]
 use crate::domain::providers::pool::init_provider_pool;
 
 // 在 Debug 模式下，TypeScript 绑定文件导出到前端项目的 bindings.ts
-#[cfg(all(feature = "app", debug_assertions))]
+#[cfg(debug_assertions)]
 const EXPORT_DIR: &str = "../src/lib/bindings.ts";
 
-#[cfg(feature = "app")]
 fn resolve_data_dir() -> PathBuf {
     let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
 
@@ -83,7 +75,6 @@ fn resolve_data_dir() -> PathBuf {
 /// 返回值：
 /// - 配置好的 tauri_specta::Builder 实例
 ///
-#[cfg(feature = "app")]
 fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new()
         // 注册所有命令函数，这些函数可以通过前端 invoke 调用
@@ -145,7 +136,6 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 /// - 初始化失败会 panic 并终止应用
 /// - 使用 expect() 确保关键步骤必须成功
 ///
-#[cfg(feature = "app")]
 pub fn run() {
     // ========== 步骤 1: 初始化日志系统 ==========
     // 设置日志级别和输出格式
