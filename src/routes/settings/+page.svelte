@@ -194,6 +194,15 @@
                 </div>
             </div>
 
+            {#if accountStore.error}
+                <div
+                    data-testid="account-delete-error"
+                    class="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                >
+                    {accountStore.error}
+                </div>
+            {/if}
+
             <!-- 账户列表 -->
             <div class="space-y-2">
                 {#each accountStore.accounts as account (account.id)}

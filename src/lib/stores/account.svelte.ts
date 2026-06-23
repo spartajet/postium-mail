@@ -216,20 +216,25 @@ export class AccountState {
    * @returns Promise<void>
    */
   async deleteAccount(id: number) {
+    this.error = null;
+
     try {
       // 调用后端命令删除账号
       const result = await commands.deleteAccount(id);
 
-      if (result.status === "ok") {
-        // 从本地列表中移除已删除的账号
-        this.accounts = this.accounts.filter((a) => a.id !== id);
+      if (result.status === "error") {
+        this.error = String(result.error.message);
+        return;
+      }
 
-        // 如果删除的是当前活跃账号，需要切换到其他账号
-        if (this.activeAccountId === id) {
-          // 如果还有其他账号，选中第一个；否则设为 null
-          this.activeAccountId =
-            this.accounts.length > 0 ? this.accounts[0]!.id : null;
-        }
+      // 从本地列表中移除已删除的账号
+      this.accounts = this.accounts.filter((a) => a.id !== id);
+
+      // 如果删除的是当前活跃账号，需要切换到其他账号
+      if (this.activeAccountId === id) {
+        // 如果还有其他账号，选中第一个；否则设为 null
+        this.activeAccountId =
+          this.accounts.length > 0 ? this.accounts[0]!.id : null;
       }
     } catch (e: unknown) {
       // 捕获异常并格式化错误消息
