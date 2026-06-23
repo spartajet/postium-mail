@@ -14,6 +14,7 @@ mod m20260404_000011_drop_folders;
 mod m20260405_000012_refactor_attachments;
 mod m20260405_000013_make_email_uid_not_null;
 mod m20260621_000014_rebuild_email_fts;
+mod m20260623_000015_recreate_email_fts;
 
 pub struct Migrator;
 
@@ -35,6 +36,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260405_000012_refactor_attachments::Migration),
             Box::new(m20260405_000013_make_email_uid_not_null::Migration),
             Box::new(m20260621_000014_rebuild_email_fts::Migration),
+            Box::new(m20260623_000015_recreate_email_fts::Migration),
         ]
     }
 }
