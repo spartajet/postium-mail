@@ -1,15 +1,8 @@
 mod common;
 
-use common::{TestEmail, TestServices, insert_test_email};
-use postium_mail_lib::infrastructure::storage::models::{
-    attachments, email_labels, emails, labels, sync_errors, sync_state,
-};
+use common::{TestEmail, TestServices, count_where, insert_test_email};
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::label_service::CreateLabelRequest;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    Statement,
-};
 
 #[tokio::test]
 async fn test_create_account() {
@@ -279,66 +272,10 @@ async fn test_delete_account_removes_local_account_data_without_foreign_keys() {
         .unwrap();
 
     let now = chrono::Utc::now().timestamp();
-    attachments::Entity::insert(attachments::ActiveModel {
-        email_id: Set(email_a),
-        filename: Set(Some("delete.txt".to_string())),
-        content_type: Set(Some("text/plain".to_string())),
-        size: Set(12),
-        section_path: Set("2".to_string()),
-        disposition: Set(Some("attachment".to_string())),
-        content_id: Set(None),
-        path: Set(None),
-        created_at: Set(now),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
-    attachments::Entity::insert(attachments::ActiveModel {
-        email_id: Set(email_b),
-        filename: Set(Some("keep.txt".to_string())),
-        content_type: Set(Some("text/plain".to_string())),
-        size: Set(34),
-        section_path: Set("2".to_string()),
-        disposition: Set(Some("attachment".to_string())),
-        content_id: Set(None),
-        path: Set(None),
-        created_at: Set(now),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
-
-    sync_state::Entity::insert(sync_state::ActiveModel {
-        account_id: Set(account_a.id),
-        folder: Set("INBOX".to_string()),
-        folder_nick_name: Set(None),
-        uidvalidity: Set(Some(1)),
-        uidnext: Set(Some(2)),
-        synced_at: Set(Some(now)),
-        last_sync_uid: Set(Some(1)),
-        created_at: Set(Some(now)),
-        updated_at: Set(Some(now)),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
-    sync_errors::Entity::insert(sync_errors::ActiveModel {
-        account_id: Set(account_a.id),
-        folder: Set(Some("INBOX".to_string())),
-        error_type: Set("test".to_string()),
-        error_message: Set("delete error row".to_string()),
-        uid: Set(Some(1)),
-        stack_trace: Set(None),
-        resolved: Set(Some(false)),
-        created_at: Set(now),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
+    insert_attachment(&svc, email_a, "delete.txt", 12, now).await;
+    insert_attachment(&svc, email_b, "keep.txt", 34, now).await;
+    insert_sync_state(&svc, account_a.id, now).await;
+    insert_sync_error(&svc, account_a.id, "delete error row", now).await;
 
     svc.account_service.delete(account_a.id).await.unwrap();
 
@@ -346,85 +283,95 @@ async fn test_delete_account_removes_local_account_data_without_foreign_keys() {
     assert!(svc.auth.get_password(&account_a.email).is_err());
 
     assert_eq!(
-        emails::Entity::find()
-            .filter(emails::Column::AccountId.eq(account_a.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM emails WHERE account_id = ?1",
+            account_a.id
+        )
+        .await,
         0
     );
     assert_eq!(
-        attachments::Entity::find()
-            .filter(attachments::Column::EmailId.eq(email_a))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM attachments WHERE email_id = ?1",
+            email_a
+        )
+        .await,
         0
     );
     assert_eq!(
-        labels::Entity::find()
-            .filter(labels::Column::AccountId.eq(account_a.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM labels WHERE account_id = ?1",
+            account_a.id
+        )
+        .await,
         0
     );
     assert_eq!(
-        email_labels::Entity::find()
-            .filter(email_labels::Column::EmailId.eq(email_a))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM email_labels WHERE email_id = ?1",
+            email_a
+        )
+        .await,
         0
     );
     assert_eq!(
-        email_labels::Entity::find()
-            .filter(email_labels::Column::LabelId.eq(label_a.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM email_labels WHERE label_id = ?1",
+            label_a.id
+        )
+        .await,
         0
     );
     assert_eq!(
-        sync_state::Entity::find()
-            .filter(sync_state::Column::AccountId.eq(account_a.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM sync_state WHERE account_id = ?1",
+            account_a.id
+        )
+        .await,
         0
     );
     assert_eq!(
-        sync_errors::Entity::find()
-            .filter(sync_errors::Column::AccountId.eq(account_a.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM sync_errors WHERE account_id = ?1",
+            account_a.id
+        )
+        .await,
         0
     );
 
     assert!(svc.account_service.get(account_b.id).await.is_ok());
     assert_eq!(
-        emails::Entity::find()
-            .filter(emails::Column::AccountId.eq(account_b.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM emails WHERE account_id = ?1",
+            account_b.id
+        )
+        .await,
         1
     );
     assert_eq!(
-        attachments::Entity::find()
-            .filter(attachments::Column::EmailId.eq(email_b))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM attachments WHERE email_id = ?1",
+            email_b
+        )
+        .await,
         1
     );
     assert_eq!(
-        labels::Entity::find()
-            .filter(labels::Column::AccountId.eq(account_b.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM labels WHERE account_id = ?1",
+            account_b.id
+        )
+        .await,
         1
     );
 }
@@ -470,66 +417,23 @@ async fn test_delete_account_rolls_back_local_data_when_account_row_delete_fails
         .unwrap();
 
     let now = chrono::Utc::now().timestamp();
-    attachments::Entity::insert(attachments::ActiveModel {
-        email_id: Set(email_id),
-        filename: Set(Some("rollback.txt".to_string())),
-        content_type: Set(Some("text/plain".to_string())),
-        size: Set(56),
-        section_path: Set("2".to_string()),
-        disposition: Set(Some("attachment".to_string())),
-        content_id: Set(None),
-        path: Set(None),
-        created_at: Set(now),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
-    sync_state::Entity::insert(sync_state::ActiveModel {
-        account_id: Set(account.id),
-        folder: Set("INBOX".to_string()),
-        folder_nick_name: Set(None),
-        uidvalidity: Set(Some(1)),
-        uidnext: Set(Some(2)),
-        synced_at: Set(Some(now)),
-        last_sync_uid: Set(Some(1)),
-        created_at: Set(Some(now)),
-        updated_at: Set(Some(now)),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
-    sync_errors::Entity::insert(sync_errors::ActiveModel {
-        account_id: Set(account.id),
-        folder: Set(Some("INBOX".to_string())),
-        error_type: Set("test".to_string()),
-        error_message: Set("rollback error row".to_string()),
-        uid: Set(Some(1)),
-        stack_trace: Set(None),
-        resolved: Set(Some(false)),
-        created_at: Set(now),
-        ..Default::default()
-    })
-    .exec(&svc.db)
-    .await
-    .unwrap();
+    insert_attachment(&svc, email_id, "rollback.txt", 56, now).await;
+    insert_sync_state(&svc, account.id, now).await;
+    insert_sync_error(&svc, account.id, "rollback error row", now).await;
 
     svc.db
-        .execute_raw(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            format!(
-                r#"
-            CREATE TRIGGER fail_delete_account
-            BEFORE DELETE ON accounts
-            WHEN OLD.id = {}
-            BEGIN
-                SELECT RAISE(ABORT, 'forced account delete failure');
-            END;
-            "#,
+        .call(move |conn| {
+            conn.execute_batch(&format!(
+                "CREATE TRIGGER fail_delete_account
+                 BEFORE DELETE ON accounts
+                 WHEN OLD.id = {}
+                 BEGIN
+                     SELECT RAISE(ABORT, 'forced account delete failure');
+                 END;",
                 account.id
-            ),
-        ))
+            ))?;
+            Ok(())
+        })
         .await
         .unwrap();
 
@@ -537,52 +441,111 @@ async fn test_delete_account_rolls_back_local_data_when_account_row_delete_fails
 
     assert!(svc.account_service.get(account.id).await.is_ok());
     assert_eq!(
-        emails::Entity::find()
-            .filter(emails::Column::AccountId.eq(account.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM emails WHERE account_id = ?1",
+            account.id
+        )
+        .await,
         1
     );
     assert_eq!(
-        attachments::Entity::find()
-            .filter(attachments::Column::EmailId.eq(email_id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM attachments WHERE email_id = ?1",
+            email_id
+        )
+        .await,
         1
     );
     assert_eq!(
-        labels::Entity::find()
-            .filter(labels::Column::AccountId.eq(account.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM labels WHERE account_id = ?1",
+            account.id
+        )
+        .await,
         1
     );
     assert_eq!(
-        email_labels::Entity::find()
-            .filter(email_labels::Column::EmailId.eq(email_id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM email_labels WHERE email_id = ?1",
+            email_id
+        )
+        .await,
         1
     );
     assert_eq!(
-        sync_state::Entity::find()
-            .filter(sync_state::Column::AccountId.eq(account.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM sync_state WHERE account_id = ?1",
+            account.id
+        )
+        .await,
         1
     );
     assert_eq!(
-        sync_errors::Entity::find()
-            .filter(sync_errors::Column::AccountId.eq(account.id))
-            .count(&svc.db)
-            .await
-            .unwrap(),
+        count_where(
+            &svc,
+            "SELECT COUNT(*) FROM sync_errors WHERE account_id = ?1",
+            account.id
+        )
+        .await,
         1
     );
     assert_eq!(svc.auth.get_password(&account.email).unwrap(), "password");
+}
+
+async fn insert_attachment(
+    svc: &TestServices,
+    email_id: i32,
+    filename: &'static str,
+    size: i32,
+    now: i64,
+) {
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO attachments (
+                    email_id, filename, content_type, size, section_path, disposition,
+                    content_id, path, created_at
+                ) VALUES (?1, ?2, 'text/plain', ?3, '2', 'attachment', NULL, NULL, ?4)",
+                rusqlite::params![email_id, filename, size, now],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn insert_sync_state(svc: &TestServices, account_id: i32, now: i64) {
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO sync_state (
+                    account_id, folder, folder_nick_name, uidvalidity, uidnext,
+                    synced_at, last_sync_uid, created_at, updated_at
+                ) VALUES (?1, 'INBOX', NULL, 1, 2, ?2, 1, ?2, ?2)",
+                rusqlite::params![account_id, now],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn insert_sync_error(svc: &TestServices, account_id: i32, message: &'static str, now: i64) {
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO sync_errors (
+                    account_id, folder, error_type, error_message, uid, stack_trace, resolved, created_at
+                ) VALUES (?1, 'INBOX', 'test', ?2, 1, NULL, 0, ?3)",
+                rusqlite::params![account_id, message, now],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
