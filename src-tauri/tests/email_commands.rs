@@ -314,6 +314,55 @@ async fn test_move_to_folder_hides_from_old_folder_and_shows_in_new_folder() {
 }
 
 #[tokio::test]
+async fn test_state_updates_preserve_updated_at() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+    let original_updated_at = 1_234_567;
+
+    let read_id = insert_test_email(&svc, account_id, TestEmail::new(71, "标记已读")).await;
+    let star_id = insert_test_email(&svc, account_id, TestEmail::new(72, "切换星标")).await;
+    let delete_id = insert_test_email(&svc, account_id, TestEmail::new(73, "软删除")).await;
+    let move_id = insert_test_email(&svc, account_id, TestEmail::new(74, "移动文件夹")).await;
+
+    for id in [read_id, star_id, delete_id, move_id] {
+        svc.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE emails SET updated_at = ?1 WHERE id = ?2",
+                    rusqlite::params![original_updated_at, id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    svc.email_service.mark_as_read(read_id, true).await.unwrap();
+    svc.email_service.toggle_star(star_id).await.unwrap();
+    svc.email_service.delete(vec![delete_id]).await.unwrap();
+    svc.email_service
+        .move_to_folder(move_id, "Archive")
+        .await
+        .unwrap();
+
+    let updated_at_values = svc
+        .db
+        .call(move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT updated_at FROM emails WHERE id IN (?1, ?2, ?3, ?4)")?;
+            stmt.query_map(
+                rusqlite::params![read_id, star_id, delete_id, move_id],
+                |row| row.get::<_, i64>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(updated_at_values, vec![original_updated_at; 4]);
+}
+
+#[tokio::test]
 async fn test_list_by_category_inbox_empty() {
     let svc = TestServices::new().await;
     let account_id = create_test_account(&svc).await;

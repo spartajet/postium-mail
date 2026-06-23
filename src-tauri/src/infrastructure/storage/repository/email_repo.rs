@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::domain::sync::FolderStat;
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
@@ -7,9 +5,114 @@ use crate::infrastructure::protocols::utils::{
     extract_email_from_address, extract_name_from_address, serialize_addresses,
 };
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::{attachments, emails};
-use sea_orm::sea_query::Expr;
-use sea_orm::*;
+use crate::infrastructure::storage::models::emails;
+use crate::infrastructure::storage::repository::attachment_repo::{
+    AttachmentWrite, INSERT_ATTACHMENT_SQL, execute_attachment_insert,
+};
+use crate::infrastructure::storage::row::{bool_to_int, opt_bool_to_int, opt_int_to_bool};
+use rusqlite::types::Value;
+
+const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
+        account_id, folder, uid, message_id, subject, sender_name, sender_email,
+        recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+        is_read, is_starred, is_draft, is_answered, is_deleted,
+        sent_at, received_at, created_at, updated_at
+     ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+     )";
+
+#[derive(Clone, Debug)]
+pub struct EmailWrite {
+    pub account_id: i32,
+    pub folder: String,
+    pub uid: u32,
+    pub message_id: Option<String>,
+    pub subject: Option<String>,
+    pub sender_name: Option<String>,
+    pub sender_email: String,
+    pub recipient_emails: String,
+    pub cc_emails: Option<String>,
+    pub bcc_emails: Option<String>,
+    pub preview: Option<String>,
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    pub is_read: Option<bool>,
+    pub is_starred: Option<bool>,
+    pub is_draft: Option<bool>,
+    pub is_answered: Option<bool>,
+    pub is_deleted: Option<bool>,
+    pub sent_at: i64,
+    pub received_at: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
+    Ok(emails::Model {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        folder: row.get("folder")?,
+        uid: row.get::<_, i64>("uid")? as u32,
+        message_id: row.get("message_id")?,
+        subject: row.get("subject")?,
+        sender_name: row.get("sender_name")?,
+        sender_email: row.get("sender_email")?,
+        recipient_emails: row.get("recipient_emails")?,
+        cc_emails: row.get("cc_emails")?,
+        bcc_emails: row.get("bcc_emails")?,
+        preview: row.get("preview")?,
+        body_text: row.get("body_text")?,
+        body_html: row.get("body_html")?,
+        is_read: opt_int_to_bool(row.get("is_read")?),
+        is_starred: opt_int_to_bool(row.get("is_starred")?),
+        is_draft: opt_int_to_bool(row.get("is_draft")?),
+        is_answered: opt_int_to_bool(row.get("is_answered")?),
+        is_deleted: opt_int_to_bool(row.get("is_deleted")?),
+        sent_at: row.get("sent_at")?,
+        received_at: row.get("received_at")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+fn placeholders(count: usize) -> String {
+    std::iter::repeat("?")
+        .take(count)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn execute_email_insert(
+    stmt: &mut rusqlite::Statement<'_>,
+    model: &EmailWrite,
+) -> rusqlite::Result<()> {
+    stmt.execute(rusqlite::params![
+        model.account_id,
+        &model.folder,
+        i64::from(model.uid),
+        &model.message_id,
+        &model.subject,
+        &model.sender_name,
+        &model.sender_email,
+        &model.recipient_emails,
+        &model.cc_emails,
+        &model.bcc_emails,
+        &model.preview,
+        &model.body_text,
+        &model.body_html,
+        opt_bool_to_int(model.is_read),
+        opt_bool_to_int(model.is_starred),
+        opt_bool_to_int(model.is_draft),
+        opt_bool_to_int(model.is_answered),
+        opt_bool_to_int(model.is_deleted),
+        model.sent_at,
+        model.received_at,
+        model.created_at,
+        model.updated_at,
+    ])?;
+    Ok(())
+}
 
 pub async fn list_by_folder(
     db: &DbConn,
@@ -18,21 +121,36 @@ pub async fn list_by_folder(
     page: usize,
     limit: usize,
 ) -> Result<(Vec<emails::Model>, u64), MailError> {
-    let query = emails::Entity::find()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .filter(emails::Column::IsDeleted.eq(false));
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        let total = conn.query_row(
+            "SELECT COUNT(*)
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2 AND is_deleted = 0",
+            rusqlite::params![account_id, &folder],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
 
-    let total = query.clone().count(db).await?;
-
-    let items = query
-        .order_by_desc(emails::Column::SentAt)
-        .offset(Some((page.saturating_sub(1).saturating_mul(limit)) as u64))
-        .limit(Some(limit as u64))
-        .all(db)
-        .await?;
-
-    Ok((items, total))
+        let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2 AND is_deleted = 0
+             ORDER BY sent_at DESC
+             LIMIT ?3 OFFSET ?4",
+        )?;
+        let items = stmt
+            .query_map(
+                rusqlite::params![account_id, folder, limit as i64, offset],
+                map_email,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((items, total))
+    })
+    .await
 }
 
 /// 按多个文件夹查询邮件（用于 category → 多文件夹映射）
@@ -43,21 +161,49 @@ pub async fn list_by_folders(
     page: usize,
     limit: usize,
 ) -> Result<(Vec<emails::Model>, u64), MailError> {
-    let query = emails::Entity::find()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.is_in(folders))
-        .filter(emails::Column::IsDeleted.eq(false));
+    if folders.is_empty() {
+        return Ok((Vec::new(), 0));
+    }
 
-    let total = query.clone().count(db).await?;
+    let folders = folders.to_vec();
+    db.call(move |conn| {
+        let in_clause = placeholders(folders.len());
+        let mut count_values = Vec::with_capacity(folders.len() + 1);
+        count_values.push(Value::from(account_id));
+        count_values.extend(folders.iter().cloned().map(Value::from));
 
-    let items = query
-        .order_by_desc(emails::Column::SentAt)
-        .offset(Some((page.saturating_sub(1).saturating_mul(limit)) as u64))
-        .limit(Some(limit as u64))
-        .all(db)
-        .await?;
+        let count_sql = format!(
+            "SELECT COUNT(*)
+             FROM emails
+             WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0"
+        );
+        let total = conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(count_values.iter()),
+            |row| row.get::<_, i64>(0),
+        )? as u64;
 
-    Ok((items, total))
+        let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+        let select_sql = format!(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0
+             ORDER BY sent_at DESC
+             LIMIT ? OFFSET ?"
+        );
+        let mut select_values = count_values;
+        select_values.push(Value::from(limit as i64));
+        select_values.push(Value::from(offset));
+        let mut stmt = conn.prepare(&select_sql)?;
+        let items = stmt
+            .query_map(rusqlite::params_from_iter(select_values.iter()), map_email)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((items, total))
+    })
+    .await
 }
 
 /// 查询星标邮件（跨所有文件夹）
@@ -67,25 +213,54 @@ pub async fn list_starred(
     page: usize,
     limit: usize,
 ) -> Result<(Vec<emails::Model>, u64), MailError> {
-    let query = emails::Entity::find()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::IsStarred.eq(true))
-        .filter(emails::Column::IsDeleted.eq(false));
+    db.call(move |conn| {
+        let total = conn.query_row(
+            "SELECT COUNT(*)
+             FROM emails
+             WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0",
+            [account_id],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
 
-    let total = query.clone().count(db).await?;
-
-    let items = query
-        .order_by_desc(emails::Column::SentAt)
-        .offset(Some((page.saturating_sub(1).saturating_mul(limit)) as u64))
-        .limit(Some(limit as u64))
-        .all(db)
-        .await?;
-
-    Ok((items, total))
+        let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0
+             ORDER BY sent_at DESC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let items = stmt
+            .query_map(
+                rusqlite::params![account_id, limit as i64, offset],
+                map_email,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((items, total))
+    })
+    .await
 }
 
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<emails::Model>, MailError> {
-    Ok(emails::Entity::find_by_id(id).one(db).await?)
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE id = ?1",
+        )?;
+        match stmt.query_row([id], map_email) {
+            Ok(email) => Ok(Some(email)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    })
+    .await
 }
 
 pub async fn get_by_uid(
@@ -94,71 +269,178 @@ pub async fn get_by_uid(
     folder: &str,
     uid: u32,
 ) -> Result<Option<emails::Model>, MailError> {
-    Ok(emails::Entity::find()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .filter(emails::Column::Uid.eq(uid))
-        .one(db)
-        .await?)
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",
+        )?;
+        match stmt.query_row(
+            rusqlite::params![account_id, folder, i64::from(uid)],
+            map_email,
+        ) {
+            Ok(email) => Ok(Some(email)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    })
+    .await
 }
 
-pub async fn bulk_insert(db: &DbConn, models: Vec<emails::ActiveModel>) -> Result<(), MailError> {
+pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, MailError> {
+    db.transaction(move |tx| {
+        let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        execute_email_insert(&mut insert_stmt, &model)?;
+        let id = tx.last_insert_rowid() as i32;
+        let mut stmt = tx.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE id = ?1",
+        )?;
+        stmt.query_row([id], map_email)
+    })
+    .await
+}
+
+pub async fn bulk_insert(db: &DbConn, models: Vec<EmailWrite>) -> Result<(), MailError> {
     if models.is_empty() {
         return Ok(());
     }
-    emails::Entity::insert_many(models).exec(db).await?;
-    Ok(())
+
+    db.transaction(move |tx| {
+        let mut stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        for model in &models {
+            execute_email_insert(&mut stmt, model)?;
+        }
+        Ok(())
+    })
+    .await
 }
 
-pub async fn update(
-    db: &DbConn,
-    id: i32,
-    model: emails::ActiveModel,
-) -> Result<emails::Model, MailError> {
-    let mut model = model;
-    model.id = Set(id);
-    Ok(model.update(db).await?)
+pub async fn update(db: &DbConn, id: i32, model: EmailWrite) -> Result<emails::Model, MailError> {
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE emails
+             SET account_id = ?1, folder = ?2, uid = ?3, message_id = ?4, subject = ?5,
+                 sender_name = ?6, sender_email = ?7, recipient_emails = ?8,
+                 cc_emails = ?9, bcc_emails = ?10, preview = ?11, body_text = ?12,
+                 body_html = ?13, is_read = ?14, is_starred = ?15, is_draft = ?16,
+                 is_answered = ?17, is_deleted = ?18, sent_at = ?19, received_at = ?20,
+                 created_at = ?21, updated_at = ?22
+             WHERE id = ?23",
+            rusqlite::params![
+                model.account_id,
+                model.folder,
+                i64::from(model.uid),
+                model.message_id,
+                model.subject,
+                model.sender_name,
+                model.sender_email,
+                model.recipient_emails,
+                model.cc_emails,
+                model.bcc_emails,
+                model.preview,
+                model.body_text,
+                model.body_html,
+                opt_bool_to_int(model.is_read),
+                opt_bool_to_int(model.is_starred),
+                opt_bool_to_int(model.is_draft),
+                opt_bool_to_int(model.is_answered),
+                opt_bool_to_int(model.is_deleted),
+                model.sent_at,
+                model.received_at,
+                model.created_at,
+                model.updated_at,
+                id,
+            ],
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE id = ?1",
+        )?;
+        stmt.query_row([id], map_email)
+    })
+    .await
 }
 
 pub async fn mark_as_read(db: &DbConn, id: i32, is_read: bool) -> Result<(), MailError> {
-    emails::Entity::update_many()
-        .col_expr(emails::Column::IsRead, Expr::value(is_read))
-        .filter(emails::Column::Id.eq(id))
-        .exec(db)
-        .await?;
-    Ok(())
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE emails SET is_read = ?1 WHERE id = ?2",
+            rusqlite::params![bool_to_int(is_read), id],
+        )?;
+        Ok(())
+    })
+    .await
 }
 
 pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool, MailError> {
-    let email = emails::Entity::find_by_id(id)
-        .one(db)
-        .await?
-        .ok_or(MailError::EmailNotFound(id))?;
-    let new_state = !email.is_starred.unwrap_or(false);
-    emails::Entity::update_many()
-        .col_expr(emails::Column::IsStarred, Expr::value(new_state))
-        .filter(emails::Column::Id.eq(id))
-        .exec(db)
+    let new_state = db
+        .call(move |conn| {
+            let current =
+                match conn.query_row("SELECT is_starred FROM emails WHERE id = ?1", [id], |row| {
+                    row.get::<_, Option<i64>>(0)
+                }) {
+                    Ok(value) => Some(value),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(err) => return Err(err),
+                };
+            let Some(current) = current else {
+                return Ok(None);
+            };
+            let new_state = !opt_int_to_bool(current).unwrap_or(false);
+            conn.execute(
+                "UPDATE emails SET is_starred = ?1 WHERE id = ?2",
+                rusqlite::params![bool_to_int(new_state), id],
+            )?;
+            Ok(Some(new_state))
+        })
         .await?;
-    Ok(new_state)
+
+    new_state.ok_or(MailError::EmailNotFound(id))
 }
 
 pub async fn soft_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize, MailError> {
-    let result = emails::Entity::update_many()
-        .col_expr(emails::Column::IsDeleted, Expr::value(true))
-        .filter(emails::Column::Id.is_in(ids))
-        .exec(db)
-        .await?;
-    Ok(result.rows_affected as usize)
+    if ids.is_empty() {
+        return Ok(0);
+    }
+
+    db.call(move |conn| {
+        let sql = format!(
+            "UPDATE emails
+             SET is_deleted = 1
+             WHERE id IN ({})",
+            placeholders(ids.len())
+        );
+        let mut values = Vec::with_capacity(ids.len());
+        values.extend(ids.into_iter().map(Value::from));
+        conn.execute(&sql, rusqlite::params_from_iter(values.iter()))
+    })
+    .await
 }
 
 pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<(), MailError> {
-    emails::Entity::update_many()
-        .col_expr(emails::Column::Folder, Expr::value(folder.to_string()))
-        .filter(emails::Column::Id.eq(id))
-        .exec(db)
-        .await?;
-    Ok(())
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE emails SET folder = ?1 WHERE id = ?2",
+            rusqlite::params![folder, id],
+        )?;
+        Ok(())
+    })
+    .await
 }
 
 /// 按 account_id 聚合文件夹统计（单条 SQL，替代 N+1 查询）
@@ -166,36 +448,25 @@ pub async fn folder_stats_by_account(
     db: &DbConn,
     account_id: i32,
 ) -> Result<Vec<FolderStat>, MailError> {
-    #[derive(Debug, FromQueryResult)]
-    struct Row {
-        folder: String,
-        total: i64,
-        unread: i64,
-    }
-
-    let rows = Row::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        r#"
-            SELECT folder,
-                   COUNT(*) as total,
-                   SUM(CASE WHEN is_read = 0 OR is_read IS NULL THEN 1 ELSE 0 END) as unread
-            FROM emails
-            WHERE account_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            GROUP BY folder
-            "#,
-        [account_id.into()],
-    ))
-    .all(db)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| FolderStat {
-            folder: r.folder,
-            total: r.total as usize,
-            unread: r.unread as usize,
-        })
-        .collect())
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT folder,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_read = 0 OR is_read IS NULL THEN 1 ELSE 0 END) as unread
+             FROM emails
+             WHERE account_id = ?1 AND (is_deleted = 0 OR is_deleted IS NULL)
+             GROUP BY folder",
+        )?;
+        let rows = stmt.query_map([account_id], |row| {
+            Ok(FolderStat {
+                folder: row.get("folder")?,
+                total: row.get::<_, i64>("total")? as usize,
+                unread: row.get::<_, i64>("unread")? as usize,
+            })
+        })?;
+        rows.collect()
+    })
+    .await
 }
 
 /// 根据账号和文件夹获取邮件 ID
@@ -204,16 +475,18 @@ pub async fn get_ids_by_folder(
     account_id: i32,
     folder: &str,
 ) -> Result<Vec<i32>, MailError> {
-    let email_ids = emails::Entity::find()
-        .select_only()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .column(emails::Column::Id)
-        .into_tuple::<i32>()
-        .all(db)
-        .await?;
-
-    Ok(email_ids)
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2
+             ORDER BY id ASC",
+        )?;
+        stmt.query_map(rusqlite::params![account_id, folder], |row| row.get("id"))?
+            .collect()
+    })
+    .await
 }
 
 /// 根据账号和文件夹删除邮件
@@ -222,54 +495,69 @@ pub async fn delete_by_folder(
     account_id: i32,
     folder: &str,
 ) -> Result<u64, MailError> {
-    let delete_result = emails::Entity::delete_many()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .exec(db)
-        .await?;
-
-    Ok(delete_result.rows_affected)
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        let deleted = conn.execute(
+            "DELETE FROM emails WHERE account_id = ?1 AND folder = ?2",
+            rusqlite::params![account_id, folder],
+        )?;
+        Ok(deleted as u64)
+    })
+    .await
 }
 
-pub async fn delete_by_account<C>(db: &C, account_id: i32) -> Result<u64, MailError>
-where
-    C: ConnectionTrait,
-{
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        r#"
-        DELETE FROM attachments
-        WHERE email_id IN (
-            SELECT id FROM emails WHERE account_id = ?
-        )
-        "#,
-        [account_id.into()],
-    ))
-    .await?;
+pub async fn delete_folder_contents(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<u64, MailError> {
+    let folder = folder.to_string();
+    db.transaction(move |tx| {
+        tx.execute(
+            "DELETE FROM email_labels
+             WHERE email_id IN (
+                SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2
+             )",
+            rusqlite::params![account_id, &folder],
+        )?;
+        tx.execute(
+            "DELETE FROM attachments
+             WHERE email_id IN (
+                SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2
+             )",
+            rusqlite::params![account_id, &folder],
+        )?;
+        let deleted = tx.execute(
+            "DELETE FROM emails WHERE account_id = ?1 AND folder = ?2",
+            rusqlite::params![account_id, &folder],
+        )?;
+        Ok(deleted as u64)
+    })
+    .await
+}
 
-    let delete_result = emails::Entity::delete_many()
-        .filter(emails::Column::AccountId.eq(account_id))
-        .exec(db)
-        .await?;
+pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<u64, MailError> {
+    db.transaction(move |tx| delete_by_account_tx(tx, account_id))
+        .await
+}
 
-    Ok(delete_result.rows_affected)
+pub fn delete_by_account_tx(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: i32,
+) -> rusqlite::Result<u64> {
+    tx.execute(
+        "DELETE FROM attachments
+         WHERE email_id IN (SELECT id FROM emails WHERE account_id = ?1)",
+        [account_id],
+    )?;
+    let deleted = tx.execute("DELETE FROM emails WHERE account_id = ?1", [account_id])?;
+    Ok(deleted as u64)
 }
 
 /// 批量保存邮件头
 ///
 /// 从 IMAP 同步的邮件头批量保存到数据库。
 /// 这个方法主要用于快速同步邮件列表，不包含邮件正文和附件。
-///
-/// # 参数
-///
-/// * `db` - 数据库连接
-/// * `account_id` - 账号 ID
-/// * `folder` - 文件夹名称
-/// * `headers` - 邮件头列表
-///
-/// # 返回
-///
-/// 返回成功保存的邮件数量
 pub async fn save_batch_email_headers(
     db: &DbConn,
     account_id: i32,
@@ -281,103 +569,72 @@ pub async fn save_batch_email_headers(
     }
 
     let now = chrono::Utc::now().timestamp();
-
-    // 将 EmailHeader 转换为 email::ActiveModel
-    let active_emails: Vec<emails::ActiveModel> = headers
+    let folder = folder.to_string();
+    let writes: Vec<(EmailWrite, Vec<AttachmentWrite>)> = headers
         .iter()
-        .map(|header| emails::ActiveModel {
-            account_id: Set(account_id),
-            folder: Set(folder.to_string()),
-            uid: Set(header.uid),
-            subject: Set(Some(header.subject.clone())),
-            sender_name: Set(extract_name_from_address(&header.from)),
-            sender_email: Set(extract_email_from_address(&header.from)),
-            recipient_emails: Set(serialize_addresses(&header.to)),
-            cc_emails: Set(if header.cc.is_empty() {
-                None
-            } else {
-                Some(serialize_addresses(&header.cc))
-            }),
-            bcc_emails: Set(None),
-            body_text: Set(None),
-            body_html: Set(None),
-            message_id: Set(None),
-            is_read: Set(Some(header.flags.seen)),
-            is_starred: Set(Some(header.flags.flagged)),
-            is_draft: Set(Some(header.flags.draft)),
-            is_answered: Set(Some(header.flags.answered)),
-            is_deleted: Set(Some(header.flags.deleted)),
-            sent_at: Set(header.date.timestamp()),
-            received_at: Set(header.date.timestamp()),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+        .map(|header| {
+            let email = EmailWrite {
+                account_id,
+                folder: folder.clone(),
+                uid: header.uid,
+                subject: Some(header.subject.clone()),
+                sender_name: extract_name_from_address(&header.from),
+                sender_email: extract_email_from_address(&header.from),
+                recipient_emails: serialize_addresses(&header.to),
+                cc_emails: if header.cc.is_empty() {
+                    None
+                } else {
+                    Some(serialize_addresses(&header.cc))
+                },
+                bcc_emails: None,
+                body_text: None,
+                body_html: None,
+                message_id: None,
+                preview: None,
+                is_read: Some(header.flags.seen),
+                is_starred: Some(header.flags.flagged),
+                is_draft: Some(header.flags.draft),
+                is_answered: Some(header.flags.answered),
+                is_deleted: Some(header.flags.deleted),
+                sent_at: header.date.timestamp(),
+                received_at: header.date.timestamp(),
+                created_at: now,
+                updated_at: now,
+            };
+            let attachments = header
+                .attachments
+                .iter()
+                .map(|att| AttachmentWrite {
+                    email_id: 0,
+                    filename: att.filename.clone(),
+                    content_type: Some(att.content_type.clone()),
+                    size: att.size as i64,
+                    section_path: att.section_path.clone(),
+                    disposition: att.disposition.clone(),
+                    content_id: att.content_id.clone(),
+                    path: None,
+                    created_at: now,
+                })
+                .collect();
+            (email, attachments)
         })
         .collect();
 
-    // 批量插入邮件
-    emails::Entity::insert_many(active_emails)
-        .exec(db)
-        .await
-        .map_err(|e| MailError::DatabaseError(format!("批量保存邮件头失败: {}", e)))?;
-
-    // 查询刚插入的邮件，获取 uid -> id 映射（只查两列，避免 SELECT *）
-    let uids: Vec<u32> = headers.iter().map(|h| h.uid).collect();
-    let uid_id_pairs: Vec<(i32, u32)> = emails::Entity::find()
-        .select_only()
-        .column(emails::Column::Id)
-        .column(emails::Column::Uid)
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .filter(emails::Column::Uid.is_in(uids))
-        .into_tuple::<(i32, u32)>()
-        .all(db)
-        .await
-        .map_err(|e| MailError::DatabaseError(format!("查询已插入邮件失败: {}", e)))?;
-
-    let uid_to_id: HashMap<u32, i32> = uid_id_pairs
-        .into_iter()
-        .map(|(id, uid)| (uid, id))
-        .collect();
-
-    // 收集所有附件
-    let mut active_attachments: Vec<attachments::ActiveModel> = Vec::new();
-    for header in headers {
-        if header.attachments.is_empty() {
-            continue;
-        }
-        let email_id = match uid_to_id.get(&header.uid) {
-            Some(id) => *id,
-            None => {
-                tracing::warn!(uid = header.uid, "未找到邮件ID，跳过附件保存");
-                continue;
+    db.transaction(move |tx| {
+        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        for (email, attachments) in &writes {
+            execute_email_insert(&mut email_stmt, email)?;
+            let email_id = tx.last_insert_rowid() as i32;
+            for attachment in attachments {
+                let mut attachment = attachment.clone();
+                attachment.email_id = email_id;
+                execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
-        };
-        for att in &header.attachments {
-            active_attachments.push(attachments::ActiveModel {
-                email_id: Set(email_id),
-                filename: Set(att.filename.clone()),
-                content_type: Set(Some(att.content_type.clone())),
-                size: Set(att.size as i64),
-                section_path: Set(att.section_path.clone()),
-                disposition: Set(att.disposition.clone()),
-                content_id: Set(att.content_id.clone()),
-                path: Set(None),
-                created_at: Set(now),
-                ..Default::default()
-            });
         }
-    }
-
-    // 批量插入附件
-    if !active_attachments.is_empty() {
-        attachments::Entity::insert_many(active_attachments)
-            .exec(db)
-            .await
-            .map_err(|e| MailError::DatabaseError(format!("批量保存附件失败: {}", e)))?;
-    }
-
-    Ok(headers.len())
+        Ok(writes.len())
+    })
+    .await
 }
 
 pub async fn save_batch_emails(
@@ -391,120 +648,182 @@ pub async fn save_batch_emails(
     }
 
     let now = chrono::Utc::now().timestamp();
-
-    // 将 WholeEmailDto 转换为 emails::ActiveModel
-    // WholeEmailDto 的字段已是正确类型，可直接映射，无需地址解析
-    let active_emails: Vec<emails::ActiveModel> = emails
+    let folder = folder.to_string();
+    let writes: Vec<(EmailWrite, Vec<AttachmentWrite>)> = emails
         .iter()
-        .map(|email| emails::ActiveModel {
-            account_id: Set(account_id),
-            folder: Set(folder.to_string()),
-            uid: Set(email.uid),
-            message_id: Set(email.message_id.clone()),
-            subject: Set(email.subject.clone()),
-            sender_name: Set(email.sender_name.clone()),
-            sender_email: Set(email.sender_email.clone()),
-            recipient_emails: Set(email.recipient_emails.clone()),
-            cc_emails: Set(email.cc_emails.clone()),
-            bcc_emails: Set(email.bcc_emails.clone()),
-            preview: Set(email.preview.clone()),
-            body_text: Set(email.body_text.clone()),
-            body_html: Set(email.body_html.clone()),
-            is_read: Set(Some(email.is_read)),
-            is_starred: Set(Some(email.is_starred)),
-            is_draft: Set(Some(email.is_draft)),
-            is_answered: Set(Some(email.is_answered)),
-            is_deleted: Set(Some(email.is_deleted)),
-            sent_at: Set(email.sent_at),
-            received_at: Set(email.received_at),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+        .map(|email| {
+            let write = EmailWrite {
+                account_id,
+                folder: folder.clone(),
+                uid: email.uid,
+                message_id: email.message_id.clone(),
+                subject: email.subject.clone(),
+                sender_name: email.sender_name.clone(),
+                sender_email: email.sender_email.clone(),
+                recipient_emails: email.recipient_emails.clone(),
+                cc_emails: email.cc_emails.clone(),
+                bcc_emails: email.bcc_emails.clone(),
+                preview: email.preview.clone(),
+                body_text: email.body_text.clone(),
+                body_html: email.body_html.clone(),
+                is_read: Some(email.is_read),
+                is_starred: Some(email.is_starred),
+                is_draft: Some(email.is_draft),
+                is_answered: Some(email.is_answered),
+                is_deleted: Some(email.is_deleted),
+                sent_at: email.sent_at,
+                received_at: email.received_at,
+                created_at: now,
+                updated_at: now,
+            };
+            let attachments = email
+                .attachments
+                .iter()
+                .map(|att| AttachmentWrite {
+                    email_id: 0,
+                    filename: att.filename.clone(),
+                    content_type: Some(att.content_type.clone()),
+                    size: att.size as i64,
+                    section_path: att.section_path.clone(),
+                    disposition: att.disposition.clone(),
+                    content_id: att.content_id.clone(),
+                    path: None,
+                    created_at: now,
+                })
+                .collect();
+            (write, attachments)
         })
         .collect();
 
-    // 批量插入邮件
-    emails::Entity::insert_many(active_emails)
-        .exec(db)
-        .await
-        .map_err(|e| MailError::DatabaseError(format!("批量保存完整邮件失败: {}", e)))?;
-
-    // 查询刚插入的邮件，获取 uid -> id 映射（列顺序 uid, id，直接 collect 无需 map 交换）
-    let uids: Vec<u32> = emails.iter().map(|e| e.uid).collect();
-    let uid_to_id: HashMap<u32, i32> = emails::Entity::find()
-        .select_only()
-        .column(emails::Column::Uid)
-        .column(emails::Column::Id)
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Folder.eq(folder))
-        .filter(emails::Column::Uid.is_in(uids))
-        .into_tuple::<(u32, i32)>()
-        .all(db)
-        .await
-        .map_err(|e| MailError::DatabaseError(format!("查询已插入邮件失败: {}", e)))?
-        .into_iter()
-        .collect();
-
-    // 收集所有附件
-    let mut active_attachments: Vec<attachments::ActiveModel> = Vec::new();
-    for email in emails {
-        if email.attachments.is_empty() {
-            continue;
-        }
-        let email_id = match uid_to_id.get(&email.uid) {
-            Some(id) => *id,
-            None => {
-                tracing::warn!(uid = email.uid, "未找到邮件ID，跳过附件保存");
-                continue;
+    db.transaction(move |tx| {
+        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        for (email, attachments) in &writes {
+            execute_email_insert(&mut email_stmt, email)?;
+            let email_id = tx.last_insert_rowid() as i32;
+            for attachment in attachments {
+                let mut attachment = attachment.clone();
+                attachment.email_id = email_id;
+                execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
-        };
-        for att in &email.attachments {
-            active_attachments.push(attachments::ActiveModel {
-                email_id: Set(email_id),
-                filename: Set(att.filename.clone()),
-                content_type: Set(Some(att.content_type.clone())),
-                size: Set(att.size as i64),
-                section_path: Set(att.section_path.clone()),
-                disposition: Set(att.disposition.clone()),
-                content_id: Set(att.content_id.clone()),
-                path: Set(None),
-                created_at: Set(now),
-                ..Default::default()
-            });
         }
-    }
-
-    // 批量插入附件
-    if !active_attachments.is_empty() {
-        attachments::Entity::insert_many(active_attachments)
-            .exec(db)
-            .await
-            .map_err(|e| MailError::DatabaseError(format!("批量保存附件失败: {}", e)))?;
-    }
-
-    Ok(emails.len())
+        Ok(writes.len())
+    })
+    .await
 }
 
 pub(crate) async fn update_body(
-    db: &DatabaseConnection,
+    db: &DbConn,
     account_id: i32,
+    folder: &str,
     uid: u32,
     body_text: String,
     body_html: String,
 ) -> Result<(), MailError> {
     let preview: Option<String> = Some(body_text.chars().take(200).collect());
     let now = chrono::Utc::now().timestamp();
+    let folder = folder.to_string();
 
-    emails::Entity::update_many()
-        .col_expr(emails::Column::BodyText, Expr::value(Some(body_text)))
-        .col_expr(emails::Column::BodyHtml, Expr::value(Some(body_html)))
-        .col_expr(emails::Column::Preview, Expr::value(preview))
-        .col_expr(emails::Column::UpdatedAt, Expr::value(now))
-        .filter(emails::Column::AccountId.eq(account_id))
-        .filter(emails::Column::Uid.eq(uid))
-        .exec(db)
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE emails
+             SET body_text = ?1, body_html = ?2, preview = ?3, updated_at = ?4
+             WHERE account_id = ?5 AND folder = ?6 AND uid = ?7",
+            rusqlite::params![
+                body_text,
+                body_html,
+                preview,
+                now,
+                account_id,
+                folder,
+                i64::from(uid)
+            ],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn create_account(db: &DbConn) -> i32 {
+        let now = chrono::Utc::now().timestamp();
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO accounts (
+                    name, email, provider, imap_host, imap_port, imap_ssl, imap_ssl_mode,
+                    smtp_host, smtp_port, smtp_ssl, smtp_ssl_mode, auth_type, account_type,
+                    created_at, updated_at
+                ) VALUES (
+                    'Test', 'test@example.com', 'gmail', 'imap.example.com', 993, 1, 'SSL',
+                    'smtp.example.com', 465, 1, 'SSL', 'Password', 'personal', ?1, ?1
+                )",
+                [now],
+            )?;
+            Ok(conn.last_insert_rowid() as i32)
+        })
         .await
-        .map_err(|e| MailError::DatabaseError(format!("更新邮件正文失败: {}", e)))?;
+        .unwrap()
+    }
 
-    Ok(())
+    async fn insert_email(db: &DbConn, account_id: i32, folder: &str, uid: u32, body: &str) -> i32 {
+        let now = chrono::Utc::now().timestamp();
+        let folder = folder.to_string();
+        let body = body.to_string();
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO emails (
+                    account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, NULL, 'Subject', 'Sender', 'sender@example.com',
+                    'recipient@example.com', NULL, NULL, NULL, ?4, NULL,
+                    0, 0, 0, 0, 0, ?5, ?5, ?5, ?5
+                )",
+                rusqlite::params![account_id, folder, i64::from(uid), body, now],
+            )?;
+            Ok(conn.last_insert_rowid() as i32)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn body_text(db: &DbConn, id: i32) -> Option<String> {
+        db.call(move |conn| {
+            conn.query_row("SELECT body_text FROM emails WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn update_body_updates_only_matching_folder_when_uid_repeats() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+        let inbox_id = insert_email(&db, account_id, "INBOX", 42, "inbox body").await;
+        let sent_id = insert_email(&db, account_id, "Sent", 42, "sent body").await;
+
+        update_body(
+            &db,
+            account_id,
+            "INBOX",
+            42,
+            "updated inbox body".to_string(),
+            "<p>updated inbox body</p>".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            body_text(&db, inbox_id).await.as_deref(),
+            Some("updated inbox body")
+        );
+        assert_eq!(body_text(&db, sent_id).await.as_deref(), Some("sent body"));
+    }
 }

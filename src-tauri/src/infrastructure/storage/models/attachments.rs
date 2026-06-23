@@ -1,11 +1,5 @@
-use sea_orm::entity::prelude::*;
-
-#[derive(
-    Clone, Debug, PartialEq, DeriveEntityModel, serde::Serialize, serde::Deserialize, specta::Type,
-)]
-#[sea_orm(table_name = "attachments")]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Model {
-    #[sea_orm(primary_key)]
     pub id: i32,
     pub email_id: i32,
     /// 附件文件名（某些附件可能没有文件名）
@@ -24,21 +18,3 @@ pub struct Model {
     pub path: Option<String>,
     pub created_at: i64,
 }
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::emails::Entity",
-        from = "Column::EmailId",
-        to = "super::emails::Column::Id"
-    )]
-    Email,
-}
-
-impl Related<super::emails::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Email.def()
-    }
-}
-
-impl ActiveModelBehavior for ActiveModel {}

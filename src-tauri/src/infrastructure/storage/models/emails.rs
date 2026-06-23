@@ -1,11 +1,5 @@
-use sea_orm::entity::prelude::*;
-
-#[derive(
-    Clone, Debug, PartialEq, DeriveEntityModel, serde::Serialize, serde::Deserialize, specta::Type,
-)]
-#[sea_orm(table_name = "emails")]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Model {
-    #[sea_orm(primary_key)]
     pub id: i32,
     pub account_id: i32,
     pub folder: String,
@@ -30,23 +24,3 @@ pub struct Model {
     pub created_at: i64,
     pub updated_at: i64,
 }
-
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::accounts::Entity",
-        from = "Column::AccountId",
-        to = "super::accounts::Column::Id"
-    )]
-    Account,
-    #[sea_orm(has_many = "super::attachments::Entity")]
-    Attachments,
-}
-
-impl Related<super::accounts::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Account.def()
-    }
-}
-
-impl ActiveModelBehavior for ActiveModel {}

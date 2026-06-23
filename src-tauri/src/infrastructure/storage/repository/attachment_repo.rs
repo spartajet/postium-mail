@@ -1,44 +1,141 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::attachments;
-use sea_orm::*;
+use crate::infrastructure::storage::models::attachments;
+
+pub const INSERT_ATTACHMENT_SQL: &str = "INSERT INTO attachments (
+        email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+
+#[derive(Clone, Debug)]
+pub struct AttachmentWrite {
+    pub email_id: i32,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+    pub size: i64,
+    pub section_path: String,
+    pub disposition: Option<String>,
+    pub content_id: Option<String>,
+    pub path: Option<String>,
+    pub created_at: i64,
+}
+
+fn map_attachment(row: &rusqlite::Row<'_>) -> rusqlite::Result<attachments::Model> {
+    Ok(attachments::Model {
+        id: row.get("id")?,
+        email_id: row.get("email_id")?,
+        filename: row.get("filename")?,
+        content_type: row.get("content_type")?,
+        size: row.get("size")?,
+        section_path: row.get("section_path")?,
+        disposition: row.get("disposition")?,
+        content_id: row.get("content_id")?,
+        path: row.get("path")?,
+        created_at: row.get("created_at")?,
+    })
+}
+
+pub fn execute_attachment_insert(
+    stmt: &mut rusqlite::Statement<'_>,
+    model: &AttachmentWrite,
+) -> rusqlite::Result<()> {
+    stmt.execute(rusqlite::params![
+        model.email_id,
+        &model.filename,
+        &model.content_type,
+        model.size,
+        &model.section_path,
+        &model.disposition,
+        &model.content_id,
+        &model.path,
+        model.created_at,
+    ])?;
+    Ok(())
+}
 
 pub async fn list_by_email(
     db: &DbConn,
     email_id: i32,
 ) -> Result<Vec<attachments::Model>, MailError> {
-    Ok(attachments::Entity::find()
-        .filter(attachments::Column::EmailId.eq(email_id))
-        .all(db)
-        .await?)
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, email_id, filename, content_type, size, section_path, disposition,
+                    content_id, path, created_at
+             FROM attachments
+             WHERE email_id = ?1
+             ORDER BY id ASC",
+        )?;
+        stmt.query_map([email_id], map_attachment)?.collect()
+    })
+    .await
 }
 
-pub async fn create(
-    db: &DbConn,
-    model: attachments::ActiveModel,
-) -> Result<attachments::Model, MailError> {
-    Ok(model.insert(db).await?)
+pub async fn create(db: &DbConn, model: AttachmentWrite) -> Result<attachments::Model, MailError> {
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO attachments (
+                email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                model.email_id,
+                model.filename,
+                model.content_type,
+                model.size,
+                model.section_path,
+                model.disposition,
+                model.content_id,
+                model.path,
+                model.created_at,
+            ],
+        )?;
+
+        let id = conn.last_insert_rowid() as i32;
+        let mut stmt = conn.prepare(
+            "SELECT id, email_id, filename, content_type, size, section_path, disposition,
+                    content_id, path, created_at
+             FROM attachments
+             WHERE id = ?1",
+        )?;
+        stmt.query_row([id], map_attachment)
+    })
+    .await
 }
 
-pub async fn bulk_insert(
-    db: &DbConn,
-    models: Vec<attachments::ActiveModel>,
-) -> Result<(), MailError> {
+pub async fn bulk_insert(db: &DbConn, models: Vec<AttachmentWrite>) -> Result<(), MailError> {
     if models.is_empty() {
         return Ok(());
     }
-    attachments::Entity::insert_many(models).exec(db).await?;
-    Ok(())
+
+    db.transaction(move |tx| {
+        let mut stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        for model in models {
+            execute_attachment_insert(&mut stmt, &model)?;
+        }
+        Ok(())
+    })
+    .await
 }
 
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<attachments::Model>, MailError> {
-    Ok(attachments::Entity::find_by_id(id).one(db).await?)
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, email_id, filename, content_type, size, section_path, disposition,
+                    content_id, path, created_at
+             FROM attachments
+             WHERE id = ?1",
+        )?;
+        match stmt.query_row([id], map_attachment) {
+            Ok(attachment) => Ok(Some(attachment)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    })
+    .await
 }
 
 pub async fn delete_by_email(db: &DbConn, email_id: i32) -> Result<(), MailError> {
-    attachments::Entity::delete_many()
-        .filter(attachments::Column::EmailId.eq(email_id))
-        .exec(db)
-        .await?;
-    Ok(())
+    db.call(move |conn| {
+        conn.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
+        Ok(())
+    })
+    .await
 }
