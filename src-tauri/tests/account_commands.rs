@@ -1,7 +1,7 @@
 mod common;
 
 use common::{TestEmail, TestServices, insert_test_email};
-use postium_mail_lib::infrastructure::storage::entities::{
+use postium_mail_lib::infrastructure::storage::models::{
     attachments, email_labels, emails, labels, sync_errors, sync_state,
 };
 use postium_mail_lib::service::account_service::CreateAccountRequest;

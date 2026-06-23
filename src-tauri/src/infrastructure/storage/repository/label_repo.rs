@@ -1,6 +1,6 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::{email_labels, labels};
+use crate::infrastructure::storage::models::{email_labels, labels};
 use sea_orm::*;
 
 pub async fn list_by_account(

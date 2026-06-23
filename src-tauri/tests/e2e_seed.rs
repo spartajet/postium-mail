@@ -2,7 +2,7 @@ mod common;
 
 use common::TestServices;
 use postium_mail_lib::domain::providers::pool::init_provider_pool;
-use postium_mail_lib::infrastructure::storage::entities::{accounts, emails};
+use postium_mail_lib::infrastructure::storage::models::{accounts, emails};
 use postium_mail_lib::infrastructure::testing::e2e_seed::seed_e2e_data;
 use postium_mail_lib::service::email_service::EmailCategory;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
@@ -61,7 +61,10 @@ async fn test_seed_data_supports_category_queries_and_search() {
     assert_eq!(inbox.total, 24);
     assert_eq!(inbox.emails.len(), 24);
     assert_eq!(
-        inbox.emails.first().and_then(|email| email.subject.as_deref()),
+        inbox
+            .emails
+            .first()
+            .and_then(|email| email.subject.as_deref()),
         Some("Primary Inbox Message 01")
     );
     assert!(

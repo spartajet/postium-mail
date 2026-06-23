@@ -21,7 +21,7 @@
 
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::labels;
+use crate::infrastructure::storage::models::labels;
 use crate::infrastructure::storage::repository::label_repo;
 use sea_orm::Set;
 use serde::{Deserialize, Serialize};
