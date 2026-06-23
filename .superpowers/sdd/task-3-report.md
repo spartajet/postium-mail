@@ -12,7 +12,7 @@ Modified files:
 - src-tauri/tests/common/mod.rs
 - src-tauri/tests/account_commands.rs
 
-Commit: ed3d595
+Commit: bbf9a87
 
 Commands and results:
 - `rtk cargo test --manifest-path src-tauri/Cargo.toml --test account_commands --test label_commands`
