@@ -96,3 +96,17 @@ pub async fn list_unresolved_errors(
         .all(db)
         .await?)
 }
+
+pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
+    sync_errors::Entity::delete_many()
+        .filter(sync_errors::Column::AccountId.eq(account_id))
+        .exec(db)
+        .await?;
+
+    sync_state::Entity::delete_many()
+        .filter(sync_state::Column::AccountId.eq(account_id))
+        .exec(db)
+        .await?;
+
+    Ok(())
+}
