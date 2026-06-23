@@ -18,6 +18,7 @@
 - 不引入连接池；使用 `tokio-rusqlite` 单连接后台线程。
 - 事务不得跨 `await` 持有；事务只允许在 `Connection::call` 闭包内同步执行。
 - 动态 SQL 只允许拼接占位符，不允许拼接用户输入值。
+- Task 1-4 允许出现真实全应用编译破坏窗口，因为 SeaORM 被一次性移除后 repository/service 需要连续改造；禁止用 feature gate 排除真实应用代码来制造默认构建假绿。
 - 每个任务完成后提交一次。
 
 ---
@@ -497,7 +498,7 @@ pub use database::DbConn;
 
 Run: `rtk cargo test --manifest-path src-tauri/Cargo.toml --test schema -- --nocapture`
 
-Expected: PASS for schema tests, while full crate may still fail because repositories and services still reference SeaORM.
+Expected during Task 1 only: this may fail at compile time because repositories and services still reference SeaORM. Do not hide those modules behind a feature gate. Record the failing symbols and continue to Task 2, where model imports begin the real compile recovery.
 
 - [ ] **Step 8: Commit**
 
