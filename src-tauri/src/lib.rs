@@ -46,14 +46,12 @@ fn resolve_data_dir() -> PathBuf {
     let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
 
     if e2e_enabled {
-        let data_dir = std::env::var("POSTIUM_DATA_DIR")
-            .expect("POSTIUM_E2E=1 时必须设置 POSTIUM_DATA_DIR");
+        let data_dir =
+            std::env::var("POSTIUM_DATA_DIR").expect("POSTIUM_E2E=1 时必须设置 POSTIUM_DATA_DIR");
         return PathBuf::from(data_dir);
     }
 
-    dirs::home_dir()
-        .expect("无法获取数据目录")
-        .join(".postium")
+    dirs::home_dir().expect("无法获取数据目录").join(".postium")
 }
 
 ///

@@ -1,8 +1,8 @@
 use crate::domain::providers::StandardFolder;
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
-use crate::infrastructure::storage::entities::emails;
-use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
+use crate::infrastructure::storage::models::emails;
+use crate::infrastructure::storage::repository::{account_repo, email_repo};
 use crate::infrastructure::storage::{DbConn, search};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -836,17 +836,8 @@ impl EmailService {
         account_id: i32,
         folder: &str,
     ) -> Result<usize, MailError> {
-        // 1. 先获取该账号、该文件夹的所有邮件 ID
-        let email_ids = email_repo::get_ids_by_folder(&self.db, account_id, folder).await?;
-
-        // 2. 删除这些邮件的附件
-        for email_id in &email_ids {
-            attachment_repo::delete_by_email(&self.db, *email_id).await?;
-        }
-
-        // 3. 删除所有邮件
         let deleted_count =
-            email_repo::delete_by_folder(&self.db, account_id, folder).await? as usize;
+            email_repo::delete_folder_contents(&self.db, account_id, folder).await? as usize;
 
         tracing::info!(
             "已删除账号文件夹的所有邮件: account_id={}, folder={}, count={}",

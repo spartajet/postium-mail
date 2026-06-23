@@ -1,9 +1,8 @@
 use crate::domain::auth::AuthManager;
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::accounts;
+use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, label_repo, sync_repo};
-use sea_orm::{Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -304,29 +303,29 @@ impl AccountService {
         // 获取当前时间戳
         let now = chrono::Utc::now().timestamp();
 
-        // 构建数据库模型
-        let model = accounts::ActiveModel {
-            name: Set(req.name),
-            email: Set(req.email),
-            display_name: Set(req.display_name),
-            provider: Set(req.provider.clone()),
+        let model = account_repo::AccountWrite {
+            name: req.name,
+            email: req.email,
+            display_name: req.display_name,
+            provider: req.provider.clone(),
             // IMAP 服务器配置
-            imap_host: Set(req.imap_host),
-            imap_port: Set(req.imap_port),
-            imap_ssl_mode: Set(req.imap_ssl_mode),
+            imap_host: req.imap_host,
+            imap_port: req.imap_port,
+            imap_ssl: Some(true),
+            imap_ssl_mode: req.imap_ssl_mode,
             // SMTP 服务器配置
-            smtp_host: Set(req.smtp_host),
-            smtp_port: Set(req.smtp_port),
-            smtp_ssl_mode: Set(req.smtp_ssl_mode),
+            smtp_host: req.smtp_host,
+            smtp_port: req.smtp_port,
+            smtp_ssl: Some(true),
+            smtp_ssl_mode: req.smtp_ssl_mode,
             // 其他属性
-            color: Set(req.color),
-            auth_type: Set(Some(req.auth_type.clone())),
-            account_type: Set(req.account_type.unwrap_or_else(|| "personal".into())),
-            sync_enabled: Set(Some(true)),
-            last_sync_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+            color: req.color,
+            auth_type: Some(req.auth_type.clone()),
+            account_type: req.account_type.unwrap_or_else(|| "personal".into()),
+            sync_enabled: Some(true),
+            last_sync_at: None,
+            created_at: now,
+            updated_at: now,
         };
 
         // 持久化到数据库
@@ -365,24 +364,27 @@ impl AccountService {
             .await?
             .ok_or(MailError::AccountNotFound(req.id))?;
 
-        // 转换为可修改的 ActiveModel
-        let mut model: accounts::ActiveModel = existing.into();
-
-        // 更新提供的字段
-        if let Some(name) = req.name {
-            model.name = Set(name);
-        }
-        if let Some(display_name) = req.display_name {
-            model.display_name = Set(Some(display_name));
-        }
-        if let Some(color) = req.color {
-            model.color = Set(Some(color));
-        }
-        if let Some(sync_enabled) = req.sync_enabled {
-            model.sync_enabled = Set(Some(sync_enabled));
-        }
-        // 更新修改时间
-        model.updated_at = Set(chrono::Utc::now().timestamp());
+        let model = account_repo::AccountWrite {
+            name: req.name.unwrap_or(existing.name),
+            email: existing.email,
+            display_name: req.display_name.or(existing.display_name),
+            provider: existing.provider,
+            imap_host: existing.imap_host,
+            imap_port: existing.imap_port,
+            imap_ssl: existing.imap_ssl,
+            imap_ssl_mode: existing.imap_ssl_mode,
+            smtp_host: existing.smtp_host,
+            smtp_port: existing.smtp_port,
+            smtp_ssl: existing.smtp_ssl,
+            smtp_ssl_mode: existing.smtp_ssl_mode,
+            color: req.color.or(existing.color),
+            sync_enabled: req.sync_enabled.or(existing.sync_enabled),
+            last_sync_at: existing.last_sync_at,
+            auth_type: existing.auth_type,
+            account_type: existing.account_type,
+            created_at: existing.created_at,
+            updated_at: chrono::Utc::now().timestamp(),
+        };
 
         // 保存到数据库
         let account = account_repo::update(&self.db, req.id, model).await?;
@@ -424,12 +426,15 @@ impl AccountService {
             .await?
             .ok_or(MailError::AccountNotFound(id))?;
 
-        let transaction = self.db.begin().await?;
-        label_repo::delete_by_account(&transaction, id).await?;
-        email_repo::delete_by_account(&transaction, id).await?;
-        sync_repo::delete_by_account(&transaction, id).await?;
-        account_repo::delete(&transaction, id).await?;
-        transaction.commit().await?;
+        self.db
+            .transaction(move |tx| {
+                label_repo::delete_by_account_tx(tx, id)?;
+                email_repo::delete_by_account_tx(tx, id)?;
+                sync_repo::delete_by_account_tx(tx, id)?;
+                account_repo::delete_tx(tx, id)?;
+                Ok(())
+            })
+            .await?;
 
         let _ = self.auth.delete_password(&account.email);
 
@@ -516,29 +521,29 @@ impl AccountService {
             .unwrap_or(&params.email)
             .to_string();
 
-        // 构建数据库模型
-        let model = accounts::ActiveModel {
-            name: Set(account_name),
-            email: Set(params.email),
-            display_name: Set(params.display_name),
-            provider: Set(params.provider_id),
+        let model = account_repo::AccountWrite {
+            name: account_name,
+            email: params.email,
+            display_name: params.display_name,
+            provider: params.provider_id,
             // IMAP 服务器配置
-            imap_host: Set(Some(params.imap_host)),
-            imap_port: Set(Some(params.imap_port as i32)),
-            imap_ssl_mode: Set(Some(params.imap_ssl_mode)),
+            imap_host: Some(params.imap_host),
+            imap_port: Some(params.imap_port as i32),
+            imap_ssl: Some(true),
+            imap_ssl_mode: Some(params.imap_ssl_mode),
             // SMTP 服务器配置
-            smtp_host: Set(Some(params.smtp_host)),
-            smtp_port: Set(Some(params.smtp_port as i32)),
-            smtp_ssl_mode: Set(Some(params.smtp_ssl_mode)),
+            smtp_host: Some(params.smtp_host),
+            smtp_port: Some(params.smtp_port as i32),
+            smtp_ssl: Some(true),
+            smtp_ssl_mode: Some(params.smtp_ssl_mode),
             // 其他属性
-            color: Set(params.color),
-            auth_type: Set(Some("OAuth2".to_string())),
-            account_type: Set("personal".to_string()),
-            sync_enabled: Set(Some(true)),
-            last_sync_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
+            color: params.color,
+            auth_type: Some("OAuth2".to_string()),
+            account_type: "personal".to_string(),
+            sync_enabled: Some(true),
+            last_sync_at: None,
+            created_at: now,
+            updated_at: now,
         };
 
         // 持久化到数据库
