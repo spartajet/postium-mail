@@ -530,6 +530,7 @@
     >
         <!-- 模态框主体：固定宽度，圆角卡片样式 -->
         <div
+            data-testid="add-account-modal"
             class="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl"
         >
             <!-- 模态框头部：标题 + 步骤指示器 + 关闭按钮 -->
@@ -566,6 +567,7 @@
                 </div>
                 <!-- 关闭按钮 -->
                 <button
+                    data-testid="add-account-close-button"
                     class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                     onclick={close}
                     aria-label="Close"
@@ -617,6 +619,7 @@
 
                             <!-- "其他"按钮：进入手动配置模式 -->
                             <button
+                                data-testid="add-account-provider-other-button"
                                 class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border p-4 transition-all hover:border-primary/50 hover:bg-glass-hover"
                                 onclick={selectManual}
                             >
@@ -692,6 +695,7 @@
                                     >{t.account.email}</label
                                 >
                                 <input
+                                    data-testid="add-account-email-input"
                                     type="email"
                                     bind:value={email}
                                     onchange={detectProvider}
@@ -722,6 +726,7 @@
                                     >{t.account.displayName}</label
                                 >
                                 <input
+                                    data-testid="add-account-display-name-input"
                                     type="text"
                                     bind:value={displayName}
                                     class="w-full rounded-md border border-border bg-glass px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -858,6 +863,7 @@
                                     >{t.account.email}</label
                                 >
                                 <input
+                                    data-testid="add-account-email-input"
                                     type="email"
                                     bind:value={email}
                                     onchange={detectProvider}
@@ -887,6 +893,7 @@
                                     >{t.account.displayName}</label
                                 >
                                 <input
+                                    data-testid="add-account-display-name-input"
                                     type="text"
                                     bind:value={displayName}
                                     class="w-full rounded-md border border-border bg-glass px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -902,6 +909,7 @@
                                     >{t.account.password}</label
                                 >
                                 <input
+                                    data-testid="add-account-password-input"
                                     type="password"
                                     bind:value={password}
                                     required
@@ -931,6 +939,7 @@
                                                 {t.account.imapHost}
                                             </label>
                                             <input
+                                                data-testid="add-account-imap-host-input"
                                                 type="text"
                                                 bind:value={imapHost}
                                                 required
@@ -947,6 +956,7 @@
                                                 {t.account.imapPort}
                                             </label>
                                             <input
+                                                data-testid="add-account-imap-port-input"
                                                 type="number"
                                                 bind:value={imapPort}
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -961,6 +971,7 @@
                                                 IMAP 加密
                                             </label>
                                             <select
+                                                data-testid="add-account-imap-ssl-select"
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                                                 value={imapSslMode}
                                                 onchange={(e) =>
@@ -988,6 +999,7 @@
                                                 {t.account.smtpHost}
                                             </label>
                                             <input
+                                                data-testid="add-account-smtp-host-input"
                                                 type="text"
                                                 bind:value={smtpHost}
                                                 required
@@ -1004,6 +1016,7 @@
                                                 {t.account.smtpPort}
                                             </label>
                                             <input
+                                                data-testid="add-account-smtp-port-input"
                                                 type="number"
                                                 bind:value={smtpPort}
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -1018,6 +1031,7 @@
                                                 SMTP 加密
                                             </label>
                                             <select
+                                                data-testid="add-account-smtp-ssl-select"
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                                                 value={smtpSslMode}
                                                 onchange={(e) =>
@@ -1038,13 +1052,19 @@
 
                             <!-- 错误信息提示 -->
                             {#if error}
-                                <p class="text-sm text-destructive">{error}</p>
+                                <p
+                                    data-testid="add-account-error"
+                                    class="text-sm text-destructive"
+                                >
+                                    {error}
+                                </p>
                             {/if}
 
                             <!-- 操作按钮区域 -->
                             <div class="flex justify-between pt-2">
                                 <!-- 返回上一步按钮 -->
                                 <button
+                                    data-testid="add-account-back-button"
                                     type="button"
                                     class="flex items-center gap-1 rounded-md border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-glass-hover"
                                     onclick={() => {
@@ -1059,6 +1079,7 @@
                                 </button>
                                 <!-- 确认提交按钮 -->
                                 <button
+                                    data-testid="add-account-submit-button"
                                     type="submit"
                                     disabled={submitting ||
                                         phase === "syncing"}
@@ -1106,7 +1127,7 @@
 
                 <!-- ─── 第三步：添加成功 ─── -->
             {:else if step === "done"}
-                <div class="p-8 text-center">
+                <div data-testid="add-account-done" class="p-8 text-center">
                     <!-- 成功图标 -->
                     <CircleCheck size={48} class="mx-auto text-green-500" />
                     <!-- 显示添加的邮箱地址 -->
@@ -1147,6 +1168,7 @@
                         </button>
                         <!-- 关闭模态框 -->
                         <button
+                            data-testid="add-account-done-close-button"
                             class="compose-btn rounded-md px-4 py-2 text-sm font-medium text-white"
                             onclick={close}
                         >

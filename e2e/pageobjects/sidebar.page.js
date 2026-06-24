@@ -10,6 +10,7 @@ class SidebarPage {
   get accountSwitcher() { return byTestId('account-switcher'); }
   get primaryAccountOption() { return byTestId('account-option-primary'); }
   get secondaryAccountOption() { return byTestId('account-option-secondary'); }
+  get addAccountButton() { return byTestId('account-add-button'); }
   get activeAccountLabel() { return byTestId('active-account-label'); }
   get folderItems() { return $$('[data-testid^="folder-"]'); }
 
@@ -34,6 +35,23 @@ class SidebarPage {
     await this.openAccountSwitcher();
     await this.secondaryAccountOption.waitForDisplayed({ timeout: 10000 });
     await this.secondaryAccountOption.click();
+  }
+
+  async openAddAccountModal() {
+    await this.openAccountSwitcher();
+    await this.addAccountButton.waitForDisplayed({ timeout: 10000 });
+    await this.addAccountButton.click();
+  }
+
+  async switchToAccountByEmail(email) {
+    await this.openAccountSwitcher();
+    const escapedEmail = email.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const option = await $(`[data-testid="account-option"][data-email="${escapedEmail}"]`);
+    await option.waitForDisplayed({
+      timeout: 10000,
+      timeoutMsg: `账号切换器中未找到 ${email}`,
+    });
+    await option.click();
   }
 
   async clickInbox() {
