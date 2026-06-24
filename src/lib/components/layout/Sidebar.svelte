@@ -297,7 +297,8 @@
                             ? "account-option-primary"
                             : account.email === "secondary.e2e@postium.test"
                               ? "account-option-secondary"
-                              : undefined}
+                              : "account-option"}
+                        data-email={account.email}
                         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {account.id ===
                         accountStore.activeAccountId
                             ? 'bg-primary/10 text-primary'
@@ -318,6 +319,7 @@
                 <div class="border-t border-border">
                     <!-- 添加新账户按钮：打开添加账户模态框 -->
                     <button
+                        data-testid="account-add-button"
                         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-glass-hover"
                         onclick={() => {
                             getAddAccountModal?.()?.show();

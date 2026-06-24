@@ -5,7 +5,8 @@
   "type": "module",
   "packageManager": "bun@1.2.23",
   "scripts": {
-    "test": "node node_modules/@wdio/cli/bin/wdio.js run wdio.conf.js"
+    "test": "node node_modules/@wdio/cli/bin/wdio.js run wdio.conf.js",
+    "test:truth": "POSTIUM_REAL_MAIL=1 node node_modules/@wdio/cli/bin/wdio.js run wdio.truth.conf.js"
   },
   "devDependencies": {
     "@wdio/cli": "^9.19.0",
