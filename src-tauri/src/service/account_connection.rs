@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 
 const IMAP_VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
+const IMAP_LOGOUT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[async_trait]
 pub trait ImapConnectionVerifier: Send + Sync {
@@ -29,22 +30,24 @@ impl ImapConnectionVerifier for RealImapConnectionVerifier {
         email: &str,
         password: &str,
     ) -> Result<(), MailError> {
-        verify_imap_with_timeout(
+        let client = verify_imap_with_timeout(
             config,
-            verify_imap_without_timeout(config, email, password),
+            verify_imap_login_without_timeout(config, email, password),
             IMAP_VERIFICATION_TIMEOUT,
         )
-        .await
+        .await?;
+
+        finish_verified_imap_session(client.logout(), IMAP_LOGOUT_TIMEOUT).await
     }
 }
 
-async fn verify_imap_with_timeout<F>(
+async fn verify_imap_with_timeout<F, T>(
     config: &ImapServerConfig,
     verify: F,
     timeout: Duration,
-) -> Result<(), MailError>
+) -> Result<T, MailError>
 where
-    F: std::future::Future<Output = Result<(), MailError>>,
+    F: std::future::Future<Output = Result<T, MailError>>,
 {
     match tokio::time::timeout(timeout, verify).await {
         Ok(result) => result,
@@ -63,20 +66,35 @@ where
     }
 }
 
-async fn verify_imap_without_timeout(
+async fn verify_imap_login_without_timeout(
     config: &ImapServerConfig,
     email: &str,
     password: &str,
-) -> Result<(), MailError> {
+) -> Result<ImapClient, MailError> {
     tracing::debug!(
         host = %config.host,
         port = config.port,
         email,
         "IMAP: 开始账号添加连接校验"
     );
-    let client = ImapClient::connect(config, email, password).await?;
-    if let Err(err) = client.logout().await {
-        tracing::debug!(error = %err, "IMAP 校验登录成功但登出失败");
+    ImapClient::connect(config, email, password).await
+}
+
+async fn finish_verified_imap_session<F>(logout: F, timeout: Duration) -> Result<(), MailError>
+where
+    F: std::future::Future<Output = Result<(), MailError>>,
+{
+    match tokio::time::timeout(timeout, logout).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            tracing::debug!(error = %err, "IMAP 校验登录成功但登出失败");
+        }
+        Err(_) => {
+            tracing::debug!(
+                timeout_secs = timeout.as_secs(),
+                "IMAP 校验登录成功但登出超时"
+            );
+        }
     }
     Ok(())
 }
@@ -278,5 +296,19 @@ mod tests {
             Err(MailError::ImapConnectionFailed(message))
                 if message.contains("超时") && message.contains("imap.example.com:993")
         ));
+    }
+
+    #[tokio::test]
+    async fn logout_timeout_after_successful_login_should_not_fail_verification() {
+        let result = finish_verified_imap_session(
+            async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok(())
+            },
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert!(result.is_ok());
     }
 }
