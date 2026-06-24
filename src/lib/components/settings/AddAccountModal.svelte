@@ -50,6 +50,8 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入账户状态管理，用于刷新账户列表
     import { getAccountState } from "$lib/stores/account.svelte";
+    // 导入同步状态管理，用于首次同步新建账号
+    import { getSyncState } from "$lib/stores/sync.svelte";
     // 导入 Tauri 后端命令，用于与服务端通信
     import { commands } from "$lib/bindings";
 
@@ -75,6 +77,8 @@
     const t = $derived(i18n.t);
     // 获取账户状态实例
     const accountStore = getAccountState();
+    // 获取同步状态实例
+    const syncStore = getSyncState();
 
     // ─── 模态框基础状态 ───
 
@@ -132,6 +136,10 @@
     let submitting = $state(false);
     // 错误信息
     let error = $state("");
+    // 当前提交阶段：空闲、验证中、同步中、完成
+    let phase = $state<"idle" | "validating" | "syncing" | "done">("idle");
+    // 首次同步错误信息
+    let syncError = $state("");
 
     // ─── OAuth2 授权流程状态 ───
 
@@ -209,6 +217,8 @@
             : "Password";
         step = "credentials";
         error = "";
+        syncError = "";
+        phase = "idle";
         oauthError = "";
     }
 
@@ -222,6 +232,8 @@
         authType = "Password";
         step = "credentials";
         error = "";
+        syncError = "";
+        phase = "idle";
         oauthError = "";
     }
 
@@ -259,6 +271,8 @@
     async function startOAuth2Flow() {
         if (!selectedProvider || !email) return;
         oauthError = "";
+        syncError = "";
+        phase = "idle";
         oauthPolling = true;
 
         try {
@@ -268,7 +282,6 @@
                 email,
                 displayName || null,
             );
-            console.log(result);
 
             if (result.status === "error") {
                 oauthError = result.error.message as string;
@@ -289,6 +302,26 @@
             oauthError = String(e);
             oauthPolling = false;
         }
+    }
+
+    async function syncCreatedAccount(accountId: number) {
+        phase = "syncing";
+        syncError = "";
+        accountStore.setActive(accountId);
+
+        await syncStore.syncAccount(accountId);
+
+        if (syncStore.error) {
+            syncError = syncStore.error;
+        }
+    }
+
+    function findAccountIdByEmail(targetEmail: string) {
+        return (
+            accountStore.accounts.find(
+                (account) => account.email === targetEmail,
+            )?.id ?? null
+        );
     }
 
     /**
@@ -343,6 +376,14 @@
                     oauthPolling = false;
                     // 后端已自动创建账号，刷新账户列表并跳转到完成页
                     await accountStore.loadAccounts();
+                    const accountId = findAccountIdByEmail(email);
+                    if (accountId !== null) {
+                        await syncCreatedAccount(accountId);
+                    } else {
+                        syncError = "账号已添加，但未能定位新账号执行首次同步";
+                        phase = "done";
+                    }
+                    phase = "done";
                     step = "done";
                 }
                 // 状态三：授权失败
@@ -370,7 +411,9 @@
     async function handleSubmit(e: Event) {
         e.preventDefault();
         error = "";
+        syncError = "";
         submitting = true;
+        phase = "validating";
         try {
             const result = await commands.createAccount({
                 // 用户名：取邮箱 @ 前的部分
@@ -401,14 +444,18 @@
 
             if (result.status === "ok") {
                 // 创建成功，跳转到完成步骤
-                step = "done";
                 await accountStore.loadAccounts();
+                await syncCreatedAccount(result.data.id);
+                phase = "done";
+                step = "done";
             } else {
                 // 创建失败，显示错误信息
                 error = result.error.message as string;
+                phase = "idle";
             }
         } catch (e: unknown) {
             error = String(e);
+            phase = "idle";
         }
         submitting = false;
     }
@@ -457,6 +504,8 @@
         detectedProviderName = "";
         submitting = false;
         error = "";
+        phase = "idle";
+        syncError = "";
         oauthState = "";
         oauthPolling = false;
         oauthError = "";
@@ -776,16 +825,23 @@
                                     <!-- 确认提交按钮 -->
                                     <button
                                         type="submit"
-                                        disabled={submitting}
+                                        disabled={submitting ||
+                                            phase === "syncing"}
                                         class="compose-btn flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
                                     >
-                                        {#if submitting}
+                                        {#if submitting || phase === "syncing"}
                                             <Loader2
                                                 size={16}
                                                 class="animate-spin"
                                             />
                                         {/if}
-                                        {t.common.confirm}
+                                        {#if phase === "validating"}
+                                            正在验证...
+                                        {:else if phase === "syncing"}
+                                            正在同步...
+                                        {:else}
+                                            {t.common.confirm}
+                                        {/if}
                                     </button>
                                 </form>
                             {/if}
@@ -994,6 +1050,8 @@
                                     onclick={() => {
                                         step = "select";
                                         error = "";
+                                        syncError = "";
+                                        phase = "idle";
                                     }}
                                 >
                                     <ChevronLeft size={16} />
@@ -1002,16 +1060,23 @@
                                 <!-- 确认提交按钮 -->
                                 <button
                                     type="submit"
-                                    disabled={submitting}
+                                    disabled={submitting ||
+                                        phase === "syncing"}
                                     class="compose-btn flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
                                 >
-                                    {#if submitting}
+                                    {#if submitting || phase === "syncing"}
                                         <Loader2
                                             size={16}
                                             class="animate-spin"
                                         />
                                     {/if}
-                                    {t.common.confirm}
+                                    {#if phase === "validating"}
+                                        正在验证...
+                                    {:else if phase === "syncing"}
+                                        正在同步...
+                                    {:else}
+                                        {t.common.confirm}
+                                    {/if}
                                 </button>
                             </div>
                         </form>
@@ -1026,6 +1091,8 @@
                                 onclick={() => {
                                     step = "select";
                                     error = "";
+                                    syncError = "";
+                                    phase = "idle";
                                     oauthError = "";
                                     oauthPolling = false;
                                 }}
@@ -1047,9 +1114,15 @@
                         {email}
                     </p>
                     <!-- 成功提示文字 -->
-                    <p class="mt-1 text-xs text-muted-foreground">
-                        {t.account.testSuccess}
-                    </p>
+                    {#if syncError}
+                        <p class="mt-1 text-xs text-destructive">
+                            账号已添加，但首次同步失败：{syncError}
+                        </p>
+                    {:else}
+                        <p class="mt-1 text-xs text-muted-foreground">
+                            账号已添加并完成首次同步
+                        </p>
+                    {/if}
                     <!-- 操作按钮 -->
                     <div class="mt-6 flex items-center justify-center gap-3">
                         <!-- 继续添加另一个账号 -->
@@ -1063,6 +1136,8 @@
                                 selectedProvider = null;
                                 isManual = false;
                                 error = "";
+                                phase = "idle";
+                                syncError = "";
                                 oauthState = "";
                                 oauthPolling = false;
                                 oauthError = "";

@@ -30,6 +30,7 @@
 /// - AccountDto: 账号数据传输对象
 /// - CreateAccountRequest: 创建账号请求
 /// - UpdateAccountRequest: 更新账号请求
+pub mod account_connection;
 pub mod account_service;
 
 /// 邮件服务模块

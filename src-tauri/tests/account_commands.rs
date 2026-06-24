@@ -1,8 +1,27 @@
 mod common;
 
+use async_trait::async_trait;
 use common::{TestEmail, TestServices, count_where, insert_test_email};
+use postium_mail_lib::domain::providers::ImapServerConfig;
+use postium_mail_lib::error::MailError;
+use postium_mail_lib::service::account_connection::ImapConnectionVerifier;
 use postium_mail_lib::service::account_service::{CreateAccountRequest, CreateOAuth2AccountParams};
 use postium_mail_lib::service::label_service::CreateLabelRequest;
+use std::sync::Arc;
+
+struct FailingImapVerifier;
+
+#[async_trait]
+impl ImapConnectionVerifier for FailingImapVerifier {
+    async fn verify(
+        &self,
+        _config: &ImapServerConfig,
+        _email: &str,
+        _password: &str,
+    ) -> Result<(), MailError> {
+        Err(MailError::AuthFailed("forced imap failure".to_string()))
+    }
+}
 
 #[tokio::test]
 async fn test_create_account() {
@@ -58,6 +77,42 @@ async fn test_create_account_saves_password() {
         svc.auth.get_password(&created.email).unwrap(),
         "initial_password"
     );
+}
+
+#[tokio::test]
+async fn test_create_account_does_not_persist_when_imap_verification_fails() {
+    let svc = TestServices::new_with_imap_verifier(Arc::new(FailingImapVerifier)).await;
+    let req = CreateAccountRequest {
+        name: "Invalid Account".to_string(),
+        email: "invalid@gmail.com".to_string(),
+        display_name: None,
+        provider: "gmail".to_string(),
+        auth_type: "Password".to_string(),
+        password: "bad_password".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+
+    let result = svc.account_service.create(req).await;
+
+    assert!(matches!(result, Err(MailError::AuthFailed(_))));
+    let count = svc
+        .db
+        .call(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(svc.auth.get_password("invalid@gmail.com").is_err());
 }
 
 #[tokio::test]
@@ -231,7 +286,7 @@ async fn test_delete_account() {
         name: "To Delete".to_string(),
         email: "delete@163.com".to_string(),
         display_name: None,
-        provider: "163".to_string(),
+        provider: "yi".to_string(),
         auth_type: "Password".to_string(),
         password: "pass".to_string(),
         imap_host: None,
