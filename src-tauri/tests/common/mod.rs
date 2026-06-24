@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use postium_mail_lib::domain::auth::AuthManager;
+use postium_mail_lib::domain::providers::pool::init_provider_pool;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
+use postium_mail_lib::service::account_connection::{
+    ImapConnectionVerifier, NoopImapConnectionVerifier,
+};
 use postium_mail_lib::service::email_service::EmailService;
 use postium_mail_lib::service::{AccountService, LabelService};
 
@@ -26,11 +30,20 @@ pub struct TestServices {
 impl TestServices {
     /// Create a full set of services backed by a fresh in-memory database.
     pub async fn new() -> Self {
+        Self::new_with_imap_verifier(Arc::new(NoopImapConnectionVerifier)).await
+    }
+
+    pub async fn new_with_imap_verifier(imap_verifier: Arc<dyn ImapConnectionVerifier>) -> Self {
+        init_provider_pool();
         let db = create_test_db().await;
         let auth = Arc::new(AuthManager::in_memory());
 
         Self {
-            account_service: AccountService::new(db.clone(), auth.clone()),
+            account_service: AccountService::new_with_imap_verifier(
+                db.clone(),
+                auth.clone(),
+                imap_verifier,
+            ),
             email_service: EmailService::new(auth.clone(), db.clone()),
             label_service: LabelService::new(db.clone()),
             db,

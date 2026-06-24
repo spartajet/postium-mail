@@ -3,6 +3,9 @@ use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, label_repo, sync_repo};
+use crate::service::account_connection::{
+    ImapConnectionVerifier, RealImapConnectionVerifier, imap_config_from_create_request,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -204,6 +207,8 @@ pub struct AccountService {
     db: DbConn,
     /// 认证管理器（线程安全）
     auth: Arc<AuthManager>,
+    /// IMAP 连通性校验器
+    imap_verifier: Arc<dyn ImapConnectionVerifier>,
 }
 
 impl AccountService {
@@ -218,7 +223,19 @@ impl AccountService {
     ///
     /// 返回初始化好的 AccountService 实例
     pub fn new(db: DbConn, auth: Arc<AuthManager>) -> Self {
-        Self { db, auth }
+        Self::new_with_imap_verifier(db, auth, Arc::new(RealImapConnectionVerifier))
+    }
+
+    pub fn new_with_imap_verifier(
+        db: DbConn,
+        auth: Arc<AuthManager>,
+        imap_verifier: Arc<dyn ImapConnectionVerifier>,
+    ) -> Self {
+        Self {
+            db,
+            auth,
+            imap_verifier,
+        }
     }
 
     /// 获取所有账号列表
@@ -299,6 +316,11 @@ impl AccountService {
     pub async fn create(&self, req: CreateAccountRequest) -> Result<AccountDto, MailError> {
         // 记录日志，便于追踪
         tracing::info!(email = %req.email, provider = %req.provider, "创建账号");
+
+        let imap_config = imap_config_from_create_request(&req)?;
+        self.imap_verifier
+            .verify(&imap_config, &req.email, &req.password)
+            .await?;
 
         // 获取当前时间戳
         let now = chrono::Utc::now().timestamp();

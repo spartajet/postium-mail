@@ -7,6 +7,7 @@ use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, sync_repo};
+use crate::service::account_connection::imap_config_from_account;
 use std::sync::Arc;
 
 /// 同步编排器 — 只负责同步流程编排，不负责进度通知
@@ -60,7 +61,7 @@ impl SyncOrchestrator {
             .get_credentials(&account.email, mail_auth_type, Some(provider_id))
             .await?;
 
-        let imap_config = provider.imap_config(&account.email);
+        let imap_config = imap_config_from_account(&account)?;
 
         // 3. 连接 IMAP
         let mut client = match &credentials {
