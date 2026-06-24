@@ -7,11 +7,17 @@ use crate::service::account_service::CreateAccountRequest;
 use async_trait::async_trait;
 use std::time::Duration;
 
+/// IMAP 连接校验超时时间（秒）
 const IMAP_VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
+/// 校验成功后登出超时时间（秒）
 const IMAP_LOGOUT_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// IMAP 连接校验器接口
+///
+/// 在添加账号时用于验证 IMAP 凭证是否有效。抽象为 trait 以便在测试中替换为 mock 实现。
 #[async_trait]
 pub trait ImapConnectionVerifier: Send + Sync {
+    /// 验证 IMAP 连接和登录凭证
     async fn verify(
         &self,
         config: &ImapServerConfig,
@@ -20,6 +26,7 @@ pub trait ImapConnectionVerifier: Send + Sync {
     ) -> Result<(), MailError>;
 }
 
+/// 真实的 IMAP 连接校验器 — 执行实际的 TCP+TLS 连接和登录
 pub struct RealImapConnectionVerifier;
 
 #[async_trait]
@@ -41,6 +48,9 @@ impl ImapConnectionVerifier for RealImapConnectionVerifier {
     }
 }
 
+/// 为 IMAP 校验操作添加超时保护
+///
+/// 防止因网络问题导致账号添加流程长时间卡住。
 async fn verify_imap_with_timeout<F, T>(
     config: &ImapServerConfig,
     verify: F,
@@ -66,6 +76,7 @@ where
     }
 }
 
+/// 执行不带超时的 IMAP 登录校验（由 `verify_imap_with_timeout` 包装）
 async fn verify_imap_login_without_timeout(
     config: &ImapServerConfig,
     email: &str,
@@ -80,6 +91,9 @@ async fn verify_imap_login_without_timeout(
     ImapClient::connect(config, email, password).await
 }
 
+/// 完成校验后的 IMAP 会话清理
+///
+/// 登出操作即使失败或超时也不影响校验结果（登录已成功即说明凭证有效）。
 async fn finish_verified_imap_session<F>(logout: F, timeout: Duration) -> Result<(), MailError>
 where
     F: std::future::Future<Output = Result<(), MailError>>,
@@ -99,6 +113,7 @@ where
     Ok(())
 }
 
+/// 空操作校验器 — 直接返回成功，用于测试或跳过校验的场景
 pub struct NoopImapConnectionVerifier;
 
 #[async_trait]
@@ -113,6 +128,10 @@ impl ImapConnectionVerifier for NoopImapConnectionVerifier {
     }
 }
 
+/// 从创建账号请求中解析 IMAP 服务器配置
+///
+/// 优先使用用户手动填写的配置（imap_host/port/ssl_mode），
+/// 未提供时回退到服务商预设配置。
 pub fn imap_config_from_create_request(
     req: &CreateAccountRequest,
 ) -> Result<ImapServerConfig, MailError> {
@@ -127,6 +146,9 @@ pub fn imap_config_from_create_request(
     provider_imap_config(&req.provider, &req.email)
 }
 
+/// 从已存储的账号模型中解析 IMAP 服务器配置
+///
+/// 与 `imap_config_from_create_request` 类似，优先使用手动配置，回退到服务商预设。
 pub fn imap_config_from_account(account: &accounts::Model) -> Result<ImapServerConfig, MailError> {
     if let Some(config) = manual_imap_config(
         account.imap_host.as_deref(),
@@ -139,6 +161,7 @@ pub fn imap_config_from_account(account: &accounts::Model) -> Result<ImapServerC
     provider_imap_config(&account.provider, &account.email)
 }
 
+/// 解析用户手动填写的 IMAP 配置，字段缺失时返回 None
 fn manual_imap_config(
     host: Option<&str>,
     port: Option<i32>,
@@ -161,6 +184,7 @@ fn manual_imap_config(
     }))
 }
 
+/// 从服务商池中获取 IMAP 配置
 fn provider_imap_config(provider_id: &str, email: &str) -> Result<ImapServerConfig, MailError> {
     let provider_pool = PROVIDER_POOL
         .get()
@@ -172,6 +196,7 @@ fn provider_imap_config(provider_id: &str, email: &str) -> Result<ImapServerConf
     Ok(provider.imap_config(email))
 }
 
+/// 将字符串形式的 SSL 模式解析为 `SslMode` 枚举
 fn parse_ssl_mode(value: &str) -> Result<SslMode, MailError> {
     match value {
         "Tls" | "TLS" | "Implicit" => Ok(SslMode::Implicit),

@@ -1909,6 +1909,11 @@ export type ProviderInfo = {
 	sort_order: number,
 };
 
+/**
+ *  全文搜索的返回结果
+ * 
+ *  包含邮件基本信息及 FTS 相关性排名（rank），rank 越高表示匹配度越高。
+ */
 export type SearchResult = {
 	id: number,
 	account_id: number,

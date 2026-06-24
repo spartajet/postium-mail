@@ -10,6 +10,22 @@ use crate::{
     },
 };
 
+/// 增量同步单个文件夹
+///
+/// 基于上次同步的最高 UID（`last_sync_uid`），只获取新增的邮件。
+/// 相比全量同步显著减少网络传输量，适用于定期自动同步场景。
+///
+/// # 参数
+///
+/// * `db` - 数据库连接
+/// * `account_id` - 账号 ID
+/// * `folder` - 文件夹名称
+/// * `last_sync_uid` - 上次同步的最高 UID
+/// * `imap_client` - IMAP 客户端引用
+///
+/// # 返回
+///
+/// 返回同步结果统计
 pub async fn sync_folder_incremental(
     db: DbConn,
     account_id: i32,

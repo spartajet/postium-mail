@@ -1,8 +1,22 @@
+//! 账号仓库模块（Account Repository）
+//!
+//! 负责 `accounts` 表的数据访问，包括账号的增删改查（CRUD）操作，
+//! 以及更新账号的最后同步时间。
+//!
+//! 主要操作：
+//! - 查询账号列表、按 ID/邮箱查询账号
+//! - 创建、更新、删除账号
+//! - 记录账号的最后同步时间
+
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::row::{opt_bool_to_int, opt_int_to_bool};
 
+/// 用于创建或更新账号的写入数据结构
+///
+/// 不包含自增主键 `id`，其余字段与 `accounts` 表一一对应。
+/// 布尔字段使用 `Option<bool>`，序列化时转换为 0/1 整数存储。
 pub struct AccountWrite {
     pub name: String,
     pub email: String,
@@ -25,6 +39,9 @@ pub struct AccountWrite {
     pub updated_at: i64,
 }
 
+/// 将数据库行映射为 `accounts::Model`
+///
+/// 同时将整数形式的布尔字段转换为 `Option<bool>`。
 fn map_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<accounts::Model> {
     Ok(accounts::Model {
         id: row.get("id")?,
@@ -50,6 +67,15 @@ fn map_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<accounts::Model> {
     })
 }
 
+/// 查询所有账号，按 ID 升序排列。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+///
+/// # 返回
+///
+/// 账号列表，按 ID 升序排列。
 pub async fn list(db: &DbConn) -> Result<Vec<accounts::Model>, MailError> {
     db.call(|conn| {
         let mut stmt = conn.prepare(
@@ -64,6 +90,16 @@ pub async fn list(db: &DbConn) -> Result<Vec<accounts::Model>, MailError> {
     .await
 }
 
+/// 根据 ID 查询账号。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 账号 ID
+///
+/// # 返回
+///
+/// 找到则返回 `Some(model)`，不存在则返回 `None`。
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<accounts::Model>, MailError> {
     db.call(move |conn| {
         let mut stmt = conn.prepare(
@@ -82,6 +118,16 @@ pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<accounts::Model>, 
     .await
 }
 
+/// 根据邮箱地址查询账号。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `email`: 账号邮箱地址
+///
+/// # 返回
+///
+/// 找到则返回 `Some(model)`，不存在则返回 `None`。
 pub async fn get_by_email(db: &DbConn, email: &str) -> Result<Option<accounts::Model>, MailError> {
     let email = email.to_string();
     db.call(move |conn| {
@@ -101,6 +147,16 @@ pub async fn get_by_email(db: &DbConn, email: &str) -> Result<Option<accounts::M
     .await
 }
 
+/// 创建新账号并返回创建后的完整记录。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `model`: 待创建的账号数据
+///
+/// # 返回
+///
+/// 创建成功后的账号记录（包含自增 ID）。
 pub async fn create(db: &DbConn, model: AccountWrite) -> Result<accounts::Model, MailError> {
     db.call(move |conn| {
         conn.execute(
@@ -145,6 +201,19 @@ pub async fn create(db: &DbConn, model: AccountWrite) -> Result<accounts::Model,
     .await
 }
 
+/// 根据 ID 更新账号，返回更新后的完整记录。
+///
+/// 覆盖更新所有字段，调用方需提供完整的 `AccountWrite` 数据。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 待更新的账号 ID
+/// - `model`: 新的账号数据
+///
+/// # 返回
+///
+/// 更新后的账号记录。
 pub async fn update(
     db: &DbConn,
     id: i32,
@@ -195,6 +264,18 @@ pub async fn update(
     .await
 }
 
+/// 根据 ID 删除账号。
+///
+/// 注意：此操作仅删除 `accounts` 表中的记录，不级联删除关联数据。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 待删除的账号 ID
+///
+/// # 返回
+///
+/// 删除成功返回 `Ok(())`。
 pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
     db.call(move |conn| {
         conn.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
@@ -203,11 +284,31 @@ pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
     .await
 }
 
+/// 在指定事务中删除账号（事务版本）
+///
+/// 供需要跨表事务性删除的调用方使用。
+///
+/// # 参数
+///
+/// - `tx`: 数据库事务
+/// - `id`: 待删除的账号 ID
 pub fn delete_tx(tx: &rusqlite::Transaction<'_>, id: i32) -> rusqlite::Result<()> {
     tx.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
     Ok(())
 }
 
+/// 更新账号的最后同步时间为当前时间。
+///
+/// 同时更新 `updated_at` 字段。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 账号 ID
+///
+/// # 返回
+///
+/// 更新成功返回 `Ok(())`。
 pub async fn update_last_sync(db: &DbConn, id: i32) -> Result<(), MailError> {
     let now = chrono::Utc::now().timestamp();
     db.call(move |conn| {

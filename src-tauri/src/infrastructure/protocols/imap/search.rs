@@ -50,6 +50,9 @@ impl ImapClient {
         Ok(uid_list)
     }
 
+    /// 获取指定 UID 之后的邮件 UID 列表（用于增量同步）
+    ///
+    /// 从 `uid_since` 开始向后探测 100 个 UID 范围内的邮件。
     pub async fn list_uids_since_uid(
         &mut self,
         folder: &str,

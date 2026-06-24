@@ -1,8 +1,19 @@
+//! 同步状态仓库模块（Sync Repository）
+//!
+//! 负责 `sync_state` 和 `sync_errors` 两张表的数据访问，
+//! 记录邮件同步的进度状态和错误信息。
+//!
+//! 主要操作：
+//! - 同步状态（sync_state）：记录/查询每个账号每个文件夹的 IMAP uidvalidity、uidnext、last_sync_uid
+//! - 同步错误（sync_errors）：记录同步过程中的错误、查询未解决的错误
+//! - 按账号清理同步状态和错误记录
+
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::{sync_errors, sync_state};
 use crate::infrastructure::storage::row::opt_int_to_bool;
 
+/// 将数据库行映射为 `sync_state::Model`
 fn map_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_state::Model> {
     Ok(sync_state::Model {
         id: row.get("id")?,
@@ -18,6 +29,9 @@ fn map_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_state::Model
     })
 }
 
+/// 将数据库行映射为 `sync_errors::Model`
+///
+/// 将整数形式的 `resolved` 字段转换为 `Option<bool>`。
 fn map_sync_error(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_errors::Model> {
     Ok(sync_errors::Model {
         id: row.get("id")?,
@@ -32,6 +46,23 @@ fn map_sync_error(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_errors::Mode
     })
 }
 
+/// 写入或更新文件夹的同步状态（upsert）。
+///
+/// 基于账号 ID + 文件夹的唯一约束进行 upsert 操作。
+/// 对于 `uidnext`、`uidvalidity`、`last_sync_uid` 字段，传入 `None` 时保留原值（使用 COALESCE）。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `uidnext`: IMAP uidnext 值，`None` 表示不更新
+/// - `uidvalidity`: IMAP uidvalidity 值，`None` 表示不更新
+/// - `last_sync_uid`: 上次同步到的最大 UID，`None` 表示不更新
+///
+/// # 返回
+///
+/// 写入/更新成功返回 `Ok(())`。
 pub async fn upsert_sync_state(
     db: &DbConn,
     account_id: i32,
@@ -67,6 +98,9 @@ pub async fn upsert_sync_state(
     .await
 }
 
+/// [`upsert_sync_state`] 的别名
+///
+/// 供旧代码使用的一致命名封装。
 pub async fn upsert_state(
     db: &DbConn,
     account_id: i32,
@@ -78,6 +112,17 @@ pub async fn upsert_state(
     upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
 }
 
+/// 查询指定账号和文件夹的同步状态。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+///
+/// # 返回
+///
+/// 找到则返回 `Some(model)`，不存在则返回 `None`。
 pub async fn get_sync_state(
     db: &DbConn,
     account_id: i32,
@@ -100,6 +145,9 @@ pub async fn get_sync_state(
     .await
 }
 
+/// [`get_sync_state`] 的别名
+///
+/// 供旧代码使用的一致命名封装。
 pub async fn get_state(
     db: &DbConn,
     account_id: i32,
@@ -108,6 +156,20 @@ pub async fn get_state(
     get_sync_state(db, account_id, folder).await
 }
 
+/// 更新文件夹的同步状态（实际委托给 [`upsert_sync_state`]）
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `uidnext`: IMAP uidnext 值
+/// - `uidvalidity`: IMAP uidvalidity 值
+/// - `last_sync_uid`: 上次同步到的最大 UID
+///
+/// # 返回
+///
+/// 更新成功返回 `Ok(())`。
 pub async fn update_sync_state(
     db: &DbConn,
     account_id: i32,
@@ -119,6 +181,22 @@ pub async fn update_sync_state(
     upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
 }
 
+/// 记录一条同步错误。
+///
+/// 将错误信息持久化到 `sync_errors` 表，`resolved` 初始为 0（未解决）。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称，可为 `None`（非文件夹级错误）
+/// - `error_type`: 错误类型标识
+/// - `error_message`: 错误详情
+/// - `uid`: 关联的邮件 UID，可为 `None`
+///
+/// # 返回
+///
+/// 记录成功返回 `Ok(())`。
 pub async fn record_error(
     db: &DbConn,
     account_id: i32,
@@ -142,6 +220,9 @@ pub async fn record_error(
     .await
 }
 
+/// [`record_error`] 的别名
+///
+/// 供旧代码使用的一致命名封装。
 pub async fn log_error(
     db: &DbConn,
     account_id: i32,
@@ -153,6 +234,16 @@ pub async fn log_error(
     record_error(db, account_id, folder, error_type, error_message, uid).await
 }
 
+/// 查询指定账号下所有未解决的同步错误，按 ID 升序排列。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+///
+/// # 返回
+///
+/// 该账号未解决（`resolved = 0` 或 `NULL`）的错误列表。
 pub async fn list_unresolved_errors(
     db: &DbConn,
     account_id: i32,
@@ -169,11 +260,31 @@ pub async fn list_unresolved_errors(
     .await
 }
 
+/// 删除指定账号的所有同步状态和错误记录。
+///
+/// 在事务中同时清理 `sync_errors` 和 `sync_state` 两张表。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+///
+/// # 返回
+///
+/// 删除成功返回 `Ok(())`。
 pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<(), MailError> {
     db.transaction(move |tx| delete_by_account_tx(tx, account_id))
         .await
 }
 
+/// 在指定事务中删除账号的同步状态和错误记录（事务版本）
+///
+/// 先清理 `sync_errors`，再清理 `sync_state`。
+///
+/// # 参数
+///
+/// - `tx`: 数据库事务
+/// - `account_id`: 账号 ID
 pub fn delete_by_account_tx(
     tx: &rusqlite::Transaction<'_>,
     account_id: i32,

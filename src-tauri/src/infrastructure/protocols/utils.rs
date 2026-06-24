@@ -1,6 +1,9 @@
 use async_imap::imap_proto::Address;
 use chrono::Datelike;
 
+/// 返回三个月前的日期，格式化为 IMAP 搜索所需的日期格式（如 "01-Jan-2025"）
+///
+/// 用于全量同步时通过 IMAP `SINCE` 命令限定查询范围。
 pub fn three_months_ago_imap_format() -> String {
     let now = chrono::Utc::now();
     let three_months_ago = now - chrono::Duration::days(90);
