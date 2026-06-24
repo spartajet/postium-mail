@@ -1,3 +1,14 @@
+//! 邮件仓库模块（Email Repository）
+//!
+//! 负责 `emails` 表的数据访问，是存储层中最大的仓库模块。
+//! 涵盖邮件的完整生命周期管理：增删改查、状态变更、批量同步、文件夹统计等。
+//!
+//! 主要操作：
+//! - 查询：按文件夹/多文件夹/星标查询、按 ID/UID 查询单条、文件夹统计
+//! - 写入：单条创建、批量创建（邮件头/完整邮件）、更新
+//! - 状态管理：标记已读、切换星标、软删除、移动文件夹、更新正文
+//! - 删除：软删除、按文件夹删除、级联删除文件夹内容、按账号删除
+
 use crate::domain::sync::FolderStat;
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
@@ -12,6 +23,7 @@ use crate::infrastructure::storage::repository::attachment_repo::{
 use crate::infrastructure::storage::row::{bool_to_int, opt_bool_to_int, opt_int_to_bool};
 use rusqlite::types::Value;
 
+/// 批量插入邮件时使用的 SQL 语句常量
 const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         account_id, folder, uid, message_id, subject, sender_name, sender_email,
         recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
@@ -22,6 +34,10 @@ const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
      )";
 
+/// 用于创建或更新邮件的写入数据结构
+///
+/// 不包含自增主键 `id`，其余字段与 `emails` 表一一对应。
+/// 布尔类标记字段使用 `Option<bool>`，序列化时转换为 0/1 整数存储。
 #[derive(Clone, Debug)]
 pub struct EmailWrite {
     pub account_id: i32,
@@ -48,6 +64,10 @@ pub struct EmailWrite {
     pub updated_at: i64,
 }
 
+/// 将数据库行映射为 `emails::Model`
+///
+/// 同时将整数形式的布尔标记字段转换为 `Option<bool>`，
+/// 并将 `uid` 从 `i64` 转换为 `u32`。
 fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
     Ok(emails::Model {
         id: row.get("id")?,
@@ -76,6 +96,9 @@ fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
     })
 }
 
+/// 生成指定数量的 SQL 占位符字符串，如 `?,?,?`
+///
+/// 用于动态构建 `IN (...)` 子句。
 fn placeholders(count: usize) -> String {
     std::iter::repeat("?")
         .take(count)
@@ -83,6 +106,14 @@ fn placeholders(count: usize) -> String {
         .join(",")
 }
 
+/// 在预编译语句上执行单次邮件插入。
+///
+/// 供批量插入场景复用预编译语句，避免重复 prepare 带来的性能开销。
+///
+/// # 参数
+///
+/// - `stmt`: 已预编译的插入语句
+/// - `model`: 待插入的邮件数据
 fn execute_email_insert(
     stmt: &mut rusqlite::Statement<'_>,
     model: &EmailWrite,
@@ -114,6 +145,21 @@ fn execute_email_insert(
     Ok(())
 }
 
+/// 按文件夹分页查询邮件。
+///
+/// 返回未软删除的邮件，按发送时间降序排列，同时返回符合条件的总数。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `page`: 页码（从 1 开始）
+/// - `limit`: 每页数量
+///
+/// # 返回
+///
+/// `(邮件列表, 总数)` 元组。
 pub async fn list_by_folder(
     db: &DbConn,
     account_id: i32,
@@ -153,7 +199,21 @@ pub async fn list_by_folder(
     .await
 }
 
-/// 按多个文件夹查询邮件（用于 category → 多文件夹映射）
+/// 按多个文件夹查询邮件（用于 category → 多文件夹映射）。
+///
+/// 用于将一个分类映射到多个 IMAP 文件夹的场景，返回未软删除的邮件。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folders`: 文件夹名称列表
+/// - `page`: 页码（从 1 开始）
+/// - `limit`: 每页数量
+///
+/// # 返回
+///
+/// `(邮件列表, 总数)` 元组。空文件夹列表时返回 `(空vec, 0)`。
 pub async fn list_by_folders(
     db: &DbConn,
     account_id: i32,
@@ -206,7 +266,20 @@ pub async fn list_by_folders(
     .await
 }
 
-/// 查询星标邮件（跨所有文件夹）
+/// 查询星标邮件（跨所有文件夹）。
+///
+/// 返回 `is_starred = 1` 且未软删除的邮件，按发送时间降序分页排列。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `page`: 页码（从 1 开始）
+/// - `limit`: 每页数量
+///
+/// # 返回
+///
+/// `(邮件列表, 总数)` 元组。
 pub async fn list_starred(
     db: &DbConn,
     account_id: i32,
@@ -244,6 +317,16 @@ pub async fn list_starred(
     .await
 }
 
+/// 根据 ID 查询邮件。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 邮件 ID
+///
+/// # 返回
+///
+/// 找到则返回 `Some(model)`，不存在则返回 `None`。
 pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<emails::Model>, MailError> {
     db.call(move |conn| {
         let mut stmt = conn.prepare(
@@ -263,6 +346,20 @@ pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<emails::Model>, Ma
     .await
 }
 
+/// 根据账号 ID、文件夹和 UID 查询邮件。
+///
+/// 用于 IMAP 同步时按唯一标识定位邮件。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `uid`: IMAP UID
+///
+/// # 返回
+///
+/// 找到则返回 `Some(model)`，不存在则返回 `None`。
 pub async fn get_by_uid(
     db: &DbConn,
     account_id: i32,
@@ -291,6 +388,18 @@ pub async fn get_by_uid(
     .await
 }
 
+/// 创建单封邮件并返回创建后的完整记录。
+///
+/// 在事务中执行插入并回读记录。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `model`: 待创建的邮件数据
+///
+/// # 返回
+///
+/// 创建成功后的邮件记录（包含自增 ID）。
 pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, MailError> {
     db.transaction(move |tx| {
         let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
@@ -309,6 +418,18 @@ pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, Mai
     .await
 }
 
+/// 批量插入邮件。
+///
+/// 在单个事务中复用预编译语句逐条插入，空列表直接返回。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `models`: 待插入的邮件列表
+///
+/// # 返回
+///
+/// 插入成功返回 `Ok(())`。
 pub async fn bulk_insert(db: &DbConn, models: Vec<EmailWrite>) -> Result<(), MailError> {
     if models.is_empty() {
         return Ok(());
@@ -324,6 +445,19 @@ pub async fn bulk_insert(db: &DbConn, models: Vec<EmailWrite>) -> Result<(), Mai
     .await
 }
 
+/// 根据 ID 更新邮件，返回更新后的完整记录。
+///
+/// 覆盖更新所有字段，调用方需提供完整的 `EmailWrite` 数据。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 待更新的邮件 ID
+/// - `model`: 新的邮件数据
+///
+/// # 返回
+///
+/// 更新后的邮件记录。
 pub async fn update(db: &DbConn, id: i32, model: EmailWrite) -> Result<emails::Model, MailError> {
     db.call(move |conn| {
         conn.execute(
@@ -375,6 +509,17 @@ pub async fn update(db: &DbConn, id: i32, model: EmailWrite) -> Result<emails::M
     .await
 }
 
+/// 更新邮件的已读状态。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 邮件 ID
+/// - `is_read`: 是否已读
+///
+/// # 返回
+///
+/// 更新成功返回 `Ok(())`。
 pub async fn mark_as_read(db: &DbConn, id: i32, is_read: bool) -> Result<(), MailError> {
     db.call(move |conn| {
         conn.execute(
@@ -386,6 +531,18 @@ pub async fn mark_as_read(db: &DbConn, id: i32, is_read: bool) -> Result<(), Mai
     .await
 }
 
+/// 切换邮件的星标状态，返回切换后的新状态。
+///
+/// 先读取当前状态取反，再写回数据库。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 邮件 ID
+///
+/// # 返回
+///
+/// 切换后的星标状态（`true` 表示已星标）。邮件不存在时返回 `EmailNotFound` 错误。
 pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool, MailError> {
     let new_state = db
         .call(move |conn| {
@@ -412,6 +569,18 @@ pub async fn toggle_star(db: &DbConn, id: i32) -> Result<bool, MailError> {
     new_state.ok_or(MailError::EmailNotFound(id))
 }
 
+/// 软删除多封邮件（标记 `is_deleted = 1`）。
+///
+/// 批量将指定邮件标记为已删除，不真正从数据库移除。空列表直接返回。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `ids`: 待软删除的邮件 ID 列表
+///
+/// # 返回
+///
+/// 受影响的行数。
 pub async fn soft_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize, MailError> {
     if ids.is_empty() {
         return Ok(0);
@@ -431,6 +600,17 @@ pub async fn soft_delete(db: &DbConn, ids: Vec<i32>) -> Result<usize, MailError>
     .await
 }
 
+/// 将邮件移动到指定文件夹。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `id`: 邮件 ID
+/// - `folder`: 目标文件夹名称
+///
+/// # 返回
+///
+/// 移动成功返回 `Ok(())`。
 pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<(), MailError> {
     let folder = folder.to_string();
     db.call(move |conn| {
@@ -443,7 +623,18 @@ pub async fn move_to_folder(db: &DbConn, id: i32, folder: &str) -> Result<(), Ma
     .await
 }
 
-/// 按 account_id 聚合文件夹统计（单条 SQL，替代 N+1 查询）
+/// 按 account_id 聚合文件夹统计（单条 SQL，替代 N+1 查询）。
+///
+/// 返回每个文件夹的总邮件数和未读邮件数，不含已软删除的邮件。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+///
+/// # 返回
+///
+/// 每个文件夹的 `FolderStat`（文件夹名、总数、未读数）列表。
 pub async fn folder_stats_by_account(
     db: &DbConn,
     account_id: i32,
@@ -469,7 +660,19 @@ pub async fn folder_stats_by_account(
     .await
 }
 
-/// 根据账号和文件夹获取邮件 ID
+/// 根据账号和文件夹获取邮件 ID。
+///
+/// 返回该账号指定文件夹下所有邮件的 ID，按 ID 升序排列（含已软删除的邮件）。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+///
+/// # 返回
+///
+/// 邮件 ID 列表。
 pub async fn get_ids_by_folder(
     db: &DbConn,
     account_id: i32,
@@ -489,7 +692,19 @@ pub async fn get_ids_by_folder(
     .await
 }
 
-/// 根据账号和文件夹删除邮件
+/// 根据账号和文件夹删除邮件。
+///
+/// 物理删除该账号指定文件夹下的所有邮件。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+///
+/// # 返回
+///
+/// 被删除的行数。
 pub async fn delete_by_folder(
     db: &DbConn,
     account_id: i32,
@@ -506,6 +721,19 @@ pub async fn delete_by_folder(
     .await
 }
 
+/// 级联删除指定文件夹的所有邮件及其关联数据。
+///
+/// 在事务中依次删除 `email_labels` 关联、`attachments` 附件，最后删除邮件本身。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+///
+/// # 返回
+///
+/// 被删除的邮件行数。
 pub async fn delete_folder_contents(
     db: &DbConn,
     account_id: i32,
@@ -536,11 +764,35 @@ pub async fn delete_folder_contents(
     .await
 }
 
+/// 删除指定账号的所有邮件及其附件。
+///
+/// 委托给 [`delete_by_account_tx`] 在事务中执行。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+///
+/// # 返回
+///
+/// 被删除的邮件行数。
 pub async fn delete_by_account(db: &DbConn, account_id: i32) -> Result<u64, MailError> {
     db.transaction(move |tx| delete_by_account_tx(tx, account_id))
         .await
 }
 
+/// 在指定事务中删除账号的所有邮件及其附件（事务版本）
+///
+/// 先删除 `attachments`，再删除 `emails`。供需要事务性删除的调用方使用。
+///
+/// # 参数
+///
+/// - `tx`: 数据库事务
+/// - `account_id`: 账号 ID
+///
+/// # 返回
+///
+/// 被删除的邮件行数。
 pub fn delete_by_account_tx(
     tx: &rusqlite::Transaction<'_>,
     account_id: i32,
@@ -554,10 +806,24 @@ pub fn delete_by_account_tx(
     Ok(deleted as u64)
 }
 
-/// 批量保存邮件头
+/// 批量保存邮件头。
 ///
 /// 从 IMAP 同步的邮件头批量保存到数据库。
-/// 这个方法主要用于快速同步邮件列表，不包含邮件正文和附件。
+/// 这个方法主要用于快速同步邮件列表，不包含邮件正文（body_text/body_html）。
+///
+/// 将 `EmailHeader` 转换为 `EmailWrite`，在单个事务中批量插入邮件和附件元数据，
+/// 附件 `email_id` 在插入邮件后通过 `last_insert_rowid` 填充。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `headers`: 从 IMAP 同步的邮件头列表
+///
+/// # 返回
+///
+/// 成功保存的邮件数量。空列表时返回 0。
 pub async fn save_batch_email_headers(
     db: &DbConn,
     account_id: i32,
@@ -637,6 +903,21 @@ pub async fn save_batch_email_headers(
     .await
 }
 
+/// 批量保存完整邮件（含正文和附件）。
+///
+/// 将 `WholeEmailDto` 转换为 `EmailWrite`，在单个事务中批量插入邮件和附件。
+/// 与 [`save_batch_email_headers`] 不同，本方法包含完整的邮件正文、preview、message_id 等字段。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `emails`: 待保存的完整邮件列表
+///
+/// # 返回
+///
+/// 成功保存的邮件数量。空列表时返回 0。
 pub async fn save_batch_emails(
     db: &DbConn,
     account_id: i32,
@@ -712,6 +993,23 @@ pub async fn save_batch_emails(
     .await
 }
 
+/// 根据 account_id + folder + uid 更新邮件正文。
+///
+/// 同步正文后回填 `body_text`、`body_html` 和自动生成的 `preview`（取正文前 200 字符）。
+/// 定位依据为账号 ID + 文件夹 + UID，以避免不同文件夹中 UID 重复时误更新。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `uid`: IMAP UID
+/// - `body_text`: 纯文本正文
+/// - `body_html`: HTML 正文
+///
+/// # 返回
+///
+/// 更新成功返回 `Ok(())`。
 pub(crate) async fn update_body(
     db: &DbConn,
     account_id: i32,

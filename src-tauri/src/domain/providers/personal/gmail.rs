@@ -1,10 +1,16 @@
 use crate::domain::providers::*;
 
+/// Gmail 邮箱服务商
+///
+/// Google 提供的邮件服务，使用 OAuth2 令牌认证，
+/// 支持 gmail.com、googlemail.com 域名，
+/// 支持 XOAUTH2 认证方式。
 pub struct GmailProvider {
     info: ProviderInfo,
 }
 
 impl GmailProvider {
+    /// 创建 Gmail 服务商实例
     pub fn new() -> Self {
         Self {
             info: ProviderInfo {
@@ -21,17 +27,20 @@ impl GmailProvider {
     }
 }
 
+/// 默认实现，等同于 [`GmailProvider::new`]
 impl Default for GmailProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// Gmail 的 [`MailProvider`] 实现
 impl MailProvider for GmailProvider {
     fn provider_info(&self) -> &ProviderInfo {
         &self.info
     }
 
+    /// IMAP 配置：imap.gmail.com:993（隐式 SSL/TLS）
     fn imap_config(&self, _email: &str) -> ImapServerConfig {
         ImapServerConfig {
             host: "imap.gmail.com".into(),
@@ -40,6 +49,7 @@ impl MailProvider for GmailProvider {
         }
     }
 
+    /// SMTP 配置：smtp.gmail.com:465（隐式 SSL/TLS）
     fn smtp_config(&self, _email: &str) -> SmtpServerConfig {
         SmtpServerConfig {
             host: "smtp.gmail.com".into(),
@@ -48,10 +58,12 @@ impl MailProvider for GmailProvider {
         }
     }
 
+    /// 支持的域名：gmail.com、googlemail.com
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["gmail.com", "googlemail.com"]
     }
 
+    /// OAuth2 配置（启用 PKCE），客户端凭证从环境变量读取
     fn oauth_config(&self) -> Option<OAuthConfig> {
         Some(OAuthConfig {
             client_id: option_env!("GOOGLE_CLIENT_ID")
@@ -69,6 +81,8 @@ impl MailProvider for GmailProvider {
         })
     }
 
+    /// Gmail 文件夹映射，使用 `[Gmail]/` 前缀的特殊文件夹名称，
+    /// 同时兼容中文环境下 IMAP UTF-7 编码的文件夹名
     fn folder_mapping(&self) -> StandardFolder {
         StandardFolder {
             inbox: vec!["INBOX".into()],
@@ -80,6 +94,8 @@ impl MailProvider for GmailProvider {
         }
     }
 
+    /// 生成 XOAUTH2 认证字符串，用于 IMAP/SMTP 的 OAuth2 认证，
+    /// 将用户名与 Bearer 令牌拼接后进行 Base64 编码
     fn generate_xoauth2(&self, email: &str, access_token: &str) -> String {
         let auth_string = format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token);
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, auth_string)

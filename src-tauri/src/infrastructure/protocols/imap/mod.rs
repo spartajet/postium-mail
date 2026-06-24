@@ -16,30 +16,48 @@ pub use util::Xoauth2Authenticator;
 
 // ─── DTO ───
 
+/// IMAP 文件夹信息（LIST 命令返回）
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct FolderInfo {
+    /// 文件夹名称（可能包含 UTF-7 编码）
     pub name: String,
+    /// 层级分隔符（如 "/" 或 "."）
     pub delimiter: Option<String>,
+    /// 文件夹属性标志列表（如 \HasChildren）
     pub flags: Vec<String>,
 }
 
+/// 邮件头部摘要（UID FETCH 返回的轻量信息）
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RawEmailHeader {
+    /// IMAP UID
     pub uid: u32,
+    /// 邮件标志列表
     pub flags: Vec<String>,
+    /// 邮件主题
     pub subject: Option<String>,
+    /// 发件人
     pub from: Option<String>,
+    /// 收件人
     pub to: Option<String>,
+    /// 邮件日期
     pub date: Option<String>,
+    /// RFC 2822 Message-ID
     pub message_id: Option<String>,
 }
 
+/// 选中文件夹后的邮箱状态信息（SELECT 命令返回）
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct MailboxInfo {
+    /// 文件夹中的邮件总数
     pub exists: u32,
+    /// 最近到达的邮件数
     pub recent: u32,
+    /// 未读邮件数（服务器支持时）
     pub unseen: Option<u32>,
+    /// UIDVALIDITY 值
     pub uid_validity: Option<u32>,
+    /// 预期的下一个 UID
     pub uid_next: Option<u32>,
 }
 
