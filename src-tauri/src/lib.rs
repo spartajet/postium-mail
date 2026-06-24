@@ -169,7 +169,10 @@ pub fn run() {
             .await
             .expect("数据库初始化失败");
 
-        if std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1") {
+        let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
+        let e2e_truth_enabled = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
+
+        if e2e_enabled && !e2e_truth_enabled {
             infrastructure::testing::e2e_seed::seed_e2e_data(&db)
                 .await
                 .expect("E2E seed 数据初始化失败");
