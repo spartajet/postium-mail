@@ -9,6 +9,8 @@ use postium_mail_lib::service::account_connection::{
 use postium_mail_lib::service::email_service::EmailService;
 use postium_mail_lib::service::{AccountService, LabelService};
 
+pub mod real_mail;
+
 /// Create an in-memory SQLite database with all migrations applied.
 pub async fn create_test_db() -> DbConn {
     DbConn::open_in_memory_for_test()

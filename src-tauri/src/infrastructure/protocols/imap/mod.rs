@@ -63,11 +63,7 @@ impl ImapClient {
 
         tracing::info!(host, port, email, "IMAP: 正在连接");
 
-        let tcp = tokio::net::TcpStream::connect((host.as_str(), port))
-            .await
-            .map_err(|e| {
-                MailError::ImapConnectionFailed(format!("连接 {host}:{port} 失败: {e}"))
-            })?;
+        let tcp = Self::connect_tcp_stream(host, port).await?;
 
         tracing::debug!(host, "IMAP: TCP 连接成功，开始 TLS 握手");
         let tls = Self::upgrade_tls(tcp, host).await?;

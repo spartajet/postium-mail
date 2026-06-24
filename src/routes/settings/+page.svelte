@@ -208,6 +208,8 @@
                 {#each accountStore.accounts as account (account.id)}
                     <!-- 账户卡片 -->
                     <div
+                        data-testid="settings-account-card"
+                        data-email={account.email}
                         class="flex items-center gap-3 rounded-lg border border-border bg-glass px-4 py-3"
                     >
                         <!-- 账户头像：显示邮箱首字母 -->

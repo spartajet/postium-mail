@@ -93,6 +93,19 @@ E2E job 无论成功失败都会上传 `e2e-artifacts`。失败时还会尝试�
 
 需要真实服务覆盖时，应单独设计手动验收或隔离的集成测试，不应混入默认 CI E2E。
 
+## Truth 真实账号测试
+
+Truth 测试用于手动验证真实 IMAP 和真实 App 交互链路。它读取 `.test_mail_accounts.json` 并连接真实邮箱服务。SMTP 发送暂未纳入 truth 断言。
+
+运行命令：
+
+```bash
+bun run test:rust:truth
+bun run test:e2e:truth
+```
+
+Truth 测试不进入默认 CI，也不包含在默认 `test:rust`、`test:e2e`、`test:ci` 中。详细说明见 [Truth 真实邮箱测试说明](./truth.md)。
+
 ## 维护重点
 
 新增功能时优先遵循以下规则：

@@ -65,6 +65,18 @@ E2E 模式下，应用启动时由 Rust seed 固定测试数据。数据不来�
 
 这些主题用于搜索、滚动、账号切换和分类导航断言。
 
+## Truth E2E
+
+默认 E2E 使用 seed 数据，不连接真实邮箱。真实账号交互测试使用独立命令：
+
+```bash
+bun run test:e2e:truth
+```
+
+Truth E2E 使用 `.e2e-truth-data/run-*` 数据目录，设置 `POSTIUM_E2E_TRUTH=1`，跳过 seed，从空数据库通过 UI 添加真实账号。当前 truth E2E 不发送真实邮件。
+
+详细说明见 [Truth 真实邮箱测试说明](./truth.md)。
+
 ## 覆盖范围
 
 当前 E2E 规格位于 `e2e/test/specs`：
