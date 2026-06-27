@@ -23,6 +23,7 @@
     // 导入全局提示消息状态管理器
     // getToastState：获取 toast 状态单例，包含 toasts 数组和 dismiss 方法
     import { getToastState } from "$lib/stores/toast.svelte";
+    import { SvelteSet } from "svelte/reactivity";
 
     // 导入消息类型定义
     // ToastType：消息类型枚举（"success" | "error" | "info" | "warning"）
@@ -42,7 +43,7 @@
     // 已处理消息 ID 集合
     // 用于追踪哪些消息已经启动了自动消失计时器
     // 防止同一条消息被重复设置计时器（$effect 可能多次触发）
-    let seen = new Set<number>();
+    let seen = new SvelteSet<number>();
 
     // ==================== 自动消失逻辑 ====================
 
