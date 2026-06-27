@@ -54,6 +54,8 @@
     import { getSyncState } from "$lib/stores/sync.svelte";
     // 导入 Tauri 后端命令，用于与服务端通信
     import { commands } from "$lib/bindings";
+    import { goto } from "$app/navigation";
+    import { continueAfterAccountAdded } from "./account-add-flow";
 
     // 导入 Tauri 的 URL 打开插件，用于在默认浏览器中打开 OAuth2 授权页面
     import { openUrl } from "@tauri-apps/plugin-opener";
@@ -136,8 +138,8 @@
     let submitting = $state(false);
     // 错误信息
     let error = $state("");
-    // 当前提交阶段：空闲、验证中、同步中、完成
-    let phase = $state<"idle" | "validating" | "syncing" | "done">("idle");
+    // 当前提交阶段：空闲、验证中、完成
+    let phase = $state<"idle" | "validating" | "done">("idle");
     // 首次同步错误信息
     let syncError = $state("");
 
@@ -304,24 +306,23 @@
         }
     }
 
-    async function syncCreatedAccount(accountId: number) {
-        phase = "syncing";
-        syncError = "";
-        accountStore.setActive(accountId);
-
-        await syncStore.syncAccount(accountId);
-
-        if (syncStore.error) {
-            syncError = syncStore.error;
-        }
-    }
-
     function findAccountIdByEmail(targetEmail: string) {
         return (
             accountStore.accounts.find(
                 (account) => account.email === targetEmail,
             )?.id ?? null
         );
+    }
+
+    async function enterMainAndStartSync(accountId: number) {
+        await continueAfterAccountAdded({
+            accountId,
+            loadAccounts: () => accountStore.loadAccounts(),
+            setActive: (id) => accountStore.setActive(id),
+            close,
+            goHome: () => goto("/"),
+            syncAccount: (id) => syncStore.syncAccount(id),
+        });
     }
 
     /**
@@ -374,17 +375,16 @@
                 ) {
                     clearInterval(interval);
                     oauthPolling = false;
-                    // 后端已自动创建账号，刷新账户列表并跳转到完成页
+                    // 后端已自动创建账号，先进入主界面，再后台触发首次同步
                     await accountStore.loadAccounts();
                     const accountId = findAccountIdByEmail(email);
                     if (accountId !== null) {
-                        await syncCreatedAccount(accountId);
+                        await enterMainAndStartSync(accountId);
                     } else {
                         syncError = "账号已添加，但未能定位新账号执行首次同步";
                         phase = "done";
+                        step = "done";
                     }
-                    phase = "done";
-                    step = "done";
                 }
                 // 状态三：授权失败
                 else if (
@@ -443,11 +443,8 @@
             });
 
             if (result.status === "ok") {
-                // 创建成功，跳转到完成步骤
-                await accountStore.loadAccounts();
-                await syncCreatedAccount(result.data.id);
-                phase = "done";
-                step = "done";
+                // 创建成功后先进入主界面，再后台触发首次同步
+                await enterMainAndStartSync(result.data.id);
             } else {
                 // 创建失败，显示错误信息
                 error = result.error.message as string;
@@ -830,11 +827,10 @@
                                     <!-- 确认提交按钮 -->
                                     <button
                                         type="submit"
-                                        disabled={submitting ||
-                                            phase === "syncing"}
+                                        disabled={submitting}
                                         class="compose-btn flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
                                     >
-                                        {#if submitting || phase === "syncing"}
+                                        {#if submitting}
                                             <Loader2
                                                 size={16}
                                                 class="animate-spin"
@@ -842,8 +838,6 @@
                                         {/if}
                                         {#if phase === "validating"}
                                             正在验证...
-                                        {:else if phase === "syncing"}
-                                            正在同步...
                                         {:else}
                                             {t.common.confirm}
                                         {/if}
@@ -1081,11 +1075,10 @@
                                 <button
                                     data-testid="add-account-submit-button"
                                     type="submit"
-                                    disabled={submitting ||
-                                        phase === "syncing"}
+                                    disabled={submitting}
                                     class="compose-btn flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
                                 >
-                                    {#if submitting || phase === "syncing"}
+                                    {#if submitting}
                                         <Loader2
                                             size={16}
                                             class="animate-spin"
@@ -1093,8 +1086,6 @@
                                     {/if}
                                     {#if phase === "validating"}
                                         正在验证...
-                                    {:else if phase === "syncing"}
-                                        正在同步...
                                     {:else}
                                         {t.common.confirm}
                                     {/if}
