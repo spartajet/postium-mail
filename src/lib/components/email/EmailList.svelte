@@ -192,6 +192,13 @@
         }
     }
 
+    /**
+     * 右键菜单：重新加载单封邮件
+     */
+    async function handleContextReload(emailId: number) {
+        await emailState.reloadEmail(emailId);
+    }
+
     // ==================== 自动加载邮件 ====================
 
     // 当活跃账号或当前文件夹变化时，自动重新加载邮件列表
@@ -649,6 +656,7 @@
             onToggleRead={handleContextToggleRead}
             onDelete={handleContextDelete}
             onForward={handleContextForward}
+            onReload={handleContextReload}
             onClose={closeContextMenu}
         />
     {/if}

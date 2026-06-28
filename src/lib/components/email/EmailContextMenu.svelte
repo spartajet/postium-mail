@@ -40,6 +40,7 @@
         Forward, // 转发图标
         Flag, // 标记/旗帜图标（用于星标操作）
         Mail, // 邮件图标（用于已读/未读切换）
+        RefreshCw, // 重新加载图标
         Trash2, // 删除图标
         MoreHorizontal, // 更多操作图标（三个水平点）
     } from "lucide-svelte";
@@ -66,6 +67,7 @@
      * @param onToggleRead - 切换已读/未读回调
      * @param onDelete - 删除回调
      * @param onForward - 转发回调
+     * @param onReload - 重新加载回调
      * @param onClose - 关闭菜单的回调函数（通知父组件隐藏菜单）
      */
     let {
@@ -79,6 +81,7 @@
         onToggleRead,
         onDelete,
         onForward,
+        onReload,
         onClose,
     }: {
         x: number;
@@ -94,6 +97,7 @@
         ) => Promise<void> | void;
         onDelete: (emailId: number) => Promise<void> | void;
         onForward: (emailId: number) => Promise<void> | void;
+        onReload: (emailId: number) => Promise<void> | void;
         onClose: () => void;
     } = $props();
 
@@ -148,6 +152,8 @@
             await onDelete(emailId);
         } else if (action === "forward") {
             await onForward(emailId);
+        } else if (action === "reload") {
+            await onReload(emailId);
         }
 
         onClose();
@@ -274,6 +280,19 @@
     >
         <Mail size={15} class="text-muted-foreground" />
         <span>{isRead ? t.email.markUnread : t.email.markRead}</span>
+    </button>
+
+    <!--
+      重新加载按钮
+      从远端重新拉取当前邮件内容，不触发完整文件夹同步
+    -->
+    <button
+        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
+        onclick={() => handleAction("reload")}
+        disabled={disabled}
+    >
+        <RefreshCw size={15} class="text-muted-foreground" />
+        <span>{t.email.reload}</span>
     </button>
 
     <!-- ==================== 分割线 ==================== -->
