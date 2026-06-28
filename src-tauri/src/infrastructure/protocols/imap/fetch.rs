@@ -436,7 +436,9 @@ impl ImapClient {
 
         let body_text = message.body_text(0).map(|text| text.to_string());
         let body_html = message.body_html(0).map(|html| html.to_string());
-        let preview = body_text.as_ref().map(|text| text.chars().take(200).collect());
+        let preview = body_text
+            .as_ref()
+            .map(|text| text.chars().take(200).collect());
         let attachments = fetch
             .bodystructure()
             .map(|bs| parser::extract_attachments(bs, ""))
