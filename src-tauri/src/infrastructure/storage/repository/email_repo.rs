@@ -993,6 +993,125 @@ pub async fn save_batch_emails(
     .await
 }
 
+/// 用一封完整邮件替换本地已有邮件及其附件元数据。
+///
+/// 在同一个事务中覆盖 `emails` 记录、删除旧附件数据库元数据并插入新的附件元数据。
+/// 不处理磁盘上的附件文件。
+pub async fn replace_email_with_attachments(
+    db: &DbConn,
+    email_id: i32,
+    account_id: i32,
+    folder: &str,
+    email: WholeEmailDto,
+) -> Result<emails::Model, MailError> {
+    let now = chrono::Utc::now().timestamp();
+    let folder = folder.to_string();
+    let write = EmailWrite {
+        account_id,
+        folder: folder.clone(),
+        uid: email.uid,
+        message_id: email.message_id,
+        subject: email.subject,
+        sender_name: email.sender_name,
+        sender_email: email.sender_email,
+        recipient_emails: email.recipient_emails,
+        cc_emails: email.cc_emails,
+        bcc_emails: email.bcc_emails,
+        preview: email.preview,
+        body_text: email.body_text,
+        body_html: email.body_html,
+        is_read: Some(email.is_read),
+        is_starred: Some(email.is_starred),
+        is_draft: Some(email.is_draft),
+        is_answered: Some(email.is_answered),
+        is_deleted: Some(email.is_deleted),
+        sent_at: email.sent_at,
+        received_at: email.received_at,
+        created_at: now,
+        updated_at: now,
+    };
+    let attachments: Vec<AttachmentWrite> = email
+        .attachments
+        .into_iter()
+        .map(|att| AttachmentWrite {
+            email_id,
+            filename: att.filename,
+            content_type: Some(att.content_type),
+            size: i64::from(att.size),
+            section_path: att.section_path,
+            disposition: att.disposition,
+            content_id: att.content_id,
+            path: None,
+            created_at: now,
+        })
+        .collect();
+
+    db.transaction(move |tx| {
+        tx.execute(
+            "UPDATE emails
+             SET account_id = ?1, folder = ?2, uid = ?3, message_id = ?4, subject = ?5,
+                 sender_name = ?6, sender_email = ?7, recipient_emails = ?8,
+                 cc_emails = ?9, bcc_emails = ?10, preview = ?11, body_text = ?12,
+                 body_html = ?13, is_read = ?14, is_starred = ?15, is_draft = ?16,
+                 is_answered = ?17, is_deleted = ?18, sent_at = ?19, received_at = ?20,
+                 created_at = ?21, updated_at = ?22
+             WHERE id = ?23",
+            rusqlite::params![
+                write.account_id,
+                write.folder,
+                i64::from(write.uid),
+                write.message_id,
+                write.subject,
+                write.sender_name,
+                write.sender_email,
+                write.recipient_emails,
+                write.cc_emails,
+                write.bcc_emails,
+                write.preview,
+                write.body_text,
+                write.body_html,
+                opt_bool_to_int(write.is_read),
+                opt_bool_to_int(write.is_starred),
+                opt_bool_to_int(write.is_draft),
+                opt_bool_to_int(write.is_answered),
+                opt_bool_to_int(write.is_deleted),
+                write.sent_at,
+                write.received_at,
+                write.created_at,
+                write.updated_at,
+                email_id,
+            ],
+        )?;
+        tx.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
+        let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        for attachment in &attachments {
+            execute_attachment_insert(&mut attachment_stmt, attachment)?;
+        }
+        let mut stmt = tx.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE id = ?1",
+        )?;
+        stmt.query_row([email_id], map_email)
+    })
+    .await
+}
+
+/// 删除单封本地邮件及附件数据库元数据。
+///
+/// 仅删除数据库中的附件元数据和邮件记录，不删除已下载到磁盘的附件文件。
+pub async fn delete_one_with_attachments(db: &DbConn, email_id: i32) -> Result<bool, MailError> {
+    db.transaction(move |tx| {
+        tx.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
+        let deleted = tx.execute("DELETE FROM emails WHERE id = ?1", [email_id])?;
+        Ok(deleted > 0)
+    })
+    .await
+}
+
 /// 根据 account_id + folder + uid 更新邮件正文。
 ///
 /// 同步正文后回填 `body_text`、`body_html` 和自动生成的 `preview`（取正文前 200 字符）。
@@ -1098,6 +1217,89 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    async fn insert_attachment(db: &DbConn, email_id: i32, filename: &str) {
+        let filename = filename.to_string();
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO attachments (
+                    email_id, filename, content_type, size, section_path,
+                    disposition, content_id, path, created_at
+                ) VALUES (?1, ?2, 'application/pdf', 10, '2', 'attachment', NULL, NULL, ?3)",
+                rusqlite::params![email_id, filename, chrono::Utc::now().timestamp()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn attachment_filenames(db: &DbConn, email_id: i32) -> Vec<String> {
+        db.call(move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT filename FROM attachments WHERE email_id = ?1 ORDER BY id ASC")?;
+            let rows = stmt.query_map([email_id], |row| row.get::<_, Option<String>>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map(|items| items.into_iter().flatten().collect())
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn replace_email_with_attachments_overwrites_email_and_attachments() {
+        use crate::infrastructure::protocols::types::{AttachmentInfo, WholeEmailDto};
+
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+        let email_id = insert_email(&db, account_id, "INBOX", 100, "old body").await;
+        insert_attachment(&db, email_id, "old.pdf").await;
+
+        let replacement = WholeEmailDto {
+            id: 0,
+            account_id: 0,
+            folder: "INBOX".to_string(),
+            uid: 100,
+            message_id: Some("<new@example.com>".to_string()),
+            subject: Some("新主题".to_string()),
+            sender_name: Some("New Sender".to_string()),
+            sender_email: "new@example.com".to_string(),
+            recipient_emails: "to@example.com".to_string(),
+            cc_emails: Some("cc@example.com".to_string()),
+            bcc_emails: None,
+            preview: Some("新正文".to_string()),
+            body_text: Some("新正文".to_string()),
+            body_html: Some("<p>新正文</p>".to_string()),
+            attachments: vec![AttachmentInfo {
+                filename: Some("new.pdf".to_string()),
+                content_type: "application/pdf".to_string(),
+                size: 42,
+                section_path: "2".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+            }],
+            is_read: true,
+            is_starred: true,
+            is_draft: false,
+            is_answered: true,
+            is_deleted: false,
+            sent_at: 1_800_000_100,
+            received_at: 1_800_000_101,
+            created_at: 0,
+        };
+
+        let updated =
+            replace_email_with_attachments(&db, email_id, account_id, "INBOX", replacement)
+                .await
+                .unwrap();
+
+        assert_eq!(updated.id, email_id);
+        assert_eq!(updated.subject.as_deref(), Some("新主题"));
+        assert_eq!(updated.body_text.as_deref(), Some("新正文"));
+
+        let attachment_names = attachment_filenames(&db, email_id).await;
+        assert_eq!(attachment_names, vec!["new.pdf".to_string()]);
     }
 
     #[tokio::test]
