@@ -56,6 +56,7 @@ export default {
     noEmails: "No emails",
     markRead: "Mark as read",
     markUnread: "Mark as unread",
+    reload: "Reload",
     star: "Star",
     unstar: "Unstar",
     delete: "Delete",

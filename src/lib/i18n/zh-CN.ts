@@ -62,6 +62,7 @@ export default {
     noEmails: "没有邮件",
     markRead: "标记已读",
     markUnread: "标记未读",
+    reload: "重新加载",
     star: "星标",
     unstar: "取消星标",
     delete: "删除",
