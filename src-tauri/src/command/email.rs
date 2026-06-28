@@ -18,7 +18,7 @@
 //!    - toggle_star: 切换邮件的星标状态（收藏）
 //!
 //! 4. 邮件管理：
-//!    - delete_emails: 删除一封或多封邮件（移动到垃圾箱或永久删除）
+//!    - delete_emails: 删除一封或多封邮件（第一阶段移动到垃圾箱）
 //!    - move_email_to_folder: 移动邮件到指定文件夹
 //!
 //! 5. 邮件发送：
@@ -495,29 +495,18 @@ pub async fn toggle_star(
 ///
 /// 删除邮件
 ///
-/// 删除一封或多封邮件。
-/// 根据邮件当前所在文件夹，此命令的行为可能不同：
-///
-/// 删除行为说明：
-/// 1. 如果邮件在普通文件夹（收件箱、已发送等）：
-///    - 移动到"垃圾箱"（Trash）文件夹
-///    - 实际上是移动操作，不是物理删除
-///
-/// 2. 如果邮件已经在"垃圾箱"文件夹：
-///    - 永久删除邮件
-///    - 从数据库中完全移除
-///
-/// 3. 支持批量删除
+/// 第一阶段删除语义为移动到服务商配置的 Trash 文件夹。
+/// 不执行永久删除，不执行 EXPUNGE。
 ///
 /// 功能说明：
 /// 1. 验证邮件存在
-/// 2. 检查邮件当前文件夹
-/// 3. 根据文件夹决定移动到垃圾箱还是永久删除
-/// 4. 更新文件夹统计信息
+/// 2. 将邮件移动到服务商配置的 Trash 文件夹
+/// 3. 远端移动成功后更新本地文件夹
+/// 4. 第一阶段仅支持单封删除，避免远端批量移动产生部分成功状态
 ///
 /// 参数：
 /// - service: EmailService 实例
-/// - email_ids: 要删除的邮件 ID 列表，支持批量删除
+/// - email_ids: 要删除的邮件 ID 列表，第一阶段仅支持单封邮件
 ///
 /// 返回值：
 /// - Ok(usize): 实际删除的邮件数量
@@ -525,12 +514,9 @@ pub async fn toggle_star(
 ///   - NotFound: 部分邮件不存在
 ///   - DatabaseError: 数据库操作错误
 ///
-/// ⚠️ 警告：永久删除操作不可恢复！
-///
 /// 使用场景：
 /// 1. 用户点击删除按钮删除单封邮件
-/// 2. 用户选择多封邮件批量删除
-/// 3. 用户清空垃圾箱
+/// 2. 用户删除当前邮件
 ///
 /// 调用示例：
 /// ```typescript
@@ -540,12 +526,8 @@ pub async fn toggle_star(
 /// // 删除单封邮件
 /// await invoke('delete_emails', { email_ids: [123] });
 ///
-/// // 批量删除
-/// const confirmed = await confirm(`确定要删除这 ${ids.length} 封邮件吗？`);
-/// if (confirmed) {
-///   const deleted = await invoke('delete_emails', { email_ids: ids });
-///   console.log(`已删除 ${deleted} 封邮件`);
-/// }
+/// const deleted = await invoke('delete_emails', { email_ids: [123] });
+/// console.log(`已删除 ${deleted} 封邮件`);
 /// ```
 ///
 #[tauri::command]
@@ -557,12 +539,7 @@ pub async fn delete_emails(
     // 记录信息日志
     tracing::info!(count = email_ids.len(), ids = ?email_ids, "命令: 删除邮件");
 
-    // 调用服务层删除邮件
-    // 该方法会：
-    // 1. 检查每个邮件的当前文件夹
-    // 2. 如果不在垃圾箱，移动到垃圾箱
-    // 3. 如果在垃圾箱，永久删除
-    // 4. 返回实际删除数量
+    // 调用服务层删除邮件：第一阶段只移动到服务商 Trash 文件夹。
     let deleted = service.delete(email_ids).await?;
 
     // 记录删除结果
@@ -635,6 +612,21 @@ pub async fn move_email_to_folder(
     // 2. 更新邮件的文件夹
     // 3. 更新文件夹统计
     service.move_to_folder(email_id, &folder).await
+}
+
+///
+/// 归档邮件
+///
+/// 将邮件移动到当前服务商配置的归档文件夹。该操作先写入 IMAP 远端，
+/// 远端成功后再更新本地邮件文件夹。
+#[tauri::command]
+#[specta::specta]
+pub async fn archive_email(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    email_id: i32,
+) -> Result<(), MailError> {
+    tracing::info!(email_id, "命令: 归档邮件");
+    service.archive(email_id).await
 }
 
 ///

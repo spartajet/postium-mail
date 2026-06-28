@@ -239,6 +239,23 @@ impl ImapClient {
         self.set_flags(uid, &format!("-FLAGS ({flags})")).await
     }
 
+    /// 使用 UID MOVE 将邮件移动到目标文件夹。
+    ///
+    /// 该操作依赖服务器支持 RFC 6851 MOVE。第一阶段不做 COPY+Deleted 降级，
+    /// 避免在不支持 MOVE 的服务器上产生重复邮件或半移动状态。
+    pub async fn move_uid_to_folder(
+        &mut self,
+        uid: u32,
+        target_folder: &str,
+    ) -> Result<(), MailError> {
+        let uid_str = uid.to_string();
+        self.session
+            .uid_mv(&uid_str, target_folder)
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("移动邮件失败: {e}")))?;
+        Ok(())
+    }
+
     // ─── 连接管理 ───
 
     /// 登出

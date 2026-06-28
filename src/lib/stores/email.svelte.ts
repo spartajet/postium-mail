@@ -38,7 +38,7 @@
  * await emailState.toggleStar(emailId);
  *
  * // 删除邮件
- * await emailState.deleteEmails([emailId1, emailId2]);
+ * await emailState.deleteEmails([emailId]);
  * ```
  */
 
@@ -104,8 +104,41 @@ export class EmailState {
   /** 是否正在加载邮件数据（响应式状态） */
   loading = $state(false);
 
+  /** 最近一次邮件操作错误，空字符串表示无错误 */
+  error = $state("");
+
+  /** 正在执行远端操作的邮件 ID 集合 */
+  operatingIds = $state<Set<number>>(new Set());
+
   /** 当前查看的邮件分类（响应式状态），如 "inbox"、"sent" 等 */
   currentFolder = $state<EmailCategory>("inbox");
+
+  private beginOperation(emailId: number) {
+    this.error = "";
+    this.operatingIds = new Set([...this.operatingIds, emailId]);
+  }
+
+  private endOperation(emailId: number) {
+    const next = new Set(this.operatingIds);
+    next.delete(emailId);
+    this.operatingIds = next;
+  }
+
+  private setError(e: unknown, fallback: string) {
+    this.error = e instanceof Error ? e.message : fallback;
+    console.error(fallback, e);
+  }
+
+  private removeFromCurrentList(emailId: number) {
+    const before = this.emails.length;
+    this.emails = this.emails.filter((email) => email.id !== emailId);
+    if (this.total > 0 && this.emails.length < before) {
+      this.total -= 1;
+    }
+    if (this.selectedEmailId === emailId) {
+      this.deselectEmail();
+    }
+  }
 
   /**
    * 按文件夹加载邮件列表
@@ -295,12 +328,7 @@ export class EmailState {
         // 自动标记已读
         // 如果邮件当前是未读状态，调用后端标记为已读
         if (!this.selectedEmail.is_read) {
-          await commands.markAsRead(id, true);
-
-          // 更新本地邮件列表中的已读状态
-          // 这样列表中的邮件预览也会显示为已读
-          const email = this.emails.find((e) => e.id === id);
-          if (email) email.is_read = true;
+          await this.markAsRead(id, true);
         }
       }
     } catch (e: unknown) {
@@ -338,6 +366,66 @@ export class EmailState {
     this.selectedEmail = null;
   }
 
+  async markAsRead(emailId: number, isRead: boolean): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.markAsRead(emailId, isRead);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+
+      const email = this.emails.find((item) => item.id === emailId);
+      if (email) email.is_read = isRead;
+
+      if (this.selectedEmail?.id === emailId) {
+        this.selectedEmail.is_read = isRead;
+      }
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to mark email read state");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
+  async archiveEmail(emailId: number): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.archiveEmail(emailId);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+      this.removeFromCurrentList(emailId);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to archive email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
+  async moveEmailToFolder(emailId: number, folder: string): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.moveEmailToFolder(emailId, folder);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+      this.removeFromCurrentList(emailId);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to move email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
   /**
    * 切换邮件星标状态
    *
@@ -373,36 +461,40 @@ export class EmailState {
    * @returns Promise<void>
    */
   async toggleStar(emailId: number) {
+    this.beginOperation(emailId);
     try {
       // 调用后端命令切换星标状态
       const result = await commands.toggleStar(emailId);
 
-      if (result.status === "ok") {
-        // 获取切换后的新状态
-        const newState = result.data;
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return;
+      }
 
-        // 更新本地邮件列表中的星标状态
-        const email = this.emails.find((e) => e.id === emailId);
-        if (email) email.is_starred = newState;
+      // 获取切换后的新状态
+      const newState = result.data;
 
-        // 如果该邮件是当前选中的邮件，同时更新详情视图的状态
-        if (this.selectedEmail?.id === emailId) {
-          this.selectedEmail.is_starred = newState;
-        }
+      // 更新本地邮件列表中的星标状态
+      const email = this.emails.find((e) => e.id === emailId);
+      if (email) email.is_starred = newState;
+
+      // 如果该邮件是当前选中的邮件，同时更新详情视图的状态
+      if (this.selectedEmail?.id === emailId) {
+        this.selectedEmail.is_starred = newState;
       }
     } catch (e: unknown) {
-      // 记录错误日志
-      console.error("Failed to toggle star:", e);
+      this.setError(e, "Failed to toggle star");
+    } finally {
+      this.endOperation(emailId);
     }
   }
 
   /**
    * 删除邮件
    *
-   * 删除指定的邮件（支持批量删除）。
-   * 删除行为取决于邮件当前所在的文件夹：
-   * - 普通文件夹：移动到垃圾箱
-   * - 垃圾箱：永久删除
+   * 删除指定的邮件。第一阶段仅支持单封邮件。
+   * 第一阶段删除语义是移动到服务商配置的 Trash 文件夹，
+   * 不执行永久删除或 EXPUNGE。
    *
    * ==================== 工作流程 ====================
    * 1. 调用后端 deleteEmails 命令删除邮件
@@ -411,8 +503,6 @@ export class EmailState {
    * 4. 更新邮件总数
    * 5. 失败时记录错误日志
    *
-   * ⚠️ **警告：垃圾箱中的邮件会被永久删除，不可恢复！**
-   *
    * ==================== 使用示例 ====================
    * ```typescript
    * const emailState = getEmailState();
@@ -420,36 +510,51 @@ export class EmailState {
    * // 删除单封邮件
    * await emailState.deleteEmails([123]);
    *
-   * // 批量删除
-   * const selectedIds = [1, 2, 3, 4, 5];
-   * if (confirm(`确定要删除 ${selectedIds.length} 封邮件吗？`)) {
-   *   await emailState.deleteEmails(selectedIds);
-   * }
    * ```
    *
    * @param ids - 要删除的邮件 ID 数组
    * @returns Promise<void>
    */
   async deleteEmails(ids: number[]) {
+    ids.forEach((id) => this.beginOperation(id));
     try {
       // 调用后端命令删除邮件
       const result = await commands.deleteEmails(ids);
 
-      if (result.status === "ok") {
-        // 从本地列表中移除已删除的邮件
-        this.emails = this.emails.filter((e) => !ids.includes(e.id));
-
-        // 如果删除的是当前选中的邮件，取消选择
-        if (this.selectedEmailId && ids.includes(this.selectedEmailId)) {
-          this.deselectEmail();
-        }
-
-        // 更新邮件总数
-        this.total -= ids.length;
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return;
       }
+
+      // 从本地列表中移除已删除的邮件
+      const before = this.emails.length;
+      this.emails = this.emails.filter((e) => !ids.includes(e.id));
+      const removed = before - this.emails.length;
+
+      // 如果删除的是当前选中的邮件，取消选择
+      if (this.selectedEmailId && ids.includes(this.selectedEmailId)) {
+        this.deselectEmail();
+      }
+
+      // 更新邮件总数
+      this.total = Math.max(0, this.total - removed);
     } catch (e: unknown) {
-      // 记录错误日志
-      console.error("Failed to delete emails:", e);
+      this.setError(e, "Failed to delete emails");
+    } finally {
+      ids.forEach((id) => this.endOperation(id));
+    }
+  }
+
+  async refreshCurrentCategory(accountId: number) {
+    try {
+      const result = await commands.syncAccount(accountId);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return;
+      }
+      await this.loadEmailsByCategory(accountId, this.currentFolder, this.page);
+    } catch (e: unknown) {
+      this.setError(e, "Failed to refresh emails");
     }
   }
 }

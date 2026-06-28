@@ -98,6 +98,99 @@ describe("EmailState 状态行为", () => {
     expect(mockInvoke).toHaveBeenCalledWith("toggle_star", { emailId: 1 });
   });
 
+  it("markAsRead 成功后同步更新列表和选中详情", async () => {
+    mockInvoke.mockResolvedValue(null);
+    const state = new EmailState();
+    state.emails = [{ ...email }];
+    state.selectedEmail = { ...emailDetail };
+
+    const ok = await state.markAsRead(1, true);
+
+    expect(ok).toBe(true);
+    expect(state.emails[0]!.is_read).toBe(true);
+    expect(state.selectedEmail?.is_read).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith("mark_as_read", {
+      emailId: 1,
+      isRead: true,
+    });
+  });
+
+  it("markAsRead 后端失败时不更新本地状态", async () => {
+    mockInvoke.mockRejectedValue(new Error("remote failed"));
+    const state = new EmailState();
+    state.emails = [{ ...email, is_read: false }];
+    state.selectedEmail = { ...emailDetail, is_read: false };
+
+    const ok = await state.markAsRead(1, true);
+
+    expect(ok).toBe(false);
+    expect(state.emails[0]!.is_read).toBe(false);
+    expect(state.selectedEmail?.is_read).toBe(false);
+    expect(state.error).toContain("remote failed");
+  });
+
+  it("archiveEmail 成功后从当前列表移除并取消选择", async () => {
+    mockInvoke.mockResolvedValue(null);
+    const state = new EmailState();
+    state.emails = [{ ...email }];
+    state.total = 1;
+    state.selectedEmailId = 1;
+    state.selectedEmail = { ...emailDetail };
+
+    const ok = await state.archiveEmail(1);
+
+    expect(ok).toBe(true);
+    expect(state.emails).toEqual([]);
+    expect(state.total).toBe(0);
+    expect(state.selectedEmailId).toBeNull();
+    expect(mockInvoke).toHaveBeenCalledWith("archive_email", { emailId: 1 });
+  });
+
+  it("archiveEmail 后端失败时保留当前列表", async () => {
+    mockInvoke.mockRejectedValue(new Error("archive failed"));
+    const state = new EmailState();
+    state.emails = [{ ...email }];
+    state.total = 1;
+
+    const ok = await state.archiveEmail(1);
+
+    expect(ok).toBe(false);
+    expect(state.emails).toHaveLength(1);
+    expect(state.total).toBe(1);
+    expect(state.error).toContain("archive failed");
+  });
+
+  it("moveEmailToFolder 成功后从当前列表移除", async () => {
+    mockInvoke.mockResolvedValue(null);
+    const state = new EmailState();
+    state.emails = [{ ...email }];
+    state.total = 1;
+
+    const ok = await state.moveEmailToFolder(1, "Work");
+
+    expect(ok).toBe(true);
+    expect(state.emails).toEqual([]);
+    expect(state.total).toBe(0);
+    expect(mockInvoke).toHaveBeenCalledWith("move_email_to_folder", {
+      emailId: 1,
+      folder: "Work",
+    });
+  });
+
+  it("moveEmailToFolder 后端失败时保留当前列表", async () => {
+    mockInvoke.mockRejectedValue(new Error("move failed"));
+    const state = new EmailState();
+    state.emails = [{ ...email }];
+    state.total = 1;
+
+    const ok = await state.moveEmailToFolder(1, "Work");
+
+    expect(ok).toBe(false);
+    expect(state.emails).toHaveLength(1);
+    expect(state.total).toBe(1);
+    expect(state.error).toContain("move failed");
+  });
+
   it("deleteEmails 移除邮件、取消当前选择并扣减总数", async () => {
     mockInvoke.mockResolvedValue(1);
     const state = new EmailState();

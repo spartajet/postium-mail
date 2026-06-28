@@ -51,6 +51,7 @@ pub mod account_service;
 /// - EmailCategory: 邮件分类枚举
 /// - SendEmailRequest: 发送邮件请求
 pub mod email_service;
+pub mod mail_operation;
 
 /// 标签服务模块
 ///

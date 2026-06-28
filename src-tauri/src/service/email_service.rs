@@ -4,6 +4,9 @@ use crate::error::MailError;
 use crate::infrastructure::storage::models::emails;
 use crate::infrastructure::storage::repository::{account_repo, email_repo};
 use crate::infrastructure::storage::{DbConn, search};
+use crate::service::mail_operation::{
+    MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -288,6 +291,8 @@ pub struct EmailService {
     auth: Arc<AuthManager>,
     /// 数据库连接
     db: DbConn,
+    /// 远端优先邮件操作服务
+    mail_operation: MailOperationService,
 }
 
 impl EmailService {
@@ -302,7 +307,21 @@ impl EmailService {
     ///
     /// 返回初始化好的 EmailService 实例
     pub fn new(auth: Arc<AuthManager>, db: DbConn) -> Self {
-        Self { auth, db }
+        let remote = Arc::new(RealMailRemoteOperator::new(auth.clone()));
+        Self::new_with_mail_remote(auth, db, remote)
+    }
+
+    pub fn new_with_mail_remote(
+        auth: Arc<AuthManager>,
+        db: DbConn,
+        remote: Arc<dyn MailRemoteOperator>,
+    ) -> Self {
+        let mail_operation = MailOperationService::new(db.clone(), auth.clone(), remote);
+        Self {
+            auth,
+            db,
+            mail_operation,
+        }
     }
 
     /// 获取指定文件夹的邮件列表（分页）
@@ -582,7 +601,7 @@ impl EmailService {
     /// email_service.mark_as_read(123, false).await?;
     /// ```
     pub async fn mark_as_read(&self, id: i32, is_read: bool) -> Result<(), MailError> {
-        email_repo::mark_as_read(&self.db, id, is_read).await
+        self.mail_operation.mark_as_read(id, is_read).await
     }
 
     /// 切换邮件星标状态
@@ -609,36 +628,37 @@ impl EmailService {
     /// println!("星标状态: {}", is_starred);
     /// ```
     pub async fn toggle_star(&self, id: i32) -> Result<bool, MailError> {
-        email_repo::toggle_star(&self.db, id).await
+        self.mail_operation.toggle_star(id).await
     }
 
-    /// 删除邮件（软删除）
+    /// 删除邮件（远端优先移动到 Trash）
     ///
-    /// 将邮件移动到已删除文件夹或标记为已删除。
-    /// 实际删除（永久删除）由同步服务处理。
+    /// 先在远端将邮件移动到服务商映射的 Trash 文件夹，远端成功后再更新本地文件夹。
+    /// 第一阶段不执行永久删除或 EXPUNGE。
     ///
     /// # 参数
     ///
-    /// - `ids`: 要删除的邮件 ID 列表
+    /// - `ids`: 要删除的邮件 ID 列表。第一阶段仅支持单封邮件。
     ///
     /// # 返回
     ///
-    /// 返回实际删除的邮件数量。
+    /// 返回实际移动到 Trash 的邮件数量。
     ///
     /// # 工作流程
     ///
-    /// 1. 如果邮件不在 Trash 文件夹，移动到 Trash
-    /// 2. 如果邮件已在 Trash 文件夹，标记为永久删除
-    /// 3. 同步服务会将操作同步到 IMAP 服务器
+    /// 1. 查询邮件和账号信息
+    /// 2. 解析服务商映射的 Trash 文件夹
+    /// 3. 调用远端移动操作
+    /// 4. 远端成功后更新本地邮件文件夹
     ///
     /// # 示例
     ///
     /// ```rust,ignore
-    /// let count = email_service.delete(vec![123, 456, 789]).await?;
+    /// let count = email_service.delete(vec![123]).await?;
     /// println!("已删除 {} 封邮件", count);
     /// ```
     pub async fn delete(&self, ids: Vec<i32>) -> Result<usize, MailError> {
-        email_repo::soft_delete(&self.db, ids).await
+        self.mail_operation.delete(ids).await
     }
 
     /// 将邮件移动到指定文件夹
@@ -670,7 +690,11 @@ impl EmailService {
     /// email_service.move_to_folder(123, "INBOX").await?;
     /// ```
     pub async fn move_to_folder(&self, id: i32, folder: &str) -> Result<(), MailError> {
-        email_repo::move_to_folder(&self.db, id, folder).await
+        self.mail_operation.move_to_folder(id, folder).await
+    }
+
+    pub async fn archive(&self, id: i32) -> Result<(), MailError> {
+        self.mail_operation.archive(id).await
     }
 
     /// 发送邮件

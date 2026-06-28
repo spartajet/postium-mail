@@ -1,12 +1,16 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use postium_mail_lib::domain::auth::AuthManager;
 use postium_mail_lib::domain::providers::pool::init_provider_pool;
+use postium_mail_lib::error::MailError;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
+use postium_mail_lib::infrastructure::storage::models::accounts;
 use postium_mail_lib::service::account_connection::{
     ImapConnectionVerifier, NoopImapConnectionVerifier,
 };
 use postium_mail_lib::service::email_service::EmailService;
+use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 use postium_mail_lib::service::{AccountService, LabelService};
 
 pub mod real_mail;
@@ -28,6 +32,41 @@ pub struct TestServices {
     pub label_service: LabelService,
 }
 
+struct NoopMailRemoteOperator;
+
+#[async_trait]
+impl MailRemoteOperator for NoopMailRemoteOperator {
+    async fn mark_seen(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _seen: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn set_flagged(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _flagged: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn move_to_folder(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _target_folder: &str,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+}
+
 #[allow(dead_code)]
 impl TestServices {
     /// Create a full set of services backed by a fresh in-memory database.
@@ -39,6 +78,7 @@ impl TestServices {
         init_provider_pool();
         let db = create_test_db().await;
         let auth = Arc::new(AuthManager::in_memory());
+        let mail_remote = Arc::new(NoopMailRemoteOperator);
 
         Self {
             account_service: AccountService::new_with_imap_verifier(
@@ -46,7 +86,33 @@ impl TestServices {
                 auth.clone(),
                 imap_verifier,
             ),
-            email_service: EmailService::new(auth.clone(), db.clone()),
+            email_service: EmailService::new_with_mail_remote(
+                auth.clone(),
+                db.clone(),
+                mail_remote,
+            ),
+            label_service: LabelService::new(db.clone()),
+            db,
+            auth,
+        }
+    }
+
+    pub async fn new_with_mail_remote(mail_remote: Arc<dyn MailRemoteOperator>) -> Self {
+        init_provider_pool();
+        let db = create_test_db().await;
+        let auth = Arc::new(AuthManager::in_memory());
+
+        Self {
+            account_service: AccountService::new_with_imap_verifier(
+                db.clone(),
+                auth.clone(),
+                Arc::new(NoopImapConnectionVerifier),
+            ),
+            email_service: EmailService::new_with_mail_remote(
+                auth.clone(),
+                db.clone(),
+                mail_remote,
+            ),
             label_service: LabelService::new(db.clone()),
             db,
             auth,
