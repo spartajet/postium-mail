@@ -239,21 +239,47 @@ impl ImapClient {
         self.set_flags(uid, &format!("-FLAGS ({flags})")).await
     }
 
-    /// 使用 UID MOVE 将邮件移动到目标文件夹。
+    /// 移动 UID 到目标文件夹。
     ///
-    /// 该操作依赖服务器支持 RFC 6851 MOVE。第一阶段不做 COPY+Deleted 降级，
-    /// 避免在不支持 MOVE 的服务器上产生重复邮件或半移动状态。
+    /// 优先使用 RFC 6851 UID MOVE；服务器不支持或执行失败时，降级为
+    /// UID COPY 到目标文件夹，再给原邮件添加 \Deleted 标志。不执行 EXPUNGE。
     pub async fn move_uid_to_folder(
         &mut self,
         uid: u32,
         target_folder: &str,
     ) -> Result<(), MailError> {
         let uid_str = uid.to_string();
-        self.session
-            .uid_mv(&uid_str, target_folder)
-            .await
-            .map_err(|e| MailError::ImapConnectionFailed(format!("移动邮件失败: {e}")))?;
+
+        match self.session.uid_mv(&uid_str, target_folder).await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                tracing::warn!(
+                    uid,
+                    target_folder,
+                    error = %error,
+                    "IMAP: UID MOVE 失败，降级为 UID COPY + \\Deleted"
+                );
+            }
+        }
+
+        self.copy_uid_to_folder(uid, target_folder).await?;
+        self.mark_uid_deleted(uid).await?;
         Ok(())
+    }
+
+    async fn copy_uid_to_folder(&mut self, uid: u32, target_folder: &str) -> Result<(), MailError> {
+        let uid_str = uid.to_string();
+        self.session
+            .uid_copy(&uid_str, target_folder)
+            .await
+            .map_err(|e| {
+                MailError::ImapConnectionFailed(format!("复制邮件到目标文件夹失败: {e}"))
+            })?;
+        Ok(())
+    }
+
+    async fn mark_uid_deleted(&mut self, uid: u32) -> Result<(), MailError> {
+        self.set_flags(uid, "+FLAGS.SILENT (\\Deleted)").await
     }
 
     // ─── 连接管理 ───
