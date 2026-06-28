@@ -440,13 +440,19 @@ async fn test_reload_email_replaces_local_email_when_remote_exists() {
 
     let result = svc.email_service.reload_email(email_id).await.unwrap();
 
-    assert!(matches!(result, ReloadEmailResult::Reloaded { .. }));
-    let detail = svc.email_service.get(email_id).await.unwrap();
-    assert_eq!(detail.email.subject.as_deref(), Some("远端新主题"));
-    assert_eq!(detail.body_text.as_deref(), Some("远端新正文"));
-    assert!(detail.email.is_read);
-    assert!(detail.email.is_starred);
-    assert_eq!(detail.email.sender_email, "reload@example.com");
+    let ReloadEmailResult::Reloaded { email } = result else {
+        panic!("expected reloaded result");
+    };
+    assert_eq!(email.email.id, email_id);
+    assert_eq!(email.email.subject.as_deref(), Some("远端新主题"));
+    assert_eq!(email.body_text.as_deref(), Some("远端新正文"));
+    assert_eq!(email.body_html.as_deref(), Some("<p>远端新正文</p>"));
+    assert_eq!(email.recipient_emails, "recipient@example.com");
+    assert_eq!(email.cc_emails.as_deref(), Some("copy@example.com"));
+    assert!(email.email.is_read);
+    assert!(email.email.is_starred);
+    assert!(email.email.has_attachments);
+    assert_eq!(email.email.sender_email, "reload@example.com");
     assert_eq!(remote.calls(), vec!["reload:test@example.com:INBOX:514"]);
 }
 

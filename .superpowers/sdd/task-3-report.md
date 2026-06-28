@@ -40,3 +40,19 @@
 - `cargo check` 在 debug 配置下会导出 `src/lib/bindings.ts`，该自动生成改动已按 brief 要求还原，未纳入提交。
 - 现有 `WholeEmailDto` 没有 `updated_at` 字段，测试 helper 已按当前代码模型调整。
 - `MailError` 不实现 `Clone`，测试 fake 使用一次性 `Option<Result<...>>` 存储 reload 结果。
+
+## Fix worker 修复记录
+
+- 修复 reviewer 指出的 Important 问题：`EmailService::reload_email` 在 `replace_email_with_attachments` 成功后不再调用 `self.get(updated.id).await?`，避免替换已提交后因额外数据库读取失败而返回错误。
+- 新增私有 helper `email_model_to_detail`，直接用 `replace_email_with_attachments` 返回的 `emails::Model` 构造 `EmailDetail`。
+- `Reloaded` 响应的 `has_attachments` 使用远端附件列表在替换前计算出的布尔值，其他详情字段来自更新后的模型。
+- 补强 `test_reload_email_replaces_local_email_when_remote_exists`：直接 match `ReloadEmailResult::Reloaded { email }`，断言响应 detail 字段，不再依赖二次 `get()` 证明响应内容。
+
+## Fix worker 验证命令
+
+- `rtk cargo test --manifest-path src-tauri/Cargo.toml reload_email -- --nocapture`
+  - 通过：3 passed, 94 filtered out。
+- `rtk cargo test --manifest-path src-tauri/Cargo.toml --test email_commands reload -- --nocapture`
+  - 通过：3 passed, 31 filtered out。
+- `rtk cargo check --manifest-path src-tauri/Cargo.toml`
+  - 通过：Finished `dev` profile。
