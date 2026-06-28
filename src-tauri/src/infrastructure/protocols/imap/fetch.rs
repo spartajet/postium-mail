@@ -382,4 +382,94 @@ impl ImapClient {
 
         Ok(emails)
     }
+
+    /// 按单个 UID 获取完整邮件。
+    ///
+    /// 返回 `Ok(None)` 表示服务器在当前文件夹中没有该 UID。
+    pub async fn fetch_email_by_uid(
+        &mut self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let query = uid.to_string();
+        let mut fetches = self
+            .session
+            .uid_fetch(
+                &query,
+                "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[] BODYSTRUCTURE UID)",
+            )
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let Some(fetch_result) = fetches.next().await else {
+            return Ok(None);
+        };
+
+        let fetch = fetch_result.map_err(|e| MailError::ImapError(e.to_string()))?;
+        let Some(fetch_uid) = fetch.uid else {
+            return Ok(None);
+        };
+        if fetch_uid != uid {
+            return Ok(None);
+        }
+
+        let raw_body = fetch
+            .body()
+            .ok_or_else(|| MailError::ImapError("邮件体为空".to_string()))?;
+        let message = MessageParser::default()
+            .parse(raw_body)
+            .ok_or_else(|| MailError::ImapError("解析邮件失败".to_string()))?;
+        let headers = extract_headers_from_message(&message, chrono::Utc::now().timestamp());
+
+        let seen = fetch.flags().any(|f| f == async_imap::types::Flag::Seen);
+        let flagged = fetch.flags().any(|f| f == async_imap::types::Flag::Flagged);
+        let answered = fetch
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Answered);
+        let deleted = fetch.flags().any(|f| f == async_imap::types::Flag::Deleted);
+        let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
+
+        let body_text = message.body_text(0).map(|text| text.to_string());
+        let body_html = message.body_html(0).map(|html| html.to_string());
+        let preview = body_text.as_ref().map(|text| text.chars().take(200).collect());
+        let attachments = fetch
+            .bodystructure()
+            .map(|bs| parser::extract_attachments(bs, ""))
+            .unwrap_or_default();
+        let received_at = fetch
+            .internal_date()
+            .map(|date| date.timestamp())
+            .unwrap_or(headers.sent_at);
+
+        Ok(Some(WholeEmailDto {
+            id: 0,
+            account_id: 0,
+            folder: folder.to_string(),
+            uid,
+            message_id: headers.message_id,
+            subject: headers.subject,
+            sender_name: headers.sender_name,
+            sender_email: headers.sender_email,
+            recipient_emails: headers.recipient_emails,
+            cc_emails: headers.cc_emails,
+            bcc_emails: headers.bcc_emails,
+            preview,
+            body_text,
+            body_html,
+            attachments,
+            is_read: seen,
+            is_starred: flagged,
+            is_draft: draft,
+            is_answered: answered,
+            is_deleted: deleted,
+            sent_at: headers.sent_at,
+            received_at,
+            created_at: 0,
+        }))
+    }
 }
