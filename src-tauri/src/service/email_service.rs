@@ -511,27 +511,7 @@ impl EmailService {
             .await?
             .ok_or(MailError::EmailNotFound(id))?;
 
-        // 构建详情响应
-        Ok(EmailDetail {
-            email: EmailDto {
-                id: email.id,
-                account_id: email.account_id,
-                folder: email.folder,
-                uid: email.uid,
-                subject: email.subject,
-                sender_name: email.sender_name,
-                sender_email: email.sender_email,
-                preview: email.preview,
-                is_read: email.is_read.unwrap_or(false),
-                is_starred: email.is_starred.unwrap_or(false),
-                sent_at: email.sent_at,
-                has_attachments: false,
-            },
-            recipient_emails: email.recipient_emails,
-            cc_emails: email.cc_emails,
-            body_text: email.body_text,
-            body_html: email.body_html,
-        })
+        Ok(email_model_to_detail(email, false))
     }
 
     pub async fn reload_email(&self, email_id: i32) -> Result<ReloadEmailResult, MailError> {
@@ -549,6 +529,7 @@ impl EmailService {
             .await?
         {
             Some(remote_email) => {
+                let has_attachments = !remote_email.attachments.is_empty();
                 let updated = email_repo::replace_email_with_attachments(
                     &self.db,
                     email_id,
@@ -557,8 +538,9 @@ impl EmailService {
                     remote_email,
                 )
                 .await?;
-                let detail = self.get(updated.id).await?;
-                Ok(ReloadEmailResult::Reloaded { email: detail })
+                Ok(ReloadEmailResult::Reloaded {
+                    email: email_model_to_detail(updated, has_attachments),
+                })
             }
             None => {
                 email_repo::delete_one_with_attachments(&self.db, email_id).await?;
@@ -953,4 +935,27 @@ fn convert_models(emails: Vec<emails::Model>) -> Vec<EmailDto> {
             has_attachments: false, // 暂时不支持附件
         })
         .collect()
+}
+
+fn email_model_to_detail(email: emails::Model, has_attachments: bool) -> EmailDetail {
+    EmailDetail {
+        email: EmailDto {
+            id: email.id,
+            account_id: email.account_id,
+            folder: email.folder,
+            uid: email.uid,
+            subject: email.subject,
+            sender_name: email.sender_name,
+            sender_email: email.sender_email,
+            preview: email.preview,
+            is_read: email.is_read.unwrap_or(false),
+            is_starred: email.is_starred.unwrap_or(false),
+            sent_at: email.sent_at,
+            has_attachments,
+        },
+        recipient_emails: email.recipient_emails,
+        cc_emails: email.cc_emails,
+        body_text: email.body_text,
+        body_html: email.body_html,
+    }
 }
