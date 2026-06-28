@@ -457,14 +457,14 @@
                       单个搜索结果项
                       - 点击：选中该邮件
                       - 搜索结果不提供右键菜单，因为 SearchResult 不包含可靠的已读/星标状态
-                      - 根据是否选中添加 active 样式类
+                      - 根据是否选中添加选中态样式
                     -->
                     <button
                         data-testid="email-item"
                         data-subject={result.subject || "(No Subject)"}
-                        class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
+                        class="group relative flex w-full cursor-pointer flex-col border-b border-border px-5 py-3 text-left transition-colors hover:bg-glass-hover {emailState.selectedEmailId ===
                         result.id
-                            ? 'active'
+                            ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                             : ''}"
                         onclick={() => emailState.selectEmail(result.id)}
                     >
@@ -539,10 +539,9 @@
                   单个邮件项
 
                   类名说明：
-                  - email-item：自定义邮件项基础样式
                   - group：Tailwind 的组标记，用于 hover 子元素联动
                   - relative：相对定位（为未读圆点的绝对定位提供参考）
-                  - active：选中状态（通过条件判断动态添加）
+                  - 选中态：通过条件类动态添加左边框和主题色背景
 
                   交互事件：
                   - onclick：选中该邮件，更新全局状态
@@ -551,9 +550,9 @@
                 <button
                     data-testid="email-item"
                     data-subject={email.subject || "(No Subject)"}
-                    class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
+                    class="group relative flex w-full cursor-pointer flex-col border-b border-border px-5 py-3 text-left transition-colors hover:bg-glass-hover {emailState.selectedEmailId ===
                     email.id
-                        ? 'active'
+                        ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                         : ''}"
                     onclick={() => emailState.selectEmail(email.id)}
                     oncontextmenu={(e) => openContextMenu(e, email)}
@@ -565,7 +564,7 @@
                     -->
                     {#if !email.is_read}
                         <div
-                            class="unread-dot absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary"
+                            class="absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary"
                         ></div>
                     {/if}
 
@@ -654,36 +653,3 @@
         />
     {/if}
 </div>
-
-<!-- ==================== 组件样式 ====================-->
-
-<!--
-  组件局部样式说明：
-  - .email-item：邮件列表项的基础样式，包括悬停和选中效果
-  - .email-item.active：选中状态的邮件项，带主题色左边框高亮
-  - .unread-dot：未读指示圆点样式（在模板中已通过 Tailwind 类实现）
--->
-<style>
-    /* 邮件列表项基础样式 */
-    .email-item {
-        cursor: pointer;
-        transition: background 150ms ease;
-    }
-
-    /* 邮件列表项悬停效果：浅色玻璃态背景 */
-    .email-item:hover {
-        background: var(--color-glass-hover);
-    }
-
-    /*
-      邮件列表项选中效果
-      - 背景色：主题色与透明的 15% 混合，产生淡主题色背景
-      - 左边框：3px 实线主题色，作为选中指示条
-      - 左内边距：减去边框宽度，保持内容不偏移
-    */
-    .email-item.active {
-        background: color-mix(in srgb, var(--color-primary) 15%, transparent);
-        border-left: 3px solid var(--color-primary);
-        padding-left: calc(1.25rem - 3px);
-    }
-</style>
