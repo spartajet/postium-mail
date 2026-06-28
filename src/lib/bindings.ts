@@ -386,6 +386,7 @@ export const commands = {
 	 *  ```
 	 */
 	getEmail: (id: number) => typedError<EmailDetail, MailError>(__TAURI_INVOKE("get_email", { id })),
+	reloadEmail: (emailId: number) => typedError<ReloadEmailResult, MailError>(__TAURI_INVOKE("reload_email", { emailId })),
 	/**
 	 *  搜索邮件
 	 * 
@@ -1897,6 +1898,8 @@ export type ProviderInfo = {
 	// 排序权重
 	sort_order: number,
 };
+
+export type ReloadEmailResult = { status: "reloaded"; email: EmailDetail } | { status: "removed"; email_id: number };
 
 /**
  *  全文搜索的返回结果

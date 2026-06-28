@@ -390,6 +390,58 @@ export class EmailState {
     }
   }
 
+  async reloadEmail(emailId: number): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.reloadEmail(emailId);
+
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+
+      if (result.data.status === "reloaded") {
+        const detail = result.data.email;
+        const updatedEmail: EmailDto = {
+          id: detail.id,
+          account_id: detail.account_id,
+          folder: detail.folder,
+          uid: detail.uid,
+          subject: detail.subject,
+          sender_name: detail.sender_name,
+          sender_email: detail.sender_email,
+          preview: detail.preview,
+          is_read: detail.is_read,
+          is_starred: detail.is_starred,
+          sent_at: detail.sent_at,
+          has_attachments: detail.has_attachments,
+        };
+        this.emails = this.emails.map((email) =>
+          email.id === emailId ? updatedEmail : email,
+        );
+        if (this.selectedEmailId === emailId) {
+          this.selectedEmail = detail;
+        }
+        return true;
+      }
+
+      const removedId = result.data.email_id;
+      const before = this.emails.length;
+      this.emails = this.emails.filter((email) => email.id !== removedId);
+      const removed = before - this.emails.length;
+      if (this.selectedEmailId === removedId) {
+        this.deselectEmail();
+      }
+      this.total = Math.max(0, this.total - removed);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to reload email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
   async archiveEmail(emailId: number): Promise<boolean> {
     this.beginOperation(emailId);
     try {

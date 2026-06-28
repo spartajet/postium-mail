@@ -27,7 +27,8 @@ const emailDetail = {
 
 describe("EmailState 状态行为", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(null);
   });
 
   it("loadEmailsByCategory 成功后写入列表和分页状态", async () => {
@@ -126,6 +127,57 @@ describe("EmailState 状态行为", () => {
     expect(ok).toBe(false);
     expect(state.emails[0]!.is_read).toBe(false);
     expect(state.selectedEmail?.is_read).toBe(false);
+    expect(state.error).toContain("remote failed");
+  });
+
+  it("reloadEmail 收到 reloaded 时更新列表和当前详情", async () => {
+    const state = new EmailState();
+    state.emails = [{ ...email, id: 1, subject: "旧主题", preview: "旧预览" }];
+    state.selectedEmailId = 1;
+    state.selectedEmail = { ...emailDetail, subject: "旧主题", body_text: "旧正文" };
+    const reloadedEmail = { ...email, id: 1, subject: "新主题", preview: "新预览" };
+    mockInvoke.mockResolvedValueOnce({
+      status: "reloaded",
+      email: { ...emailDetail, ...reloadedEmail, body_text: "新正文" },
+    });
+
+    const ok = await state.reloadEmail(1);
+
+    expect(ok).toBe(true);
+    expect(state.emails[0]?.subject).toBe("新主题");
+    expect(state.selectedEmail?.body_text).toBe("新正文");
+    expect(mockInvoke).toHaveBeenCalledWith("reload_email", { emailId: 1 });
+  });
+
+  it("reloadEmail 收到 removed 时移除列表并取消选择", async () => {
+    const state = new EmailState();
+    state.emails = [{ ...email, id: 1 }, { ...email, id: 2 }];
+    state.total = 2;
+    state.selectedEmailId = 1;
+    state.selectedEmail = { ...emailDetail, id: 1 };
+    mockInvoke.mockResolvedValueOnce({
+      status: "removed",
+      email_id: 1,
+    });
+
+    const ok = await state.reloadEmail(1);
+
+    expect(ok).toBe(true);
+    expect(state.emails.map((email) => email.id)).toEqual([2]);
+    expect(state.selectedEmailId).toBeNull();
+    expect(state.selectedEmail).toBeNull();
+    expect(state.total).toBe(1);
+  });
+
+  it("reloadEmail 后端失败时保留本地状态", async () => {
+    const state = new EmailState();
+    state.emails = [{ ...email, id: 1, subject: "旧主题" }];
+    mockInvoke.mockRejectedValueOnce(new Error("remote failed"));
+
+    const ok = await state.reloadEmail(1);
+
+    expect(ok).toBe(false);
+    expect(state.emails[0]?.subject).toBe("旧主题");
     expect(state.error).toContain("remote failed");
   });
 
