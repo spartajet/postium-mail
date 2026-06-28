@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use postium_mail_lib::domain::auth::AuthManager;
 use postium_mail_lib::domain::providers::pool::init_provider_pool;
 use postium_mail_lib::error::MailError;
+use postium_mail_lib::infrastructure::protocols::types::WholeEmailDto;
 use postium_mail_lib::infrastructure::storage::database::DbConn;
 use postium_mail_lib::infrastructure::storage::models::accounts;
 use postium_mail_lib::service::account_connection::{
@@ -64,6 +65,15 @@ impl MailRemoteOperator for NoopMailRemoteOperator {
         _target_folder: &str,
     ) -> Result<(), MailError> {
         Ok(())
+    }
+
+    async fn reload_email(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        Ok(None)
     }
 }
 

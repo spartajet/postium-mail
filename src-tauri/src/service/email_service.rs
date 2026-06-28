@@ -199,6 +199,13 @@ pub struct EmailDetail {
     pub body_html: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ReloadEmailResult {
+    Reloaded { email: EmailDetail },
+    Removed { email_id: i32 },
+}
+
 /// 邮件列表响应
 ///
 /// 分页查询的响应格式，包含邮件列表和分页信息。
@@ -525,6 +532,39 @@ impl EmailService {
             body_text: email.body_text,
             body_html: email.body_html,
         })
+    }
+
+    pub async fn reload_email(&self, email_id: i32) -> Result<ReloadEmailResult, MailError> {
+        let email = email_repo::get_by_id(&self.db, email_id)
+            .await?
+            .ok_or(MailError::EmailNotFound(email_id))?;
+        let account = account_repo::get_by_id(&self.db, email.account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(email.account_id))?;
+
+        match self
+            .mail_operation
+            .remote()
+            .reload_email(&account, &email.folder, email.uid)
+            .await?
+        {
+            Some(remote_email) => {
+                let updated = email_repo::replace_email_with_attachments(
+                    &self.db,
+                    email_id,
+                    account.id,
+                    &email.folder,
+                    remote_email,
+                )
+                .await?;
+                let detail = self.get(updated.id).await?;
+                Ok(ReloadEmailResult::Reloaded { email: detail })
+            }
+            None => {
+                email_repo::delete_one_with_attachments(&self.db, email_id).await?;
+                Ok(ReloadEmailResult::Removed { email_id })
+            }
+        }
     }
 
     /// 全文搜索邮件

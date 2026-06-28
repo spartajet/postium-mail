@@ -3,14 +3,15 @@ mod common;
 use async_trait::async_trait;
 use common::{TestEmail, TestServices, insert_test_email};
 use postium_mail_lib::error::MailError;
+use postium_mail_lib::infrastructure::protocols::types::{AttachmentInfo, WholeEmailDto};
 use postium_mail_lib::infrastructure::storage::models::accounts;
+use postium_mail_lib::service::account_service::CreateAccountRequest;
+use postium_mail_lib::service::email_service::{EmailCategory, ReloadEmailResult};
+use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 static ACCOUNT_COUNTER: AtomicU32 = AtomicU32::new(1);
-use postium_mail_lib::service::account_service::CreateAccountRequest;
-use postium_mail_lib::service::email_service::EmailCategory;
-use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 
 async fn create_test_account(svc: &TestServices) -> i32 {
     let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -53,21 +54,71 @@ async fn create_remote_test_account(svc: &TestServices) -> i32 {
     svc.account_service.create(req).await.unwrap().id
 }
 
-#[derive(Default)]
+fn remote_email(uid: u32, subject: &str, body: &str) -> WholeEmailDto {
+    WholeEmailDto {
+        id: 0,
+        account_id: 0,
+        folder: "INBOX".to_string(),
+        uid,
+        message_id: Some(format!("<reload-{uid}@example.com>")),
+        sender_name: Some("Reload Sender".to_string()),
+        sender_email: "reload@example.com".to_string(),
+        recipient_emails: "recipient@example.com".to_string(),
+        cc_emails: Some("copy@example.com".to_string()),
+        bcc_emails: None,
+        subject: Some(subject.to_string()),
+        preview: Some(body.chars().take(200).collect()),
+        body_text: Some(body.to_string()),
+        body_html: Some(format!("<p>{body}</p>")),
+        attachments: vec![AttachmentInfo {
+            filename: Some("reload.pdf".to_string()),
+            content_type: "application/pdf".to_string(),
+            size: 42,
+            section_path: "2".to_string(),
+            disposition: Some("attachment".to_string()),
+            content_id: None,
+        }],
+        is_read: true,
+        is_starred: true,
+        is_draft: false,
+        is_answered: true,
+        is_deleted: false,
+        sent_at: 1_800_000_100,
+        received_at: 1_800_000_101,
+        created_at: 0,
+    }
+}
+
 struct FakeMailRemote {
     calls: Mutex<Vec<String>>,
     fail: bool,
+    reload_result: Mutex<Option<Result<Option<WholeEmailDto>, MailError>>>,
 }
 
 impl FakeMailRemote {
     fn success() -> Arc<Self> {
-        Arc::new(Self::default())
+        Arc::new(Self {
+            calls: Mutex::new(Vec::new()),
+            fail: false,
+            reload_result: Mutex::new(Some(Ok(None))),
+        })
     }
 
     fn failing() -> Arc<Self> {
         Arc::new(Self {
             calls: Mutex::new(Vec::new()),
             fail: true,
+            reload_result: Mutex::new(Some(Err(MailError::ImapConnectionFailed(
+                "fake remote failure".to_string(),
+            )))),
+        })
+    }
+
+    fn with_reload(result: Result<Option<WholeEmailDto>, MailError>) -> Arc<Self> {
+        Arc::new(Self {
+            calls: Mutex::new(Vec::new()),
+            fail: false,
+            reload_result: Mutex::new(Some(result)),
         })
     }
 
@@ -127,6 +178,23 @@ impl MailRemoteOperator for FakeMailRemote {
             account.email
         ));
         self.maybe_fail()
+    }
+
+    async fn reload_email(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("reload:{}:{folder}:{uid}", account.email));
+        self.reload_result
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(Ok(None))
     }
 }
 
@@ -355,6 +423,73 @@ async fn test_delete_batch_returns_error_without_remote_or_local_changes() {
         "INBOX"
     );
     assert!(remote.calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_reload_email_replaces_local_email_when_remote_exists() {
+    let remote =
+        FakeMailRemote::with_reload(Ok(Some(remote_email(514, "远端新主题", "远端新正文"))));
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(514, "本地旧主题").body_text("本地旧正文"),
+    )
+    .await;
+
+    let result = svc.email_service.reload_email(email_id).await.unwrap();
+
+    assert!(matches!(result, ReloadEmailResult::Reloaded { .. }));
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.subject.as_deref(), Some("远端新主题"));
+    assert_eq!(detail.body_text.as_deref(), Some("远端新正文"));
+    assert!(detail.email.is_read);
+    assert!(detail.email.is_starred);
+    assert_eq!(detail.email.sender_email, "reload@example.com");
+    assert_eq!(remote.calls(), vec!["reload:test@example.com:INBOX:514"]);
+}
+
+#[tokio::test]
+async fn test_reload_email_removes_local_email_when_remote_uid_missing() {
+    let remote = FakeMailRemote::with_reload(Ok(None));
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(515, "远端不存在")).await;
+
+    let result = svc.email_service.reload_email(email_id).await.unwrap();
+
+    assert!(matches!(
+        result,
+        ReloadEmailResult::Removed { email_id: removed_id } if removed_id == email_id
+    ));
+    assert!(matches!(
+        svc.email_service.get(email_id).await,
+        Err(MailError::EmailNotFound(id)) if id == email_id
+    ));
+    assert_eq!(remote.calls(), vec!["reload:test@example.com:INBOX:515"]);
+}
+
+#[tokio::test]
+async fn test_reload_email_remote_error_keeps_local_email() {
+    let remote =
+        FakeMailRemote::with_reload(Err(MailError::ImapError("remote failed".to_string())));
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(516, "保留主题").body_text("保留正文"),
+    )
+    .await;
+
+    let result = svc.email_service.reload_email(email_id).await;
+
+    assert!(result.is_err());
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.subject.as_deref(), Some("保留主题"));
+    assert_eq!(detail.body_text.as_deref(), Some("保留正文"));
+    assert_eq!(remote.calls(), vec!["reload:test@example.com:INBOX:516"]);
 }
 
 #[tokio::test]
