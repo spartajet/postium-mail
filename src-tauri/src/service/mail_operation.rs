@@ -3,6 +3,7 @@ use crate::domain::auth::manager::Credentials;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
+use crate::infrastructure::protocols::types::WholeEmailDto;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::{account_repo, email_repo};
@@ -35,6 +36,13 @@ pub trait MailRemoteOperator: Send + Sync {
         uid: u32,
         target_folder: &str,
     ) -> Result<(), MailError>;
+
+    async fn reload_email(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError>;
 }
 
 pub struct RealMailRemoteOperator {
@@ -128,6 +136,18 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         client.logout().await.ok();
         Ok(())
     }
+
+    async fn reload_email(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        let mut client = self.connect_for_account(account).await?;
+        let result = client.fetch_email_by_uid(folder, uid).await;
+        client.logout().await.ok();
+        result
+    }
 }
 
 pub struct MailOperationService {
@@ -138,6 +158,10 @@ pub struct MailOperationService {
 impl MailOperationService {
     pub fn new(db: DbConn, _auth: Arc<AuthManager>, remote: Arc<dyn MailRemoteOperator>) -> Self {
         Self { db, remote }
+    }
+
+    pub(crate) fn remote(&self) -> Arc<dyn MailRemoteOperator> {
+        self.remote.clone()
     }
 
     async fn get_email(&self, email_id: i32) -> Result<emails::Model, MailError> {

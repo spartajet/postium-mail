@@ -57,7 +57,7 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
 use crate::service::email_service::{
-    EmailCategory, EmailDetail, EmailListResponse, SendEmailRequest,
+    EmailCategory, EmailDetail, EmailListResponse, ReloadEmailResult, SendEmailRequest,
 };
 
 ///
@@ -294,6 +294,16 @@ pub async fn get_email(
     // 2. 自动标记为已读
     // 3. 返回详细信息
     service.get(id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reload_email(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    email_id: i32,
+) -> Result<ReloadEmailResult, MailError> {
+    tracing::info!(email_id, "命令: 重新加载邮件");
+    service.reload_email(email_id).await
 }
 
 ///
