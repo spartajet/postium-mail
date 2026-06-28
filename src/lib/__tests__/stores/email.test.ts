@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  commands,
+} from "$lib/bindings";
+import {
   createMockResult,
   expectOk,
   type MockCommandResult,
@@ -160,6 +163,15 @@ describe("EmailState invoke 测试", () => {
     const result = await invokeMock<number>("delete_emails", { emailIds: [1, 2] });
     expectOk(result);
     expect(result.data).toBe(2);
+  });
+
+  it("archiveEmail 调用正确", async () => {
+    mockInvoke.mockResolvedValue(null);
+
+    const result = await commands.archiveEmail(123);
+
+    expect(result.status).toBe("ok");
+    expect(mockInvoke).toHaveBeenCalledWith("archive_email", { emailId: 123 });
   });
 
   it("处理错误响应", async () => {

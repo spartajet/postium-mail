@@ -34,6 +34,8 @@
 <script lang="ts">
     // ==================== 导入依赖 ====================
 
+    // 导入 Svelte Context API，用于获取父组件共享的模态框引用
+    import { getContext } from "svelte";
     // 导入国际化状态管理，用于多语言支持
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入邮件状态管理，用于邮件列表数据、选中状态、加载操作等
@@ -46,6 +48,8 @@
     import type { SearchResult } from "$lib/bindings";
     // 导入右键菜单子组件
     import EmailContextMenu from "./EmailContextMenu.svelte";
+    // 导入写邮件模态框类型定义（用于 Context 引用类型）
+    import type ComposeModal from "./ComposeModal.svelte";
     // 导入图标组件（Lucide 图标库）
     import {
         Search, // 搜索图标
@@ -67,6 +71,12 @@
     const emailState = getEmailState();
     // 获取账户状态实例（包含当前活跃账户信息）
     const accountStore = getAccountState();
+
+    // 写邮件模态框的 Context 键（与 +layout.svelte 中设置的键一致）
+    const COMPOSE_MODAL_KEY = Symbol.for("compose-modal");
+    // 从 Context 中获取写邮件模态框的引用函数
+    const getComposeModal =
+        getContext<() => ComposeModal | undefined>(COMPOSE_MODAL_KEY);
 
     // ==================== 搜索相关状态 ====================
 
@@ -131,6 +141,55 @@
      */
     function closeContextMenu() {
         contextMenu.visible = false;
+    }
+
+    /**
+     * 刷新当前分类邮件
+     *
+     * 触发当前活跃账号同步，并重新加载当前邮件分类。
+     */
+    async function handleRefresh() {
+        if (accountStore.activeAccountId) {
+            await emailState.refreshCurrentCategory(
+                accountStore.activeAccountId,
+            );
+        }
+    }
+
+    /**
+     * 右键菜单：切换星标状态
+     */
+    async function handleContextToggleStar(emailId: number) {
+        await emailState.toggleStar(emailId);
+    }
+
+    /**
+     * 右键菜单：切换已读/未读状态
+     */
+    async function handleContextToggleRead(emailId: number, isRead: boolean) {
+        await emailState.markAsRead(emailId, isRead);
+    }
+
+    /**
+     * 右键菜单：删除邮件
+     */
+    async function handleContextDelete(emailId: number) {
+        await emailState.deleteEmails([emailId]);
+    }
+
+    /**
+     * 右键菜单：转发邮件
+     */
+    async function handleContextForward(emailId: number) {
+        const result = await commands.getEmail(emailId);
+        const modal = getComposeModal?.();
+        if (result.status === "ok" && modal) {
+            const email = result.data;
+            modal.showForward(
+                email.subject || "",
+                email.body_text || email.body_html || "",
+            );
+        }
     }
 
     // ==================== 自动加载邮件 ====================
@@ -328,18 +387,27 @@
                 data-testid="email-refresh-button"
                 class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.sidebar.sync}
+                onclick={handleRefresh}
+                disabled={!accountStore.activeAccountId || emailState.loading}
             >
-                <RefreshCw size={18} />
+                <RefreshCw
+                    size={18}
+                    class={emailState.loading ? "animate-spin" : ""}
+                />
             </button>
             <!-- 列表视图按钮 -->
             <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-50"
+                disabled
+                aria-disabled="true"
             >
                 <List size={18} />
             </button>
             <!-- 网格视图按钮 -->
             <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-50"
+                disabled
+                aria-disabled="true"
             >
                 <LayoutGrid size={18} />
             </button>
@@ -388,7 +456,7 @@
                     <!--
                       单个搜索结果项
                       - 点击：选中该邮件
-                      - 右键：打开上下文菜单
+                      - 搜索结果不提供右键菜单，因为 SearchResult 不包含可靠的已读/星标状态
                       - 根据是否选中添加 active 样式类
                     -->
                     <button
@@ -399,12 +467,6 @@
                             ? 'active'
                             : ''}"
                         onclick={() => emailState.selectEmail(result.id)}
-                        oncontextmenu={(e) =>
-                            openContextMenu(e, {
-                                id: result.id,
-                                is_read: true,
-                                is_starred: false,
-                            })}
                     >
                         <!-- 第一行：发件人 + 时间 -->
                         <div class="flex items-center justify-between gap-2">
@@ -583,6 +645,11 @@
             emailId={contextMenu.emailId}
             isRead={contextMenu.isRead}
             isStarred={contextMenu.isStarred}
+            disabled={emailState.operatingIds.has(contextMenu.emailId)}
+            onToggleStar={handleContextToggleStar}
+            onToggleRead={handleContextToggleRead}
+            onDelete={handleContextDelete}
+            onForward={handleContextForward}
             onClose={closeContextMenu}
         />
     {/if}

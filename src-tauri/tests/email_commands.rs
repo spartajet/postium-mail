@@ -1,11 +1,16 @@
 mod common;
 
+use async_trait::async_trait;
 use common::{TestEmail, TestServices, insert_test_email};
+use postium_mail_lib::error::MailError;
+use postium_mail_lib::infrastructure::storage::models::accounts;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 static ACCOUNT_COUNTER: AtomicU32 = AtomicU32::new(1);
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::email_service::EmailCategory;
+use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 
 async fn create_test_account(svc: &TestServices) -> i32 {
     let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -26,6 +31,330 @@ async fn create_test_account(svc: &TestServices) -> i32 {
         account_type: None,
     };
     svc.account_service.create(req).await.unwrap().id
+}
+
+async fn create_remote_test_account(svc: &TestServices) -> i32 {
+    let req = CreateAccountRequest {
+        name: "Test Remote".to_string(),
+        email: "test@example.com".to_string(),
+        display_name: None,
+        provider: "gmail".to_string(),
+        auth_type: "Password".to_string(),
+        password: "pass".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+    svc.account_service.create(req).await.unwrap().id
+}
+
+#[derive(Default)]
+struct FakeMailRemote {
+    calls: Mutex<Vec<String>>,
+    fail: bool,
+}
+
+impl FakeMailRemote {
+    fn success() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    fn failing() -> Arc<Self> {
+        Arc::new(Self {
+            calls: Mutex::new(Vec::new()),
+            fail: true,
+        })
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    fn maybe_fail(&self) -> Result<(), MailError> {
+        if self.fail {
+            return Err(MailError::ImapConnectionFailed(
+                "fake remote failure".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl MailRemoteOperator for FakeMailRemote {
+    async fn mark_seen(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        seen: bool,
+    ) -> Result<(), MailError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("mark_seen:{}:{folder}:{uid}:{seen}", account.email));
+        self.maybe_fail()
+    }
+
+    async fn set_flagged(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        flagged: bool,
+    ) -> Result<(), MailError> {
+        self.calls.lock().unwrap().push(format!(
+            "set_flagged:{}:{folder}:{uid}:{flagged}",
+            account.email
+        ));
+        self.maybe_fail()
+    }
+
+    async fn move_to_folder(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        target_folder: &str,
+    ) -> Result<(), MailError> {
+        self.calls.lock().unwrap().push(format!(
+            "move_to_folder:{}:{folder}:{uid}:{target_folder}",
+            account.email
+        ));
+        self.maybe_fail()
+    }
+}
+
+#[tokio::test]
+async fn test_mark_as_read_remote_success_updates_local() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(501, "远端已读")).await;
+
+    svc.email_service
+        .mark_as_read(email_id, true)
+        .await
+        .unwrap();
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert!(detail.email.is_read);
+    assert_eq!(
+        remote.calls(),
+        vec!["mark_seen:test@example.com:INBOX:501:true"]
+    );
+}
+
+#[tokio::test]
+async fn test_mark_as_read_remote_failure_keeps_local_state() {
+    let remote = FakeMailRemote::failing();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(502, "远端失败")).await;
+
+    let result = svc.email_service.mark_as_read(email_id, true).await;
+
+    assert!(result.is_err());
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert!(!detail.email.is_read);
+    assert_eq!(
+        remote.calls(),
+        vec!["mark_seen:test@example.com:INBOX:502:true"]
+    );
+}
+
+#[tokio::test]
+async fn test_toggle_star_remote_success_updates_local() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(503, "远端星标")).await;
+
+    let new_state = svc.email_service.toggle_star(email_id).await.unwrap();
+
+    assert!(new_state);
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert!(detail.email.is_starred);
+    assert_eq!(
+        remote.calls(),
+        vec!["set_flagged:test@example.com:INBOX:503:true"]
+    );
+}
+
+#[tokio::test]
+async fn test_toggle_star_remote_failure_keeps_local_state() {
+    let remote = FakeMailRemote::failing();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(504, "星标失败")).await;
+
+    let result = svc.email_service.toggle_star(email_id).await;
+
+    assert!(result.is_err());
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert!(!detail.email.is_starred);
+    assert_eq!(
+        remote.calls(),
+        vec!["set_flagged:test@example.com:INBOX:504:true"]
+    );
+}
+
+#[tokio::test]
+async fn test_move_to_folder_remote_success_updates_local_folder() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(505, "移动邮件")).await;
+
+    svc.email_service
+        .move_to_folder(email_id, "Work")
+        .await
+        .unwrap();
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "Work");
+    assert_eq!(
+        remote.calls(),
+        vec!["move_to_folder:test@example.com:INBOX:505:Work"]
+    );
+}
+
+#[tokio::test]
+async fn test_move_to_folder_remote_failure_keeps_local_folder() {
+    let remote = FakeMailRemote::failing();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(506, "移动失败")).await;
+
+    let result = svc.email_service.move_to_folder(email_id, "Work").await;
+
+    assert!(result.is_err());
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "INBOX");
+    assert_eq!(
+        remote.calls(),
+        vec!["move_to_folder:test@example.com:INBOX:506:Work"]
+    );
+}
+
+#[tokio::test]
+async fn test_archive_moves_remote_to_provider_archive_folder() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(507, "归档邮件")).await;
+
+    svc.email_service.archive(email_id).await.unwrap();
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "[Gmail]/All Mail");
+    assert_eq!(
+        remote.calls(),
+        vec!["move_to_folder:test@example.com:INBOX:507:[Gmail]/All Mail"]
+    );
+}
+
+#[tokio::test]
+async fn test_delete_moves_remote_to_provider_trash_folder_without_soft_delete() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(508, "删除邮件")).await;
+
+    let count = svc.email_service.delete(vec![email_id]).await.unwrap();
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(detail.email.folder, "[Gmail]/Trash");
+    assert_eq!(
+        remote.calls(),
+        vec!["move_to_folder:test@example.com:INBOX:508:[Gmail]/Trash"]
+    );
+}
+
+#[tokio::test]
+async fn test_delete_remote_failure_keeps_email_in_original_folder() {
+    let remote = FakeMailRemote::failing();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(509, "删除失败")).await;
+
+    let result = svc.email_service.delete(vec![email_id]).await;
+
+    assert!(result.is_err());
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "INBOX");
+    assert_eq!(
+        remote.calls(),
+        vec!["move_to_folder:test@example.com:INBOX:509:[Gmail]/Trash"]
+    );
+}
+
+#[tokio::test]
+async fn test_delete_email_already_in_trash_returns_error_without_remote_call() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(510, "已在垃圾箱").folder("[Gmail]/Trash"),
+    )
+    .await;
+
+    let result = svc.email_service.delete(vec![email_id]).await;
+
+    assert!(matches!(result, Err(MailError::InvalidParam(_))));
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "[Gmail]/Trash");
+    assert!(remote.calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_delete_email_in_alternate_trash_folder_returns_error_without_remote_call() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(511, "中文垃圾箱").folder("[Gmail]/&V4NXPpCuTvY-"),
+    )
+    .await;
+
+    let result = svc.email_service.delete(vec![email_id]).await;
+
+    assert!(matches!(result, Err(MailError::InvalidParam(_))));
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert_eq!(detail.email.folder, "[Gmail]/&V4NXPpCuTvY-");
+    assert!(remote.calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_delete_batch_returns_error_without_remote_or_local_changes() {
+    let remote = FakeMailRemote::success();
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_remote_test_account(&svc).await;
+    let first_id = insert_test_email(&svc, account_id, TestEmail::new(512, "第一封")).await;
+    let second_id = insert_test_email(&svc, account_id, TestEmail::new(513, "第二封")).await;
+
+    let result = svc.email_service.delete(vec![first_id, second_id]).await;
+
+    assert!(matches!(result, Err(MailError::InvalidParam(_))));
+    assert_eq!(
+        svc.email_service.get(first_id).await.unwrap().email.folder,
+        "INBOX"
+    );
+    assert_eq!(
+        svc.email_service.get(second_id).await.unwrap().email.folder,
+        "INBOX"
+    );
+    assert!(remote.calls().is_empty());
 }
 
 #[tokio::test]
@@ -163,11 +492,10 @@ async fn test_get_email_returns_detail_fields() {
 async fn test_mark_as_read_not_found() {
     let svc = TestServices::new().await;
 
-    // mark_as_read 内部使用 update_many，不存在的 id 会静默成功（影响 0 行）
     let result = svc.email_service.mark_as_read(999, true).await;
     assert!(
-        result.is_ok(),
-        "mark_as_read 对不存在的邮件不报错（update_many 静默成功）"
+        matches!(result, Err(MailError::EmailNotFound(999))),
+        "mark_as_read 对不存在的邮件应返回 EmailNotFound"
     );
 }
 
@@ -268,7 +596,7 @@ async fn test_delete_emails_empty_list() {
 }
 
 #[tokio::test]
-async fn test_delete_emails_soft_deletes_and_hides_from_list() {
+async fn test_delete_emails_moves_to_trash_and_hides_from_inbox() {
     let svc = TestServices::new().await;
     let account_id = create_test_account(&svc).await;
     let delete_id = insert_test_email(&svc, account_id, TestEmail::new(60, "待删除")).await;

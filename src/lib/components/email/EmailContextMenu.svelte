@@ -61,6 +61,11 @@
      * @param emailId - 目标邮件的唯一 ID
      * @param isRead - 目标邮件的当前已读状态
      * @param isStarred - 目标邮件的当前星标状态
+     * @param disabled - 目标邮件是否正在执行操作
+     * @param onToggleStar - 切换星标回调
+     * @param onToggleRead - 切换已读/未读回调
+     * @param onDelete - 删除回调
+     * @param onForward - 转发回调
      * @param onClose - 关闭菜单的回调函数（通知父组件隐藏菜单）
      */
     let {
@@ -69,6 +74,11 @@
         emailId,
         isRead,
         isStarred,
+        disabled = false,
+        onToggleStar,
+        onToggleRead,
+        onDelete,
+        onForward,
         onClose,
     }: {
         x: number;
@@ -76,6 +86,14 @@
         emailId: number;
         isRead: boolean;
         isStarred: boolean;
+        disabled?: boolean;
+        onToggleStar: (emailId: number) => Promise<void> | void;
+        onToggleRead: (
+            emailId: number,
+            isRead: boolean,
+        ) => Promise<void> | void;
+        onDelete: (emailId: number) => Promise<void> | void;
+        onForward: (emailId: number) => Promise<void> | void;
         onClose: () => void;
     } = $props();
 
@@ -115,22 +133,23 @@
     /**
      * 处理菜单项点击操作
      *
-     * 根据用户点击的菜单项执行对应的操作。
-     * 当前所有操作均为占位实现，仅关闭菜单。
+     * 根据用户点击的菜单项执行对应的邮件操作。
      *
-     * TODO: 实现以下操作的完整逻辑：
-     * - reply：打开写邮件模态框，预填充回复信息
-     * - replyAll：打开写邮件模态框，预填充全部回复信息
-     * - forward：打开写邮件模态框，预填充转发信息
-     * - star：切换邮件星标状态
-     * - toggleRead：切换邮件已读/未读状态
-     * - delete：删除邮件（移至废纸篓）
-     * - more：显示更多操作子菜单
-     *
-     * @param _action - 操作类型标识符
+     * @param action - 操作类型标识符
      */
-    function handleAction(_action: string) {
-        // TODO: 实现各操作功能
+    async function handleAction(action: string) {
+        if (disabled) return;
+
+        if (action === "star") {
+            await onToggleStar(emailId);
+        } else if (action === "toggleRead") {
+            await onToggleRead(emailId, !isRead);
+        } else if (action === "delete") {
+            await onDelete(emailId);
+        } else if (action === "forward") {
+            await onForward(emailId);
+        }
+
         onClose();
     }
 
@@ -182,8 +201,8 @@
       向原始发件人发送回复邮件
     -->
     <button
-        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
-        onclick={() => handleAction("reply")}
+        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-muted-foreground opacity-50"
+        disabled
     >
         <Reply size={15} class="text-muted-foreground" />
         <span>{t.email.reply}</span>
@@ -194,8 +213,8 @@
       向原始发件人和所有收件人发送回复邮件
     -->
     <button
-        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
-        onclick={() => handleAction("replyAll")}
+        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-muted-foreground opacity-50"
+        disabled
     >
         <ReplyAll size={15} class="text-muted-foreground" />
         <span>{t.email.replyAll}</span>
@@ -208,6 +227,7 @@
     <button
         class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
         onclick={() => handleAction("forward")}
+        disabled={disabled}
     >
         <Forward size={15} class="text-muted-foreground" />
         <span>{t.email.forward}</span>
@@ -232,6 +252,7 @@
     <button
         class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
         onclick={() => handleAction("star")}
+        disabled={disabled}
     >
         <Flag
             size={15}
@@ -249,6 +270,7 @@
     <button
         class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
         onclick={() => handleAction("toggleRead")}
+        disabled={disabled}
     >
         <Mail size={15} class="text-muted-foreground" />
         <span>{isRead ? t.email.markUnread : t.email.markRead}</span>
@@ -272,6 +294,7 @@
     <button
         class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
         onclick={() => handleAction("delete")}
+        disabled={disabled}
     >
         <Trash2 size={15} />
         <span>{t.email.delete}</span>
@@ -292,8 +315,8 @@
       预留扩展入口，未来可添加移动到文件夹、设置标签等操作
     -->
     <button
-        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm transition-colors hover:bg-glass-hover"
-        onclick={() => handleAction("more")}
+        class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-muted-foreground opacity-50"
+        disabled
     >
         <MoreHorizontal size={15} class="text-muted-foreground" />
         <span>{t.common.operations}</span>

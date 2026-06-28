@@ -296,9 +296,21 @@ mod tests {
         let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
 
         assert!(result.cc_emails.is_some());
-        assert!(result.cc_emails.as_ref().unwrap().contains("charlie@example.com"));
+        assert!(
+            result
+                .cc_emails
+                .as_ref()
+                .unwrap()
+                .contains("charlie@example.com")
+        );
         assert!(result.bcc_emails.is_some());
-        assert!(result.bcc_emails.as_ref().unwrap().contains("secret@example.com"));
+        assert!(
+            result
+                .bcc_emails
+                .as_ref()
+                .unwrap()
+                .contains("secret@example.com")
+        );
     }
 
     #[test]

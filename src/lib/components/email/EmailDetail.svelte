@@ -150,21 +150,32 @@
      * 将当前选中邮件的星标状态进行反转（已星标 → 取消，未星标 → 添加）。
      * 操作委托给 emailState 处理，确保全局状态一致。
      */
-    function handleToggleStar() {
+    async function handleToggleStar() {
         if (emailState.selectedEmail) {
-            emailState.toggleStar(emailState.selectedEmail.id);
+            await emailState.toggleStar(emailState.selectedEmail.id);
+        }
+    }
+
+    /**
+     * 归档当前选中邮件
+     *
+     * 将当前邮件移出当前分类。操作委托给 emailState 处理。
+     */
+    async function handleArchive() {
+        if (emailState.selectedEmail) {
+            await emailState.archiveEmail(emailState.selectedEmail.id);
         }
     }
 
     /**
      * 删除当前选中邮件
      *
-     * 将当前邮件移至废纸篓（或永久删除，取决于后端实现）。
+     * 第一阶段将当前邮件移至服务商 Trash 文件夹，不执行永久删除。
      * 操作委托给 emailState 处理。
      */
-    function handleDelete() {
+    async function handleDelete() {
         if (emailState.selectedEmail) {
-            emailState.deleteEmails([emailState.selectedEmail.id]);
+            await emailState.deleteEmails([emailState.selectedEmail.id]);
         }
     }
 
@@ -627,6 +638,9 @@
                     : 'text-muted-foreground hover:text-foreground'}"
                 title={t.email.star}
                 onclick={handleToggleStar}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Star
                     size={18}
@@ -636,10 +650,14 @@
                 />
             </button>
 
-            <!-- 归档按钮（功能占位） -->
+            <!-- 归档按钮 -->
             <button
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.email.archive}
+                onclick={handleArchive}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Archive size={18} />
             </button>
@@ -653,6 +671,9 @@
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-destructive"
                 title={t.common.delete}
                 onclick={handleDelete}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Trash2 size={18} />
             </button>
