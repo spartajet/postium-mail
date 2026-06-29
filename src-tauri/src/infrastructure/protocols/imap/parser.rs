@@ -1,7 +1,9 @@
 use crate::infrastructure::protocols::types::AttachmentInfo;
 use async_imap::imap_proto;
+use base64::Engine;
+use encoding_rs::GB18030;
 
-use mail_parser::MessageParser;
+use mail_parser::{Encoding, MessageParser, PartType};
 
 // ──────────────────────────────────────────────
 // mail_parser 辅助函数
@@ -31,7 +33,19 @@ pub struct ParsedHeaders {
 /// `fallback_ts`：当邮件中无 Date 头时使用的时间戳
 pub fn parse_headers_from_raw(raw: &[u8], fallback_ts: i64) -> Option<ParsedHeaders> {
     let msg = MessageParser::default().parse(raw)?;
-    Some(extract_headers_from_message(&msg, fallback_ts))
+    Some(extract_headers_from_message_with_raw(
+        &msg,
+        raw,
+        fallback_ts,
+    ))
+}
+
+pub fn decoded_body_text(msg: &mail_parser::Message<'_>) -> Option<String> {
+    decode_body_part_with_fallback(msg, *msg.text_body.first()?, BodyKind::Text)
+}
+
+pub fn decoded_body_html(msg: &mail_parser::Message<'_>) -> Option<String> {
+    decode_body_part_with_fallback(msg, *msg.html_body.first()?, BodyKind::Html)
 }
 
 /// 从已解析的 mail_parser Message 中提取邮件头字段
@@ -41,7 +55,15 @@ pub fn extract_headers_from_message(
     msg: &mail_parser::Message<'_>,
     fallback_ts: i64,
 ) -> ParsedHeaders {
-    let subject = msg.subject().map(|s| s.to_string());
+    extract_headers_from_message_with_raw(msg, msg.raw_message(), fallback_ts)
+}
+
+pub fn extract_headers_from_message_with_raw(
+    msg: &mail_parser::Message<'_>,
+    raw: &[u8],
+    fallback_ts: i64,
+) -> ParsedHeaders {
+    let subject = decode_subject_with_fallback(msg, raw);
     let message_id = msg.message_id().map(|s| s.to_string());
     let sent_at = msg.date().map(|d| d.to_timestamp()).unwrap_or(fallback_ts);
 
@@ -74,6 +96,148 @@ pub fn extract_headers_from_message(
         bcc_emails,
         message_id,
         sent_at,
+    }
+}
+
+fn decode_subject_with_fallback(msg: &mail_parser::Message<'_>, raw: &[u8]) -> Option<String> {
+    let parsed = msg.subject().map(decode_rfc2047);
+    if parsed.as_ref().is_some_and(|subject| !is_mojibake(subject)) {
+        return parsed;
+    }
+
+    if let Some(raw_subject) = raw_header_value(raw, b"subject") {
+        if let Ok(ascii_subject) = std::str::from_utf8(raw_subject) {
+            let decoded = decode_rfc2047(ascii_subject);
+            if !is_mojibake(&decoded) && decoded != ascii_subject {
+                return Some(decoded);
+            }
+        }
+
+        let decoded = decode_gb18030_lossy(raw_subject);
+        if !is_mojibake(&decoded) {
+            return Some(decoded);
+        }
+    }
+
+    parsed
+}
+
+fn raw_header_value<'a>(raw: &'a [u8], header_name: &[u8]) -> Option<&'a [u8]> {
+    let header_end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .or_else(|| raw.windows(2).position(|window| window == b"\n\n"))
+        .unwrap_or(raw.len());
+    let headers = &raw[..header_end];
+    let mut offset = 0;
+
+    while offset < headers.len() {
+        let line_end = headers[offset..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+            .map(|pos| offset + pos)
+            .unwrap_or(headers.len());
+        let mut line = &headers[offset..line_end];
+        if line.ends_with(b"\r") {
+            line = &line[..line.len() - 1];
+        }
+
+        if let Some(colon_pos) = line.iter().position(|&byte| byte == b':')
+            && line[..colon_pos].eq_ignore_ascii_case(header_name)
+        {
+            let value_start = offset + colon_pos + 1;
+            let mut end = line_end;
+            let mut next = if line_end < headers.len() {
+                line_end + 1
+            } else {
+                line_end
+            };
+            while next < headers.len() && matches!(headers.get(next), Some(b' ' | b'\t')) {
+                end = headers[next..]
+                    .iter()
+                    .position(|&byte| byte == b'\n')
+                    .map(|pos| next + pos)
+                    .unwrap_or(headers.len());
+                next = if end < headers.len() { end + 1 } else { end };
+            }
+            return Some(trim_ascii_whitespace(&headers[value_start..end]));
+        }
+
+        offset = if line_end < headers.len() {
+            line_end + 1
+        } else {
+            line_end
+        };
+    }
+
+    None
+}
+
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())
+        .map(|pos| pos + 1)
+        .unwrap_or(start);
+    &bytes[start..end]
+}
+
+enum BodyKind {
+    Text,
+    Html,
+}
+
+fn decode_body_part_with_fallback(
+    msg: &mail_parser::Message<'_>,
+    part_id: u32,
+    kind: BodyKind,
+) -> Option<String> {
+    let part = msg.parts.get(part_id as usize)?;
+    let parsed = match (&part.body, &kind) {
+        (PartType::Text(text), BodyKind::Text) | (PartType::Html(text), BodyKind::Html) => {
+            Some(text.to_string())
+        }
+        _ => None,
+    };
+    if parsed.as_ref().is_some_and(|text| !is_mojibake(text)) {
+        return parsed;
+    }
+
+    let raw = msg.raw_message();
+    let body = raw.get(part.offset_body as usize..part.offset_end as usize)?;
+    let decoded_transfer = decode_transfer_encoded_body(body, part.encoding)?;
+    Some(decode_gb18030_lossy(&decoded_transfer))
+}
+
+fn is_mojibake(value: &str) -> bool {
+    value.chars().filter(|&ch| ch == '\u{fffd}').count() >= 2
+}
+
+fn decode_gb18030_lossy(bytes: &[u8]) -> String {
+    let (decoded, _, _) = GB18030.decode(bytes);
+    decoded.into_owned()
+}
+
+fn decode_transfer_encoded_body(body: &[u8], encoding: Encoding) -> Option<Vec<u8>> {
+    match encoding {
+        Encoding::None => Some(body.to_vec()),
+        Encoding::Base64 => {
+            let normalized = body
+                .iter()
+                .copied()
+                .filter(|byte| !byte.is_ascii_whitespace())
+                .collect::<Vec<_>>();
+            base64::engine::general_purpose::STANDARD
+                .decode(normalized)
+                .ok()
+        }
+        Encoding::QuotedPrintable => {
+            quoted_printable::decode(body, quoted_printable::ParseMode::Robust).ok()
+        }
     }
 }
 
@@ -409,6 +573,52 @@ mod tests {
 
         assert_eq!(result.sent_at, 1745126400);
         assert_eq!(result.subject.as_deref(), Some("No Date"));
+    }
+
+    #[test]
+    fn decodes_raw_gb18030_subject_without_encoded_word() {
+        let mut raw = b"From: alice@example.com\r\nSubject: ".to_vec();
+        raw.extend_from_slice(&[
+            0xd0, 0xc2, 0xc0, 0xcb, 0xd4, 0xc6, 0xd6, 0xd5, 0xd6, 0xb9, 0xb7, 0xfe, 0xce, 0xf1,
+            0xb9, 0xab, 0xb8, 0xe6,
+        ]);
+        raw.extend_from_slice(b"\r\n\r\nBody");
+
+        let result = parse_headers_from_raw(&raw, 0).expect("应成功解析");
+
+        assert_eq!(result.subject.as_deref(), Some("新浪云终止服务公告"));
+    }
+
+    #[test]
+    fn decodes_gbk_rfc2047_subject() {
+        let raw = b"From: alice@example.com\r\n\
+                    Subject: =?GBK?B?0MLAy9TG1tXWubf+zvG5q7jm?=\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert_eq!(result.subject.as_deref(), Some("新浪云终止服务公告"));
+    }
+
+    #[test]
+    fn decodes_raw_gb18030_text_body_without_charset() {
+        let mut raw =
+            b"From: alice@example.com\r\nSubject: test\r\nContent-Type: text/plain\r\n\r\n"
+                .to_vec();
+        raw.extend_from_slice(&[
+            0xd7, 0xf0, 0xbe, 0xb4, 0xb5, 0xc4, 0xd3, 0xc3, 0xbb, 0xa7, 0xa3, 0xba, 0x0a, 0xc4,
+            0xfa, 0xba, 0xc3, 0xa3, 0xac, 0xb8, 0xd0, 0xd0, 0xbb, 0xc4, 0xfa, 0xb3, 0xa4, 0xc6,
+            0xda, 0xd2, 0xd4, 0xc0, 0xb4, 0xb6, 0xd4, 0xd0, 0xc2, 0xc0, 0xcb, 0xd4, 0xc6, 0xb2,
+            0xfa, 0xc6, 0xb7, 0xd3, 0xeb, 0xb7, 0xfe, 0xce, 0xf1, 0xb5, 0xc4, 0xd6, 0xa7, 0xb3,
+            0xd6, 0xa1, 0xa3,
+        ]);
+
+        let message = MessageParser::default().parse(&raw).expect("应成功解析");
+
+        assert_eq!(
+            decoded_body_text(&message).as_deref(),
+            Some("尊敬的用户：\n您好，感谢您长期以来对新浪云产品与服务的支持。")
+        );
     }
 
     #[test]

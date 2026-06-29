@@ -42,6 +42,7 @@ async-imap = { version = "0.11", default-features = false, features = [
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }
 mail-parser = "0.11"
 quoted_printable = "0.5"
+encoding_rs = "0.8"
 
 # OAuth
 oauth2 = { version = "5", features = ["reqwest"] }
