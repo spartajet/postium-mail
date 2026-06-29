@@ -4,7 +4,10 @@ use async_imap::imap_proto::types::{MessageSection, SectionPath};
 use futures::{StreamExt, TryStreamExt};
 use mail_parser::MessageParser;
 
-use super::parser::{self, ParsedHeaders, extract_headers_from_message};
+use super::parser::{
+    self, ParsedHeaders, decoded_body_html, decoded_body_text,
+    extract_headers_from_message_with_raw,
+};
 use super::{ImapClient, RawEmailHeader};
 
 fn parse_section_path(
@@ -253,11 +256,9 @@ impl ImapClient {
             && let Ok(email_message) = MessageParser::default()
                 .parse(fetch_body_raw)
                 .ok_or(|| MailError::ImapError("解析邮件失败".to_string()))
-            && let Ok(body_text) = email_message
-                .body_text(0)
+            && let Ok(body_text) = decoded_body_text(&email_message)
                 .ok_or(|| MailError::ImapError("获取邮件内容失败".to_string()))
-            && let Ok(body_html) = email_message
-                .body_html(0)
+            && let Ok(body_html) = decoded_body_html(&email_message)
                 .ok_or(|| MailError::ImapError("获取邮件内容失败".to_string()))
         {
             (body_text.to_string(), body_html.to_string())
@@ -433,10 +434,10 @@ impl ImapClient {
             if let Some(raw) = fetch.body() {
                 // 单次解析，同时提取头部和正文
                 if let Some(msg) = mail_parser::MessageParser::default().parse(raw) {
-                    body_text = msg.body_text(0).map(|t| t.to_string());
-                    body_html = msg.body_html(0).map(|t| t.to_string());
+                    body_text = decoded_body_text(&msg);
+                    body_html = decoded_body_html(&msg);
                     preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
-                    headers = Some(extract_headers_from_message(&msg, now));
+                    headers = Some(extract_headers_from_message_with_raw(&msg, raw, now));
                 }
             }
 
@@ -538,7 +539,11 @@ impl ImapClient {
         let message = MessageParser::default()
             .parse(raw_body)
             .ok_or_else(|| MailError::ImapError("解析邮件失败".to_string()))?;
-        let headers = extract_headers_from_message(&message, chrono::Utc::now().timestamp());
+        let headers = extract_headers_from_message_with_raw(
+            &message,
+            raw_body,
+            chrono::Utc::now().timestamp(),
+        );
 
         let seen = fetch.flags().any(|f| f == async_imap::types::Flag::Seen);
         let flagged = fetch.flags().any(|f| f == async_imap::types::Flag::Flagged);
@@ -548,8 +553,8 @@ impl ImapClient {
         let deleted = fetch.flags().any(|f| f == async_imap::types::Flag::Deleted);
         let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
 
-        let body_text = message.body_text(0).map(|text| text.to_string());
-        let body_html = message.body_html(0).map(|html| html.to_string());
+        let body_text = decoded_body_text(&message);
+        let body_html = decoded_body_html(&message);
         let preview = body_text
             .as_ref()
             .map(|text| text.chars().take(200).collect());

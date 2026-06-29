@@ -3587,6 +3587,7 @@ dependencies = [
  "chrono",
  "dirs",
  "dotenvy",
+ "encoding_rs",
  "futures",
  "keyring",
  "lettre",
