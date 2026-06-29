@@ -42,6 +42,8 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入邮件状态管理，用于获取选中邮件和执行邮件操作
     import { getEmailState } from "$lib/stores/email.svelte";
+    // 导入账号状态管理，用于识别当前邮件所属账号邮箱
+    import { getAccountState } from "$lib/stores/account.svelte";
     // 导入写邮件模态框类型定义（用于 Context 引用类型）
     import type ComposeModal from "./ComposeModal.svelte";
     import type { AttachmentDto } from "$lib/bindings";
@@ -90,11 +92,17 @@
     const t = $derived(i18n.t);
     // 获取邮件状态实例（包含选中邮件、邮件列表等）
     const emailState = getEmailState();
+    // 获取账号状态实例（用于从 account_id 反查账号邮箱）
+    const accountState = getAccountState();
 
     // AI 摘要文本内容
     let aiSummary = $state("");
     // AI 摘要加载状态标志
     let isLoadingSummary = $state(false);
+    // 多收件人列表是否展开
+    let recipientsExpanded = $state(false);
+    // 记录当前邮件 ID，用于切换邮件时重置展开状态
+    let lastRecipientEmailId = $state<number | null>(null);
 
     // ==================== 工具函数 ====================
 
@@ -130,6 +138,47 @@
             minute: "2-digit",
         });
     }
+
+    function splitEmailList(value: string | null | undefined): string[] {
+        return (value ?? "")
+            .split(/[;,]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+
+    const recipientList = $derived(
+        splitEmailList(emailState.selectedEmail?.recipient_emails),
+    );
+
+    const currentAccountEmail = $derived(
+        accountState.accounts.find(
+            (account) => account.id === emailState.selectedEmail?.account_id,
+        )?.email ?? "",
+    );
+
+    const recipientSummary = $derived.by(() => {
+        if (recipientList.length === 0) return "";
+        if (recipientList.length === 1) return recipientList[0]!;
+
+        const accountEmail = currentAccountEmail.toLowerCase();
+        const accountRecipient = recipientList.find(
+            (recipient) => recipient.toLowerCase() === accountEmail,
+        );
+        const primaryRecipient = accountRecipient ?? recipientList[0]!;
+        const otherRecipients = t.email.otherRecipients.replace(
+            "{count}",
+            String(recipientList.length - 1),
+        );
+        return `${primaryRecipient} ${otherRecipients}`;
+    });
+
+    $effect(() => {
+        const emailId = emailState.selectedEmail?.id ?? null;
+        if (emailId !== lastRecipientEmailId) {
+            lastRecipientEmailId = emailId;
+            recipientsExpanded = false;
+        }
+    });
 
     /**
      * 手动加载 AI 摘要
@@ -398,12 +447,49 @@
                     </span>
                 </div>
                 <!-- 第二行：收件人 + 抄送信息 -->
-                <div class="mt-0.5 text-xs text-muted-foreground">
-                    {t.email.to}: {emailState.selectedEmail.recipient_emails}
+                <div
+                    class="mt-0.5 flex min-w-0 flex-wrap items-start gap-x-1 gap-y-1 text-xs text-muted-foreground"
+                >
+                    <span class="shrink-0">{t.email.to}:</span>
+                    {#if recipientList.length > 1 && !recipientsExpanded}
+                        <span class="min-w-0 break-all">
+                            {recipientSummary}
+                        </span>
+                    {:else}
+                        <span class="min-w-0 break-all">
+                            {#each recipientList as recipient, index}
+                                <span>{recipient}</span>{#if index < recipientList.length - 1}, {/if}
+                            {/each}
+                        </span>
+                    {/if}
+
+                    {#if recipientList.length > 1}
+                        <button
+                            type="button"
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            aria-label={recipientsExpanded
+                                ? t.email.collapseRecipients
+                                : t.email.expandRecipients}
+                            title={recipientsExpanded
+                                ? t.email.collapseRecipients
+                                : t.email.expandRecipients}
+                            onclick={() =>
+                                (recipientsExpanded = !recipientsExpanded)}
+                        >
+                            {#if recipientsExpanded}
+                                <ChevronUp size={14} />
+                            {:else}
+                                <ChevronDown size={14} />
+                            {/if}
+                        </button>
+                    {/if}
+
                     <!-- 如果有抄送，显示抄送信息 -->
                     {#if emailState.selectedEmail.cc_emails}
-                        &nbsp;|&nbsp; {t.email.cc}: {emailState.selectedEmail
-                            .cc_emails}
+                        <span class="shrink-0">&nbsp;|&nbsp; {t.email.cc}:</span>
+                        <span class="min-w-0 break-all">
+                            {emailState.selectedEmail.cc_emails}
+                        </span>
                     {/if}
                 </div>
             </div>

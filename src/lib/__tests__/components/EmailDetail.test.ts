@@ -1,12 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import EmailDetail from "$lib/components/email/EmailDetail.svelte";
 
 const downloadAttachment = vi.fn();
 const saveAttachmentAs = vi.fn();
 const openAttachment = vi.fn();
 
-const selectedEmail = {
+const baseSelectedEmail = {
     id: 1,
     account_id: 1,
     folder: "INBOX",
@@ -39,6 +39,24 @@ const selectedEmail = {
     ],
 };
 
+let selectedEmail = { ...baseSelectedEmail };
+
+const accounts = [
+    {
+        id: 1,
+        name: "Main",
+        email: "gxz04220427@163.com",
+        display_name: null,
+        provider: "imap",
+        color: null,
+        sync_enabled: true,
+        auth_type: "password",
+        account_type: "personal",
+        last_sync_at: null,
+        created_at: 1,
+    },
+];
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
     save: vi.fn(),
 }));
@@ -59,6 +77,12 @@ vi.mock("$lib/stores/email.svelte", () => ({
     }),
 }));
 
+vi.mock("$lib/stores/account.svelte", () => ({
+    getAccountState: () => ({
+        accounts,
+    }),
+}));
+
 vi.mock("$lib/stores/i18n.svelte", () => ({
     getI18nState: () => ({
         t: {
@@ -66,6 +90,9 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
                 noEmailSelected: "选择一封邮件开始阅读",
                 from: "发件人",
                 to: "收件人",
+                otherRecipients: "及其他 {count} 个收件人",
+                expandRecipients: "展开收件人",
+                collapseRecipients: "收起收件人",
                 cc: "抄送",
                 attachments: "附件",
                 attachmentDownload: "下载",
@@ -94,6 +121,33 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
 }));
 
 describe("EmailDetail", () => {
+    beforeEach(() => {
+        selectedEmail = { ...baseSelectedEmail };
+        vi.clearAllMocks();
+    });
+
+    it("多收件人默认折叠并可展开完整列表", async () => {
+        selectedEmail = {
+            ...selectedEmail,
+            recipient_emails:
+                "alice@example.com, gxz04220427@163.com, bob@example.com",
+        };
+
+        render(EmailDetail);
+
+        expect(
+            screen.getByText("gxz04220427@163.com 及其他 2 个收件人"),
+        ).toBeTruthy();
+        expect(screen.queryByText("alice@example.com")).toBeNull();
+
+        await fireEvent.click(
+            screen.getByRole("button", { name: "展开收件人" }),
+        );
+
+        expect(screen.getByText("alice@example.com")).toBeTruthy();
+        expect(screen.getByText("bob@example.com")).toBeTruthy();
+    });
+
     it("渲染真实附件并触发下载", async () => {
         render(EmailDetail);
 
