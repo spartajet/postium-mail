@@ -32,6 +32,7 @@
 /// - UpdateAccountRequest: 更新账号请求
 pub mod account_connection;
 pub mod account_service;
+pub mod attachment_service;
 
 /// 邮件服务模块
 ///
@@ -90,6 +91,9 @@ pub mod sync_service;
 /// - CreateAccountRequest: 创建账号时的请求参数
 /// - UpdateAccountRequest: 更新账号时的请求参数
 pub use account_service::{AccountDto, AccountService, CreateAccountRequest, UpdateAccountRequest};
+
+/// 附件相关导出
+pub use attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 
 /// 标签相关导出
 ///

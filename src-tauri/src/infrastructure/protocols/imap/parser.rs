@@ -127,12 +127,12 @@ pub fn extract_attachments(
 
     match body {
         imap_proto::BodyStructure::Basic { common, other, .. } => {
-            if is_attachment(common) {
+            if is_attachment(common, other) {
                 attachments.push(build_attachment_info(common, other, section));
             }
         }
         imap_proto::BodyStructure::Text { common, other, .. } => {
-            if is_attachment(common) {
+            if is_attachment(common, other) {
                 attachments.push(build_attachment_info(common, other, section));
             }
         }
@@ -142,7 +142,7 @@ pub fn extract_attachments(
             body: inner_body,
             ..
         } => {
-            if is_attachment(common) {
+            if is_attachment(common, other) {
                 attachments.push(build_attachment_info(common, other, section));
             }
             let inner_section = if section.is_empty() {
@@ -173,7 +173,11 @@ pub fn extract_attachments(
 /// 1. Content-Disposition 为 "attachment"
 /// 2. Content-Disposition 包含 filename 参数
 /// 3. Content-Type 包含 name 参数
-pub fn is_attachment(common: &imap_proto::BodyContentCommon<'_>) -> bool {
+/// 4. image/* 且包含 Content-ID（用于 CID 内联图片）
+pub fn is_attachment(
+    common: &imap_proto::BodyContentCommon<'_>,
+    other: &imap_proto::BodyContentSinglePart<'_>,
+) -> bool {
     if let Some(ref disposition) = common.disposition {
         if disposition.ty.eq_ignore_ascii_case("attachment") {
             return true;
@@ -196,12 +200,15 @@ pub fn is_attachment(common: &imap_proto::BodyContentCommon<'_>) -> bool {
         return true;
     }
 
-    false
+    common.ty.ty.eq_ignore_ascii_case("image") && other.id.is_some()
 }
 
 /// 对可能包含 RFC 2047 编码的字符串进行解码
 fn decode_rfc2047(raw: &str) -> String {
-    match rfc2047_decoder::decode(raw.as_bytes()) {
+    match rfc2047_decoder::Decoder::new()
+        .too_long_encoded_word_strategy(rfc2047_decoder::RecoverStrategy::Decode)
+        .decode(raw.as_bytes())
+    {
         Ok(decoded) => decoded,
         Err(_) => raw.to_string(),
     }
@@ -251,6 +258,127 @@ pub fn build_attachment_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_inline_cid_image_without_filename_as_attachment() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("image"),
+                    subtype: Cow::Borrowed("png"),
+                    params: None,
+                },
+                disposition: None,
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: Some(Cow::Borrowed("<logo@example.com>")),
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 128,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "2");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].content_type, "image/png");
+        assert_eq!(
+            attachments[0].content_id.as_deref(),
+            Some("<logo@example.com>")
+        );
+        assert_eq!(attachments[0].section_path, "2");
+    }
+
+    #[test]
+    fn top_level_single_part_attachment_keeps_empty_section_path() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentDisposition,
+            ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("application"),
+                    subtype: Cow::Borrowed("pdf"),
+                    params: None,
+                },
+                disposition: Some(ContentDisposition {
+                    ty: Cow::Borrowed("attachment"),
+                    params: None,
+                }),
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: None,
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 128,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].section_path, "");
+    }
+
+    #[test]
+    fn decodes_rfc2047_encoded_attachment_filename() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentDisposition,
+            ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let encoded_filename = "=?utf-8?B?6YKA6K+35Ye9LTIwMjYg5pqR5YGH77yI56ysIDE2IOWxiu+8ieWFqOWbvemrmOagoeWkp+aooeWei+OAgeaZuuiDveS9k+S4jueUn+aIkOW8j+e8lueoi+WunuaImOeglOS/ruePrS5wZGY=?=";
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("application"),
+                    subtype: Cow::Borrowed("pdf"),
+                    params: None,
+                },
+                disposition: Some(ContentDisposition {
+                    ty: Cow::Borrowed("attachment"),
+                    params: Some(vec![(
+                        Cow::Borrowed("filename"),
+                        Cow::Borrowed(encoded_filename),
+                    )]),
+                }),
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: None,
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 128,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "2");
+
+        assert_eq!(
+            attachments[0].filename.as_deref(),
+            Some("邀请函-2026 暑假（第 16 届）全国高校大模型、智能体与生成式编程实战研修班.pdf")
+        );
+    }
 
     #[test]
     fn test_parse_headers_from_basic_email() {

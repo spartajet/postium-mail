@@ -3,7 +3,9 @@ mod common;
 use async_trait::async_trait;
 use common::{TestEmail, TestServices, insert_test_email};
 use postium_mail_lib::error::MailError;
-use postium_mail_lib::infrastructure::protocols::types::{AttachmentInfo, WholeEmailDto};
+use postium_mail_lib::infrastructure::protocols::types::{
+    AttachmentInfo, FetchedBodySection, WholeEmailDto,
+};
 use postium_mail_lib::infrastructure::storage::models::accounts;
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::email_service::{EmailCategory, ReloadEmailResult};
@@ -93,6 +95,7 @@ struct FakeMailRemote {
     calls: Mutex<Vec<String>>,
     fail: bool,
     reload_result: Mutex<Option<Result<Option<WholeEmailDto>, MailError>>>,
+    attachment_section: Mutex<Option<Result<Option<FetchedBodySection>, MailError>>>,
 }
 
 impl FakeMailRemote {
@@ -101,6 +104,7 @@ impl FakeMailRemote {
             calls: Mutex::new(Vec::new()),
             fail: false,
             reload_result: Mutex::new(Some(Ok(None))),
+            attachment_section: Mutex::new(Some(Ok(None))),
         })
     }
 
@@ -111,6 +115,9 @@ impl FakeMailRemote {
             reload_result: Mutex::new(Some(Err(MailError::ImapConnectionFailed(
                 "fake remote failure".to_string(),
             )))),
+            attachment_section: Mutex::new(Some(Err(MailError::ImapConnectionFailed(
+                "fake remote failure".to_string(),
+            )))),
         })
     }
 
@@ -119,6 +126,19 @@ impl FakeMailRemote {
             calls: Mutex::new(Vec::new()),
             fail: false,
             reload_result: Mutex::new(Some(result)),
+            attachment_section: Mutex::new(Some(Ok(None))),
+        })
+    }
+
+    fn with_attachment_section(body: Vec<u8>, transfer_encoding: Option<String>) -> Arc<Self> {
+        Arc::new(Self {
+            calls: Mutex::new(Vec::new()),
+            fail: false,
+            reload_result: Mutex::new(Some(Ok(None))),
+            attachment_section: Mutex::new(Some(Ok(Some(FetchedBodySection {
+                body,
+                transfer_encoding,
+            })))),
         })
     }
 
@@ -196,6 +216,188 @@ impl MailRemoteOperator for FakeMailRemote {
             .take()
             .unwrap_or(Ok(None))
     }
+
+    async fn fetch_attachment_section(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        self.calls.lock().unwrap().push(format!(
+            "fetch_attachment_section:{}:{folder}:{uid}:{section_path}",
+            account.email
+        ));
+        self.attachment_section
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(Ok(None))
+    }
+}
+
+async fn insert_test_attachment(
+    svc: &TestServices,
+    email_id: i32,
+    filename: &str,
+    size: i64,
+    section_path: &str,
+) -> i32 {
+    let filename = filename.to_string();
+    let section_path = section_path.to_string();
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO attachments (
+                    email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
+                rusqlite::params![
+                    email_id,
+                    filename,
+                    "text/plain",
+                    size,
+                    section_path,
+                    "attachment",
+                    Option::<String>::None,
+                    chrono::Utc::now().timestamp()
+                ],
+            )?;
+            Ok(conn.last_insert_rowid() as i32)
+        })
+        .await
+        .unwrap()
+}
+
+async fn attachment_path(svc: &TestServices, attachment_id: i32) -> Option<String> {
+    svc.db
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT path FROM attachments WHERE id = ?1",
+                [attachment_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn ensure_cached_downloads_small_attachment_and_updates_path() {
+    let remote = FakeMailRemote::with_attachment_section(
+        b"hello attachment".to_vec(),
+        Some("7bit".to_string()),
+    );
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_test_account(&svc).await;
+    let email_id =
+        insert_test_email(&svc, account_id, TestEmail::new(3101, "small attachment")).await;
+    let attachment_id = insert_test_attachment(&svc, email_id, "hello.txt", 16, "2").await;
+    let cache_root = tempfile::tempdir().unwrap();
+
+    let service = postium_mail_lib::service::AttachmentService::new_with_remote(
+        svc.db.clone(),
+        remote.clone(),
+        cache_root.path().to_path_buf(),
+    );
+
+    let dto = service.ensure_cached(attachment_id).await.unwrap();
+
+    assert!(dto.is_cached);
+    let cache_path = dto.cache_path.unwrap();
+    assert_eq!(std::fs::read(&cache_path).unwrap(), b"hello attachment");
+    let calls = remote.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].ends_with(":INBOX:3101:2"));
+}
+
+#[tokio::test]
+async fn ensure_cached_decodes_base64_attachment_with_mime_whitespace() {
+    let remote = FakeMailRemote::with_attachment_section(
+        b"aGVs\r\nbG8g\r\nYXR0YWNobWVudA==".to_vec(),
+        Some("base64".to_string()),
+    );
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_test_account(&svc).await;
+    let email_id =
+        insert_test_email(&svc, account_id, TestEmail::new(3104, "base64 attachment")).await;
+    let attachment_id = insert_test_attachment(&svc, email_id, "base64.txt", 16, "2").await;
+    let cache_root = tempfile::tempdir().unwrap();
+
+    let service = postium_mail_lib::service::AttachmentService::new_with_remote(
+        svc.db.clone(),
+        remote,
+        cache_root.path().to_path_buf(),
+    );
+
+    let dto = service.ensure_cached(attachment_id).await.unwrap();
+
+    let cache_path = dto.cache_path.unwrap();
+    assert_eq!(std::fs::read(&cache_path).unwrap(), b"hello attachment");
+}
+
+#[tokio::test]
+async fn save_as_copies_small_attachment_from_cache_and_updates_path() {
+    let remote =
+        FakeMailRemote::with_attachment_section(b"cached copy".to_vec(), Some("7bit".to_string()));
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(3102, "save small")).await;
+    let attachment_id = insert_test_attachment(&svc, email_id, "copy.txt", 11, "2").await;
+    let cache_root = tempfile::tempdir().unwrap();
+    let output_dir = tempfile::tempdir().unwrap();
+    let target_path = output_dir.path().join("saved-copy.txt");
+    let service = postium_mail_lib::service::AttachmentService::new_with_remote(
+        svc.db.clone(),
+        remote.clone(),
+        cache_root.path().to_path_buf(),
+    );
+
+    service
+        .save_as(attachment_id, target_path.to_string_lossy().to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&target_path).unwrap(), b"cached copy");
+    assert!(attachment_path(&svc, attachment_id).await.is_some());
+    let calls = remote.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].ends_with(":INBOX:3102:2"));
+}
+
+#[tokio::test]
+async fn save_as_writes_large_attachment_directly_without_updating_path() {
+    let remote =
+        FakeMailRemote::with_attachment_section(b"direct large".to_vec(), Some("7bit".to_string()));
+    let svc = TestServices::new_with_mail_remote(remote.clone()).await;
+    let account_id = create_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(3103, "save large")).await;
+    let attachment_id = insert_test_attachment(
+        &svc,
+        email_id,
+        "large.bin",
+        postium_mail_lib::service::attachment_service::SMALL_ATTACHMENT_LIMIT_BYTES + 1,
+        "2",
+    )
+    .await;
+    let cache_root = tempfile::tempdir().unwrap();
+    let output_dir = tempfile::tempdir().unwrap();
+    let target_path = output_dir.path().join("large.bin");
+    let service = postium_mail_lib::service::AttachmentService::new_with_remote(
+        svc.db.clone(),
+        remote.clone(),
+        cache_root.path().to_path_buf(),
+    );
+
+    service
+        .save_as(attachment_id, target_path.to_string_lossy().to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&target_path).unwrap(), b"direct large");
+    assert!(attachment_path(&svc, attachment_id).await.is_none());
+    let calls = remote.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].ends_with(":INBOX:3103:2"));
 }
 
 #[tokio::test]
@@ -596,6 +798,57 @@ async fn test_list_emails_filters_folder_account_and_deleted_messages() {
 }
 
 #[tokio::test]
+async fn test_list_emails_returns_real_attachment_state() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+    let with_attachment_id =
+        insert_test_email(&svc, account_id, TestEmail::new(3002, "列表附件")).await;
+    let without_attachment_id =
+        insert_test_email(&svc, account_id, TestEmail::new(3003, "列表无附件")).await;
+
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO attachments (
+                    email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
+                rusqlite::params![
+                    with_attachment_id,
+                    "report.pdf",
+                    "application/pdf",
+                    1234_i64,
+                    "2",
+                    "attachment",
+                    Option::<String>::None,
+                    chrono::Utc::now().timestamp()
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let resp = svc
+        .email_service
+        .list(account_id, "INBOX", 1, 20)
+        .await
+        .unwrap();
+
+    let with_attachment = resp
+        .emails
+        .iter()
+        .find(|email| email.id == with_attachment_id)
+        .unwrap();
+    let without_attachment = resp
+        .emails
+        .iter()
+        .find(|email| email.id == without_attachment_id)
+        .unwrap();
+    assert!(with_attachment.has_attachments);
+    assert!(!without_attachment.has_attachments);
+}
+
+#[tokio::test]
 async fn test_get_email_not_found() {
     let svc = TestServices::new().await;
 
@@ -627,6 +880,46 @@ async fn test_get_email_returns_detail_fields() {
     assert_eq!(detail.body_text.as_deref(), Some("详情正文"));
     assert!(detail.email.is_read);
     assert!(detail.email.is_starred);
+}
+
+#[tokio::test]
+async fn get_email_returns_real_attachments() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+    let email_id =
+        insert_test_email(&svc, account_id, TestEmail::new(3001, "with attachment")).await;
+
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO attachments (
+                    email_id, filename, content_type, size, section_path, disposition, content_id, path, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)",
+                rusqlite::params![
+                    email_id,
+                    "report.pdf",
+                    "application/pdf",
+                    1234_i64,
+                    "2",
+                    "attachment",
+                    Option::<String>::None,
+                    chrono::Utc::now().timestamp()
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+
+    assert!(detail.email.has_attachments);
+    assert_eq!(detail.attachments.len(), 1);
+    assert_eq!(detail.attachments[0].filename, "report.pdf");
+    assert_eq!(detail.attachments[0].content_type, "application/pdf");
+    assert_eq!(detail.attachments[0].size, 1234);
+    assert!(!detail.attachments[0].is_inline);
+    assert!(!detail.attachments[0].is_cached);
 }
 
 #[tokio::test]

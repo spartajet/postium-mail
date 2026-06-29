@@ -46,10 +46,17 @@
 import { getContext, setContext } from "svelte";
 
 // 导入 Tauri 命令绑定，用于调用后端 API
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { commands } from "$lib/bindings";
 
 // 导入邮件相关的数据传输对象类型
-import type { EmailDto, EmailDetail, EmailCategory } from "$lib/bindings";
+import type {
+  AttachmentDto,
+  EmailDto,
+  EmailDetail,
+  EmailCategory,
+  InlineAttachmentDto,
+} from "$lib/bindings";
 
 // 导入错误格式化工具
 import { formatError } from "$lib/utils/error.js";
@@ -110,8 +117,19 @@ export class EmailState {
   /** 正在执行远端操作的邮件 ID 集合 */
   operatingIds = $state<Set<number>>(new Set());
 
+  /** 正在执行附件操作的附件 ID 集合 */
+  attachmentOperatingIds = $state<Set<number>>(new Set());
+
+  /** 按附件 ID 保存的操作错误 */
+  attachmentErrors = $state<Record<number, string>>({});
+
+  /** 已替换 CID 图片后的正文 HTML */
+  resolvedBodyHtml = $state<string | null>(null);
+
   /** 当前查看的邮件分类（响应式状态），如 "inbox"、"sent" 等 */
   currentFolder = $state<EmailCategory>("inbox");
+
+  private inlineResolveRequestId = 0;
 
   private beginOperation(emailId: number) {
     this.error = "";
@@ -127,6 +145,43 @@ export class EmailState {
   private setError(e: unknown, fallback: string) {
     this.error = e instanceof Error ? e.message : fallback;
     console.error(fallback, e);
+  }
+
+  private beginAttachmentOperation(attachmentId: number) {
+    this.attachmentErrors = { ...this.attachmentErrors, [attachmentId]: "" };
+    this.attachmentOperatingIds = new Set([
+      ...this.attachmentOperatingIds,
+      attachmentId,
+    ]);
+  }
+
+  private endAttachmentOperation(attachmentId: number) {
+    const next = new Set(this.attachmentOperatingIds);
+    next.delete(attachmentId);
+    this.attachmentOperatingIds = next;
+  }
+
+  private replaceSelectedAttachment(updated: AttachmentDto) {
+    if (!this.selectedEmail) return;
+
+    this.selectedEmail = {
+      ...this.selectedEmail,
+      attachments: this.selectedEmail.attachments.map((attachment) =>
+        attachment.id === updated.id ? updated : attachment,
+      ),
+    };
+  }
+
+  private setAttachmentError(
+    attachmentId: number,
+    error: unknown,
+    fallback: string,
+  ) {
+    const message = formatError(error);
+    this.attachmentErrors = {
+      ...this.attachmentErrors,
+      [attachmentId]: message || fallback,
+    };
   }
 
   private removeFromCurrentList(emailId: number) {
@@ -324,6 +379,8 @@ export class EmailState {
       if (result.status === "ok") {
         // 更新选中邮件的详情
         this.selectedEmail = result.data;
+        this.resolvedBodyHtml = result.data.body_html;
+        void this.resolveInlineAttachmentsForSelectedEmail();
 
         // 自动标记已读
         // 如果邮件当前是未读状态，调用后端标记为已读
@@ -364,6 +421,10 @@ export class EmailState {
   deselectEmail() {
     this.selectedEmailId = null;
     this.selectedEmail = null;
+    this.resolvedBodyHtml = null;
+    this.attachmentErrors = {};
+    this.attachmentOperatingIds = new Set();
+    this.inlineResolveRequestId += 1;
   }
 
   async markAsRead(emailId: number, isRead: boolean): Promise<boolean> {
@@ -421,6 +482,8 @@ export class EmailState {
         );
         if (this.selectedEmailId === emailId) {
           this.selectedEmail = detail;
+          this.resolvedBodyHtml = detail.body_html;
+          void this.resolveInlineAttachmentsForSelectedEmail();
         }
         return true;
       }
@@ -609,6 +672,105 @@ export class EmailState {
       this.setError(e, "Failed to refresh emails");
     }
   }
+
+  async downloadAttachment(attachmentId: number) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.ensureAttachmentCached(attachmentId);
+      if (result.status === "ok") {
+        this.replaceSelectedAttachment(result.data);
+      } else {
+        this.setAttachmentError(attachmentId, result.error, "附件下载失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件下载失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async saveAttachmentAs(attachmentId: number, targetPath: string) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.saveAttachmentAs(attachmentId, targetPath);
+      if (result.status === "error") {
+        this.setAttachmentError(attachmentId, result.error, "附件保存失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件保存失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async openAttachment(attachmentId: number) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.openAttachment(attachmentId);
+      if (result.status === "error") {
+        this.setAttachmentError(attachmentId, result.error, "附件打开失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件打开失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async resolveInlineAttachmentsForSelectedEmail() {
+    const email = this.selectedEmail;
+    const requestId = ++this.inlineResolveRequestId;
+    if (!email?.body_html) {
+      this.resolvedBodyHtml = email?.body_html ?? null;
+      return;
+    }
+
+    const smallInlineImages = email.attachments.filter(
+      (attachment) =>
+        attachment.content_id &&
+        attachment.content_type.startsWith("image/") &&
+        attachment.size <= 10 * 1024 * 1024,
+    );
+    if (smallInlineImages.length === 0) {
+      this.resolvedBodyHtml = email.body_html;
+      return;
+    }
+
+    const result = await commands.resolveInlineAttachments(email.id);
+    if (requestId !== this.inlineResolveRequestId || this.selectedEmail?.id !== email.id) {
+      return;
+    }
+    if (result.status !== "ok") {
+      this.resolvedBodyHtml = email.body_html;
+      return;
+    }
+
+    const mapped = result.data.map((attachment) => ({
+      ...attachment,
+      url: convertFileSrc(attachment.url),
+    }));
+    this.resolvedBodyHtml = replaceCidReferences(email.body_html, mapped);
+  }
+}
+
+export function normalizeContentId(contentId: string): string {
+  return contentId.trim().replace(/^<|>$/g, "");
+}
+
+export function replaceCidReferences(
+  html: string,
+  inlineAttachments: InlineAttachmentDto[],
+): string {
+  let next = html;
+  for (const attachment of inlineAttachments) {
+    const cid = normalizeContentId(attachment.content_id);
+    const candidates = new Set([cid, encodeURIComponent(cid)]);
+    for (const candidate of candidates) {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      next = next.replace(new RegExp(`cid:${escaped}`, "gi"), attachment.url);
+    }
+  }
+  return next;
 }
 
 /**

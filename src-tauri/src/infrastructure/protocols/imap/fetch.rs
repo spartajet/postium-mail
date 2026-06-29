@@ -1,10 +1,59 @@
 use crate::error::MailError;
-use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
+use crate::infrastructure::protocols::types::{EmailHeader, FetchedBodySection, WholeEmailDto};
+use async_imap::imap_proto::types::{MessageSection, SectionPath};
 use futures::{StreamExt, TryStreamExt};
 use mail_parser::MessageParser;
 
 use super::parser::{self, ParsedHeaders, extract_headers_from_message};
 use super::{ImapClient, RawEmailHeader};
+
+fn parse_section_path(
+    section_path: &str,
+    message_section: Option<MessageSection>,
+) -> Option<SectionPath> {
+    let parts = section_path
+        .split('.')
+        .map(|part| part.parse::<u32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+
+    if parts.is_empty() {
+        return None;
+    }
+    if parts.iter().any(|part| *part == 0) {
+        return None;
+    }
+
+    Some(SectionPath::Part(parts, message_section))
+}
+
+fn parse_transfer_encoding(mime_header: &[u8]) -> Option<String> {
+    let header = String::from_utf8_lossy(mime_header);
+    let mut unfolded = String::new();
+    for line in header.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            unfolded.push(' ');
+            unfolded.push_str(line.trim());
+        } else {
+            if !unfolded.is_empty() {
+                unfolded.push('\n');
+            }
+            unfolded.push_str(line);
+        }
+    }
+
+    unfolded.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name
+            .trim()
+            .eq_ignore_ascii_case("Content-Transfer-Encoding")
+        {
+            Some(value.trim().to_ascii_lowercase())
+        } else {
+            None
+        }
+    })
+}
 
 impl ImapClient {
     /// 批量获取邮件头（用于骨架同步，不获取正文）
@@ -217,6 +266,71 @@ impl ImapClient {
         };
 
         Ok(body_result)
+    }
+
+    /// 下载指定 MIME section 的原始内容和 MIME 头中的传输编码。
+    pub async fn fetch_body_section_with_mime(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        let section_path = section_path.trim();
+        let (body_section, mime_section, items) = if section_path.is_empty() {
+            (
+                SectionPath::Full(MessageSection::Text),
+                SectionPath::Full(MessageSection::Header),
+                "(BODY.PEEK[HEADER] BODY.PEEK[TEXT] UID)".to_string(),
+            )
+        } else {
+            let body_section = parse_section_path(section_path, None).ok_or_else(|| {
+                MailError::AttachmentUnavailable(format!(
+                    "附件 MIME section path 无效: {section_path}"
+                ))
+            })?;
+            let mime_section = parse_section_path(section_path, Some(MessageSection::Mime))
+                .ok_or_else(|| {
+                    MailError::AttachmentUnavailable(format!(
+                        "附件 MIME section path 无效: {section_path}"
+                    ))
+                })?;
+            (
+                body_section,
+                mime_section,
+                format!("(BODY.PEEK[{section_path}.MIME] BODY.PEEK[{section_path}] UID)"),
+            )
+        };
+
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let mut fetches = self
+            .session
+            .uid_fetch(uid.to_string(), items)
+            .await
+            .map_err(|e| MailError::AttachmentDownloadFailed(e.to_string()))?;
+
+        let Some(fetch_result) = fetches.next().await else {
+            return Ok(None);
+        };
+        let fetch = fetch_result.map_err(|e| MailError::AttachmentDownloadFailed(e.to_string()))?;
+        if fetch.uid != Some(uid) {
+            return Ok(None);
+        }
+
+        let body = fetch.section(&body_section).ok_or_else(|| {
+            MailError::AttachmentDownloadFailed("附件 section 内容为空".to_string())
+        })?;
+        let transfer_encoding = fetch
+            .section(&mime_section)
+            .and_then(parse_transfer_encoding);
+
+        Ok(Some(FetchedBodySection {
+            body: body.to_vec(),
+            transfer_encoding,
+        }))
     }
 
     /// 获取邮件的 FLAGS 和 UID（用于增量同步）
@@ -473,5 +587,37 @@ impl ImapClient {
             received_at,
             created_at: 0,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_transfer_encoding_should_return_lowercase_header_value() {
+        let mime_header = b"Content-Type: application/pdf\r\nContent-Transfer-Encoding: BASE64\r\n";
+
+        let transfer_encoding = parse_transfer_encoding(mime_header);
+
+        assert_eq!(transfer_encoding, Some("base64".to_string()));
+    }
+
+    #[test]
+    fn parse_transfer_encoding_should_unfold_header_continuations() {
+        let mime_header =
+            b"Content-Type: application/pdf\r\nContent-Transfer-Encoding:\r\n\tBASE64\r\n";
+
+        let transfer_encoding = parse_transfer_encoding(mime_header);
+
+        assert_eq!(transfer_encoding, Some("base64".to_string()));
+    }
+
+    #[test]
+    fn parse_section_path_should_reject_zero_parts() {
+        assert_eq!(parse_section_path("0", None), None);
+        assert_eq!(parse_section_path("1.0", None), None);
+        assert!(parse_section_path("2", None).is_some());
+        assert!(parse_section_path("3.1", None).is_some());
     }
 }
