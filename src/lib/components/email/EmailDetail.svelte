@@ -502,10 +502,10 @@
 
         <!--
       可滚动内容区域
-      包含：AI 摘要卡片、邮件正文、附件列表
+      包含：AI 摘要卡片、邮件正文
       使用 flex-1 overflow-y-auto 实现独立滚动
     -->
-        <div class="flex-1 overflow-y-auto">
+        <div data-testid="email-body-scroller" class="flex-1 overflow-y-auto">
             <!-- ==================== AI 摘要卡片 ==================== -->
 
             <!--
@@ -591,27 +591,31 @@
                 {/if}
             </div>
 
-            <!-- ==================== 附件列表 ==================== -->
+        </div>
 
-            <!--
-        附件区域
-        仅当邮件包含附件时显示 (has_attachments 为 true)
-        包含附件标题栏和附件文件卡片列表
-      -->
-            {#if emailState.selectedEmail.attachments.length > 0}
-                <section
-                    class="border-t border-border px-5 py-4"
-                    aria-label={t.email.attachments}
+        <!-- ==================== 附件列表 ==================== -->
+
+        <!--
+      附件区域
+      仅当邮件包含附件时显示，固定在正文滚动区下方、操作按钮栏上方
+      高度由内容自然撑开；附件较多时仅附件区域内部滚动
+    -->
+        {#if emailState.selectedEmail.attachments.length > 0}
+            <section
+                data-testid="email-attachments-bar"
+                class="shrink-0 border-t border-border px-5 py-3"
+                aria-label={t.email.attachments}
+            >
+                <!-- 附件标题栏：回形针图标 + "附件" 文本 -->
+                <div
+                    class="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground"
                 >
-                    <!-- 附件标题栏：回形针图标 + "附件" 文本 -->
-                    <div
-                        class="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground"
-                    >
-                        <Paperclip size={18} />
-                        <span>{t.email.attachments}</span>
-                    </div>
+                    <Paperclip size={18} />
+                    <span>{t.email.attachments}</span>
+                </div>
 
-                    <!-- 附件文件卡片列表：窄屏单列，中等宽度两列，宽屏三列 -->
+                <!-- 附件文件卡片列表：窄屏单列，中等宽度两列，宽屏三列 -->
+                <div class="max-h-48 overflow-y-auto pr-1">
                     <div
                         class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
                     >
@@ -703,9 +707,9 @@
                             </div>
                         {/each}
                     </div>
-                </section>
-            {/if}
-        </div>
+                </div>
+            </section>
+        {/if}
 
         <!-- ==================== 邮件操作按钮栏 ==================== -->
 

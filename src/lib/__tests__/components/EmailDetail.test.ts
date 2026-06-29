@@ -156,4 +156,13 @@ describe("EmailDetail", () => {
 
         expect(downloadAttachment).toHaveBeenCalledWith(7);
     });
+
+    it("附件栏停靠在正文滚动区外部", () => {
+        render(EmailDetail);
+
+        const bodyScroller = screen.getByTestId("email-body-scroller");
+        const attachmentBar = screen.getByTestId("email-attachments-bar");
+
+        expect(bodyScroller.contains(attachmentBar)).toBe(false);
+    });
 });
