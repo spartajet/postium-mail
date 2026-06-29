@@ -525,8 +525,10 @@
                         <span>{t.email.attachments}</span>
                     </div>
 
-                    <!-- 附件文件卡片列表（flex-wrap 支持多行排列） -->
-                    <div class="flex flex-col gap-2">
+                    <!-- 附件文件卡片列表：窄屏单列，中等宽度两列，宽屏三列 -->
+                    <div
+                        class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                    >
                         {#each emailState.selectedEmail.attachments as attachment (attachment.id)}
                             {@const Icon = attachmentIcon(attachment)}
                             {@const operating = emailState.attachmentOperatingIds.has(
@@ -534,7 +536,7 @@
                             )}
                             {@const large = isLargeAttachment(attachment)}
                             <div
-                                class="flex items-center gap-3 rounded-md border border-border bg-glass px-3 py-2 transition-colors hover:border-primary hover:bg-glass-hover"
+                                class="flex min-w-0 items-center gap-3 rounded-md border border-border bg-glass px-3 py-2 transition-colors hover:border-primary hover:bg-glass-hover"
                             >
                                 <div
                                     class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
