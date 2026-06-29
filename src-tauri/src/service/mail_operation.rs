@@ -3,7 +3,7 @@ use crate::domain::auth::manager::Credentials;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
-use crate::infrastructure::protocols::types::WholeEmailDto;
+use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::{account_repo, email_repo};
@@ -43,6 +43,14 @@ pub trait MailRemoteOperator: Send + Sync {
         folder: &str,
         uid: u32,
     ) -> Result<Option<WholeEmailDto>, MailError>;
+
+    async fn fetch_attachment_section(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError>;
 }
 
 pub struct RealMailRemoteOperator {
@@ -145,6 +153,21 @@ impl MailRemoteOperator for RealMailRemoteOperator {
     ) -> Result<Option<WholeEmailDto>, MailError> {
         let mut client = self.connect_for_account(account).await?;
         let result = client.fetch_email_by_uid(folder, uid).await;
+        client.logout().await.ok();
+        result
+    }
+
+    async fn fetch_attachment_section(
+        &self,
+        account: &accounts::Model,
+        folder: &str,
+        uid: u32,
+        section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        let mut client = self.connect_for_account(account).await?;
+        let result = client
+            .fetch_body_section_with_mime(folder, uid, section_path)
+            .await;
         client.logout().await.ok();
         result
     }

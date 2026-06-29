@@ -387,6 +387,10 @@ export const commands = {
 	 */
 	getEmail: (id: number) => typedError<EmailDetail, MailError>(__TAURI_INVOKE("get_email", { id })),
 	reloadEmail: (emailId: number) => typedError<ReloadEmailResult, MailError>(__TAURI_INVOKE("reload_email", { emailId })),
+	ensureAttachmentCached: (attachmentId: number) => typedError<AttachmentDto, MailError>(__TAURI_INVOKE("ensure_attachment_cached", { attachmentId })),
+	saveAttachmentAs: (attachmentId: number, targetPath: string) => typedError<null, MailError>(__TAURI_INVOKE("save_attachment_as", { attachmentId, targetPath })),
+	openAttachment: (attachmentId: number) => typedError<null, MailError>(__TAURI_INVOKE("open_attachment", { attachmentId })),
+	resolveInlineAttachments: (emailId: number) => typedError<InlineAttachmentDto[], MailError>(__TAURI_INVOKE("resolve_inline_attachments", { emailId })),
 	/**
 	 *  搜索邮件
 	 * 
@@ -1544,6 +1548,19 @@ export type AccountType =
 // 企业邮箱
 "Enterprise";
 
+export type AttachmentDto = {
+	id: number,
+	email_id: number,
+	filename: string,
+	content_type: string,
+	size: number,
+	disposition: string | null,
+	content_id: string | null,
+	is_inline: boolean,
+	is_cached: boolean,
+	cache_path: string | null,
+};
+
 /**
  *  认证方式枚举
  * 
@@ -1700,6 +1717,7 @@ export type EmailCategory =
  *  - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
  *  - `body_text`: 纯文本正文
  *  - `body_html`: HTML 格式正文
+ *  - `attachments`: 附件列表
  */
 export type EmailDetail = {
 	// 收件人邮箱列表（逗号分隔）
@@ -1710,6 +1728,8 @@ export type EmailDetail = {
 	body_text: string | null,
 	// HTML 正文
 	body_html: string | null,
+	// 附件列表
+	attachments: AttachmentDto[],
 } & 
 // 邮件基本信息
 (EmailDto);
@@ -1733,7 +1753,7 @@ export type EmailDetail = {
  *  - `is_read`: 是否已读
  *  - `is_starred`: 是否星标
  *  - `sent_at`: 发送时间（Unix 时间戳，秒）
- *  - `has_attachments`: 是否有附件（暂时固定为 false）
+ *  - `has_attachments`: 是否有附件（根据附件表真实计算）
  */
 export type EmailDto = {
 	// 数据库主键
@@ -1816,6 +1836,11 @@ export type FolderStat = {
 	unread: number,
 };
 
+export type InlineAttachmentDto = {
+	content_id: string,
+	url: string,
+};
+
 /**
  *  标签数据传输对象
  * 
@@ -1840,7 +1865,7 @@ export type LabelDto = {
 };
 
 // 统一错误类型 — 前端通过 tauri-specta Result 模式拿到类型化错误
-export type MailError = { type: "AccountNotFound"; message: number } | { type: "AuthFailed"; message: string } | { type: "ImapConnectionFailed"; message: string } | { type: "SmtpSendFailed"; message: string } | { type: "SyncFailed"; message: string } | { type: "DatabaseError"; message: string } | { type: "KeyringError"; message: string } | { type: "ProviderNotSupported"; message: string } | { type: "InvalidParam"; message: string } | { type: "EmailNotFound"; message: number } | { type: "FolderNotFound"; message: string } | { type: "OAuthError"; message: string } | { type: "InvalidProvider"; message: string } | { type: "OAuth2Error"; message: string } | { type: "NotImplemented"; message: string } | { type: "LabelNotFound"; message: number } | { type: "ImapFolderMetadataFailed"; message: string } | { type: "ImapSearchFailed"; message: string } | { type: "BatchFetchHeadersFailed"; message: string } | { type: "ImapError"; message: string } | { type: "EmailMissingUid"; message: string };
+export type MailError = { type: "AccountNotFound"; message: number } | { type: "AuthFailed"; message: string } | { type: "ImapConnectionFailed"; message: string } | { type: "SmtpSendFailed"; message: string } | { type: "SyncFailed"; message: string } | { type: "DatabaseError"; message: string } | { type: "KeyringError"; message: string } | { type: "ProviderNotSupported"; message: string } | { type: "InvalidParam"; message: string } | { type: "EmailNotFound"; message: number } | { type: "AttachmentNotFound"; message: number } | { type: "AttachmentUnavailable"; message: string } | { type: "AttachmentDownloadFailed"; message: string } | { type: "AttachmentDecodeFailed"; message: string } | { type: "FileSystemError"; message: string } | { type: "FolderNotFound"; message: string } | { type: "OAuthError"; message: string } | { type: "InvalidProvider"; message: string } | { type: "OAuth2Error"; message: string } | { type: "NotImplemented"; message: string } | { type: "LabelNotFound"; message: number } | { type: "ImapFolderMetadataFailed"; message: string } | { type: "ImapSearchFailed"; message: string } | { type: "BatchFetchHeadersFailed"; message: string } | { type: "ImapError"; message: string } | { type: "EmailMissingUid"; message: string };
 
 // OAuth2 授权 URL 结果
 export type OAuth2AuthUrl = {

@@ -11,6 +11,7 @@
     "core:window:allow-hide",
     "core:window:allow-show",
     "core:window:allow-close",
+    "dialog:default",
     "opener:default",
     "mcp-bridge:default",
     "positioner:default"

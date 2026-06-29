@@ -31,6 +31,7 @@ export const mockEmit = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mockInvoke,
+  convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

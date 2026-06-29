@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EmailState } from "$lib/stores/email.svelte";
+import {
+  EmailState,
+  replaceCidReferences,
+} from "$lib/stores/email.svelte";
 import { mockInvoke } from "../mocks/tauri";
 
 const email = {
@@ -23,6 +26,7 @@ const emailDetail = {
   cc_emails: null,
   body_text: "正文",
   body_html: "<p>正文</p>",
+  attachments: [],
 };
 
 describe("EmailState 状态行为", () => {
@@ -261,5 +265,104 @@ describe("EmailState 状态行为", () => {
     expect(state.selectedEmail).toBeNull();
     expect(state.total).toBe(1);
     expect(mockInvoke).toHaveBeenCalledWith("delete_emails", { emailIds: [1] });
+  });
+
+  it("downloadAttachment 下载后更新当前详情中的附件缓存状态", async () => {
+    const attachment = {
+      id: 7,
+      email_id: 1,
+      filename: "a.txt",
+      content_type: "text/plain",
+      size: 12,
+      disposition: "attachment",
+      content_id: null,
+      is_inline: false,
+      is_cached: false,
+      cache_path: null,
+    };
+    const state = new EmailState();
+    state.selectedEmail = {
+      ...emailDetail,
+      has_attachments: true,
+      attachments: [attachment],
+    };
+    mockInvoke.mockResolvedValueOnce({
+      ...attachment,
+      is_cached: true,
+      cache_path: "/tmp/a.txt",
+    });
+
+    await state.downloadAttachment(7);
+
+    expect(state.selectedEmail.attachments[0]?.is_cached).toBe(true);
+    expect(state.selectedEmail.attachments[0]?.cache_path).toBe("/tmp/a.txt");
+    expect(state.attachmentOperatingIds.has(7)).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith("ensure_attachment_cached", {
+      attachmentId: 7,
+    });
+  });
+
+  it("saveAttachmentAs 保存失败时记录当前附件错误", async () => {
+    const state = new EmailState();
+    mockInvoke.mockRejectedValueOnce(new Error("save failed"));
+
+    await state.saveAttachmentAs(7, "/tmp/a.txt");
+
+    expect(state.attachmentErrors[7]).toContain("save failed");
+    expect(state.attachmentOperatingIds.has(7)).toBe(false);
+  });
+
+  it("replaces cid references case-insensitively and url-encoded", () => {
+    const html = '<p><img src="cid:Logo@Example.Com"><img src="cid:logo%40example.com"></p>';
+    const result = replaceCidReferences(html, [
+      {
+        content_id: "<logo@example.com>",
+        url: "asset://localhost/logo.png",
+      },
+    ]);
+
+    expect(result).toContain('src="asset://localhost/logo.png"');
+    expect(result).not.toContain("cid:Logo@Example.Com");
+    expect(result).not.toContain("cid:logo%40example.com");
+  });
+
+  it("忽略旧邮件延迟返回的 CID 解析结果", async () => {
+    const state = new EmailState();
+    const first = {
+      ...emailDetail,
+      id: 1,
+      body_html: '<img src="cid:first@example.com">',
+      attachments: [
+        {
+          id: 8,
+          email_id: 1,
+          filename: "first.png",
+          content_type: "image/png",
+          size: 100,
+          disposition: "inline",
+          content_id: "<first@example.com>",
+          is_inline: true,
+          is_cached: false,
+          cache_path: null,
+        },
+      ],
+    };
+    const second = {
+      ...emailDetail,
+      id: 2,
+      body_html: "<p>second</p>",
+      attachments: [],
+    };
+    mockInvoke.mockResolvedValueOnce([
+      { content_id: "<first@example.com>", url: "/tmp/first.png" },
+    ]);
+    state.selectedEmail = first;
+    const resolvingFirst = state.resolveInlineAttachmentsForSelectedEmail();
+    state.selectedEmail = second;
+    state.resolvedBodyHtml = second.body_html;
+
+    await resolvingFirst;
+
+    expect(state.resolvedBodyHtml).toBe("<p>second</p>");
   });
 });

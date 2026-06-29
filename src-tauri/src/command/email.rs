@@ -56,6 +56,7 @@
 
 use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
+use crate::service::attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 use crate::service::email_service::{
     EmailCategory, EmailDetail, EmailListResponse, ReloadEmailResult, SendEmailRequest,
 };
@@ -304,6 +305,43 @@ pub async fn reload_email(
 ) -> Result<ReloadEmailResult, MailError> {
     tracing::info!(email_id, "命令: 重新加载邮件");
     service.reload_email(email_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn ensure_attachment_cached(
+    service: tauri::State<'_, AttachmentService>,
+    attachment_id: i32,
+) -> Result<AttachmentDto, MailError> {
+    service.ensure_cached(attachment_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_attachment_as(
+    service: tauri::State<'_, AttachmentService>,
+    attachment_id: i32,
+    target_path: String,
+) -> Result<(), MailError> {
+    service.save_as(attachment_id, target_path).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_attachment(
+    service: tauri::State<'_, AttachmentService>,
+    attachment_id: i32,
+) -> Result<(), MailError> {
+    service.open(attachment_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_inline_attachments(
+    service: tauri::State<'_, AttachmentService>,
+    email_id: i32,
+) -> Result<Vec<InlineAttachmentDto>, MailError> {
+    service.resolve_inline_images(email_id).await
 }
 
 ///

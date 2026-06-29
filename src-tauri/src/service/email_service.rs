@@ -2,8 +2,9 @@ use crate::domain::providers::StandardFolder;
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
 use crate::infrastructure::storage::models::emails;
-use crate::infrastructure::storage::repository::{account_repo, email_repo};
+use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
 use crate::infrastructure::storage::{DbConn, search};
+use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
 use crate::service::mail_operation::{
     MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
 };
@@ -144,7 +145,7 @@ impl EmailCategory {
 /// - `is_read`: 是否已读
 /// - `is_starred`: 是否星标
 /// - `sent_at`: 发送时间（Unix 时间戳，秒）
-/// - `has_attachments`: 是否有附件（暂时固定为 false）
+/// - `has_attachments`: 是否有附件（根据附件表真实计算）
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EmailDto {
     /// 数据库主键
@@ -184,6 +185,7 @@ pub struct EmailDto {
 /// - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
 /// - `body_text`: 纯文本正文
 /// - `body_html`: HTML 格式正文
+/// - `attachments`: 附件列表
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EmailDetail {
     /// 邮件基本信息
@@ -197,6 +199,8 @@ pub struct EmailDetail {
     pub body_text: Option<String>,
     /// HTML 正文
     pub body_html: Option<String>,
+    /// 附件列表
+    pub attachments: Vec<AttachmentDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -366,7 +370,7 @@ impl EmailService {
         let (emails, total) =
             email_repo::list_by_folder(&self.db, account_id, folder, page, limit).await?;
         Ok(EmailListResponse {
-            emails: convert_models(emails),
+            emails: convert_models_with_attachments(&self.db, emails).await?,
             total,
             page,
             limit,
@@ -433,7 +437,7 @@ impl EmailService {
             let (emails, total) =
                 email_repo::list_starred(&self.db, account_id, page, limit).await?;
             return Ok(EmailListResponse {
-                emails: convert_models(emails),
+                emails: convert_models_with_attachments(&self.db, emails).await?,
                 total,
                 page,
                 limit,
@@ -478,7 +482,7 @@ impl EmailService {
         let (emails, total) =
             email_repo::list_by_folders(&self.db, account_id, &folders, page, limit).await?;
         Ok(EmailListResponse {
-            emails: convert_models(emails),
+            emails: convert_models_with_attachments(&self.db, emails).await?,
             total,
             page,
             limit,
@@ -510,8 +514,9 @@ impl EmailService {
         let email = email_repo::get_by_id(&self.db, id)
             .await?
             .ok_or(MailError::EmailNotFound(id))?;
+        let attachments = list_dtos_by_email(&self.db, id).await?;
 
-        Ok(email_model_to_detail(email, false))
+        Ok(email_model_to_detail(email, attachments))
     }
 
     pub async fn reload_email(&self, email_id: i32) -> Result<ReloadEmailResult, MailError> {
@@ -529,7 +534,6 @@ impl EmailService {
             .await?
         {
             Some(remote_email) => {
-                let has_attachments = !remote_email.attachments.is_empty();
                 let updated = email_repo::replace_email_with_attachments(
                     &self.db,
                     email_id,
@@ -538,8 +542,9 @@ impl EmailService {
                     remote_email,
                 )
                 .await?;
+                let attachments = list_dtos_by_email(&self.db, email_id).await?;
                 Ok(ReloadEmailResult::Reloaded {
-                    email: email_model_to_detail(updated, has_attachments),
+                    email: email_model_to_detail(updated, attachments),
                 })
             }
             None => {
@@ -915,47 +920,49 @@ impl EmailService {
 /// # 转换说明
 ///
 /// - 处理 Optional 类型的默认值
-/// - 附件标志暂时固定为 false
+/// - 附件标志根据附件表真实计算
 /// - 保留所有重要字段信息
-fn convert_models(emails: Vec<emails::Model>) -> Vec<EmailDto> {
-    emails
+async fn convert_models_with_attachments(
+    db: &DbConn,
+    emails: Vec<emails::Model>,
+) -> Result<Vec<EmailDto>, MailError> {
+    let ids = emails.iter().map(|email| email.id).collect::<Vec<_>>();
+    let with_attachments = attachment_repo::has_for_email_ids(db, ids).await?;
+    Ok(emails
         .into_iter()
-        .map(|e| EmailDto {
-            id: e.id,
-            account_id: e.account_id,
-            folder: e.folder,
-            uid: e.uid,
-            subject: e.subject,
-            sender_name: e.sender_name,
-            sender_email: e.sender_email,
-            preview: e.preview,
-            is_read: e.is_read.unwrap_or(false),
-            is_starred: e.is_starred.unwrap_or(false),
-            sent_at: e.sent_at,
-            has_attachments: false, // 暂时不支持附件
+        .map(|email| {
+            let has_attachments = with_attachments.contains(&email.id);
+            email_model_to_dto(&email, has_attachments)
         })
-        .collect()
+        .collect())
 }
 
-fn email_model_to_detail(email: emails::Model, has_attachments: bool) -> EmailDetail {
+fn email_model_to_dto(email: &emails::Model, has_attachments: bool) -> EmailDto {
+    EmailDto {
+        id: email.id,
+        account_id: email.account_id,
+        folder: email.folder.clone(),
+        uid: email.uid,
+        subject: email.subject.clone(),
+        sender_name: email.sender_name.clone(),
+        sender_email: email.sender_email.clone(),
+        preview: email.preview.clone(),
+        is_read: email.is_read.unwrap_or(false),
+        is_starred: email.is_starred.unwrap_or(false),
+        sent_at: email.sent_at,
+        has_attachments,
+    }
+}
+
+fn email_model_to_detail(email: emails::Model, attachments: Vec<AttachmentDto>) -> EmailDetail {
+    let has_attachments = !attachments.is_empty();
+    let email_dto = email_model_to_dto(&email, has_attachments);
     EmailDetail {
-        email: EmailDto {
-            id: email.id,
-            account_id: email.account_id,
-            folder: email.folder,
-            uid: email.uid,
-            subject: email.subject,
-            sender_name: email.sender_name,
-            sender_email: email.sender_email,
-            preview: email.preview,
-            is_read: email.is_read.unwrap_or(false),
-            is_starred: email.is_starred.unwrap_or(false),
-            sent_at: email.sent_at,
-            has_attachments,
-        },
+        email: email_dto,
         recipient_emails: email.recipient_emails,
         cc_emails: email.cc_emails,
         body_text: email.body_text,
         body_html: email.body_html,
+        attachments,
     }
 }

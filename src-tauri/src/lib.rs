@@ -88,6 +88,10 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::email::list_emails_by_category,
             command::email::get_email,
             command::email::reload_email,
+            command::email::ensure_attachment_cached,
+            command::email::save_attachment_as,
+            command::email::open_attachment,
+            command::email::resolve_inline_attachments,
             command::email::search_emails,
             command::email::mark_as_read,
             command::email::toggle_star,
@@ -157,10 +161,9 @@ pub fn run() {
 
     // ========== 步骤 3: 初始化数据库 ==========
     // 使用 block_on 在同步上下文中执行异步初始化
+    let data_dir = resolve_data_dir();
     let db = tauri::async_runtime::block_on(async {
         // 获取用户主目录，创建应用数据目录
-        let data_dir = resolve_data_dir();
-
         // 确保数据目录存在，如果不存在则创建
         std::fs::create_dir_all(&data_dir).expect("无法创建数据目录");
 
@@ -208,6 +211,10 @@ pub fn run() {
     // 标签服务：负责邮件标签的管理
     let label_service = service::LabelService::new(db.clone());
 
+    // 附件服务：负责附件缓存、保存和系统打开
+    let attachment_service =
+        service::AttachmentService::new(db.clone(), auth.clone(), data_dir.clone());
+
     // ========== 步骤 6: 初始化 OAuth2 管理器 ==========
     // OAuth2Manager 处理 OAuth2 授权流程
     // 支持通过浏览器进行 OAuth2 授权，获取访问令牌
@@ -228,6 +235,8 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         // 窗口定位器插件：支持窗口位置管理
         .plugin(tauri_plugin_positioner::init())
+        // 对话框插件：支持文件选择和保存路径选择
+        .plugin(tauri_plugin_dialog::init())
         // URL 打开器插件：支持在浏览器中打开链接
         .plugin(tauri_plugin_opener::init())
         // 使用 manage 方法将服务实例注入到应用状态中
@@ -236,6 +245,7 @@ pub fn run() {
         .manage(email_service)
         .manage(sync_service)
         .manage(label_service)
+        .manage(attachment_service)
         .manage(oauth2_manager);
 
     // 在 Debug 模式下启用 MCP Bridge 插件
