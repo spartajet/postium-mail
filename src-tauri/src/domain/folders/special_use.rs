@@ -1,8 +1,10 @@
 use crate::domain::folders::FolderCategory;
 use async_imap::imap_proto::NameAttribute;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// RFC 6154 SPECIAL-USE 标记（从 LIST attributes 提取）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub enum SpecialUseFlag {
     Sent,
     Drafts,
