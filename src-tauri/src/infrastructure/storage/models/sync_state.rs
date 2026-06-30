@@ -21,6 +21,8 @@ pub struct Model {
     pub last_sync_uid: Option<u32>,
     /// 历史邮件已经同步到的最早时间戳（Unix 秒）
     pub history_synced_since: Option<i64>,
+    /// 下一次历史回填应查询的 UID 上界（查询 UID 小于该值的邮件）
+    pub history_before_uid: Option<u32>,
     /// 是否已确认没有更早的历史邮件
     pub history_exhausted: Option<bool>,
     /// 创建时间戳（Unix 毫秒）

@@ -20,11 +20,9 @@ use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::SyncProgressEmitter;
 use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
 use crate::domain::sync::folder_sync_full::fetch_emails_body;
-use crate::domain::sync::history;
 use crate::domain::sync::{FolderStat, InitialSyncRange, SyncProgress, SyncStage};
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
-use crate::infrastructure::protocols::utils::unix_seconds_to_imap_date;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, sync_repo};
 use crate::service::account_connection::imap_config_from_account;
@@ -34,11 +32,14 @@ use specta::Type;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+const HISTORY_UID_BATCH_SIZE: usize = 50;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct HistorySyncState {
     pub account_id: i32,
     pub category: EmailCategory,
     pub history_synced_since: Option<i64>,
+    pub history_before_uid: Option<u32>,
     pub history_exhausted: bool,
     pub folders: Vec<String>,
 }
@@ -287,12 +288,21 @@ impl SyncService {
         }
 
         let mut history_synced_since: Option<i64> = None;
+        let mut history_before_uid: Option<u32> = None;
         let mut history_exhausted = true;
         for folder in &folders {
             let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
             history_synced_since = match (
                 history_synced_since,
                 state.as_ref().and_then(|s| s.history_synced_since),
+            ) {
+                (Some(existing), Some(next)) => Some(existing.min(next)),
+                (None, next) => next,
+                (existing, None) => existing,
+            };
+            history_before_uid = match (
+                history_before_uid,
+                state.as_ref().and_then(|s| s.history_before_uid),
             ) {
                 (Some(existing), Some(next)) => Some(existing.min(next)),
                 (None, next) => next,
@@ -305,6 +315,7 @@ impl SyncService {
             account_id,
             category,
             history_synced_since,
+            history_before_uid,
             history_exhausted,
             folders,
         })
@@ -352,7 +363,6 @@ impl SyncService {
             }
         };
 
-        let now = chrono::Utc::now().timestamp();
         let mut new_emails = 0u64;
         let mut updated_emails = 0u64;
         let mut min_window_start = i64::MAX;
@@ -361,29 +371,40 @@ impl SyncService {
 
         for folder in &folders {
             let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
-            let local_earliest =
-                email_repo::earliest_sent_at_by_folder(&self.db, account_id, folder).await?;
-            let boundary = state
-                .as_ref()
-                .and_then(|s| s.history_synced_since)
-                .unwrap_or_else(|| history::initialize_legacy_boundary(local_earliest, now));
-            let window = history::older_window_from_boundary(boundary);
-            let window_start = window
-                .start
-                .ok_or_else(|| MailError::InvalidParam("历史回填窗口缺少起始时间".into()))?;
-            let window_end = window
-                .end
-                .ok_or_else(|| MailError::InvalidParam("历史回填窗口缺少结束时间".into()))?;
-            let start_date = unix_seconds_to_imap_date(window_start)?;
-            let end_date = unix_seconds_to_imap_date(window_end)?;
+            let before_uid =
+                history_before_uid_for_folder(&self.db, account_id, folder, state.as_ref()).await?;
             let uids = client
-                .list_uids_between(folder, &start_date, &end_date)
+                .list_uids_before_uid(folder, before_uid, HISTORY_UID_BATCH_SIZE)
                 .await?;
 
+            if uids.is_empty() {
+                sync_repo::update_history_state(
+                    &self.db,
+                    account_id,
+                    folder,
+                    state.as_ref().and_then(|s| s.history_synced_since),
+                    Some(before_uid),
+                    true,
+                )
+                .await?;
+                folder_exhausted_states.push(true);
+                continue;
+            }
+
+            let next_before_uid = uids.iter().min().copied().unwrap_or(before_uid);
+            let mut folder_min_sent_at = state.as_ref().and_then(|s| s.history_synced_since);
+            let mut folder_window_start = i64::MAX;
+            let mut folder_window_end = i64::MIN;
+
             for group in uids.chunks(10) {
-                let email_headers = client
-                    .batch_fetch_email_headers(folder, group[0], group[group.len() - 1])
-                    .await?;
+                let email_headers = client.fetch_email_headers_by_uids(folder, group).await?;
+                for header in &email_headers {
+                    let sent_at = header.date.timestamp();
+                    folder_min_sent_at =
+                        Some(folder_min_sent_at.map_or(sent_at, |existing| existing.min(sent_at)));
+                    folder_window_start = folder_window_start.min(sent_at);
+                    folder_window_end = folder_window_end.max(sent_at);
+                }
                 new_emails += email_repo::save_batch_email_headers(
                     &self.db,
                     account_id,
@@ -395,21 +416,25 @@ impl SyncService {
             fetch_emails_body(self.db.clone(), account_id, folder, &uids, &mut client).await?;
             updated_emails += uids.len() as u64;
 
-            let has_older_uids = client.has_uids_before(folder, &start_date).await?;
-            let folder_history_exhausted = !has_older_uids;
+            let folder_history_exhausted = next_before_uid <= 1;
 
             sync_repo::update_history_state(
                 &self.db,
                 account_id,
                 folder,
-                window.start,
+                folder_min_sent_at,
+                Some(next_before_uid),
                 folder_history_exhausted,
             )
             .await?;
             folder_exhausted_states.push(folder_history_exhausted);
 
-            min_window_start = min_window_start.min(window_start);
-            max_window_end = max_window_end.max(window_end);
+            if folder_window_start != i64::MAX {
+                min_window_start = min_window_start.min(folder_window_start);
+            }
+            if folder_window_end != i64::MIN {
+                max_window_end = max_window_end.max(folder_window_end);
+            }
         }
 
         client.logout().await.ok();
@@ -417,8 +442,8 @@ impl SyncService {
         Ok(OlderSyncResult {
             new_emails,
             updated_emails,
-            window_start: min_window_start,
-            window_end: max_window_end,
+            window_start: normalized_history_window_bound(min_window_start),
+            window_end: normalized_history_window_bound(max_window_end),
             history_exhausted: all_history_exhausted(folder_exhausted_states),
             folders,
         })
@@ -512,6 +537,29 @@ impl SyncService {
 
 fn all_history_exhausted(states: impl IntoIterator<Item = bool>) -> bool {
     states.into_iter().all(|exhausted| exhausted)
+}
+
+async fn history_before_uid_for_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    state: Option<&crate::infrastructure::storage::models::sync_state::Model>,
+) -> Result<u32, MailError> {
+    if let Some(before_uid) = state.and_then(|s| s.history_before_uid) {
+        return Ok(before_uid);
+    }
+    if let Some(local_min_uid) = email_repo::min_uid_by_folder(db, account_id, folder).await? {
+        return Ok(local_min_uid);
+    }
+    Ok(state.and_then(|s| s.uidnext).unwrap_or(1))
+}
+
+fn normalized_history_window_bound(value: i64) -> i64 {
+    if value == i64::MAX || value == i64::MIN {
+        0
+    } else {
+        value
+    }
 }
 
 #[cfg(test)]

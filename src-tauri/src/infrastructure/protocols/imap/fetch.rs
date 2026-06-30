@@ -59,15 +59,10 @@ fn parse_transfer_encoding(mime_header: &[u8]) -> Option<String> {
 }
 
 impl ImapClient {
-    /// 批量获取邮件头（用于骨架同步，不获取正文）
-    ///
-    /// 使用 `BODY.PEEK[HEADER]` 获取 RFC822 原始头部，再通过 `mail_parser` 解析。
-    /// BODYSTRUCTURE 用于提取附件 section_path。
-    pub async fn batch_fetch_email_headers(
+    async fn fetch_email_headers_by_uid_set(
         &mut self,
         folder: &str,
-        start_uid: u32,
-        end_uid: u32,
+        uid_set: &str,
     ) -> Result<Vec<EmailHeader>, MailError> {
         // SELECT 文件夹
         self.session
@@ -75,14 +70,12 @@ impl ImapClient {
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?;
 
-        let uid_range = format!("{}:{}", start_uid, end_uid);
-
-        tracing::trace!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+        tracing::trace!("批量获取邮件头: folder={}, uid_set={}", folder, uid_set);
 
         let fetches = self
             .session
             .uid_fetch(
-                &uid_range,
+                uid_set,
                 "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER] BODYSTRUCTURE UID)",
             )
             .await
@@ -165,6 +158,38 @@ impl ImapClient {
         );
 
         Ok(headers)
+    }
+
+    /// 批量获取邮件头（用于骨架同步，不获取正文）
+    ///
+    /// 使用 `BODY.PEEK[HEADER]` 获取 RFC822 原始头部，再通过 `mail_parser` 解析。
+    /// BODYSTRUCTURE 用于提取附件 section_path。
+    pub async fn batch_fetch_email_headers(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<EmailHeader>, MailError> {
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+        self.fetch_email_headers_by_uid_set(folder, &uid_range)
+            .await
+    }
+
+    /// 按精确 UID 集合批量获取邮件头。
+    pub async fn fetch_email_headers_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<EmailHeader>, MailError> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let uid_set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        self.fetch_email_headers_by_uid_set(folder, &uid_set).await
     }
 
     /// 按 UID 范围获取邮件头

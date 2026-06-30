@@ -252,6 +252,40 @@ async fn earliest_sent_at_by_folder_should_ignore_deleted_emails() {
 }
 
 #[tokio::test]
+async fn min_uid_by_folder_should_return_smallest_local_uid() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+
+    email_repo::save_batch_email_headers(
+        &db,
+        1,
+        "INBOX",
+        &[
+            header(402, "newer uid", 3000),
+            header(300, "older uid", 1000),
+            header(350, "middle uid", 2000),
+        ],
+    )
+    .await
+    .unwrap();
+    email_repo::save_batch_email_headers(&db, 1, "Archive", &[header(10, "archive", 1000)])
+        .await
+        .unwrap();
+
+    let inbox_min_uid = email_repo::min_uid_by_folder(&db, 1, "INBOX")
+        .await
+        .unwrap();
+    let archive_min_uid = email_repo::min_uid_by_folder(&db, 1, "Archive")
+        .await
+        .unwrap();
+    let empty_min_uid = email_repo::min_uid_by_folder(&db, 1, "Sent").await.unwrap();
+
+    assert_eq!(inbox_min_uid, Some(300));
+    assert_eq!(archive_min_uid, Some(10));
+    assert_eq!(empty_min_uid, None);
+}
+
+#[tokio::test]
 async fn distinct_folders_by_account_should_return_existing_non_deleted_folders() {
     let db = DbConn::open_in_memory_for_test().await.unwrap();
     seed_account(&db).await;

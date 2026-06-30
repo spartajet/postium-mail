@@ -102,6 +102,12 @@ fn migrate_sync_state_history_columns(conn: &rusqlite::Connection) -> rusqlite::
             [],
         )?;
     }
+    if !table_has_column(conn, "sync_state", "history_before_uid")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN history_before_uid INTEGER",
+            [],
+        )?;
+    }
     if !table_has_column(conn, "sync_state", "history_exhausted")? {
         conn.execute(
             "ALTER TABLE sync_state ADD COLUMN history_exhausted INTEGER DEFAULT 0",

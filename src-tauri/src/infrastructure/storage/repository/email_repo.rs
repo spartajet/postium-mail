@@ -1066,6 +1066,29 @@ pub async fn earliest_sent_at_by_folder(
     .await
 }
 
+/// 查询指定账号文件夹中最小的未删除邮件 UID。
+pub async fn min_uid_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<Option<u32>, MailError> {
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        match conn.query_row(
+            "SELECT MIN(uid)
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2 AND is_deleted = 0",
+            rusqlite::params![account_id, folder],
+            |row| row.get::<_, Option<i64>>(0),
+        ) {
+            Ok(value) => Ok(value.map(|uid| uid as u32)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    })
+    .await
+}
+
 /// 查询账号本地邮件中实际存在的未删除文件夹名称。
 pub async fn distinct_folders_by_account(
     db: &DbConn,

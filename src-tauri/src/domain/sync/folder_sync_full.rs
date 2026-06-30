@@ -77,9 +77,20 @@ pub async fn sync_folder_full(
         .await?;
         match window.start {
             Some(start) => {
-                sync_repo::update_history_state(&db, account_id, folder, Some(start), false).await?
+                sync_repo::update_history_state(
+                    &db,
+                    account_id,
+                    folder,
+                    Some(start),
+                    Some(uidnext),
+                    false,
+                )
+                .await?
             }
-            None => sync_repo::update_history_state(&db, account_id, folder, None, true).await?,
+            None => {
+                sync_repo::update_history_state(&db, account_id, folder, None, Some(uidnext), true)
+                    .await?
+            }
         }
         return Ok(SyncResult {
             new_emails: 0,
@@ -146,9 +157,27 @@ pub async fn sync_folder_full(
 
     match window.start {
         Some(start) => {
-            sync_repo::update_history_state(&db, account_id, folder, Some(start), false).await?
+            sync_repo::update_history_state(
+                &db,
+                account_id,
+                folder,
+                Some(start),
+                uids.first().copied(),
+                false,
+            )
+            .await?
         }
-        None => sync_repo::update_history_state(&db, account_id, folder, None, true).await?,
+        None => {
+            sync_repo::update_history_state(
+                &db,
+                account_id,
+                folder,
+                None,
+                uids.first().copied(),
+                true,
+            )
+            .await?
+        }
     }
 
     // let folder_string = folder.to_string();

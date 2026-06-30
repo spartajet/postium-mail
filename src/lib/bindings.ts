@@ -1843,6 +1843,7 @@ export type HistorySyncState = {
 	account_id: number,
 	category: EmailCategory,
 	history_synced_since: number | null,
+	history_before_uid: number | null,
 	history_exhausted: boolean,
 	folders: string[],
 };
