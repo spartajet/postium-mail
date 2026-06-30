@@ -1,4 +1,5 @@
 use crate::domain::auth::AuthManager;
+use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::folder_sync_full::sync_folder_full;
 use crate::domain::sync::folder_sync_increment::sync_folder_incremental;
@@ -11,7 +12,6 @@ use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, sync_repo};
 use crate::service::account_connection::imap_config_from_account;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 /// 同步编排器 — 只负责同步流程编排，不负责进度通知
@@ -101,12 +101,30 @@ impl SyncOrchestrator {
 
         // 4. 列出远程文件夹
         let remote_folders = client.list_folders().await?;
-        let remote_folder_names = remote_folders
-            .into_iter()
-            .map(|folder| folder.name)
-            .collect::<Vec<_>>();
-        let folder_mapping = provider.folder_mapping();
-        let sync_folders = resolve_sync_folders(&folder_mapping, &remote_folder_names);
+        let remote: Vec<RemoteFolder> = remote_folders
+            .iter()
+            .map(|f| RemoteFolder {
+                name: f.name.clone(),
+                special_use: f.special_use.clone(),
+                no_select: f.no_select,
+            })
+            .collect();
+        let registry = FolderRegistry::builder()
+            .remote_folders(remote)
+            .provider_mapping(provider.folder_mapping())
+            .build();
+        // 同步所有被识别为标准类别的文件夹（多选）
+        let sync_folders: Vec<String> = [
+            FolderCategory::Inbox,
+            FolderCategory::Sent,
+            FolderCategory::Drafts,
+            FolderCategory::Junk,
+            FolderCategory::Trash,
+            FolderCategory::Archive,
+        ]
+        .iter()
+        .flat_map(|cat| registry.resolve(*cat))
+        .collect();
         tracing::info!(
             account_id,
             count = sync_folders.len(),
@@ -263,113 +281,5 @@ impl SyncOrchestrator {
             uidvalidity: server_uidvalidity,
             uidnext: metadata.uidnext,
         })
-    }
-}
-
-fn resolve_sync_folders(
-    mapping: &crate::domain::providers::StandardFolder,
-    remote_folders: &[String],
-) -> Vec<String> {
-    let remote_folders = remote_folders.iter().collect::<HashSet<_>>();
-    let mut seen = HashSet::new();
-    let mut resolved = Vec::new();
-
-    for candidates in [
-        &mapping.inbox,
-        &mapping.sent,
-        &mapping.drafts,
-        &mapping.spam,
-        &mapping.trash,
-        &mapping.archive,
-    ] {
-        if candidates.is_empty() {
-            continue;
-        }
-
-        let folder = candidates
-            .iter()
-            .find(|candidate| remote_folders.contains(candidate))
-            .unwrap_or(&candidates[0])
-            .clone();
-
-        if seen.insert(folder.clone()) {
-            resolved.push(folder);
-        }
-    }
-
-    resolved
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resolve_sync_folders;
-    use crate::domain::providers::StandardFolder;
-
-    #[test]
-    fn sync_folders_should_select_one_existing_alias_per_standard_folder() {
-        let mapping = StandardFolder {
-            inbox: vec!["INBOX".into()],
-            sent: vec!["[Gmail]/Sent Mail".into(), "Sent".into()],
-            drafts: vec!["[Gmail]/Drafts".into()],
-            spam: vec!["[Gmail]/Spam".into()],
-            trash: vec!["[Gmail]/Trash".into()],
-            archive: vec!["[Gmail]/All Mail".into(), "Archive".into()],
-        };
-        let remote_folders = [
-            "INBOX".to_string(),
-            "Sent".to_string(),
-            "[Gmail]/Drafts".to_string(),
-            "[Gmail]/Spam".to_string(),
-            "[Gmail]/Trash".to_string(),
-            "Archive".to_string(),
-        ];
-
-        let folders = resolve_sync_folders(&mapping, &remote_folders);
-
-        assert_eq!(
-            folders,
-            vec![
-                "INBOX".to_string(),
-                "Sent".to_string(),
-                "[Gmail]/Drafts".to_string(),
-                "[Gmail]/Spam".to_string(),
-                "[Gmail]/Trash".to_string(),
-                "Archive".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn sync_folders_should_not_sync_both_gmail_archive_aliases() {
-        let mapping = StandardFolder {
-            inbox: vec![],
-            sent: vec![],
-            drafts: vec![],
-            spam: vec![],
-            trash: vec![],
-            archive: vec!["[Gmail]/All Mail".into(), "Archive".into()],
-        };
-        let remote_folders = ["[Gmail]/All Mail".to_string(), "Archive".to_string()];
-
-        let folders = resolve_sync_folders(&mapping, &remote_folders);
-
-        assert_eq!(folders, vec!["[Gmail]/All Mail".to_string()]);
-    }
-
-    #[test]
-    fn sync_folders_should_fallback_to_first_alias_when_no_remote_candidate_exists() {
-        let mapping = StandardFolder {
-            inbox: vec![],
-            sent: vec![],
-            drafts: vec![],
-            spam: vec![],
-            trash: vec![],
-            archive: vec!["[Gmail]/All Mail".into(), "Archive".into()],
-        };
-        let remote_folders = ["Unrelated".to_string()];
-
-        let folders = resolve_sync_folders(&mapping, &remote_folders);
-
-        assert_eq!(folders, vec!["[Gmail]/All Mail".to_string()]);
     }
 }
