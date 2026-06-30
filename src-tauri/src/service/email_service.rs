@@ -1,8 +1,9 @@
+use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::providers::StandardFolder;
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
 use crate::infrastructure::storage::models::emails;
-use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo};
+use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo, sync_repo};
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
 use crate::service::mail_operation::{
@@ -465,8 +466,35 @@ impl EmailService {
         // 获取文件夹映射配置
         let folder_mapping = provider.folder_mapping();
 
-        // 将分类转换为 IMAP 文件夹列表
-        let folders = category.resolve_folders(&folder_mapping);
+        // list_by_category 不连接 IMAP，只能用本地已存文件夹名做降级解析：
+        // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
+        // 本地文件夹名正是同步（写）路径通过 FolderRegistry 解析后写入 DB 的值，
+        // 故此处与写路径保持一致，避免对中文 Provider（如网易）返回英文默认名导致查不到邮件。
+        let local_names: Vec<RemoteFolder> = {
+            let mut names = sync_repo::distinct_folders_by_account(&self.db, account_id).await?;
+            names.extend(email_repo::distinct_folders_by_account(&self.db, account_id).await?);
+            names
+                .into_iter()
+                .map(|n| RemoteFolder { name: n, special_use: vec![], no_select: false })
+                .collect()
+        };
+        let registry = FolderRegistry::builder()
+            .remote_folders(local_names)
+            .provider_mapping(folder_mapping)
+            .build();
+        // Starred 已在上方单独处理，这里 category 必为文件夹型分类，from_email_category 不会为 None。
+        let cat = match FolderCategory::from_email_category(&category) {
+            Some(c) => c,
+            None => {
+                return Ok(EmailListResponse {
+                    emails: vec![],
+                    total: 0,
+                    page,
+                    limit,
+                });
+            }
+        };
+        let folders = registry.resolve(cat);
 
         // 如果没有映射的文件夹，返回空结果
         if folders.is_empty() {
