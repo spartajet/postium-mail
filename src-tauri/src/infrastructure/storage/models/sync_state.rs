@@ -19,6 +19,10 @@ pub struct Model {
     pub synced_at: Option<i64>,
     /// 已同步的最后一个邮件 UID（增量同步的断点）
     pub last_sync_uid: Option<u32>,
+    /// 历史邮件已经同步到的最早时间戳（Unix 秒）
+    pub history_synced_since: Option<i64>,
+    /// 是否已确认没有更早的历史邮件
+    pub history_exhausted: Option<bool>,
     /// 创建时间戳（Unix 毫秒）
     pub created_at: Option<i64>,
     /// 最后更新时间戳（Unix 毫秒）

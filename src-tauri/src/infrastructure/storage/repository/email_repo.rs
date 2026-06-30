@@ -34,6 +34,46 @@ const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
      )";
 
+const INSERT_EMAIL_HEADER_SQL: &str = "INSERT INTO emails (
+        account_id, folder, uid, message_id, subject, sender_name, sender_email,
+        recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+        is_read, is_starred, is_draft, is_answered, is_deleted,
+        sent_at, received_at, created_at, updated_at
+     ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+     )
+     ON CONFLICT(account_id, folder, uid) DO NOTHING";
+
+const UPSERT_EMAIL_SQL: &str = "INSERT INTO emails (
+        account_id, folder, uid, message_id, subject, sender_name, sender_email,
+        recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+        is_read, is_starred, is_draft, is_answered, is_deleted,
+        sent_at, received_at, created_at, updated_at
+     ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+     )
+     ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+        message_id = COALESCE(excluded.message_id, emails.message_id),
+        subject = excluded.subject,
+        sender_name = excluded.sender_name,
+        sender_email = excluded.sender_email,
+        recipient_emails = excluded.recipient_emails,
+        cc_emails = excluded.cc_emails,
+        bcc_emails = excluded.bcc_emails,
+        preview = excluded.preview,
+        body_text = excluded.body_text,
+        body_html = excluded.body_html,
+        is_read = excluded.is_read,
+        is_starred = excluded.is_starred,
+        is_draft = excluded.is_draft,
+        is_answered = excluded.is_answered,
+        is_deleted = excluded.is_deleted,
+        sent_at = excluded.sent_at,
+        received_at = excluded.received_at,
+        updated_at = excluded.updated_at";
+
 /// 用于创建或更新邮件的写入数据结构
 ///
 /// 不包含自增主键 `id`，其余字段与 `emails` 表一一对应。
@@ -117,7 +157,7 @@ fn placeholders(count: usize) -> String {
 fn execute_email_insert(
     stmt: &mut rusqlite::Statement<'_>,
     model: &EmailWrite,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<usize> {
     stmt.execute(rusqlite::params![
         model.account_id,
         &model.folder,
@@ -141,8 +181,7 @@ fn execute_email_insert(
         model.received_at,
         model.created_at,
         model.updated_at,
-    ])?;
-    Ok(())
+    ])
 }
 
 /// 按文件夹分页查询邮件。
@@ -887,10 +926,15 @@ pub async fn save_batch_email_headers(
         .collect();
 
     db.transaction(move |tx| {
-        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut email_stmt = tx.prepare(INSERT_EMAIL_HEADER_SQL)?;
         let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        let mut inserted_count = 0;
         for (email, attachments) in &writes {
-            execute_email_insert(&mut email_stmt, email)?;
+            let inserted = execute_email_insert(&mut email_stmt, email)?;
+            if inserted == 0 {
+                continue;
+            }
+            inserted_count += 1;
             let email_id = tx.last_insert_rowid() as i32;
             for attachment in attachments {
                 let mut attachment = attachment.clone();
@@ -898,7 +942,7 @@ pub async fn save_batch_email_headers(
                 execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
         }
-        Ok(writes.len())
+        Ok(inserted_count)
     })
     .await
 }
@@ -917,7 +961,7 @@ pub async fn save_batch_email_headers(
 ///
 /// # 返回
 ///
-/// 成功保存的邮件数量。空列表时返回 0。
+/// 成功插入或更新的邮件行数。空列表时返回 0。
 pub async fn save_batch_emails(
     db: &DbConn,
     account_id: i32,
@@ -977,18 +1021,67 @@ pub async fn save_batch_emails(
         .collect();
 
     db.transaction(move |tx| {
-        let mut email_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        let mut email_stmt = tx.prepare(UPSERT_EMAIL_SQL)?;
         let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+        let mut affected_rows = 0;
         for (email, attachments) in &writes {
-            execute_email_insert(&mut email_stmt, email)?;
-            let email_id = tx.last_insert_rowid() as i32;
+            affected_rows += execute_email_insert(&mut email_stmt, email)?;
+            let email_id = tx.query_row(
+                "SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",
+                rusqlite::params![email.account_id, &email.folder, i64::from(email.uid)],
+                |row| row.get::<_, i32>(0),
+            )?;
+            tx.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
             for attachment in attachments {
                 let mut attachment = attachment.clone();
                 attachment.email_id = email_id;
                 execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
         }
-        Ok(writes.len())
+        Ok(affected_rows)
+    })
+    .await
+}
+
+/// 查询指定账号文件夹中最早一封未删除邮件的发送时间。
+pub async fn earliest_sent_at_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<Option<i64>, MailError> {
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        match conn.query_row(
+            "SELECT MIN(sent_at)
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2 AND is_deleted = 0",
+            rusqlite::params![account_id, folder],
+            |row| row.get::<_, Option<i64>>(0),
+        ) {
+            Ok(value) => Ok(value),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    })
+    .await
+}
+
+/// 查询账号本地邮件中实际存在的未删除文件夹名称。
+pub async fn distinct_folders_by_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<Vec<String>, MailError> {
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT folder
+             FROM emails
+             WHERE account_id = ?1 AND is_deleted = 0
+             ORDER BY folder",
+        )?;
+        let folders = stmt
+            .query_map([account_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(folders)
     })
     .await
 }

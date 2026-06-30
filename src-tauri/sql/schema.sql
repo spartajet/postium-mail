@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS emails (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     folder TEXT NOT NULL,
     uid INTEGER NOT NULL,
-    message_id TEXT UNIQUE,
+    message_id TEXT,
     subject TEXT,
     sender_name TEXT,
     sender_email TEXT NOT NULL,
@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS sync_state (
     uidnext INTEGER,
     synced_at INTEGER,
     last_sync_uid INTEGER,
+    history_synced_since INTEGER,
+    history_exhausted INTEGER DEFAULT 0,
     created_at INTEGER,
     updated_at INTEGER
 );
@@ -107,6 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_emails_account ON emails(account_id);
 CREATE INDEX IF NOT EXISTS idx_emails_folder ON emails(folder);
 CREATE INDEX IF NOT EXISTS idx_emails_sent_at ON emails(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_emails_is_read ON emails(is_read);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_uid ON emails(account_id, folder, uid);
 CREATE INDEX IF NOT EXISTS idx_attachments_email ON attachments(email_id);
 CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
 CREATE INDEX IF NOT EXISTS idx_email_labels_email ON email_labels(email_id);

@@ -15,13 +15,43 @@
 //！ ═════════════════════════════════════════════════════════════════════════
 
 use crate::domain::auth::AuthManager;
+use crate::domain::auth::manager::Credentials;
+use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::SyncProgressEmitter;
 use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
-use crate::domain::sync::{FolderStat, SyncProgress, SyncStage};
+use crate::domain::sync::folder_sync_full::fetch_emails_body;
+use crate::domain::sync::history;
+use crate::domain::sync::{FolderStat, InitialSyncRange, SyncProgress, SyncStage};
 use crate::error::MailError;
+use crate::infrastructure::protocols::imap::ImapClient;
+use crate::infrastructure::protocols::utils::unix_seconds_to_imap_date;
 use crate::infrastructure::storage::DbConn;
-use crate::infrastructure::storage::repository::email_repo;
+use crate::infrastructure::storage::repository::{account_repo, email_repo, sync_repo};
+use crate::service::account_connection::imap_config_from_account;
+use crate::service::email_service::EmailCategory;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::collections::HashSet;
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct HistorySyncState {
+    pub account_id: i32,
+    pub category: EmailCategory,
+    pub history_synced_since: Option<i64>,
+    pub history_exhausted: bool,
+    pub folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct OlderSyncResult {
+    pub new_emails: u64,
+    pub updated_emails: u64,
+    pub window_start: i64,
+    pub window_end: i64,
+    pub history_exhausted: bool,
+    pub folders: Vec<String>,
+}
 
 /// 同步服务
 ///
@@ -204,6 +234,223 @@ impl SyncService {
         }
     }
 
+    pub async fn sync_account_with_range(
+        &self,
+        app_handle: tauri::AppHandle,
+        account_id: i32,
+        range: InitialSyncRange,
+    ) -> Result<(), MailError> {
+        let emitter = SyncProgressEmitter::new(app_handle);
+        emitter.emit(SyncProgress {
+            account_id,
+            stage: SyncStage::Connecting,
+            folder: None,
+            current: 0,
+            total: 0,
+            message: "正在连接...".into(),
+        });
+
+        let orchestrator =
+            SyncOrchestrator::new(self.db.clone(), self.auth.clone()).with_emitter(emitter);
+        orchestrator
+            .sync_account_with_range(account_id, range)
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn get_history_state(
+        &self,
+        account_id: i32,
+        category: EmailCategory,
+    ) -> Result<HistorySyncState, MailError> {
+        if category == EmailCategory::Starred {
+            return Err(MailError::InvalidParam("星标邮件不支持历史回填".into()));
+        }
+
+        let account = account_repo::get_by_id(&self.db, account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(account_id))?;
+        let provider_pool = PROVIDER_POOL
+            .get()
+            .ok_or(MailError::ProviderNotSupported(
+                "未找到provider pool".into(),
+            ))?
+            .clone();
+        let provider = provider_pool
+            .get(&account.provider)
+            .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
+        let folders = self
+            .resolve_history_folders(account_id, category.clone(), &provider.folder_mapping())
+            .await?;
+        if folders.is_empty() {
+            return Err(MailError::InvalidParam("当前分类不支持历史回填".into()));
+        }
+
+        let mut history_synced_since: Option<i64> = None;
+        let mut history_exhausted = true;
+        for folder in &folders {
+            let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
+            history_synced_since = match (
+                history_synced_since,
+                state.as_ref().and_then(|s| s.history_synced_since),
+            ) {
+                (Some(existing), Some(next)) => Some(existing.min(next)),
+                (None, next) => next,
+                (existing, None) => existing,
+            };
+            history_exhausted &= state.and_then(|s| s.history_exhausted).unwrap_or(false);
+        }
+
+        Ok(HistorySyncState {
+            account_id,
+            category,
+            history_synced_since,
+            history_exhausted,
+            folders,
+        })
+    }
+
+    pub async fn sync_older_emails(
+        &self,
+        account_id: i32,
+        category: EmailCategory,
+    ) -> Result<OlderSyncResult, MailError> {
+        let account = account_repo::get_by_id(&self.db, account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(account_id))?;
+        let provider_pool = PROVIDER_POOL
+            .get()
+            .ok_or(MailError::ProviderNotSupported(
+                "未找到provider pool".into(),
+            ))?
+            .clone();
+        let provider = provider_pool
+            .get(&account.provider)
+            .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
+        let folders = self
+            .resolve_history_folders(account_id, category.clone(), &provider.folder_mapping())
+            .await?;
+        if folders.is_empty() || category == EmailCategory::Starred {
+            return Err(MailError::InvalidParam("当前分类不支持历史回填".into()));
+        }
+
+        let credentials = self
+            .auth
+            .get_credentials(
+                &account.email,
+                &provider.provider_info().auth_type,
+                Some(&account.provider),
+            )
+            .await?;
+        let imap_config = imap_config_from_account(&account)?;
+        let mut client = match credentials {
+            Credentials::Password(password) => {
+                ImapClient::connect(&imap_config, &account.email, &password).await?
+            }
+            Credentials::OAuth2 { access_token } => {
+                ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await?
+            }
+        };
+
+        let now = chrono::Utc::now().timestamp();
+        let mut new_emails = 0u64;
+        let mut updated_emails = 0u64;
+        let mut min_window_start = i64::MAX;
+        let mut max_window_end = i64::MIN;
+        let mut folder_exhausted_states = Vec::with_capacity(folders.len());
+
+        for folder in &folders {
+            let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
+            let local_earliest =
+                email_repo::earliest_sent_at_by_folder(&self.db, account_id, folder).await?;
+            let boundary = state
+                .as_ref()
+                .and_then(|s| s.history_synced_since)
+                .unwrap_or_else(|| history::initialize_legacy_boundary(local_earliest, now));
+            let window = history::older_window_from_boundary(boundary);
+            let window_start = window
+                .start
+                .ok_or_else(|| MailError::InvalidParam("历史回填窗口缺少起始时间".into()))?;
+            let window_end = window
+                .end
+                .ok_or_else(|| MailError::InvalidParam("历史回填窗口缺少结束时间".into()))?;
+            let start_date = unix_seconds_to_imap_date(window_start)?;
+            let end_date = unix_seconds_to_imap_date(window_end)?;
+            let uids = client
+                .list_uids_between(folder, &start_date, &end_date)
+                .await?;
+
+            for group in uids.chunks(10) {
+                let email_headers = client
+                    .batch_fetch_email_headers(folder, group[0], group[group.len() - 1])
+                    .await?;
+                new_emails += email_repo::save_batch_email_headers(
+                    &self.db,
+                    account_id,
+                    folder,
+                    &email_headers,
+                )
+                .await? as u64;
+            }
+            fetch_emails_body(self.db.clone(), account_id, folder, &uids, &mut client).await?;
+            updated_emails += uids.len() as u64;
+
+            let has_older_uids = client.has_uids_before(folder, &start_date).await?;
+            let folder_history_exhausted = !has_older_uids;
+
+            sync_repo::update_history_state(
+                &self.db,
+                account_id,
+                folder,
+                window.start,
+                folder_history_exhausted,
+            )
+            .await?;
+            folder_exhausted_states.push(folder_history_exhausted);
+
+            min_window_start = min_window_start.min(window_start);
+            max_window_end = max_window_end.max(window_end);
+        }
+
+        client.logout().await.ok();
+
+        Ok(OlderSyncResult {
+            new_emails,
+            updated_emails,
+            window_start: min_window_start,
+            window_end: max_window_end,
+            history_exhausted: all_history_exhausted(folder_exhausted_states),
+            folders,
+        })
+    }
+
+    async fn resolve_history_folders(
+        &self,
+        account_id: i32,
+        category: EmailCategory,
+        mapping: &crate::domain::providers::StandardFolder,
+    ) -> Result<Vec<String>, MailError> {
+        let candidates = category.resolve_folders(mapping);
+        if candidates.is_empty() {
+            return Ok(candidates);
+        }
+
+        let mut local_folders =
+            sync_repo::distinct_folders_by_account(&self.db, account_id).await?;
+        local_folders.extend(email_repo::distinct_folders_by_account(&self.db, account_id).await?);
+        let local_folders = local_folders.into_iter().collect::<HashSet<_>>();
+
+        let resolved = candidates
+            .iter()
+            .find(|folder| local_folders.contains(*folder))
+            .cloned();
+        if let Some(folder) = resolved {
+            Ok(vec![folder])
+        } else {
+            Ok(candidates.into_iter().take(1).collect())
+        }
+    }
+
     /// 获取账号的文件夹统计信息
     ///
     /// 使用单条 GROUP BY SQL 查询获取各文件夹的邮件数量统计，
@@ -260,5 +507,24 @@ impl SyncService {
     /// ```
     pub async fn get_folder_stats(&self, account_id: i32) -> Result<Vec<FolderStat>, MailError> {
         email_repo::folder_stats_by_account(&self.db, account_id).await
+    }
+}
+
+fn all_history_exhausted(states: impl IntoIterator<Item = bool>) -> bool {
+    states.into_iter().all(|exhausted| exhausted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::all_history_exhausted;
+
+    #[test]
+    fn all_history_exhausted_should_return_false_when_any_folder_has_older_mail() {
+        assert!(!all_history_exhausted([true, false, true]));
+    }
+
+    #[test]
+    fn all_history_exhausted_should_return_true_when_every_folder_is_exhausted() {
+        assert!(all_history_exhausted([true, true]));
     }
 }

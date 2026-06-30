@@ -1,10 +1,11 @@
+import type { InitialSyncRange } from "$lib/bindings";
+
 type ContinueAfterAccountAddedOptions = {
   accountId: number;
   loadAccounts: () => Promise<void>;
   setActive: (accountId: number) => void;
   close: () => void;
   goHome: () => Promise<void>;
-  syncAccount: (accountId: number) => Promise<void>;
 };
 
 export async function continueAfterAccountAdded({
@@ -13,16 +14,54 @@ export async function continueAfterAccountAdded({
   setActive,
   close,
   goHome,
-  syncAccount,
 }: ContinueAfterAccountAddedOptions) {
   await loadAccounts();
   setActive(accountId);
   close();
   await goHome();
 
-  void syncAccount(accountId).catch(() => {
-    // 同步状态和错误提示由全局同步 store 负责处理；这里不能阻塞主界面跳转。
-  });
+  return { readyForInitialSync: true };
+}
+
+type StartInitialSyncOptions = {
+  accountId: number;
+  range: InitialSyncRange;
+  syncAccountWithRange: (
+    accountId: number,
+    range: InitialSyncRange,
+  ) => Promise<void>;
+};
+
+export async function startInitialSyncAfterAccountAdded({
+  accountId,
+  range,
+  syncAccountWithRange,
+}: StartInitialSyncOptions) {
+  await syncAccountWithRange(accountId, range);
 
   return { syncStarted: true };
+}
+
+type AccountEmailIdentity = {
+  id: number;
+  email: string;
+};
+
+type ResolveOAuth2CompletedAccountOptions = {
+  completedEmail: string;
+  loadAccounts: () => Promise<void>;
+  getAccounts: () => AccountEmailIdentity[];
+};
+
+export async function resolveOAuth2CompletedAccount({
+  completedEmail,
+  loadAccounts,
+  getAccounts,
+}: ResolveOAuth2CompletedAccountOptions) {
+  await loadAccounts();
+
+  return (
+    getAccounts().find((account) => account.email === completedEmail)?.id ??
+    null
+  );
 }

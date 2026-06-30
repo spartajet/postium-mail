@@ -24,6 +24,8 @@ fn map_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_state::Model
         uidnext: row.get("uidnext")?,
         synced_at: row.get("synced_at")?,
         last_sync_uid: row.get("last_sync_uid")?,
+        history_synced_since: row.get("history_synced_since")?,
+        history_exhausted: opt_int_to_bool(row.get("history_exhausted")?),
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -132,7 +134,8 @@ pub async fn get_sync_state(
     db.call(move |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, account_id, folder, folder_nick_name, uidvalidity, uidnext,
-                    synced_at, last_sync_uid, created_at, updated_at
+                    synced_at, last_sync_uid, history_synced_since, history_exhausted,
+                    created_at, updated_at
              FROM sync_state
              WHERE account_id = ?1 AND folder = ?2",
         )?;
@@ -154,6 +157,26 @@ pub async fn get_state(
     folder: &str,
 ) -> Result<Option<sync_state::Model>, MailError> {
     get_sync_state(db, account_id, folder).await
+}
+
+/// 查询账号本地同步状态中实际存在的文件夹名称。
+pub async fn distinct_folders_by_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<Vec<String>, MailError> {
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT folder
+             FROM sync_state
+             WHERE account_id = ?1
+             ORDER BY folder",
+        )?;
+        let folders = stmt
+            .query_map([account_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(folders)
+    })
+    .await
 }
 
 /// 更新文件夹的同步状态（实际委托给 [`upsert_sync_state`]）
@@ -179,6 +202,47 @@ pub async fn update_sync_state(
     last_sync_uid: Option<u32>,
 ) -> Result<(), MailError> {
     upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
+}
+
+/// 更新文件夹的历史同步窗口状态。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `account_id`: 账号 ID
+/// - `folder`: 文件夹名称
+/// - `history_synced_since`: 历史同步已覆盖到的最早时间戳（Unix 秒）
+/// - `history_exhausted`: 是否确认不存在更早历史邮件
+pub async fn update_history_state(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    history_synced_since: Option<i64>,
+    history_exhausted: bool,
+) -> Result<(), MailError> {
+    let folder = folder.to_string();
+    let now = chrono::Utc::now().timestamp();
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO sync_state (
+                account_id, folder, history_synced_since, history_exhausted, synced_at, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5)
+             ON CONFLICT(account_id, folder) DO UPDATE SET
+                history_synced_since = excluded.history_synced_since,
+                history_exhausted = excluded.history_exhausted,
+                synced_at = excluded.synced_at,
+                updated_at = excluded.updated_at",
+            rusqlite::params![
+                account_id,
+                folder,
+                history_synced_since,
+                if history_exhausted { 1 } else { 0 },
+                now,
+            ],
+        )?;
+        Ok(())
+    })
+    .await
 }
 
 /// 记录一条同步错误。

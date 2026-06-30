@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   commands,
 } from "$lib/bindings";
+import { EmailState } from "$lib/stores/email.svelte";
 import {
   createMockResult,
   expectOk,
@@ -113,6 +114,148 @@ describe("EmailState invoke 测试", () => {
       page: 1,
       limit: 50,
     });
+  });
+
+  it("loadNextPage 追加下一页分类邮件并更新分页状态", async () => {
+    const firstEmail = {
+      id: 1,
+      account_id: 1,
+      folder: "INBOX",
+      uid: 100,
+      subject: "First",
+      sender_name: "Alice",
+      sender_email: "alice@test.com",
+      preview: "Hello",
+      is_read: false,
+      is_starred: false,
+      sent_at: 1745126400,
+      has_attachments: false,
+    };
+    const secondEmail = {
+      ...firstEmail,
+      id: 2,
+      uid: 101,
+      subject: "Second",
+    };
+    const state = new EmailState();
+    state.emails = [firstEmail];
+    state.total = 2;
+    state.page = 1;
+    state.currentFolder = "inbox";
+
+    const listEmailsByCategorySpy = vi
+      .spyOn(commands, "listEmailsByCategory")
+      .mockResolvedValue(
+        createMockResult({
+          emails: [secondEmail],
+          total: 2,
+          page: 2,
+          limit: 50,
+        }),
+      );
+
+    await state.loadNextPage(1);
+
+    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(1, "inbox", 2, 50);
+    expect(state.emails).toEqual([firstEmail, secondEmail]);
+    expect(state.total).toBe(2);
+    expect(state.page).toBe(2);
+  });
+
+  it("loadNextPage 不使用整列表 loading，避免追加分页时列表被骨架屏替换", async () => {
+    const firstEmail = {
+      id: 1,
+      account_id: 1,
+      folder: "INBOX",
+      uid: 100,
+      subject: "First",
+      sender_name: "Alice",
+      sender_email: "alice@test.com",
+      preview: "Hello",
+      is_read: false,
+      is_starred: false,
+      sent_at: 1745126400,
+      has_attachments: false,
+    };
+    const state = new EmailState();
+    state.emails = [firstEmail];
+    state.total = 2;
+    state.page = 1;
+    state.currentFolder = "inbox";
+
+    let resolveRequest!: (
+      value: Awaited<ReturnType<typeof commands.listEmailsByCategory>>,
+    ) => void;
+    const pendingRequest = new Promise<
+      Awaited<ReturnType<typeof commands.listEmailsByCategory>>
+    >((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.spyOn(commands, "listEmailsByCategory").mockReturnValue(pendingRequest);
+
+    const loadPromise = state.loadNextPage(1);
+
+    expect(state.loading).toBe(false);
+    expect(state.loadingNextPage).toBe(true);
+
+    resolveRequest(
+      createMockResult({
+        emails: [],
+        total: 1,
+        page: 2,
+        limit: 50,
+      }),
+    );
+    await loadPromise;
+
+    expect(state.loadingNextPage).toBe(false);
+  });
+
+  it("refreshLoadedEmailsByCategory 刷新当前已加载范围并保留页数", async () => {
+    const firstEmail = {
+      id: 1,
+      account_id: 1,
+      folder: "INBOX",
+      uid: 100,
+      subject: "First",
+      sender_name: "Alice",
+      sender_email: "alice@test.com",
+      preview: "Hello",
+      is_read: false,
+      is_starred: false,
+      sent_at: 1745126400,
+      has_attachments: false,
+    };
+    const secondEmail = {
+      ...firstEmail,
+      id: 2,
+      uid: 101,
+      subject: "Older",
+    };
+    const state = new EmailState();
+    state.emails = [firstEmail];
+    state.total = 1;
+    state.page = 1;
+    state.currentFolder = "inbox";
+
+    const listEmailsByCategorySpy = vi
+      .spyOn(commands, "listEmailsByCategory")
+      .mockResolvedValue(
+        createMockResult({
+          emails: [firstEmail, secondEmail],
+          total: 2,
+          page: 1,
+        limit: 50,
+      }),
+    );
+
+    await state.refreshLoadedEmailsByCategory(1, 1);
+
+    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(1, "inbox", 1, 50);
+    expect(state.emails).toEqual([firstEmail, secondEmail]);
+    expect(state.total).toBe(2);
+    expect(state.page).toBe(1);
+    expect(state.loading).toBe(false);
   });
 
   it("getEmail 并在未读时调用 markAsRead", async () => {

@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { continueAfterAccountAdded } from "$lib/components/settings/account-add-flow";
+import {
+  continueAfterAccountAdded,
+  resolveOAuth2CompletedAccount,
+  startInitialSyncAfterAccountAdded,
+} from "$lib/components/settings/account-add-flow";
 
-describe("continueAfterAccountAdded", () => {
-  it("先切换到主界面，再后台启动首次同步", async () => {
+describe("account add flow", () => {
+  it("添加账号后只进入主界面，不立即同步", async () => {
     const calls: string[] = [];
-    let releaseSync: (() => void) | undefined;
 
     const result = await continueAfterAccountAdded({
       accountId: 7,
@@ -20,24 +23,54 @@ describe("continueAfterAccountAdded", () => {
       goHome: async () => {
         calls.push("goHome");
       },
-      syncAccount: vi.fn(
-        () =>
-          new Promise<void>((resolve) => {
-            calls.push("syncAccount:start");
-            releaseSync = resolve;
-          }),
-      ),
     });
 
-    expect(calls).toEqual([
-      "loadAccounts",
-      "setActive:7",
-      "close",
-      "goHome",
-      "syncAccount:start",
-    ]);
-    expect(result.syncStarted).toBe(true);
+    expect(calls).toEqual(["loadAccounts", "setActive:7", "close", "goHome"]);
+    expect(result.readyForInitialSync).toBe(true);
+  });
 
-    releaseSync?.();
+  it("用户选择范围后启动带范围首次同步", async () => {
+    const syncAccountWithRange = vi.fn(async () => undefined);
+
+    await startInitialSyncAfterAccountAdded({
+      accountId: 7,
+      range: "three_months",
+      syncAccountWithRange,
+    });
+
+    expect(syncAccountWithRange).toHaveBeenCalledWith(7, "three_months");
+  });
+
+  it("OAuth2 完成后用后端返回邮箱定位账号", async () => {
+    const calls: string[] = [];
+    let loaded = false;
+
+    const accountId = await resolveOAuth2CompletedAccount({
+      completedEmail: "oauth-created@example.com",
+      loadAccounts: async () => {
+        calls.push("loadAccounts");
+        loaded = true;
+      },
+      getAccounts: () => {
+        calls.push(`getAccounts:${loaded}`);
+        return [
+          { id: 1, email: "typed-before-oauth@example.com" },
+          { id: 7, email: "oauth-created@example.com" },
+        ];
+      },
+    });
+
+    expect(accountId).toBe(7);
+    expect(calls).toEqual(["loadAccounts", "getAccounts:true"]);
+  });
+
+  it("OAuth2 完成后找不到后端返回邮箱时不伪造账号", async () => {
+    const accountId = await resolveOAuth2CompletedAccount({
+      completedEmail: "missing@example.com",
+      loadAccounts: async () => undefined,
+      getAccounts: () => [{ id: 1, email: "other@example.com" }],
+    });
+
+    expect(accountId).toBeNull();
   });
 });

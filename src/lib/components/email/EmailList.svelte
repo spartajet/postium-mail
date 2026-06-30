@@ -42,6 +42,8 @@
     import { getEmailState } from "$lib/stores/email.svelte";
     // 导入账户状态管理，用于获取当前活跃账户 ID
     import { getAccountState } from "$lib/stores/account.svelte";
+    // 导入同步状态管理，用于加载历史同步状态和同步更早邮件
+    import { getSyncState } from "$lib/stores/sync.svelte";
     // 导入 Tauri 后端命令接口，用于调用搜索等后端方法
     import { commands } from "$lib/bindings";
     // 导入搜索结果类型定义
@@ -71,6 +73,8 @@
     const emailState = getEmailState();
     // 获取账户状态实例（包含当前活跃账户信息）
     const accountStore = getAccountState();
+    // 获取同步状态实例（包含历史同步状态和更早邮件同步操作）
+    const syncStore = getSyncState();
 
     // 写邮件模态框的 Context 键（与 +layout.svelte 中设置的键一致）
     const COMPOSE_MODAL_KEY = Symbol.for("compose-modal");
@@ -86,6 +90,33 @@
     let searchResults = $state<SearchResult[] | null>(null);
     // 搜索加载状态标志
     let searching = $state(false);
+
+    let supportsOlderSync = $derived(
+        searchResults === null && emailState.currentFolder !== "starred",
+    );
+    let localHasMore = $derived(emailState.emails.length < emailState.total);
+    let historyState = $derived(
+        accountStore.activeAccountId
+            ? syncStore.getHistoryState(
+                  accountStore.activeAccountId,
+                  emailState.currentFolder,
+              )
+            : null,
+    );
+    let canSyncOlder = $derived(
+        supportsOlderSync &&
+            !localHasMore &&
+            historyState !== null &&
+            !historyState.history_exhausted,
+    );
+    let olderSyncing = $derived(
+        accountStore.activeAccountId
+            ? syncStore.isOlderSyncing(
+                  accountStore.activeAccountId,
+                  emailState.currentFolder,
+              )
+            : false,
+    );
 
     // ==================== 右键菜单状态 ====================
 
@@ -213,6 +244,16 @@
         }
     });
 
+    $effect(() => {
+        const accountId = accountStore.activeAccountId;
+        const category = emailState.currentFolder;
+        const searchingNow = searchResults !== null;
+
+        if (accountId && !searchingNow && category !== "starred") {
+            void syncStore.loadHistoryState(accountId, category);
+        }
+    });
+
     // ==================== 搜索防抖 Effect ====================
 
     // 搜索防抖逻辑 - H-02: 正确清理 timeout
@@ -265,6 +306,28 @@
     function clearSearch() {
         searchQuery = "";
         searchResults = null;
+    }
+
+    async function handleLoadMore() {
+        if (accountStore.activeAccountId) {
+            await emailState.loadNextPage(accountStore.activeAccountId);
+        }
+    }
+
+    async function handleSyncOlder() {
+        const accountId = accountStore.activeAccountId;
+        if (!accountId) return;
+
+        const result = await syncStore.syncOlderEmails(
+            accountId,
+            emailState.currentFolder,
+        );
+        if (result) {
+            await emailState.refreshLoadedEmailsByCategory(
+                accountId,
+                emailState.emails.length + result.new_emails,
+            );
+        }
     }
 
     /**
@@ -534,6 +597,15 @@
                     {t.email.noEmails}
                 </h3>
                 <p class="text-sm">{t.email.noEmails}</p>
+                {#if canSyncOlder}
+                    <button
+                        class="mt-4 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:opacity-60"
+                        onclick={handleSyncOlder}
+                        disabled={olderSyncing}
+                    >
+                        {olderSyncing ? t.email.syncingOlder : t.email.syncOlder}
+                    </button>
+                {/if}
             </div>
         {:else}
             <!--
@@ -634,6 +706,30 @@
                     {/if}
                 </button>
             {/each}
+
+            {#if searchResults === null && emailState.emails.length > 0}
+                <div class="border-t border-border p-3">
+                    {#if localHasMore}
+                        <button
+                            class="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            onclick={handleLoadMore}
+                            disabled={emailState.loadingNextPage}
+                        >
+                            {t.email.loadMore}
+                        </button>
+                    {:else if canSyncOlder}
+                        <button
+                            class="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:opacity-60"
+                            onclick={handleSyncOlder}
+                            disabled={olderSyncing}
+                        >
+                            {olderSyncing
+                                ? t.email.syncingOlder
+                                : t.email.syncOlder}
+                        </button>
+                    {/if}
+                </div>
+            {/if}
         {/if}
     </div>
 

@@ -791,6 +791,9 @@ export const commands = {
 	 *  ```
 	 */
 	syncAccount: (accountId: number) => typedError<null, MailError>(__TAURI_INVOKE("sync_account", { accountId })),
+	syncAccountWithRange: (accountId: number, range: InitialSyncRange) => typedError<null, MailError>(__TAURI_INVOKE("sync_account_with_range", { accountId, range })),
+	getSyncHistoryState: (accountId: number, category: EmailCategory) => typedError<HistorySyncState, MailError>(__TAURI_INVOKE("get_sync_history_state", { accountId, category })),
+	syncOlderEmails: (accountId: number, category: EmailCategory) => typedError<OlderSyncResult, MailError>(__TAURI_INVOKE("sync_older_emails", { accountId, category })),
 	/**
 	 *  获取文件夹统计信息
 	 * 
@@ -1836,6 +1839,17 @@ export type FolderStat = {
 	unread: number,
 };
 
+export type HistorySyncState = {
+	account_id: number,
+	category: EmailCategory,
+	history_synced_since: number | null,
+	history_exhausted: boolean,
+	folders: string[],
+};
+
+// 初始同步范围
+export type InitialSyncRange = "week" | "month" | "three_months" | "year" | "all";
+
 export type InlineAttachmentDto = {
 	content_id: string,
 	url: string,
@@ -1881,6 +1895,15 @@ export type OAuth2CompletedInfo = {
 
 // OAuth2 轮询状态
 export type OAuth2PollResult = "Pending" | ({ Completed: OAuth2CompletedInfo }) & { Error?: never } | ({ Error: string }) & { Completed?: never };
+
+export type OlderSyncResult = {
+	new_emails: number,
+	updated_emails: number,
+	window_start: number,
+	window_end: number,
+	history_exhausted: boolean,
+	folders: string[],
+};
 
 export type ProviderDetectionResult = {
 	detected: boolean,
