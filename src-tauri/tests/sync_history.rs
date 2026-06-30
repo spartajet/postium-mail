@@ -100,3 +100,65 @@ async fn history_state_should_fallback_archive_alias_to_first_candidate() {
 
     assert_eq!(result.folders, vec!["[Gmail]/All Mail".to_string()]);
 }
+
+#[tokio::test]
+async fn history_state_should_use_existing_history_before_uid() {
+    init_provider_pool();
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+    db.call(|conn| {
+        conn.execute(
+            "INSERT INTO sync_state (
+                account_id, folder, uidvalidity, uidnext, last_sync_uid,
+                history_before_uid, history_exhausted, synced_at, created_at, updated_at
+            ) VALUES (1, 'INBOX', 1, 200, 199, 80, 0, 1, 1, 1)",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let service = SyncService::new(
+        db,
+        Arc::new(postium_mail_lib::domain::auth::AuthManager::default()),
+    );
+
+    let result = service
+        .get_history_state(1, EmailCategory::Inbox)
+        .await
+        .unwrap();
+
+    assert_eq!(result.history_before_uid, Some(80));
+    assert!(!result.history_exhausted);
+}
+
+#[tokio::test]
+async fn history_state_should_report_exhausted_when_state_is_exhausted() {
+    init_provider_pool();
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+    db.call(|conn| {
+        conn.execute(
+            "INSERT INTO sync_state (
+                account_id, folder, uidvalidity, uidnext, last_sync_uid,
+                history_before_uid, history_exhausted, synced_at, created_at, updated_at
+            ) VALUES (1, 'INBOX', 1, 2, 1, 1, 1, 1, 1, 1)",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let service = SyncService::new(
+        db,
+        Arc::new(postium_mail_lib::domain::auth::AuthManager::default()),
+    );
+
+    let result = service
+        .get_history_state(1, EmailCategory::Inbox)
+        .await
+        .unwrap();
+
+    assert_eq!(result.history_before_uid, Some(1));
+    assert!(result.history_exhausted);
+}

@@ -148,6 +148,16 @@ use specta::Type;
 
 use tauri::{AppHandle, Emitter};
 
+pub const HISTORY_UID_BATCH_SIZE: usize = 50;
+
+pub fn history_exhausted_before_uid(before_uid: u32) -> bool {
+    before_uid <= 1
+}
+
+pub fn next_history_before_uid(batch: &[u32], previous_before_uid: u32) -> u32 {
+    batch.iter().copied().min().unwrap_or(previous_before_uid)
+}
+
 /// 初始同步范围
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -442,4 +452,31 @@ pub enum SyncMode {
         /// 上次同步的最高 UID
         last_sync_uid: u32,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_batch_size_should_default_to_fifty() {
+        assert_eq!(HISTORY_UID_BATCH_SIZE, 50);
+    }
+
+    #[test]
+    fn history_exhausted_before_uid_should_be_true_for_first_uid() {
+        assert!(history_exhausted_before_uid(1));
+        assert!(history_exhausted_before_uid(0));
+        assert!(!history_exhausted_before_uid(2));
+    }
+
+    #[test]
+    fn next_history_before_uid_should_move_to_minimum_batch_uid() {
+        assert_eq!(next_history_before_uid(&[41, 39, 40], 50), 39);
+    }
+
+    #[test]
+    fn next_history_before_uid_should_keep_previous_when_batch_empty() {
+        assert_eq!(next_history_before_uid(&[], 50), 50);
+    }
 }

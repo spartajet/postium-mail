@@ -92,8 +92,8 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
                 search: "搜索邮件...",
                 noEmails: "没有邮件",
                 loadMore: "加载更多",
-                syncOlder: "同步更久邮件",
-                syncingOlder: "正在同步更久...",
+                syncOlder: "加载更早邮件",
+                syncingOlder: "正在加载更早邮件...",
             },
         },
     }),
@@ -148,15 +148,15 @@ describe("EmailList footer", () => {
         await fireEvent.click(button);
 
         expect(loadNextPage).toHaveBeenCalledWith(1);
-        expect(screen.queryByRole("button", { name: "同步更久邮件" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "加载更早邮件" })).toBeNull();
     });
 
-    it("本地加载完且历史未耗尽时显示同步更久邮件并刷新当前已加载范围", async () => {
+    it("本地加载完且历史未耗尽时显示加载更早邮件并刷新当前已加载范围", async () => {
         render(EmailList);
         const loadEmailsBeforeSyncOlder = loadEmailsByCategory.mock.calls.length;
 
         await fireEvent.click(
-            screen.getByRole("button", { name: "同步更久邮件" }),
+            screen.getByRole("button", { name: "加载更早邮件" }),
         );
 
         expect(syncOlderEmails).toHaveBeenCalledWith(1, "inbox");
@@ -168,25 +168,25 @@ describe("EmailList footer", () => {
         );
     });
 
-    it("历史已耗尽时不显示同步更久邮件", () => {
+    it("历史已耗尽时不显示加载更早邮件", () => {
         historyExhausted = true;
 
         render(EmailList);
 
-        expect(screen.queryByRole("button", { name: "同步更久邮件" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "加载更早邮件" })).toBeNull();
     });
 
-    it("历史状态尚未加载完成时仍显示同步更久邮件入口", () => {
+    it("历史状态尚未加载完成时仍显示加载更早邮件入口", () => {
         historyStateLoaded = false;
 
         render(EmailList);
 
         expect(
-            screen.getByRole("button", { name: "同步更久邮件" }),
+            screen.getByRole("button", { name: "加载更早邮件" }),
         ).toBeTruthy();
     });
 
-    it("搜索输入防抖期间仍可显示同步更久邮件，搜索结果模式隐藏", async () => {
+    it("搜索输入防抖期间仍可显示加载更早邮件，搜索结果模式隐藏", async () => {
         const { unmount } = render(EmailList);
 
         await fireEvent.input(screen.getByTestId("email-search-input"), {
@@ -194,32 +194,32 @@ describe("EmailList footer", () => {
         });
 
         expect(
-            screen.getByRole("button", { name: "同步更久邮件" }),
+            screen.getByRole("button", { name: "加载更早邮件" }),
         ).toBeTruthy();
 
         await waitFor(() => {
             expect(
-                screen.queryByRole("button", { name: "同步更久邮件" }),
+                screen.queryByRole("button", { name: "加载更早邮件" }),
             ).toBeNull();
         });
         unmount();
     });
 
-    it("starred 分类不显示同步更久邮件", () => {
+    it("starred 分类不显示加载更早邮件", () => {
         emailState.currentFolder = "starred";
         render(EmailList);
 
-        expect(screen.queryByRole("button", { name: "同步更久邮件" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "加载更早邮件" })).toBeNull();
     });
 
-    it("本地不足一页且历史未耗尽时空列表显示同步更久邮件", () => {
+    it("本地不足一页且历史未耗尽时空列表显示加载更早邮件", () => {
         emailState.emails = [];
         emailState.total = 0;
 
         render(EmailList);
 
         expect(
-            screen.getByRole("button", { name: "同步更久邮件" }),
+            screen.getByRole("button", { name: "加载更早邮件" }),
         ).toBeTruthy();
     });
 });

@@ -713,11 +713,6 @@ export class EmailState {
 
   async refreshCurrentCategory(accountId: number) {
     try {
-      const result = await commands.syncAccount(accountId);
-      if (result.status === "error") {
-        this.error = formatError(result.error);
-        return;
-      }
       await this.loadEmailsByCategory(accountId, this.currentFolder, this.page);
     } catch (e: unknown) {
       this.setError(e, "Failed to refresh emails");

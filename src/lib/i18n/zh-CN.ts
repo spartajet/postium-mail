@@ -92,8 +92,8 @@ export default {
     attachmentSaveCanceled: "已取消保存",
     loading: "加载中...",
     loadMore: "加载更多",
-    syncOlder: "同步更久邮件",
-    syncingOlder: "正在同步更久...",
+    syncOlder: "加载更早邮件",
+    syncingOlder: "正在加载更早邮件...",
     emailCount: "封邮件",
   },
   account: {

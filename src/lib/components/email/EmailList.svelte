@@ -180,8 +180,11 @@
      */
     async function handleRefresh() {
         if (accountStore.activeAccountId) {
-            await emailState.refreshCurrentCategory(
+            await syncStore.syncAccount(accountStore.activeAccountId);
+            await emailState.loadEmailsByCategory(
                 accountStore.activeAccountId,
+                emailState.currentFolder,
+                emailState.page,
             );
         }
     }
