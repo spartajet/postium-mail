@@ -20,7 +20,10 @@ use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::SyncProgressEmitter;
 use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
 use crate::domain::sync::folder_sync_full::fetch_emails_body;
-use crate::domain::sync::{FolderStat, InitialSyncRange, SyncProgress, SyncStage};
+use crate::domain::sync::{
+    FolderStat, HISTORY_UID_BATCH_SIZE, InitialSyncRange, SyncProgress, SyncStage,
+    history_exhausted_before_uid, next_history_before_uid,
+};
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::DbConn;
@@ -31,8 +34,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashSet;
 use std::sync::Arc;
-
-const HISTORY_UID_BATCH_SIZE: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct HistorySyncState {
@@ -373,6 +374,20 @@ impl SyncService {
             let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
             let before_uid =
                 history_before_uid_for_folder(&self.db, account_id, folder, state.as_ref()).await?;
+            if history_exhausted_before_uid(before_uid) {
+                sync_repo::update_history_state(
+                    &self.db,
+                    account_id,
+                    folder,
+                    state.as_ref().and_then(|s| s.history_synced_since),
+                    Some(before_uid),
+                    true,
+                )
+                .await?;
+                folder_exhausted_states.push(true);
+                continue;
+            }
+
             let uids = client
                 .list_uids_before_uid(folder, before_uid, HISTORY_UID_BATCH_SIZE)
                 .await?;
@@ -391,7 +406,7 @@ impl SyncService {
                 continue;
             }
 
-            let next_before_uid = uids.iter().min().copied().unwrap_or(before_uid);
+            let next_before_uid = next_history_before_uid(&uids, before_uid);
             let mut folder_min_sent_at = state.as_ref().and_then(|s| s.history_synced_since);
             let mut folder_window_start = i64::MAX;
             let mut folder_window_end = i64::MIN;
@@ -416,7 +431,7 @@ impl SyncService {
             fetch_emails_body(self.db.clone(), account_id, folder, &uids, &mut client).await?;
             updated_emails += uids.len() as u64;
 
-            let folder_history_exhausted = next_before_uid <= 1;
+            let folder_history_exhausted = history_exhausted_before_uid(next_before_uid);
 
             sync_repo::update_history_state(
                 &self.db,

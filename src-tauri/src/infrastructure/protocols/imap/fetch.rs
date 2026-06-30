@@ -58,6 +58,19 @@ fn parse_transfer_encoding(mime_header: &[u8]) -> Option<String> {
     })
 }
 
+fn build_uid_set(uids: &[u32]) -> Option<String> {
+    if uids.is_empty() {
+        return None;
+    }
+
+    Some(
+        uids.iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
 impl ImapClient {
     async fn fetch_email_headers_by_uid_set(
         &mut self,
@@ -382,20 +395,10 @@ impl ImapClient {
         Ok(results)
     }
 
-    /// 按 UID 范围批量获取完整邮件（包含正文）
-    ///
-    /// 使用 `mail_parser` 统一解析所有邮件头和正文内容，
-    /// BODYSTRUCTURE 仅用于提取附件 section_path（IMAP 按需下载所需）。
-    ///
-    /// # 注意
-    ///
-    /// `id`、`account_id`、`created_at` 为数据库侧字段，此处设为默认值（0 / 当前时间），
-    /// 由调用者在持久化后填充。
-    pub async fn batch_fetch_emails(
+    async fn fetch_whole_emails_by_uid_set(
         &mut self,
         folder: &str,
-        start_uid: u32,
-        end_uid: u32,
+        uid_set: &str,
     ) -> Result<Vec<WholeEmailDto>, MailError> {
         // SELECT 文件夹
         self.session
@@ -403,19 +406,14 @@ impl ImapClient {
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?;
 
-        let uid_range = format!("{}:{}", start_uid, end_uid);
-        tracing::trace!(
-            "批量获取完整邮件: folder={}, uid_range={}",
-            folder,
-            uid_range
-        );
+        tracing::trace!("批量获取完整邮件: folder={}, uid_set={}", folder, uid_set);
 
         // 批量 FETCH：FLAGS + BODYSTRUCTURE + BODY.PEEK[] + INTERNALDATE + UID
         // 不再使用 ENVELOPE，所有邮件头通过 mail_parser 从 BODY.PEEK[] 解析
         let fetches = self
             .session
             .uid_fetch(
-                &uid_range,
+                uid_set,
                 "(FLAGS INTERNALDATE BODYSTRUCTURE BODY.PEEK[] UID)",
             )
             .await
@@ -521,6 +519,38 @@ impl ImapClient {
         );
 
         Ok(emails)
+    }
+
+    /// 按 UID 范围批量获取完整邮件（包含正文）
+    ///
+    /// 使用 `mail_parser` 统一解析所有邮件头和正文内容，
+    /// BODYSTRUCTURE 仅用于提取附件 section_path（IMAP 按需下载所需）。
+    ///
+    /// # 注意
+    ///
+    /// `id`、`account_id`、`created_at` 为数据库侧字段，此处设为默认值（0 / 当前时间），
+    /// 由调用者在持久化后填充。
+    pub async fn batch_fetch_emails(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+        self.fetch_whole_emails_by_uid_set(folder, &uid_range).await
+    }
+
+    /// 按精确 UID 集合批量获取完整邮件（包含正文）。
+    pub async fn batch_fetch_emails_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        let Some(uid_set) = build_uid_set(uids) else {
+            return Ok(Vec::new());
+        };
+
+        self.fetch_whole_emails_by_uid_set(folder, &uid_set).await
     }
 
     /// 按单个 UID 获取完整邮件。
@@ -649,5 +679,15 @@ mod tests {
         assert_eq!(parse_section_path("1.0", None), None);
         assert!(parse_section_path("2", None).is_some());
         assert!(parse_section_path("3.1", None).is_some());
+    }
+
+    #[test]
+    fn build_uid_set_should_join_exact_uids() {
+        assert_eq!(build_uid_set(&[9, 3, 7]), Some("9,3,7".to_string()));
+    }
+
+    #[test]
+    fn build_uid_set_should_return_none_for_empty_input() {
+        assert_eq!(build_uid_set(&[]), None);
     }
 }

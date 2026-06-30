@@ -21,6 +21,10 @@ fn build_uid_before_search_command(before_uid: u32) -> Option<String> {
         .map(|last_uid| format!("UID 1:{last_uid}"))
 }
 
+fn build_uid_since_search_command(uid_since: u32) -> Option<String> {
+    (uid_since >= 1).then(|| format!("UID {uid_since}:*"))
+}
+
 impl ImapClient {
     /// 获取指定时间范围内的邮件 UID 列表（使用 IMAP SINCE 命令）
     /// date_since: IMAP 日期格式，如 "01-Jan-2025"
@@ -140,7 +144,7 @@ impl ImapClient {
 
     /// 获取指定 UID 之后的邮件 UID 列表（用于增量同步）
     ///
-    /// 从 `uid_since` 开始向后探测 100 个 UID 范围内的邮件。
+    /// 从 `uid_since` 开始查询所有后续 UID。
     pub async fn list_uids_since_uid(
         &mut self,
         folder: &str,
@@ -150,7 +154,11 @@ impl ImapClient {
             .select(folder)
             .await
             .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
-        let search_cmd = format!("UID {}:{}", uid_since, uid_since + 100);
+
+        let Some(search_cmd) = build_uid_since_search_command(uid_since) else {
+            return Ok(Vec::new());
+        };
+
         tracing::info!("📤 使用 IMAP 搜索命令: '{}'", search_cmd);
         let uids = self
             .session
@@ -215,7 +223,7 @@ impl ImapClient {
 mod tests {
     use super::{
         build_all_search_command, build_before_search_command, build_since_before_search_command,
-        build_uid_before_search_command,
+        build_uid_before_search_command, build_uid_since_search_command,
     };
 
     #[test]
@@ -250,5 +258,18 @@ mod tests {
     #[test]
     fn build_uid_before_search_command_should_return_none_for_first_uid() {
         assert_eq!(build_uid_before_search_command(1), None);
+    }
+
+    #[test]
+    fn build_uid_since_search_command_should_request_all_newer_uids() {
+        assert_eq!(
+            build_uid_since_search_command(42).as_deref(),
+            Some("UID 42:*")
+        );
+    }
+
+    #[test]
+    fn build_uid_since_search_command_should_return_none_for_zero() {
+        assert_eq!(build_uid_since_search_command(0), None);
     }
 }

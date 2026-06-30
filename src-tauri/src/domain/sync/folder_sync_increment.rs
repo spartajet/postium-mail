@@ -1,5 +1,5 @@
 use crate::{
-    domain::sync::SyncResult,
+    domain::sync::{HISTORY_UID_BATCH_SIZE, SyncResult},
     error::MailError,
     infrastructure::{
         protocols::imap::ImapClient,
@@ -43,25 +43,31 @@ pub async fn sync_folder_incremental(
     let new_uids = imap_client
         .list_uids_since_uid(folder, last_sync_uid + 1)
         .await?;
-    if !new_uids.is_empty() {
-        // 批量获取新邮件
-        let new_emails = imap_client
-            .batch_fetch_emails(
-                folder,
-                last_sync_uid + 1,
-                new_uids.last().copied().unwrap_or(0),
-            )
-            .await?;
+    let mut inserted = 0usize;
+    let mut fetched = 0usize;
 
-        let insert_result = save_batch_emails(&db, account_id, folder, &new_emails).await?;
-        tracing::info!("同步完成，插入 {} 条新邮件", insert_result);
+    for group in new_uids.chunks(HISTORY_UID_BATCH_SIZE) {
+        let new_emails = imap_client
+            .batch_fetch_emails_by_uids(folder, group)
+            .await?;
+        fetched += new_emails.len();
+        inserted += save_batch_emails(&db, account_id, folder, &new_emails).await?;
     }
+
+    if !new_uids.is_empty() {
+        tracing::info!(
+            "增量同步完成，拉取 {} 条邮件，插入或更新 {} 条邮件",
+            fetched,
+            inserted
+        );
+    }
+
     let max_uid = new_uids.last().copied().unwrap_or(last_sync_uid);
     sync_repo::upsert_sync_state(&db, account_id, folder, None, None, Some(max_uid)).await?;
 
     Ok(SyncResult {
-        new_emails: 0,
-        updated_emails: 0,
+        new_emails: inserted,
+        updated_emails: fetched,
         deleted_emails: 0,
         duration_ms: 0,
     })

@@ -86,8 +86,8 @@ export default {
     attachmentSaveCanceled: "Save canceled",
     loading: "Loading...",
     loadMore: "Load more",
-    syncOlder: "Sync older mail",
-    syncingOlder: "Syncing older mail...",
+    syncOlder: "Load older mail",
+    syncingOlder: "Loading older mail...",
     emailCount: "emails",
   },
   account: {
