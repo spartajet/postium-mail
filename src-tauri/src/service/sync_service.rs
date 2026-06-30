@@ -339,10 +339,8 @@ impl SyncService {
         let provider = provider_pool
             .get(&account.provider)
             .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
-        let folders = self
-            .resolve_history_folders(account_id, category.clone(), &provider.folder_mapping())
-            .await?;
-        if folders.is_empty() || category == EmailCategory::Starred {
+        let candidate_folders = category.resolve_folders(&provider.folder_mapping());
+        if candidate_folders.is_empty() || category == EmailCategory::Starred {
             return Err(MailError::InvalidParam("当前分类不支持历史回填".into()));
         }
 
@@ -364,6 +362,29 @@ impl SyncService {
             }
         };
 
+        // 连接 IMAP 后用服务器返回的真实文件夹名来解析，确保选出的文件夹确实存在，
+        // 避免像旧逻辑那样回退到一个本地/远程都不存在的候选名（会导致 before_uid 退化为
+        // 默认值 1，随即被判定为历史已耗尽，从而一封更早的邮件也拉不到）。
+        let remote_folder_names = client
+            .list_folders()
+            .await?
+            .into_iter()
+            .map(|folder| folder.name)
+            .collect::<Vec<_>>();
+        let folders = self
+            .resolve_history_candidate_folders(
+                account_id,
+                &candidate_folders,
+                Some(&remote_folder_names),
+            )
+            .await?;
+        tracing::debug!(
+            account_id,
+            category = ?category,
+            folders = ?folders,
+            "历史回填解析文件夹完成"
+        );
+
         let mut new_emails = 0u64;
         let mut updated_emails = 0u64;
         let mut min_window_start = i64::MAX;
@@ -372,8 +393,14 @@ impl SyncService {
 
         for folder in &folders {
             let state = sync_repo::get_sync_state(&self.db, account_id, folder).await?;
-            let before_uid =
-                history_before_uid_for_folder(&self.db, account_id, folder, state.as_ref()).await?;
+            let before_uid = history_before_uid_for_folder(
+                &self.db,
+                account_id,
+                folder,
+                state.as_ref(),
+                Some(&mut client),
+            )
+            .await?;
             if history_exhausted_before_uid(before_uid) {
                 sync_repo::update_history_state(
                     &self.db,
@@ -475,20 +502,41 @@ impl SyncService {
             return Ok(candidates);
         }
 
+        // get_history_state 不连接 IMAP，只能基于本地已存文件夹名解析。
+        self.resolve_history_candidate_folders(account_id, &candidates, None)
+            .await
+    }
+
+    /// 基于本地与（可选的）远程文件夹名，为历史回填挑选所有真实存在的文件夹。
+    ///
+    /// 同一分类可能映射到多个别名（如网易发件箱同时存在 `Sent` 与 IMAP-UTF-7 的
+    /// `&XfJT0ZAB-`），这些是不同的物理文件夹，各自的历史都要回填，因此返回候选中
+    /// **所有**真实存在的文件夹，而非只挑一个。
+    ///
+    /// `remote_folders` 在 `sync_older_emails` 中由 IMAP `LIST` 返回；
+    /// 在 `get_history_state` 这类不连接服务器的场景下传入 `None`，仅用本地已存名称解析。
+    async fn resolve_history_candidate_folders(
+        &self,
+        account_id: i32,
+        candidates: &[String],
+        remote_folders: Option<&[String]>,
+    ) -> Result<Vec<String>, MailError> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut local_folders =
             sync_repo::distinct_folders_by_account(&self.db, account_id).await?;
         local_folders.extend(email_repo::distinct_folders_by_account(&self.db, account_id).await?);
         let local_folders = local_folders.into_iter().collect::<HashSet<_>>();
+        let remote_folders = remote_folders
+            .map(|folders| folders.iter().cloned().collect::<HashSet<_>>());
 
-        let resolved = candidates
-            .iter()
-            .find(|folder| local_folders.contains(*folder))
-            .cloned();
-        if let Some(folder) = resolved {
-            Ok(vec![folder])
-        } else {
-            Ok(candidates.into_iter().take(1).collect())
-        }
+        Ok(choose_history_folders(
+            candidates,
+            &local_folders,
+            remote_folders.as_ref(),
+        ))
     }
 
     /// 获取账号的文件夹统计信息
@@ -559,6 +607,7 @@ async fn history_before_uid_for_folder(
     account_id: i32,
     folder: &str,
     state: Option<&crate::infrastructure::storage::models::sync_state::Model>,
+    imap_client: Option<&mut ImapClient>,
 ) -> Result<u32, MailError> {
     if let Some(before_uid) = state.and_then(|s| s.history_before_uid) {
         return Ok(before_uid);
@@ -566,7 +615,19 @@ async fn history_before_uid_for_folder(
     if let Some(local_min_uid) = email_repo::min_uid_by_folder(db, account_id, folder).await? {
         return Ok(local_min_uid);
     }
-    Ok(state.and_then(|s| s.uidnext).unwrap_or(1))
+    if let Some(uidnext) = state.and_then(|s| s.uidnext) {
+        return Ok(uidnext);
+    }
+
+    // 该文件夹本地从未同步过（如同一分类的第二个别名文件夹）：
+    // 用 IMAP EXAMINE 拿到服务器真实的 uidnext 作为回填起点，
+    // 避免直接退化成 1 被误判为历史已耗尽、一封邮件也拉不到。
+    if let Some(client) = imap_client {
+        let metadata = client.fetch_folder_metadata(folder).await?;
+        return Ok(metadata.uidnext as u32);
+    }
+
+    Ok(1)
 }
 
 fn normalized_history_window_bound(value: i64) -> i64 {
@@ -577,9 +638,53 @@ fn normalized_history_window_bound(value: i64) -> i64 {
     }
 }
 
+/// 为历史回填挑选所有真实存在的文件夹名。
+///
+/// 同一分类可能映射到多个别名（如网易发件箱同时存在 `Sent` 与 IMAP-UTF-7 的
+/// `&XfJT0ZAB-`），这些是不同的物理文件夹，各自都要独立回填历史，因此返回候选中
+/// **所有**真实存在的文件夹。
+///
+/// 判定优先级（与初始同步 [`resolve_sync_folders`](crate::domain::sync) 保持一致）：
+/// 1. **远程真实存在**：候选名出现在 IMAP `LIST` 返回的文件夹中（最可靠）。
+/// 2. **本地已存**：候选名已存在于 `sync_state` / `emails` 表中（覆盖不连接服务器的场景）。
+/// 3. **候选第一个**：当传入了 `remote_folders` 却没有任何候选命中远程时，
+///    回退到候选数组的第一个，交由后续 IMAP 查询兜底；若未传入远程集合
+///    （`get_history_state` 场景）且本地也无命中，则返回空，避免凭空选一个不存在的名字。
+///
+/// 注意：旧实现只在本地集合中挑**一个**，命中失败就回退到 `candidates[0]`，
+/// 导致发件箱/草稿箱/垃圾箱等文件夹常常选到本地/远程都不存在的名字，
+/// 进而 `history_before_uid` 退化为 `1`、被误判为历史已耗尽。
+fn choose_history_folders(
+    candidates: &[String],
+    local_folders: &HashSet<String>,
+    remote_folders: Option<&HashSet<String>>,
+) -> Vec<String> {
+    // 优先匹配远程真实存在的所有候选（如 QQ 的 "Sent Messages"、Gmail 的 "[Gmail]/Sent Mail"）。
+    if let Some(remote) = remote_folders {
+        let matched: Vec<String> = candidates
+            .iter()
+            .filter(|c| remote.contains(*c))
+            .cloned()
+            .collect();
+        if !matched.is_empty() {
+            return matched;
+        }
+        // 远程一个都没命中：回退到候选第一个，交给后续 IMAP 查询兜底（与初始同步一致）。
+        return candidates.first().cloned().into_iter().collect();
+    }
+
+    // 未连接服务器（get_history_state）：收集所有本地已存的候选。
+    candidates
+        .iter()
+        .filter(|c| local_folders.contains(*c))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::all_history_exhausted;
+    use super::{all_history_exhausted, choose_history_folders};
+    use std::collections::HashSet;
 
     #[test]
     fn all_history_exhausted_should_return_false_when_any_folder_has_older_mail() {
@@ -589,5 +694,77 @@ mod tests {
     #[test]
     fn all_history_exhausted_should_return_true_when_every_folder_is_exhausted() {
         assert!(all_history_exhausted([true, true]));
+    }
+
+    fn set(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn choose_history_folders_should_return_all_remote_matches() {
+        // 网易发件箱：Sent 与 IMAP-UTF-7 的 "&XfJT0ZAB-" 在服务器上都真实存在，
+        // 两者是不同的物理文件夹，各自的历史都要回填。
+        let candidates = vec!["Sent".to_string(), "&XfJT0ZAB-".to_string()];
+        let local = set(&["INBOX"]);
+        let remote = set(&["Sent", "&XfJT0ZAB-"]);
+
+        let chosen = choose_history_folders(&candidates, &local, Some(&remote));
+        assert_eq!(chosen, vec!["Sent".to_string(), "&XfJT0ZAB-".to_string()]);
+    }
+
+    #[test]
+    fn choose_history_folders_should_return_only_remote_present_candidate() {
+        // 候选有两个，但服务器上只有第二个真实存在。
+        let candidates = vec!["Sent".to_string(), "&XfJT0ZAB-".to_string()];
+        let local = set(&["Sent"]);
+        let remote = set(&["INBOX", "&XfJT0ZAB-"]);
+
+        let chosen = choose_history_folders(&candidates, &local, Some(&remote));
+        assert_eq!(chosen, vec!["&XfJT0ZAB-".to_string()]);
+    }
+
+    #[test]
+    fn choose_history_folders_should_fall_back_to_first_candidate_when_no_remote_match() {
+        // 远程一个都没命中时，回退到候选第一个（与初始同步 resolve_sync_folders 一致）。
+        let candidates = vec!["Sent".to_string(), "Sent Items".to_string()];
+        let local = set(&["INBOX"]);
+        let remote = set(&["INBOX"]);
+
+        let chosen = choose_history_folders(&candidates, &local, Some(&remote));
+        assert_eq!(chosen, vec!["Sent".to_string()]);
+    }
+
+    #[test]
+    fn choose_history_folders_should_return_all_local_matches_without_remote() {
+        // get_history_state 不连接服务器，只能靠本地已存名称解析，返回所有本地命中的候选。
+        let candidates = vec![
+            "Sent Messages".to_string(),
+            "Sent".to_string(),
+            "Sent Items".to_string(),
+        ];
+        let local = set(&["Sent", "Sent Items"]);
+
+        let chosen = choose_history_folders(&candidates, &local, None);
+        assert_eq!(
+            chosen,
+            vec!["Sent".to_string(), "Sent Items".to_string()]
+        );
+    }
+
+    #[test]
+    fn choose_history_folders_should_return_empty_when_no_local_match_without_remote() {
+        // 未连接服务器且本地无命中：返回空，避免凭空选一个不存在的名字。
+        let candidates = vec!["Sent".to_string(), "Sent Items".to_string()];
+        let local = set(&["INBOX"]);
+
+        let chosen = choose_history_folders(&candidates, &local, None);
+        assert!(chosen.is_empty());
+    }
+
+    #[test]
+    fn choose_history_folders_should_return_empty_for_empty_candidates() {
+        let local = set(&["INBOX"]);
+        let chosen = choose_history_folders(&[], &local, None);
+        assert!(chosen.is_empty());
     }
 }
