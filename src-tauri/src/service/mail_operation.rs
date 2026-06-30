@@ -6,7 +6,8 @@ use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::{accounts, emails};
-use crate::infrastructure::storage::repository::{account_repo, email_repo};
+use crate::infrastructure::storage::repository::{account_repo, email_repo, sync_repo};
+use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::service::account_connection::imap_config_from_account;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -299,24 +300,29 @@ impl MailOperationService {
         account: &accounts::Model,
         kind: &str,
     ) -> Result<Vec<String>, MailError> {
+        let cat = match kind {
+            "trash" => FolderCategory::Trash,
+            "archive" => FolderCategory::Archive,
+            _ => return Ok(Vec::new()),
+        };
         let provider_pool = PROVIDER_POOL
             .get()
             .ok_or_else(|| MailError::ProviderNotSupported("未找到provider pool".to_string()))?;
         let provider = provider_pool
             .get(&account.provider)
             .ok_or_else(|| MailError::ProviderNotSupported(account.provider.clone()))?;
-        let mapping = provider.folder_mapping();
-        let candidates = match kind {
-            "trash" => mapping.trash,
-            "archive" => mapping.archive,
-            _ => Vec::new(),
-        };
-        if candidates.is_empty() {
-            return Err(MailError::FolderNotFound(format!(
-                "账号 {} 未配置 {kind} 文件夹",
-                account.email
-            )));
-        }
-        Ok(candidates)
+        // resolve_special_folders 不连接 IMAP，只能用本地已存文件夹名做降级解析：
+        // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
+        let mut names = sync_repo::distinct_folders_by_account(&self.db, account.id).await?;
+        names.extend(email_repo::distinct_folders_by_account(&self.db, account.id).await?);
+        let remote: Vec<RemoteFolder> = names
+            .into_iter()
+            .map(|n| RemoteFolder { name: n, special_use: vec![], no_select: false })
+            .collect();
+        let registry = FolderRegistry::builder()
+            .remote_folders(remote)
+            .provider_mapping(provider.folder_mapping())
+            .build();
+        Ok(registry.resolve(cat))
     }
 }
