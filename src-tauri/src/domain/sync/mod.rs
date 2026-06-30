@@ -115,6 +115,9 @@
 /// 包含 `SyncOrchestrator` 同步编排器，负责协调完整的同步流程。
 pub mod folder_sync_dispatcher;
 
+/// 同步历史窗口模块
+pub mod history;
+
 /// 文件夹全量同步模块
 ///
 /// 实现文件夹的全量同步逻辑，用于首次同步或重建索引。
@@ -144,6 +147,27 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use tauri::{AppHandle, Emitter};
+
+/// 初始同步范围
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialSyncRange {
+    Week,
+    Month,
+    ThreeMonths,
+    Year,
+    All,
+}
+
+/// 同步时间窗口
+///
+/// `start` 和 `end` 都使用 Unix 秒级时间戳。
+/// 当窗口映射到 IMAP 搜索条件时，`end` 对应 `BEFORE <date>` 的排他上界。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncWindow {
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+}
 
 /// 同步进度事件
 ///
@@ -403,6 +427,8 @@ pub enum SyncMode {
     Full {
         /// IMAP 文件夹的 UIDVALIDITY 值
         uidvalidity: u64,
+        /// IMAP UIDNEXT 值，用于空窗口首次同步时建立安全高水位
+        uidnext: u64,
     },
     /// 增量同步模式
     ///

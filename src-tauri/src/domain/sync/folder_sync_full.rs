@@ -1,8 +1,9 @@
 use crate::{
     domain::sync::SyncResult,
+    domain::sync::SyncWindow,
     error::MailError,
     infrastructure::{
-        protocols::{imap::ImapClient, utils::three_months_ago_imap_format},
+        protocols::{imap::ImapClient, utils::unix_seconds_to_imap_date},
         storage::{
             DbConn,
             repository::{email_repo, sync_repo},
@@ -31,7 +32,9 @@ pub async fn sync_folder_full(
     account_id: i32,
     folder: &str,
     uidvalidity: u32,
+    uidnext: u32,
     imap_client: &mut ImapClient,
+    window: SyncWindow,
 ) -> Result<SyncResult, MailError> {
     tracing::info!(
         "全量同步文件夹: account_id={}, folder={}",
@@ -39,18 +42,45 @@ pub async fn sync_folder_full(
         folder,
     );
 
-    // 1. 获取近三个月的邮件 UID
-    tracing::info!("全量同步，获取三个月内的邮件: folder={}", folder);
-    let date_since = three_months_ago_imap_format();
-    tracing::info!(
-        "全量同步，获取三个月内的邮件: folder={}, date_since={}",
-        folder,
-        date_since
-    );
-
-    let uids = imap_client.list_uids_since(folder, &date_since).await?;
+    // 1. 按同步窗口获取邮件 UID
+    let uids = match (window.start, window.end) {
+        (Some(start), None) => {
+            let date_since = unix_seconds_to_imap_date(start)?;
+            tracing::info!(
+                "全量同步，获取时间窗口内邮件: folder={}, date_since={}",
+                folder,
+                date_since
+            );
+            imap_client.list_uids_since(folder, &date_since).await?
+        }
+        (None, None) => {
+            tracing::info!("全量同步，获取全部邮件 UID: folder={}", folder);
+            imap_client.list_all_uids(folder).await?
+        }
+        _ => {
+            return Err(MailError::InvalidParam(
+                "全量同步仅支持起始时间窗口或全量窗口".into(),
+            ));
+        }
+    };
     let server_uids_len = uids.len();
     if server_uids_len == 0 {
+        let last_sync_uid = last_sync_uid_for_full_sync(&uids, uidnext);
+        sync_repo::upsert_sync_state(
+            &db,
+            account_id,
+            folder,
+            Some(uidnext),
+            Some(uidvalidity),
+            Some(last_sync_uid),
+        )
+        .await?;
+        match window.start {
+            Some(start) => {
+                sync_repo::update_history_state(&db, account_id, folder, Some(start), false).await?
+            }
+            None => sync_repo::update_history_state(&db, account_id, folder, None, true).await?,
+        }
         return Ok(SyncResult {
             new_emails: 0,
             updated_emails: 0,
@@ -92,7 +122,7 @@ pub async fn sync_folder_full(
         tracing::debug!("保存邮件头: {}", email_headers.len())
     }
 
-    let max_uid = uids.last().copied().unwrap_or(0);
+    let max_uid = last_sync_uid_for_full_sync(&uids, uidnext);
 
     tracing::info!(
         "同步完成: account_id={}, folder={}, new_emails={}, last_sync_uid={}",
@@ -108,11 +138,18 @@ pub async fn sync_folder_full(
         &db,
         account_id,
         folder,
-        None,
+        Some(uidnext),
         Some(uidvalidity),
         Some(max_uid),
     )
     .await?;
+
+    match window.start {
+        Some(start) => {
+            sync_repo::update_history_state(&db, account_id, folder, Some(start), false).await?
+        }
+        None => sync_repo::update_history_state(&db, account_id, folder, None, true).await?,
+    }
 
     // let folder_string = folder.to_string();
     // let imap_client_clone = imap_client.clone();
@@ -129,7 +166,13 @@ pub async fn sync_folder_full(
     })
 }
 
-async fn fetch_emails_body(
+fn last_sync_uid_for_full_sync(uids: &[u32], uidnext: u32) -> u32 {
+    uids.last()
+        .copied()
+        .unwrap_or_else(|| uidnext.saturating_sub(1))
+}
+
+pub(crate) async fn fetch_emails_body(
     db: DbConn,
     account_id: i32,
     folder: &str,
@@ -172,4 +215,14 @@ pub async fn delete_account_folder_emails(
     );
 
     Ok(deleted_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::last_sync_uid_for_full_sync;
+
+    #[test]
+    fn last_sync_uid_for_full_sync_should_use_uidnext_high_watermark_when_window_is_empty() {
+        assert_eq!(last_sync_uid_for_full_sync(&[], 501), 500);
+    }
 }

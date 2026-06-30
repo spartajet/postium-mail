@@ -54,7 +54,14 @@ import { getContext, setContext } from "svelte";
 import { commands, events } from "$lib/bindings";
 
 // 导入同步进度和文件夹统计的数据传输对象类型
-import type { SyncProgress, FolderStat } from "$lib/bindings";
+import type {
+  EmailCategory,
+  FolderStat,
+  HistorySyncState,
+  InitialSyncRange,
+  OlderSyncResult,
+  SyncProgress,
+} from "$lib/bindings";
 
 // 导入错误格式化工具
 import { formatError } from "$lib/utils/error.js";
@@ -95,7 +102,7 @@ import { getToastState } from "$lib/stores/toast.svelte";
  * - Toast 提示可能在某些情况下未初始化（如 Context 未设置），
  *   因此使用 try-catch 包裹 Toast 调用
  */
-class SyncState {
+export class SyncState {
   /**
    * 是否正在同步中（响应式状态）
    *
@@ -124,6 +131,10 @@ class SyncState {
    * 用于在侧边栏中显示各文件夹的未读邮件数量角标。
    */
   folderStats = $state<FolderStat[]>([]);
+
+  historyStates = $state<Record<string, HistorySyncState>>({});
+
+  olderSyncingKeys = $state<Set<string>>(new Set());
 
   /**
    * 错误信息（响应式状态）
@@ -190,6 +201,10 @@ class SyncState {
     });
   }
 
+  private historyKey(accountId: number, category: EmailCategory) {
+    return `${accountId}:${category}`;
+  }
+
   /**
    * 触发账号同步
    *
@@ -247,6 +262,80 @@ class SyncState {
       // 注意：如果同步仍在进行（异步），事件监听器会在完成时再次设置 syncing
       this.syncing = false;
     }
+  }
+
+  async syncAccountWithRange(accountId: number, range: InitialSyncRange) {
+    // 设置同步中状态
+    this.syncing = true;
+    // 清除之前的错误信息
+    this.error = null;
+
+    try {
+      // 调用后端命令发起指定范围的账号同步
+      const result = await commands.syncAccountWithRange(accountId, range);
+
+      if (result.status === "error") {
+        // 后端返回错误时，设置错误信息
+        this.error = result.error.message as string;
+      }
+    } catch (e: unknown) {
+      // 捕获异常并格式化错误消息
+      this.error = formatError(e);
+    } finally {
+      // 无论成功或失败，都重置同步状态
+      this.syncing = false;
+    }
+  }
+
+  async loadHistoryState(accountId: number, category: EmailCategory) {
+    const result = await commands.getSyncHistoryState(accountId, category);
+
+    if (result.status === "error") {
+      this.error = result.error.message as string;
+      return null;
+    }
+
+    this.historyStates = {
+      ...this.historyStates,
+      [this.historyKey(accountId, category)]: result.data,
+    };
+    return result.data;
+  }
+
+  async syncOlderEmails(
+    accountId: number,
+    category: EmailCategory,
+  ): Promise<OlderSyncResult | null> {
+    const key = this.historyKey(accountId, category);
+    this.olderSyncingKeys = new Set([...this.olderSyncingKeys, key]);
+    this.error = null;
+
+    try {
+      const result = await commands.syncOlderEmails(accountId, category);
+
+      if (result.status === "error") {
+        this.error = result.error.message as string;
+        return null;
+      }
+
+      await this.loadHistoryState(accountId, category);
+      return result.data;
+    } catch (e: unknown) {
+      this.error = formatError(e);
+      return null;
+    } finally {
+      const next = new Set(this.olderSyncingKeys);
+      next.delete(key);
+      this.olderSyncingKeys = next;
+    }
+  }
+
+  isOlderSyncing(accountId: number, category: EmailCategory) {
+    return this.olderSyncingKeys.has(this.historyKey(accountId, category));
+  }
+
+  getHistoryState(accountId: number, category: EmailCategory) {
+    return this.historyStates[this.historyKey(accountId, category)] ?? null;
   }
 
   /**

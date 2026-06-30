@@ -5,17 +5,18 @@
   本组件是邮箱账号添加的核心模态框，支持多种邮箱服务商的账号配置。
 
   ==================== 功能说明 ====================
-  1. 三步式添加流程：
+  1. 四步式添加流程：
      - 第一步：选择邮箱服务商（Gmail、Outlook等）或手动配置
      - 第二步：输入账号凭据（OAuth2授权 或 密码登录）
-     - 第三步：显示添加成功结果
+     - 第三步：选择首次同步范围
+     - 第四步：显示添加成功结果
   2. OAuth2 授权流程：在默认浏览器中打开授权页面，轮询等待授权完成
   3. 密码认证流程：支持自动检测邮箱服务商、手动配置 IMAP/SMTP
   4. SSL/TLS 加密模式配置，自动推荐端口
 
   ==================== 组件状态 ====================
   - open: 模态框是否打开
-  - step: 当前步骤（"select" | "credentials" | "done"）
+  - step: 当前步骤（"select" | "credentials" | "sync-scope" | "done"）
   - selectedProvider: 选中的服务商信息
   - isManual: 是否为手动配置模式
   - providers: 可用的服务商列表
@@ -55,7 +56,11 @@
     // 导入 Tauri 后端命令，用于与服务端通信
     import { commands } from "$lib/bindings";
     import { goto } from "$app/navigation";
-    import { continueAfterAccountAdded } from "./account-add-flow";
+    import {
+        continueAfterAccountAdded,
+        resolveOAuth2CompletedAccount,
+        startInitialSyncAfterAccountAdded,
+    } from "./account-add-flow";
 
     // 导入 Tauri 的 URL 打开插件，用于在默认浏览器中打开 OAuth2 授权页面
     import { openUrl } from "@tauri-apps/plugin-opener";
@@ -71,7 +76,7 @@
         Shield, // 盾牌图标（用于密码登录按钮）
     } from "lucide-svelte";
     // 导入服务商信息类型定义
-    import type { ProviderInfo } from "$lib/bindings";
+    import type { InitialSyncRange, ProviderInfo } from "$lib/bindings";
 
     // 获取国际化状态实例
     const i18n = getI18nState();
@@ -86,8 +91,10 @@
 
     // 模态框是否打开（外部通过 show() 方法控制）
     let open = $state(false);
-    // 当前步骤：选择服务商 → 输入凭据 → 完成
-    let step = $state<"select" | "credentials" | "done">("select");
+    // 当前步骤：选择服务商 → 输入凭据 → 选择同步范围 → 完成
+    let step = $state<"select" | "credentials" | "sync-scope" | "done">(
+        "select",
+    );
     // 选中的邮箱服务商信息，null 表示手动配置模式
     let selectedProvider = $state<ProviderInfo | null>(null);
     // 是否为手动配置模式（未选择预设服务商）
@@ -142,6 +149,11 @@
     let phase = $state<"idle" | "validating" | "done">("idle");
     // 首次同步错误信息
     let syncError = $state("");
+    // 等待用户选择首次同步范围的账号 ID
+    let pendingInitialSyncAccountId = $state<number | null>(null);
+    // 首次同步范围，默认同步最近三个月
+    let selectedInitialSyncRange =
+        $state<InitialSyncRange>("three_months");
 
     // ─── OAuth2 授权流程状态 ───
 
@@ -187,6 +199,24 @@
         StartTls: 587, // STARTTLS 端口（最常用）
         None: 25, // 无加密端口
     };
+
+    type InitialSyncRangeOption = {
+        value: InitialSyncRange;
+        label: string;
+        hint?: string;
+    };
+
+    const initialSyncRangeOptions = $derived<InitialSyncRangeOption[]>([
+        { value: "week", label: t.account.syncRangeWeek },
+        { value: "month", label: t.account.syncRangeMonth },
+        { value: "three_months", label: t.account.syncRangeThreeMonths },
+        { value: "year", label: t.account.syncRangeYear },
+        {
+            value: "all",
+            label: t.account.syncRangeAll,
+            hint: t.account.syncRangeAllHint,
+        },
+    ]);
 
     // ─── 副作用 ───
 
@@ -306,22 +336,32 @@
         }
     }
 
-    function findAccountIdByEmail(targetEmail: string) {
-        return (
-            accountStore.accounts.find(
-                (account) => account.email === targetEmail,
-            )?.id ?? null
-        );
+    async function enterSyncScope(accountId: number) {
+        await accountStore.loadAccounts();
+        accountStore.setActive(accountId);
+        pendingInitialSyncAccountId = accountId;
+        selectedInitialSyncRange = "three_months";
+        step = "sync-scope";
     }
 
-    async function enterMainAndStartSync(accountId: number) {
+    async function startSelectedInitialSync() {
+        if (pendingInitialSyncAccountId === null) return;
+        const accountId = pendingInitialSyncAccountId;
+        const range = selectedInitialSyncRange;
+
         await continueAfterAccountAdded({
             accountId,
             loadAccounts: () => accountStore.loadAccounts(),
             setActive: (id) => accountStore.setActive(id),
             close,
             goHome: () => goto("/"),
-            syncAccount: (id) => syncStore.syncAccount(id),
+        });
+
+        void startInitialSyncAfterAccountAdded({
+            accountId,
+            range,
+            syncAccountWithRange: (id, range) =>
+                syncStore.syncAccountWithRange(id, range),
         });
     }
 
@@ -375,15 +415,22 @@
                 ) {
                     clearInterval(interval);
                     oauthPolling = false;
-                    // 后端已自动创建账号，先进入主界面，再后台触发首次同步
-                    await accountStore.loadAccounts();
-                    const accountId = findAccountIdByEmail(email);
+                    // 后端已自动创建账号，进入同步范围选择步骤
+                    const completedEmail = pollResult.Completed.email;
+                    const accountId = await resolveOAuth2CompletedAccount({
+                        completedEmail,
+                        loadAccounts: () => accountStore.loadAccounts(),
+                        getAccounts: () => accountStore.accounts,
+                    });
                     if (accountId !== null) {
-                        await enterMainAndStartSync(accountId);
+                        await enterSyncScope(accountId);
                     } else {
-                        syncError = "账号已添加，但未能定位新账号执行首次同步";
-                        phase = "done";
-                        step = "done";
+                        oauthError = t.account.oauthAccountMissing.replace(
+                            "{email}",
+                            completedEmail,
+                        );
+                        syncError = oauthError;
+                        phase = "idle";
                     }
                 }
                 // 状态三：授权失败
@@ -443,8 +490,8 @@
             });
 
             if (result.status === "ok") {
-                // 创建成功后先进入主界面，再后台触发首次同步
-                await enterMainAndStartSync(result.data.id);
+                // 创建成功后进入同步范围选择步骤
+                await enterSyncScope(result.data.id);
             } else {
                 // 创建失败，显示错误信息
                 error = result.error.message as string;
@@ -503,6 +550,8 @@
         error = "";
         phase = "idle";
         syncError = "";
+        pendingInitialSyncAccountId = null;
+        selectedInitialSyncRange = "three_months";
         oauthState = "";
         oauthPolling = false;
         oauthError = "";
@@ -556,9 +605,15 @@
                         >
                         <ChevronRight size={12} />
                         <span
+                            class={step === "sync-scope"
+                                ? "font-medium text-primary"
+                                : ""}>3. {t.account.startSync}</span
+                        >
+                        <ChevronRight size={12} />
+                        <span
                             class={step === "done"
                                 ? "font-medium text-primary"
-                                : ""}>3. {t.account.step3}</span
+                                : ""}>4. {t.account.step3}</span
                         >
                     </div>
                 </div>
@@ -1116,6 +1171,52 @@
                     {/if}
                 </div>
 
+                <!-- ─── 第三步：选择首次同步范围 ─── -->
+            {:else if step === "sync-scope"}
+                <div class="p-6">
+                    <h3 class="text-base font-semibold text-foreground">
+                        {t.account.syncScopeTitle}
+                    </h3>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                        {t.account.syncScopeHint}
+                    </p>
+
+                    <div class="mt-5 space-y-2">
+                        {#each initialSyncRangeOptions as option}
+                            <label
+                                class="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2 transition-colors hover:bg-glass-hover"
+                            >
+                                <input
+                                    type="radio"
+                                    name="initial-sync-range"
+                                    value={option.value}
+                                    bind:group={selectedInitialSyncRange}
+                                    class="mt-1"
+                                />
+                                <span class="min-w-0">
+                                    <span
+                                        class="block text-sm font-medium text-foreground"
+                                        >{option.label}</span
+                                    >
+                                    {#if option.hint}
+                                        <span
+                                            class="block text-xs text-muted-foreground"
+                                            >{option.hint}</span
+                                        >
+                                    {/if}
+                                </span>
+                            </label>
+                        {/each}
+                    </div>
+
+                    <button
+                        class="mt-6 w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                        onclick={startSelectedInitialSync}
+                    >
+                        {t.account.startSync}
+                    </button>
+                </div>
+
                 <!-- ─── 第三步：添加成功 ─── -->
             {:else if step === "done"}
                 <div data-testid="add-account-done" class="p-8 text-center">
@@ -1125,14 +1226,17 @@
                     <p class="mt-3 text-sm font-medium text-foreground">
                         {email}
                     </p>
-                    <!-- 成功提示文字 -->
+                    <!-- 完成提示文字：首次同步会在后台启动，不在此处承诺已完成 -->
                     {#if syncError}
                         <p class="mt-1 text-xs text-destructive">
-                            账号已添加，但首次同步失败：{syncError}
+                            {t.account.initialSyncFailed.replace(
+                                "{error}",
+                                syncError,
+                            )}
                         </p>
                     {:else}
                         <p class="mt-1 text-xs text-muted-foreground">
-                            账号已添加并完成首次同步
+                            {t.account.initialSyncStarted}
                         </p>
                     {/if}
                     <!-- 操作按钮 -->

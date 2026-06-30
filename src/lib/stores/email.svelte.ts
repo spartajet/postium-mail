@@ -111,6 +111,9 @@ export class EmailState {
   /** 是否正在加载邮件数据（响应式状态） */
   loading = $state(false);
 
+  /** 是否正在追加下一页邮件，不替换当前列表 */
+  loadingNextPage = $state(false);
+
   /** 最近一次邮件操作错误，空字符串表示无错误 */
   error = $state("");
 
@@ -329,6 +332,54 @@ export class EmailState {
     } finally {
       // 无论成功或失败，都重置加载状态
       this.loading = false;
+    }
+  }
+
+  async loadNextPage(accountId: number) {
+    if (this.loading || this.loadingNextPage || this.emails.length >= this.total)
+      return;
+
+    const nextPage = this.page + 1;
+    this.loadingNextPage = true;
+
+    try {
+      const result = await commands.listEmailsByCategory(
+        accountId,
+        this.currentFolder,
+        nextPage,
+        this.limit,
+      );
+
+      if (result.status === "ok") {
+        this.emails = [...this.emails, ...result.data.emails];
+        this.total = result.data.total;
+        this.page = result.data.page;
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to load next email page");
+    } finally {
+      this.loadingNextPage = false;
+    }
+  }
+
+  async refreshLoadedEmailsByCategory(accountId: number, minimumLimit = 0) {
+    const loadedCount = Math.max(this.emails.length, minimumLimit, this.limit);
+
+    try {
+      const result = await commands.listEmailsByCategory(
+        accountId,
+        this.currentFolder,
+        1,
+        loadedCount,
+      );
+
+      if (result.status === "ok") {
+        this.emails = result.data.emails;
+        this.total = result.data.total;
+        this.page = Math.max(1, Math.ceil(result.data.emails.length / this.limit));
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to refresh loaded emails");
     }
   }
 
