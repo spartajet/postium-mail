@@ -1,6 +1,8 @@
+use crate::domain::folders::SpecialUseFlag;
 use crate::domain::providers::ImapServerConfig;
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::FolderMetadata;
+use async_imap::imap_proto::NameAttribute;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -25,6 +27,12 @@ pub struct FolderInfo {
     pub delimiter: Option<String>,
     /// 文件夹属性标志列表（如 \HasChildren）
     pub flags: Vec<String>,
+    /// RFC 6154 SPECIAL-USE 标记（从 attributes 解析）
+    #[serde(default)]
+    pub special_use: Vec<SpecialUseFlag>,
+    /// 是否 \NoSelect/\NonExistent（不可选文件夹）
+    #[serde(default)]
+    pub no_select: bool,
 }
 
 /// 邮件头部摘要（UID FETCH 返回的轻量信息）
@@ -141,10 +149,19 @@ impl ImapClient {
         while let Some(item) = list.next().await {
             let item = item
                 .map_err(|e| MailError::ImapConnectionFailed(format!("解析文件夹项失败: {e}")))?;
-            folders.push(FolderInfo {
-                name: item.name().to_string(),
-                delimiter: item.delimiter().map(|s: &str| s.to_string()),
-                flags: item.attributes().iter().map(|f| format!("{f:?}")).collect(),
+            folders.push({
+                let attrs = item.attributes();
+                let special_use = SpecialUseFlag::from_attributes(attrs);
+                let no_select = attrs
+                    .iter()
+                    .any(|a| matches!(a, NameAttribute::NoSelect));
+                FolderInfo {
+                    name: item.name().to_string(),
+                    delimiter: item.delimiter().map(|s: &str| s.to_string()),
+                    flags: attrs.iter().map(|f| format!("{f:?}")).collect(),
+                    special_use,
+                    no_select,
+                }
             });
         }
         tracing::debug!(count = folders.len(), "IMAP: 列出文件夹完成");
