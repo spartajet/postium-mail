@@ -164,6 +164,7 @@ async fn init_database_migrates_legacy_sync_state_history_columns() {
         .unwrap();
 
     assert!(columns.contains(&"history_synced_since".to_string()));
+    assert!(columns.contains(&"history_before_uid".to_string()));
     assert!(columns.contains(&"history_exhausted".to_string()));
 }
 
@@ -399,7 +400,7 @@ async fn sync_repo_history_state_upserts_and_maps_history_fields() {
     .await
     .unwrap();
 
-    sync_repo::update_history_state(&db, 1, "INBOX", Some(1700000000), false)
+    sync_repo::update_history_state(&db, 1, "INBOX", Some(1700000000), Some(500), false)
         .await
         .unwrap();
 
@@ -409,6 +410,7 @@ async fn sync_repo_history_state_upserts_and_maps_history_fields() {
         .expect("sync_state row should be created");
 
     assert_eq!(initial_state.history_synced_since, Some(1700000000));
+    assert_eq!(initial_state.history_before_uid, Some(500));
     assert_eq!(initial_state.history_exhausted, Some(false));
 
     let row_count_after_first_write = db
@@ -424,7 +426,7 @@ async fn sync_repo_history_state_upserts_and_maps_history_fields() {
 
     assert_eq!(row_count_after_first_write, 1);
 
-    sync_repo::update_history_state(&db, 1, "INBOX", Some(1600000000), true)
+    sync_repo::update_history_state(&db, 1, "INBOX", Some(1600000000), Some(250), true)
         .await
         .unwrap();
 
@@ -435,6 +437,7 @@ async fn sync_repo_history_state_upserts_and_maps_history_fields() {
 
     assert_eq!(updated_state.id, initial_state.id);
     assert_eq!(updated_state.history_synced_since, Some(1600000000));
+    assert_eq!(updated_state.history_before_uid, Some(250));
     assert_eq!(updated_state.history_exhausted, Some(true));
 
     let row_count_after_second_write = db

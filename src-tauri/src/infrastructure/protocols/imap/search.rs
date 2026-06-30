@@ -14,6 +14,13 @@ fn build_before_search_command(date_before: &str) -> String {
     format!("BEFORE {}", date_before)
 }
 
+fn build_uid_before_search_command(before_uid: u32) -> Option<String> {
+    before_uid
+        .checked_sub(1)
+        .filter(|last_uid| *last_uid >= 1)
+        .map(|last_uid| format!("UID 1:{last_uid}"))
+}
+
 impl ImapClient {
     /// 获取指定时间范围内的邮件 UID 列表（使用 IMAP SINCE 命令）
     /// date_since: IMAP 日期格式，如 "01-Jan-2025"
@@ -164,12 +171,51 @@ impl ImapClient {
 
         Ok(uid_list)
     }
+
+    /// 获取指定 UID 之前最近的一批邮件 UID 列表（用于历史回填）。
+    ///
+    /// UID 在同一文件夹和同一 UIDVALIDITY 下单调递增，因此历史回填使用
+    /// `UID 1:<before_uid - 1>` 向前分页，避免按时间窗口遇到长空档时反复空转。
+    pub async fn list_uids_before_uid(
+        &mut self,
+        folder: &str,
+        before_uid: u32,
+        limit: usize,
+    ) -> Result<Vec<u32>, MailError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let Some(search_cmd) = build_uid_before_search_command(before_uid) else {
+            return Ok(Vec::new());
+        };
+
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
+
+        tracing::info!("📤 使用 IMAP 历史 UID 搜索命令: '{}'", search_cmd);
+        let uids = self
+            .session
+            .uid_search(&search_cmd)
+            .await
+            .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
+
+        let mut uid_list: Vec<u32> = uids.into_iter().collect();
+        uid_list.sort();
+        if uid_list.len() > limit {
+            uid_list = uid_list.split_off(uid_list.len() - limit);
+        }
+        Ok(uid_list)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         build_all_search_command, build_before_search_command, build_since_before_search_command,
+        build_uid_before_search_command,
     };
 
     #[test]
@@ -191,5 +237,18 @@ mod tests {
             build_before_search_command("01-Jan-2024"),
             "BEFORE 01-Jan-2024"
         );
+    }
+
+    #[test]
+    fn build_uid_before_search_command_should_request_uids_below_cursor() {
+        assert_eq!(
+            build_uid_before_search_command(42).as_deref(),
+            Some("UID 1:41")
+        );
+    }
+
+    #[test]
+    fn build_uid_before_search_command_should_return_none_for_first_uid() {
+        assert_eq!(build_uid_before_search_command(1), None);
     }
 }

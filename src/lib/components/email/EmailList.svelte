@@ -106,8 +106,7 @@
     let canSyncOlder = $derived(
         supportsOlderSync &&
             !localHasMore &&
-            historyState !== null &&
-            !historyState.history_exhausted,
+            (historyState === null || !historyState.history_exhausted),
     );
     let olderSyncing = $derived(
         accountStore.activeAccountId

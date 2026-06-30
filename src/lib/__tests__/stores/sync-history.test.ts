@@ -13,6 +13,7 @@ describe("同步历史命令调用", () => {
       account_id: 1,
       category: "inbox",
       history_synced_since: 1_700_000_000,
+      history_before_uid: 500,
       history_exhausted: false,
       folders: ["INBOX"],
     });
@@ -68,6 +69,7 @@ describe("SyncState 历史同步状态", () => {
       account_id: 1,
       category: "inbox",
       history_synced_since: 1_700_000_000,
+      history_before_uid: 500,
       history_exhausted: false,
       folders: ["INBOX"],
     };
@@ -97,6 +99,7 @@ describe("SyncState 历史同步状态", () => {
       account_id: 1,
       category: "inbox",
       history_synced_since: 1_600_000_000,
+      history_before_uid: 450,
       history_exhausted: false,
       folders: ["INBOX"],
     };

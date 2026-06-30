@@ -47,6 +47,7 @@ let emailState: {
 
 let activeAccountId: number | null = 1;
 let historyExhausted = false;
+let historyStateLoaded = true;
 let syncingOlder = false;
 
 vi.mock("$lib/stores/email.svelte", () => ({
@@ -63,13 +64,18 @@ vi.mock("$lib/stores/account.svelte", () => ({
 
 vi.mock("$lib/stores/sync.svelte", () => ({
     getSyncState: () => ({
-        getHistoryState: vi.fn(() => ({
-            account_id: 1,
-            category: emailState.currentFolder,
-            history_synced_since: 1_700_000_000,
-            history_exhausted: historyExhausted,
-            folders: ["INBOX"],
-        })),
+        getHistoryState: vi.fn(() =>
+            historyStateLoaded
+                ? {
+                      account_id: 1,
+                      category: emailState.currentFolder,
+                      history_synced_since: 1_700_000_000,
+                      history_before_uid: 500,
+                      history_exhausted: historyExhausted,
+                      folders: ["INBOX"],
+                  }
+                : null,
+        ),
         loadHistoryState,
         syncOlderEmails,
         isOlderSyncing,
@@ -121,6 +127,7 @@ function resetState() {
     };
     activeAccountId = 1;
     historyExhausted = false;
+    historyStateLoaded = true;
     syncingOlder = false;
     syncOlderEmails.mockResolvedValue({ new_emails: 1 });
     isOlderSyncing.mockImplementation(() => syncingOlder);
@@ -159,6 +166,24 @@ describe("EmailList footer", () => {
         expect(loadEmailsByCategory).toHaveBeenCalledTimes(
             loadEmailsBeforeSyncOlder,
         );
+    });
+
+    it("历史已耗尽时不显示同步更久邮件", () => {
+        historyExhausted = true;
+
+        render(EmailList);
+
+        expect(screen.queryByRole("button", { name: "同步更久邮件" })).toBeNull();
+    });
+
+    it("历史状态尚未加载完成时仍显示同步更久邮件入口", () => {
+        historyStateLoaded = false;
+
+        render(EmailList);
+
+        expect(
+            screen.getByRole("button", { name: "同步更久邮件" }),
+        ).toBeTruthy();
     });
 
     it("搜索输入防抖期间仍可显示同步更久邮件，搜索结果模式隐藏", async () => {
