@@ -7,6 +7,7 @@
 //! `keyword_table`、`registry`、`special_use` 子模块。
 
 pub mod category;
+pub mod keyword_table;
 pub mod special_use;
 
 pub use category::FolderCategory;
