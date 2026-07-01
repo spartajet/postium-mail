@@ -92,7 +92,7 @@
                 return `${prefix}${t.sync.syncingFolders}`;
             case "SyncingEmails": {
                 // 正在同步邮件，显示文件夹名和进度（如 "收件箱 (15/100)"）
-                const folder = p.folder ?? "";
+                const folder = p.folder_display_name ?? p.folder ?? "";
                 const progress =
                     p.total > 0 ? ` (${p.current}/${p.total})` : "";
                 return `${prefix}${t.sync.syncingEmails} ${folder}${progress}`;

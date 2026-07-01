@@ -13,12 +13,19 @@ use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, sync_repo};
 use crate::service::account_connection::imap_config_from_account;
 use std::sync::Arc;
+use utf7_imap::decode_utf7_imap;
 
 /// 同步编排器 — 只负责同步流程编排，不负责进度通知
 pub struct SyncOrchestrator {
     db: DbConn,
     auth: Arc<AuthManager>,
     emitter: Option<SyncProgressEmitter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncFolder {
+    raw_name: String,
+    display_name: String,
 }
 
 impl SyncOrchestrator {
@@ -125,10 +132,25 @@ impl SyncOrchestrator {
         .iter()
         .flat_map(|cat| registry.resolve(*cat))
         .collect();
+        let sync_folders: Vec<SyncFolder> = sync_folders
+            .into_iter()
+            .map(|folder| {
+                let display_name = decoded_folder_display_name(&folder);
+                SyncFolder {
+                    raw_name: folder,
+                    display_name,
+                }
+            })
+            .collect();
         for folder in &sync_folders {
-            if let Some(category) = registry.classify(folder) {
-                sync_repo::upsert_folder_category(&self.db, account_id, folder, category.as_str())
-                    .await?;
+            if let Some(category) = registry.classify(&folder.raw_name) {
+                sync_repo::upsert_folder_category(
+                    &self.db,
+                    account_id,
+                    &folder.raw_name,
+                    category.as_str(),
+                )
+                .await?;
             }
         }
         tracing::info!(
@@ -146,6 +168,7 @@ impl SyncOrchestrator {
                 account_id,
                 stage: SyncStage::SyncingFolders,
                 folder: None,
+                folder_display_name: None,
                 current: 0,
                 total: total_folders,
                 message: format!("发现 {} 个文件夹需要同步", total_folders),
@@ -159,17 +182,18 @@ impl SyncOrchestrator {
                 emitter.emit(SyncProgress {
                     account_id,
                     stage: SyncStage::SyncingEmails,
-                    folder: Some(folder.clone()),
+                    folder: Some(folder.raw_name.clone()),
+                    folder_display_name: Some(folder.display_name.clone()),
                     current: idx + 1,
                     total: total_folders,
-                    message: format!("正在同步文件夹 {} ({}/{})", folder, idx + 1, total_folders),
+                    message: syncing_folder_message(folder, idx + 1, total_folders),
                 });
             }
-            tracing::debug!(account_id, folder = %folder, "开始同步文件夹");
+            tracing::debug!(account_id, folder = %folder.raw_name, "开始同步文件夹");
             let sync_mode = self
-                .determine_sync_mode(account_id, folder, &mut client)
+                .determine_sync_mode(account_id, &folder.raw_name, &mut client)
                 .await?;
-            tracing::debug!(account_id, folder = %folder, "同步模式: {:?}", sync_mode);
+            tracing::debug!(account_id, folder = %folder.raw_name, "同步模式: {:?}", sync_mode);
             let sync_result = match sync_mode {
                 SyncMode::Full {
                     uidvalidity,
@@ -184,7 +208,7 @@ impl SyncOrchestrator {
                     sync_folder_full(
                         self.db.clone(),
                         account_id,
-                        folder,
+                        &folder.raw_name,
                         uidvalidity as u32,
                         uidnext as u32,
                         &mut client,
@@ -196,14 +220,14 @@ impl SyncOrchestrator {
                     sync_folder_incremental(
                         self.db.clone(),
                         account_id,
-                        folder,
+                        &folder.raw_name,
                         last_sync_uid,
                         &mut client,
                     )
                     .await?
                 }
             };
-            tracing::info!(account_id, folder = %folder, "同步完成");
+            tracing::info!(account_id, folder = %folder.raw_name, "同步完成");
             sync_results.push(sync_result);
         }
 
@@ -287,5 +311,49 @@ impl SyncOrchestrator {
             uidvalidity: server_uidvalidity,
             uidnext: metadata.uidnext,
         })
+    }
+}
+
+fn syncing_folder_message(folder: &SyncFolder, current: usize, total: usize) -> String {
+    format!(
+        "正在同步文件夹 {} ({}/{})",
+        folder.display_name, current, total
+    )
+}
+
+fn decoded_folder_display_name(raw_name: &str) -> String {
+    let decoded = decode_utf7_imap(raw_name.to_string());
+    if decoded.trim().is_empty() {
+        raw_name.to_string()
+    } else {
+        decoded
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_message_should_use_decoded_folder_name_for_display() {
+        let folder = SyncFolder {
+            raw_name: "&XfJT0ZAB-".to_string(),
+            display_name: "已发送".to_string(),
+        };
+
+        assert_eq!(folder.raw_name, "&XfJT0ZAB-");
+        assert_eq!(
+            syncing_folder_message(&folder, 1, 3),
+            "正在同步文件夹 已发送 (1/3)"
+        );
+    }
+
+    #[test]
+    fn decoded_folder_display_name_should_keep_plain_folder_name() {
+        assert_eq!(decoded_folder_display_name("INBOX"), "INBOX");
+        assert_eq!(
+            decoded_folder_display_name("Sent Messages"),
+            "Sent Messages"
+        );
     }
 }
