@@ -305,6 +305,7 @@ pub enum SyncStage {
 /// - `account_id`: 正在同步的账号 ID
 /// - `stage`: 当前同步阶段
 /// - `folder`: 当前正在同步的文件夹（可选）
+/// - `folder_display_name`: 当前文件夹的可读展示名（可选）
 /// - `current`: 当前进度值（已处理的邮件数）
 /// - `total`: 总数量（当前文件夹的总邮件数）
 /// - `message`: 进度描述消息
@@ -316,6 +317,7 @@ pub enum SyncStage {
 ///     account_id: 1,
 ///     stage: SyncStage::SyncingEmails,
 ///     folder: Some("INBOX".to_string()),
+///     folder_display_name: Some("INBOX".to_string()),
 ///     current: 25,
 ///     total: 100,
 ///     message: "正在同步 INBOX...".to_string(),
@@ -330,6 +332,8 @@ pub struct SyncProgress {
     pub stage: SyncStage,
     /// 当前正在同步的文件夹名称（可选）
     pub folder: Option<String>,
+    /// 当前文件夹的可读展示名（可选）
+    pub folder_display_name: Option<String>,
     /// 当前进度值（已处理的数量）
     pub current: usize,
     /// 总数量（当前任务的总数）
