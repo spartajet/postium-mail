@@ -89,6 +89,7 @@
     // 账户下拉菜单是否展开
     // 控制账户选择器的显示/隐藏
     let showAccountDropdown = $state(false);
+    let statsLoadedAccountId = $state<number | null>(null);
 
     // ==================== 组件生命周期 ====================
 
@@ -96,6 +97,19 @@
     // 加载账户列表，填充账户选择器
     onMount(() => {
         accountStore.loadAccounts();
+    });
+
+    function loadFolderStatsForAccount(accountId: number, force = false) {
+        if (!force && accountId === statsLoadedAccountId) return;
+        statsLoadedAccountId = accountId;
+        syncStore.loadFolderStats(accountId);
+    }
+
+    $effect(() => {
+        const accountId = accountStore.activeAccountId;
+        if (accountId) {
+            loadFolderStatsForAccount(accountId);
+        }
     });
 
     // ==================== 文件夹选择处理 ====================
@@ -131,6 +145,7 @@
                 accountStore.activeAccountId,
                 emailStore.currentFolder,
             );
+            await syncStore.loadFolderStats(accountStore.activeAccountId);
         }
     }
 
@@ -138,7 +153,15 @@
         accountStore.setActive(accountId);
         emailStore.deselectEmail();
         emailStore.loadEmailsByCategory(accountId, emailStore.currentFolder);
+        loadFolderStatsForAccount(accountId, true);
         showAccountDropdown = false;
+    }
+
+    function unreadCount(folderId: EmailCategory) {
+        return (
+            syncStore.folderStats.find((stat) => stat.folder === folderId)
+                ?.unread ?? 0
+        );
     }
 
     // ==================== 文件夹配置列表 ====================
@@ -381,7 +404,17 @@
                     <!-- 文件夹图标：动态渲染对应图标组件 -->
                     <folder.icon size={18} class="shrink-0" />
                     <!-- 文件夹名称（国际化文本） -->
-                    <span class="flex-1">{folder.label}</span>
+                    <span class="min-w-0 flex-1 truncate">{folder.label}</span>
+                    {#if unreadCount(folder.id) > 0}
+                        <span
+                            class="min-w-5 shrink-0 rounded-full bg-primary/12 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-primary"
+                            aria-label={`${folder.label} ${unreadCount(folder.id)} 封未读`}
+                        >
+                            {unreadCount(folder.id) > 99
+                                ? "99+"
+                                : unreadCount(folder.id)}
+                        </span>
+                    {/if}
                 </button>
             {/each}
         </div>

@@ -51,6 +51,7 @@ describe("EmailState 状态行为", () => {
       category: "starred",
       page: 2,
       limit: 50,
+      unreadOnly: false,
     });
   });
 

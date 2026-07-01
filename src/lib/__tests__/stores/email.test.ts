@@ -52,6 +52,7 @@ function invokeMock<T>(
 describe("EmailState invoke 测试", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("listEmails 调用正确的命令和参数", async () => {
@@ -106,6 +107,7 @@ describe("EmailState invoke 测试", () => {
       category: "inbox",
       page: 1,
       limit: 50,
+      unreadOnly: false,
     });
 
     expect(mockInvoke).toHaveBeenCalledWith("list_emails_by_category", {
@@ -113,6 +115,7 @@ describe("EmailState invoke 测试", () => {
       category: "inbox",
       page: 1,
       limit: 50,
+      unreadOnly: false,
     });
   });
 
@@ -156,10 +159,82 @@ describe("EmailState invoke 测试", () => {
 
     await state.loadNextPage(1);
 
-    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(1, "inbox", 2, 50);
+    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(
+      1,
+      "inbox",
+      2,
+      50,
+      false,
+    );
     expect(state.emails).toEqual([firstEmail, secondEmail]);
     expect(state.total).toBe(2);
     expect(state.page).toBe(2);
+  });
+
+  it("未读模式按分类从后端分页加载所有未读邮件", async () => {
+    const firstEmail = {
+      id: 1,
+      account_id: 1,
+      folder: "INBOX",
+      uid: 100,
+      subject: "Unread",
+      sender_name: "Alice",
+      sender_email: "alice@test.com",
+      preview: "Hello",
+      is_read: false,
+      is_starred: false,
+      sent_at: 1745126400,
+      has_attachments: false,
+    };
+    const secondEmail = {
+      ...firstEmail,
+      id: 2,
+      uid: 101,
+      subject: "Older unread",
+    };
+    const state = new EmailState();
+
+    const listEmailsByCategorySpy = vi
+      .spyOn(commands, "listEmailsByCategory")
+      .mockResolvedValueOnce(
+        createMockResult({
+          emails: [firstEmail],
+          total: 2,
+          page: 1,
+          limit: 50,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createMockResult({
+          emails: [secondEmail],
+          total: 2,
+          page: 2,
+          limit: 50,
+        }),
+      );
+
+    await state.setUnreadOnly(1, true);
+    await state.loadNextPage(1);
+
+    expect(listEmailsByCategorySpy).toHaveBeenNthCalledWith(
+      1,
+      1,
+      "inbox",
+      1,
+      50,
+      true,
+    );
+    expect(listEmailsByCategorySpy).toHaveBeenNthCalledWith(
+      2,
+      1,
+      "inbox",
+      2,
+      50,
+      true,
+    );
+    expect(state.unreadOnly).toBe(true);
+    expect(state.emails).toEqual([firstEmail, secondEmail]);
+    expect(state.total).toBe(2);
   });
 
   it("loadNextPage 不使用整列表 loading，避免追加分页时列表被骨架屏替换", async () => {
@@ -251,7 +326,13 @@ describe("EmailState invoke 测试", () => {
 
     await state.refreshLoadedEmailsByCategory(1, 1);
 
-    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(1, "inbox", 1, 50);
+    expect(listEmailsByCategorySpy).toHaveBeenCalledWith(
+      1,
+      "inbox",
+      1,
+      50,
+      false,
+    );
     expect(state.emails).toEqual([firstEmail, secondEmail]);
     expect(state.total).toBe(2);
     expect(state.page).toBe(1);

@@ -39,7 +39,7 @@ async fn test_seed_data_supports_category_queries_and_search() {
 
     let inbox = svc
         .email_service
-        .list_by_category(primary.id, EmailCategory::Inbox, 1, 30)
+        .list_by_category(primary.id, EmailCategory::Inbox, 1, 30, false)
         .await
         .unwrap();
     assert_eq!(inbox.total, 24);
@@ -60,7 +60,7 @@ async fn test_seed_data_supports_category_queries_and_search() {
 
     let sent = svc
         .email_service
-        .list_by_category(primary.id, EmailCategory::Sent, 1, 10)
+        .list_by_category(primary.id, EmailCategory::Sent, 1, 10, false)
         .await
         .unwrap();
     assert_eq!(sent.total, 5);
@@ -72,7 +72,7 @@ async fn test_seed_data_supports_category_queries_and_search() {
 
     let starred = svc
         .email_service
-        .list_by_category(primary.id, EmailCategory::Starred, 1, 20)
+        .list_by_category(primary.id, EmailCategory::Starred, 1, 20, false)
         .await
         .unwrap();
     assert_eq!(starred.total, 8);
@@ -124,7 +124,7 @@ async fn test_seed_data_is_isolated_by_account() {
 
     let inbox = svc
         .email_service
-        .list_by_category(secondary.id, EmailCategory::Inbox, 1, 20)
+        .list_by_category(secondary.id, EmailCategory::Inbox, 1, 20, false)
         .await
         .unwrap();
 

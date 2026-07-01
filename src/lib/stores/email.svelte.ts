@@ -132,6 +132,9 @@ export class EmailState {
   /** 当前查看的邮件分类（响应式状态），如 "inbox"、"sent" 等 */
   currentFolder = $state<EmailCategory>("inbox");
 
+  /** 是否只显示未读邮件 */
+  unreadOnly = $state(false);
+
   private inlineResolveRequestId = 0;
 
   private beginOperation(emailId: number) {
@@ -318,6 +321,7 @@ export class EmailState {
         category,
         page,
         this.limit,
+        this.unreadOnly,
       );
 
       if (result.status === "ok") {
@@ -348,6 +352,7 @@ export class EmailState {
         this.currentFolder,
         nextPage,
         this.limit,
+        this.unreadOnly,
       );
 
       if (result.status === "ok") {
@@ -371,6 +376,7 @@ export class EmailState {
         this.currentFolder,
         1,
         loadedCount,
+        this.unreadOnly,
       );
 
       if (result.status === "ok") {
@@ -381,6 +387,12 @@ export class EmailState {
     } catch (e: unknown) {
       this.setError(e, "Failed to refresh loaded emails");
     }
+  }
+
+  async setUnreadOnly(accountId: number, unreadOnly: boolean) {
+    if (this.unreadOnly === unreadOnly && this.page === 1) return;
+    this.unreadOnly = unreadOnly;
+    await this.loadEmailsByCategory(accountId, this.currentFolder, 1);
   }
 
   /**

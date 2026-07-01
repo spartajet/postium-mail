@@ -259,6 +259,7 @@ pub async fn list_by_folders(
     folders: &[String],
     page: usize,
     limit: usize,
+    unread_only: bool,
 ) -> Result<(Vec<emails::Model>, u64), MailError> {
     if folders.is_empty() {
         return Ok((Vec::new(), 0));
@@ -274,8 +275,10 @@ pub async fn list_by_folders(
         let count_sql = format!(
             "SELECT COUNT(*)
              FROM emails
-             WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0"
+             WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0
+               AND (? = 0 OR is_read = 0 OR is_read IS NULL)"
         );
+        count_values.push(Value::from(if unread_only { 1 } else { 0 }));
         let total = conn.query_row(
             &count_sql,
             rusqlite::params_from_iter(count_values.iter()),
@@ -290,6 +293,7 @@ pub async fn list_by_folders(
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0
+               AND (? = 0 OR is_read = 0 OR is_read IS NULL)
              ORDER BY sent_at DESC
              LIMIT ? OFFSET ?"
         );
@@ -324,13 +328,15 @@ pub async fn list_starred(
     account_id: i32,
     page: usize,
     limit: usize,
+    unread_only: bool,
 ) -> Result<(Vec<emails::Model>, u64), MailError> {
     db.call(move |conn| {
         let total = conn.query_row(
             "SELECT COUNT(*)
              FROM emails
-             WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0",
-            [account_id],
+             WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0
+               AND (?2 = 0 OR is_read = 0 OR is_read IS NULL)",
+            rusqlite::params![account_id, if unread_only { 1 } else { 0 }],
             |row| row.get::<_, i64>(0),
         )? as u64;
 
@@ -342,16 +348,46 @@ pub async fn list_starred(
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0
+               AND (?2 = 0 OR is_read = 0 OR is_read IS NULL)
              ORDER BY sent_at DESC
-             LIMIT ?2 OFFSET ?3",
+             LIMIT ?3 OFFSET ?4",
         )?;
         let items = stmt
             .query_map(
-                rusqlite::params![account_id, limit as i64, offset],
+                rusqlite::params![
+                    account_id,
+                    if unread_only { 1 } else { 0 },
+                    limit as i64,
+                    offset
+                ],
                 map_email,
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok((items, total))
+    })
+    .await
+}
+
+/// 统计账号下星标邮件总数和未读数。
+pub async fn starred_stats_by_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<FolderStat, MailError> {
+    db.call(move |conn| {
+        conn.query_row(
+            "SELECT COUNT(*) as total,
+                    SUM(CASE WHEN is_read = 0 OR is_read IS NULL THEN 1 ELSE 0 END) as unread
+             FROM emails
+             WHERE account_id = ?1 AND is_starred = 1 AND (is_deleted = 0 OR is_deleted IS NULL)",
+            [account_id],
+            |row| {
+                Ok(FolderStat {
+                    folder: "starred".to_string(),
+                    total: row.get::<_, i64>("total")? as usize,
+                    unread: row.get::<_, Option<i64>>("unread")?.unwrap_or(0) as usize,
+                })
+            },
+        )
     })
     .await
 }

@@ -34,6 +34,7 @@ use crate::service::email_service::EmailCategory;
 use crate::service::email_service::local_folder_registry_inputs;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -518,17 +519,18 @@ impl SyncService {
         })
     }
 
-    /// 获取账号的文件夹统计信息
+    /// 获取账号侧边栏分类统计信息。
     ///
-    /// 使用单条 GROUP BY SQL 查询获取各文件夹的邮件数量统计，
-    /// 相比 N+1 查询（多次查询）更高效。
+    /// 先按本地真实文件夹做 GROUP BY 统计，再通过 FolderRegistry 折叠到
+    /// `inbox`、`sent`、`drafts` 等侧边栏分类，避免前端拿到原始 IMAP 名称
+    /// 或 UTF-7 编码名后无法匹配分类。
     ///
     /// # 统计信息
     ///
-    /// 返回每个文件夹的以下信息：
-    /// - `folder`: 文件夹名称（如 "INBOX", "Sent"）
-    /// - `total_count`: 总邮件数
-    /// - `unread_count`: 未读邮件数
+    /// 返回每个分类的以下信息：
+    /// - `folder`: 侧边栏分类 key（如 "inbox", "sent", "starred"）
+    /// - `total`: 总邮件数
+    /// - `unread`: 未读邮件数
     ///
     /// # 参数
     ///
@@ -536,19 +538,7 @@ impl SyncService {
     ///
     /// # 返回
     ///
-    /// 返回文件夹统计信息列表。
-    ///
-    /// # SQL 查询示例
-    ///
-    /// ```sql
-    /// SELECT
-    ///     folder,
-    ///     COUNT(*) as total_count,
-    ///     SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread_count
-    /// FROM emails
-    /// WHERE account_id = ? AND deleted_at IS NULL
-    /// GROUP BY folder
-    /// ```
+    /// 返回侧边栏分类统计信息列表。
     ///
     /// # 使用场景
     ///
@@ -558,7 +548,7 @@ impl SyncService {
     ///
     /// # 性能优化
     ///
-    /// 使用 GROUP BY 聚合，单次查询获取所有统计信息，
+    /// 使用 GROUP BY 聚合真实文件夹统计，再在内存中按分类合并，
     /// 避免了对每个文件夹单独查询的 N+1 问题。
     ///
     /// # 示例
@@ -568,13 +558,66 @@ impl SyncService {
     /// for stat in stats {
     ///     println!(
     ///         "{}: {} 封邮件，{} 封未读",
-    ///         stat.folder, stat.total_count, stat.unread_count
+    ///         stat.folder, stat.total, stat.unread
     ///     );
     /// }
     /// ```
     pub async fn get_folder_stats(&self, account_id: i32) -> Result<Vec<FolderStat>, MailError> {
-        email_repo::folder_stats_by_account(&self.db, account_id).await
+        let account = account_repo::get_by_id(&self.db, account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(account_id))?;
+        let provider_pool = PROVIDER_POOL
+            .get()
+            .ok_or(MailError::ProviderNotSupported(
+                "未找到provider pool".into(),
+            ))?
+            .clone();
+        let provider = provider_pool
+            .get(&account.provider)
+            .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
+        let (local_names, known_categories) =
+            local_folder_registry_inputs(&self.db, account_id).await?;
+        let registry = FolderRegistry::builder()
+            .remote_folders(local_names)
+            .known_categories(known_categories)
+            .provider_mapping(provider.folder_mapping())
+            .build();
+        let mut stats = aggregate_folder_stats_by_category(
+            email_repo::folder_stats_by_account(&self.db, account_id).await?,
+            &registry,
+        );
+        let starred = email_repo::starred_stats_by_account(&self.db, account_id).await?;
+        if starred.total > 0 || starred.unread > 0 {
+            stats.push(starred);
+            stats.sort_by(|a, b| a.folder.cmp(&b.folder));
+        }
+        Ok(stats)
     }
+}
+
+fn aggregate_folder_stats_by_category(
+    stats: Vec<FolderStat>,
+    registry: &FolderRegistry,
+) -> Vec<FolderStat> {
+    let mut grouped = HashMap::<String, FolderStat>::new();
+
+    for stat in stats {
+        let folder = registry
+            .classify(&stat.folder)
+            .map(|category| category.as_str().to_string())
+            .unwrap_or_else(|| stat.folder.clone());
+        let entry = grouped.entry(folder.clone()).or_insert(FolderStat {
+            folder,
+            total: 0,
+            unread: 0,
+        });
+        entry.total += stat.total;
+        entry.unread += stat.unread;
+    }
+
+    let mut stats = grouped.into_values().collect::<Vec<_>>();
+    stats.sort_by(|a, b| a.folder.cmp(&b.folder));
+    stats
 }
 
 fn all_history_exhausted(states: impl IntoIterator<Item = bool>) -> bool {
@@ -624,7 +667,15 @@ fn normalized_history_window_bound(value: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::all_history_exhausted;
+    use super::*;
+
+    fn remote_folder(name: &str) -> RemoteFolder {
+        RemoteFolder {
+            name: name.to_string(),
+            special_use: vec![],
+            no_select: false,
+        }
+    }
 
     #[test]
     fn all_history_exhausted_should_return_false_when_any_folder_has_older_mail() {
@@ -639,5 +690,53 @@ mod tests {
     #[test]
     fn all_history_exhausted_should_return_false_when_no_folder_was_checked() {
         assert!(!all_history_exhausted([]));
+    }
+
+    #[test]
+    fn aggregate_folder_stats_uses_sidebar_categories() {
+        let registry = FolderRegistry::builder()
+            .remote_folders(vec![remote_folder("INBOX"), remote_folder("&XfJT0ZAB-")])
+            .build();
+        let stats = vec![
+            FolderStat {
+                folder: "INBOX".to_string(),
+                total: 3,
+                unread: 2,
+            },
+            FolderStat {
+                folder: "&XfJT0ZAB-".to_string(),
+                total: 4,
+                unread: 1,
+            },
+            FolderStat {
+                folder: "Unknown".to_string(),
+                total: 9,
+                unread: 5,
+            },
+        ];
+
+        let aggregated = aggregate_folder_stats_by_category(stats, &registry);
+
+        assert_eq!(
+            aggregated
+                .iter()
+                .find(|stat| stat.folder == "inbox")
+                .map(|stat| stat.unread),
+            Some(2)
+        );
+        assert_eq!(
+            aggregated
+                .iter()
+                .find(|stat| stat.folder == "sent")
+                .map(|stat| stat.unread),
+            Some(1)
+        );
+        assert_eq!(
+            aggregated
+                .iter()
+                .find(|stat| stat.folder == "Unknown")
+                .map(|stat| stat.unread),
+            Some(5)
+        );
     }
 }

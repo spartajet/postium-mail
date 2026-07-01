@@ -10,6 +10,7 @@ const selectEmail = vi.fn();
 const loadHistoryState = vi.fn();
 const syncOlderEmails = vi.fn();
 const isOlderSyncing = vi.fn();
+const loadFolderStats = vi.fn();
 
 const baseEmail = {
     id: 1,
@@ -33,7 +34,9 @@ let emailState: {
     loading: boolean;
     loadingNextPage: boolean;
     currentFolder: "inbox" | "starred";
+    unreadOnly: boolean;
     operatingIds: Set<number>;
+    setUnreadOnly: ReturnType<typeof vi.fn>;
     loadEmailsByCategory: typeof loadEmailsByCategory;
     refreshLoadedEmailsByCategory: typeof refreshLoadedEmailsByCategory;
     refreshCurrentCategory: typeof refreshCurrentCategory;
@@ -79,6 +82,7 @@ vi.mock("$lib/stores/sync.svelte", () => ({
         loadHistoryState,
         syncOlderEmails,
         isOlderSyncing,
+        loadFolderStats,
     }),
 }));
 
@@ -114,7 +118,9 @@ function resetState() {
         loading: false,
         loadingNextPage: false,
         currentFolder: "inbox",
+        unreadOnly: false,
         operatingIds: new Set(),
+        setUnreadOnly: vi.fn(),
         loadEmailsByCategory,
         refreshLoadedEmailsByCategory,
         refreshCurrentCategory,
@@ -221,5 +227,29 @@ describe("EmailList footer", () => {
         expect(
             screen.getByRole("button", { name: "加载更早邮件" }),
         ).toBeTruthy();
+    });
+
+    it("点击未读切换时按未读模式重新加载并移除无用布局按钮", async () => {
+        render(EmailList);
+
+        expect(screen.queryByLabelText("列表视图")).toBeNull();
+        expect(screen.queryByLabelText("网格视图")).toBeNull();
+
+        await fireEvent.click(
+            screen.getByRole("button", { name: "仅显示未读邮件" }),
+        );
+
+        expect(emailState.setUnreadOnly).toHaveBeenCalledWith(1, true);
+    });
+
+    it("未读模式下打开未读邮件后刷新当前未读列表", async () => {
+        emailState.unreadOnly = true;
+        emailState.emails = [{ ...baseEmail, is_read: false }];
+
+        render(EmailList);
+        await fireEvent.click(screen.getByTestId("email-item"));
+
+        expect(selectEmail).toHaveBeenCalledWith(1);
+        expect(refreshLoadedEmailsByCategory).toHaveBeenCalledWith(1);
     });
 });
