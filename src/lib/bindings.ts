@@ -333,7 +333,7 @@ export const commands = {
 	 * 
 	 *  按分类加载邮件列表
 	 */
-	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit })),
+	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number, unreadOnly: boolean) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit, unreadOnly })),
 	/**
 	 *  获取邮件详情
 	 * 

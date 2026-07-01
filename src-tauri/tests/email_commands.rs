@@ -1135,7 +1135,7 @@ async fn test_list_by_category_inbox_empty() {
     // 使用 Starred 类别（不走 provider pool）来验证空结果
     let result = svc
         .email_service
-        .list_by_category(account_id, EmailCategory::Starred, 1, 20)
+        .list_by_category(account_id, EmailCategory::Starred, 1, 20, false)
         .await;
     assert!(
         result.is_ok(),
@@ -1181,7 +1181,7 @@ async fn test_list_by_category_starred_filters_starred_and_deleted_messages() {
 
     let resp = svc
         .email_service
-        .list_by_category(account_id, EmailCategory::Starred, 1, 20)
+        .list_by_category(account_id, EmailCategory::Starred, 1, 20, false)
         .await
         .unwrap();
 
@@ -1192,6 +1192,41 @@ async fn test_list_by_category_starred_filters_starred_and_deleted_messages() {
             .iter()
             .all(|email| email.subject.as_deref() != Some("已删除星标"))
     );
+}
+
+#[tokio::test]
+async fn list_by_category_starred_can_filter_unread_messages() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+
+    insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(85, "未读星标").starred(true).read(false),
+    )
+    .await;
+    insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(86, "已读星标").starred(true).read(true),
+    )
+    .await;
+    insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(87, "未读非星标").starred(false).read(false),
+    )
+    .await;
+
+    let resp = svc
+        .email_service
+        .list_by_category(account_id, EmailCategory::Starred, 1, 20, true)
+        .await
+        .unwrap();
+
+    assert_eq!(resp.total, 1);
+    assert_eq!(resp.emails[0].subject.as_deref(), Some("未读星标"));
+    assert!(resp.emails.iter().all(|email| !email.is_read));
 }
 
 #[tokio::test]
@@ -1210,7 +1245,7 @@ async fn list_by_category_uses_persisted_folder_category_when_name_has_no_keywor
 
     let resp = svc
         .email_service
-        .list_by_category(account_id, EmailCategory::Sent, 1, 20)
+        .list_by_category(account_id, EmailCategory::Sent, 1, 20, false)
         .await
         .unwrap();
 

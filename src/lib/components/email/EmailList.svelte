@@ -57,8 +57,6 @@
         Search, // 搜索图标
         RefreshCw, // 刷新/同步图标
         X, // 关闭/清除图标
-        List, // 列表视图图标
-        LayoutGrid, // 网格视图图标
         Mail, // 邮件图标（空状态占位）
         Star, // 星标图标
     } from "lucide-svelte";
@@ -173,6 +171,27 @@
         contextMenu.visible = false;
     }
 
+    function refreshFolderStats() {
+        const accountId = accountStore.activeAccountId;
+        if (accountId) {
+            void syncStore.loadFolderStats(accountId);
+        }
+    }
+
+    async function handleSelectEmail(emailId: number) {
+        const email = emailState.emails.find((item) => item.id === emailId);
+        const wasUnread = email ? !email.is_read : false;
+        await emailState.selectEmail(emailId);
+        if (wasUnread) {
+            refreshFolderStats();
+            if (emailState.unreadOnly && accountStore.activeAccountId) {
+                await emailState.refreshLoadedEmailsByCategory(
+                    accountStore.activeAccountId,
+                );
+            }
+        }
+    }
+
     /**
      * 刷新当前分类邮件
      *
@@ -186,7 +205,16 @@
                 emailState.currentFolder,
                 emailState.page,
             );
+            await syncStore.loadFolderStats(accountStore.activeAccountId);
         }
+    }
+
+    async function toggleUnreadOnly() {
+        if (!accountStore.activeAccountId) return;
+        await emailState.setUnreadOnly(
+            accountStore.activeAccountId,
+            !emailState.unreadOnly,
+        );
     }
 
     /**
@@ -194,6 +222,7 @@
      */
     async function handleContextToggleStar(emailId: number) {
         await emailState.toggleStar(emailId);
+        refreshFolderStats();
     }
 
     /**
@@ -201,6 +230,7 @@
      */
     async function handleContextToggleRead(emailId: number, isRead: boolean) {
         await emailState.markAsRead(emailId, isRead);
+        refreshFolderStats();
     }
 
     /**
@@ -208,6 +238,7 @@
      */
     async function handleContextDelete(emailId: number) {
         await emailState.deleteEmails([emailId]);
+        refreshFolderStats();
     }
 
     /**
@@ -467,21 +498,19 @@
                     class={emailState.loading ? "animate-spin" : ""}
                 />
             </button>
-            <!-- 列表视图按钮 -->
             <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-50"
-                disabled
-                aria-disabled="true"
+                class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {emailState.unreadOnly
+                    ? 'border-primary bg-primary/12 text-primary'
+                    : 'border-border text-muted-foreground hover:bg-glass-hover hover:text-foreground'}"
+                type="button"
+                aria-pressed={emailState.unreadOnly}
+                aria-label={emailState.unreadOnly
+                    ? "显示全部邮件"
+                    : "仅显示未读邮件"}
+                onclick={toggleUnreadOnly}
+                disabled={!accountStore.activeAccountId || emailState.loading}
             >
-                <List size={18} />
-            </button>
-            <!-- 网格视图按钮 -->
-            <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground opacity-50"
-                disabled
-                aria-disabled="true"
-            >
-                <LayoutGrid size={18} />
+                {emailState.unreadOnly ? "全部" : "未读"}
             </button>
             <!--
               邮件数量统计
@@ -538,7 +567,7 @@
                         result.id
                             ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                             : ''}"
-                        onclick={() => emailState.selectEmail(result.id)}
+                        onclick={() => handleSelectEmail(result.id)}
                     >
                         <!-- 第一行：发件人 + 时间 -->
                         <div class="flex items-center justify-between gap-2">
@@ -635,7 +664,7 @@
                     email.id
                         ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                         : ''}"
-                    onclick={() => emailState.selectEmail(email.id)}
+                    onclick={() => handleSelectEmail(email.id)}
                     oncontextmenu={(e) => openContextMenu(e, email)}
                 >
                     <!--

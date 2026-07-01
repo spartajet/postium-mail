@@ -204,9 +204,10 @@ pub async fn list_emails_by_category(
     category: EmailCategory,
     page: usize,
     limit: usize,
+    unread_only: bool,
 ) -> Result<EmailListResponse, MailError> {
     // 记录调试日志，使用 ?trait 格式输出枚举值
-    tracing::debug!(account_id, category = ?category, page, limit, "命令: 按分类列出邮件");
+    tracing::debug!(account_id, category = ?category, page, limit, unread_only, "命令: 按分类列出邮件");
 
     // 调用服务层按分类查询邮件
     // 该方法会：
@@ -214,13 +215,14 @@ pub async fn list_emails_by_category(
     // 2. 执行数据库查询
     // 3. 返回分页结果
     let result = service
-        .list_by_category(account_id, category.clone(), page, limit)
+        .list_by_category(account_id, category.clone(), page, limit, unread_only)
         .await?;
 
     // 记录返回结果统计信息
     tracing::debug!(
         account_id,
         category = ?category,
+        unread_only,
         total = result.total,
         returned = result.emails.len(),
         "分类邮件列表"

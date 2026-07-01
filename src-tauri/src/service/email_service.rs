@@ -389,11 +389,12 @@ impl EmailService {
         category: EmailCategory,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<EmailListResponse, MailError> {
         // ─── 特殊处理：星标邮件（跨文件夹查询） ───
         if category == EmailCategory::Starred {
             let (emails, total) =
-                email_repo::list_starred(&self.db, account_id, page, limit).await?;
+                email_repo::list_starred(&self.db, account_id, page, limit, unread_only).await?;
             return Ok(EmailListResponse {
                 emails: convert_models_with_attachments(&self.db, emails).await?,
                 total,
@@ -460,7 +461,8 @@ impl EmailService {
 
         // ─── 查询这些文件夹中的邮件 ───
         let (emails, total) =
-            email_repo::list_by_folders(&self.db, account_id, &folders, page, limit).await?;
+            email_repo::list_by_folders(&self.db, account_id, &folders, page, limit, unread_only)
+                .await?;
         Ok(EmailListResponse {
             emails: convert_models_with_attachments(&self.db, emails).await?,
             total,
