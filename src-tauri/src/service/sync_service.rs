@@ -31,6 +31,7 @@ use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, email_repo, sync_repo};
 use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::EmailCategory;
+use crate::service::email_service::local_folder_registry_inputs;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
@@ -283,17 +284,13 @@ impl SyncService {
             .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
         // get_history_state 不连接 IMAP，只能用本地已存文件夹名做降级解析：
         // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
-        let local_names: Vec<RemoteFolder> = {
-            let mut names = sync_repo::distinct_folders_by_account(&self.db, account_id).await?;
-            names.extend(email_repo::distinct_folders_by_account(&self.db, account_id).await?);
-            names
-                .into_iter()
-                .map(|n| RemoteFolder { name: n, special_use: vec![], no_select: false })
-                .collect()
-        };
+        let (local_names, known_categories) =
+            local_folder_registry_inputs(&self.db, account_id).await?;
         let registry = FolderRegistry::builder()
             .remote_folders(local_names)
+            .known_categories(known_categories)
             .provider_mapping(provider.folder_mapping())
+            .allow_unverified_provider_fallback(true)
             .build();
         let cat = FolderCategory::from_email_category(&category)
             .ok_or(MailError::InvalidParam("星标邮件不支持历史回填".into()))?;
@@ -353,8 +350,7 @@ impl SyncService {
         let provider = provider_pool
             .get(&account.provider)
             .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
-        let candidate_folders = category.resolve_folders(&provider.folder_mapping());
-        if candidate_folders.is_empty() || category == EmailCategory::Starred {
+        if category == EmailCategory::Starred {
             return Err(MailError::InvalidParam("当前分类不支持历史回填".into()));
         }
         let cat = FolderCategory::from_email_category(&category)
@@ -395,6 +391,16 @@ impl SyncService {
             .provider_mapping(provider.folder_mapping())
             .build();
         let folders = registry.resolve(cat);
+        if folders.is_empty() {
+            client.logout().await.ok();
+            return Err(MailError::InvalidParam("当前分类不支持历史回填".into()));
+        }
+        for folder in &folders {
+            if let Some(category) = registry.classify(folder) {
+                sync_repo::upsert_folder_category(&self.db, account_id, folder, category.as_str())
+                    .await?;
+            }
+        }
         tracing::debug!(
             account_id,
             category = ?category,
@@ -568,7 +574,12 @@ impl SyncService {
 }
 
 fn all_history_exhausted(states: impl IntoIterator<Item = bool>) -> bool {
-    states.into_iter().all(|exhausted| exhausted)
+    let mut saw_folder = false;
+    let all_exhausted = states.into_iter().all(|exhausted| {
+        saw_folder = true;
+        exhausted
+    });
+    saw_folder && all_exhausted
 }
 
 async fn history_before_uid_for_folder(
@@ -619,5 +630,10 @@ mod tests {
     #[test]
     fn all_history_exhausted_should_return_true_when_every_folder_is_exhausted() {
         assert!(all_history_exhausted([true, true]));
+    }
+
+    #[test]
+    fn all_history_exhausted_should_return_false_when_no_folder_was_checked() {
+        assert!(!all_history_exhausted([]));
     }
 }

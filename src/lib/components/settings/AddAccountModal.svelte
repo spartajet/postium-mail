@@ -409,14 +409,19 @@
                 }
 
                 // 状态二：授权成功完成
-                if (
-                    typeof pollResult === "object" &&
-                    "Completed" in pollResult
-                ) {
+                const completed =
+                    typeof pollResult === "object"
+                        ? pollResult.Completed
+                        : undefined;
+                const pollError =
+                    typeof pollResult === "object"
+                        ? pollResult.Error
+                        : undefined;
+                if (completed) {
                     clearInterval(interval);
                     oauthPolling = false;
                     // 后端已自动创建账号，进入同步范围选择步骤
-                    const completedEmail = pollResult.Completed.email;
+                    const completedEmail = completed.email;
                     const accountId = await resolveOAuth2CompletedAccount({
                         completedEmail,
                         loadAccounts: () => accountStore.loadAccounts(),
@@ -434,13 +439,10 @@
                     }
                 }
                 // 状态三：授权失败
-                else if (
-                    typeof pollResult === "object" &&
-                    "Error" in pollResult
-                ) {
+                else if (pollError) {
                     clearInterval(interval);
                     oauthPolling = false;
-                    oauthError = pollResult.Error;
+                    oauthError = pollError;
                 }
             } catch {
                 // 轮询命令暂不可用或其他临时错误 - 继续轮询
@@ -1275,15 +1277,3 @@
         </div>
     </div>
 {/if}
-
-<!-- 样式定义 -->
-<style>
-    /* 主操作按钮样式：使用主色到辅色的渐变背景 */
-    .compose-btn {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-    }
-</style>

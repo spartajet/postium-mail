@@ -188,32 +188,3 @@
         {/each}
     </div>
 {/if}
-
-<style>
-    /* ==================== 滑入动画定义 ==================== */
-
-    /*
-      .animate-slide-in：消息弹出时的滑入动画类
-      从右侧滑入并淡入，持续 0.2 秒
-    */
-    .animate-slide-in {
-        animation: slideIn 0.2s ease-out;
-    }
-
-    /*
-      @keyframes slideIn：滑入动画关键帧
-      - from：初始状态，完全在右侧视口外（translateX(100%)），完全透明
-      - to：结束状态，回到正常位置（translateX(0)），完全显示
-      使用 ease-out 缓动函数，使动画开始快结束慢，更自然
-    */
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-</style>

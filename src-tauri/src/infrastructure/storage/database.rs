@@ -96,6 +96,9 @@ fn table_has_column(
 }
 
 fn migrate_sync_state_history_columns(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    if !table_has_column(conn, "sync_state", "folder_category")? {
+        conn.execute("ALTER TABLE sync_state ADD COLUMN folder_category TEXT", [])?;
+    }
     if !table_has_column(conn, "sync_state", "history_synced_since")? {
         conn.execute(
             "ALTER TABLE sync_state ADD COLUMN history_synced_since INTEGER",

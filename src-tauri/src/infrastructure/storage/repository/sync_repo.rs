@@ -19,6 +19,7 @@ fn map_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_state::Model
         id: row.get("id")?,
         account_id: row.get("account_id")?,
         folder: row.get("folder")?,
+        folder_category: row.get("folder_category")?,
         folder_nick_name: row.get("folder_nick_name")?,
         uidvalidity: row.get("uidvalidity")?,
         uidnext: row.get("uidnext")?,
@@ -115,6 +116,31 @@ pub async fn upsert_state(
     upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
 }
 
+/// 写入或更新文件夹的标准分类元数据。
+pub async fn upsert_folder_category(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    folder_category: &str,
+) -> Result<(), MailError> {
+    let folder = folder.to_string();
+    let folder_category = folder_category.to_string();
+    let now = chrono::Utc::now().timestamp();
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO sync_state (
+                account_id, folder, folder_category, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(account_id, folder) DO UPDATE SET
+                folder_category = excluded.folder_category,
+                updated_at = excluded.updated_at",
+            rusqlite::params![account_id, folder, folder_category, now],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
 /// 查询指定账号和文件夹的同步状态。
 ///
 /// # 参数
@@ -134,7 +160,7 @@ pub async fn get_sync_state(
     let folder = folder.to_string();
     db.call(move |conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, account_id, folder, folder_nick_name, uidvalidity, uidnext,
+            "SELECT id, account_id, folder, folder_category, folder_nick_name, uidvalidity, uidnext,
                     synced_at, last_sync_uid, history_synced_since, history_before_uid,
                     history_exhausted,
                     created_at, updated_at
@@ -175,6 +201,28 @@ pub async fn distinct_folders_by_account(
         )?;
         let folders = stmt
             .query_map([account_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(folders)
+    })
+    .await
+}
+
+/// 查询账号下已持久化分类的文件夹名称与分类。
+pub async fn folder_categories_by_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<Vec<(String, String)>, MailError> {
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT folder, folder_category
+             FROM sync_state
+             WHERE account_id = ?1 AND folder_category IS NOT NULL
+             ORDER BY folder",
+        )?;
+        let folders = stmt
+            .query_map([account_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(folders)
     })

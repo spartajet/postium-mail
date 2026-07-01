@@ -65,7 +65,10 @@ mod tests {
 
     #[test]
     fn all_maps_to_archive() {
-        assert_eq!(SpecialUseFlag::All.to_category(), Some(FolderCategory::Archive));
+        assert_eq!(
+            SpecialUseFlag::All.to_category(),
+            Some(FolderCategory::Archive)
+        );
     }
 
     #[test]

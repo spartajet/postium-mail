@@ -52,6 +52,31 @@ impl FolderCategory {
             Self::Archive => EmailCategory::Archive,
         }
     }
+
+    /// 数据库存储用稳定字符串。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inbox => "inbox",
+            Self::Sent => "sent",
+            Self::Drafts => "drafts",
+            Self::Junk => "spam",
+            Self::Trash => "trash",
+            Self::Archive => "archive",
+        }
+    }
+
+    /// 从数据库/API 字符串恢复分类。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "inbox" => Some(Self::Inbox),
+            "sent" => Some(Self::Sent),
+            "drafts" => Some(Self::Drafts),
+            "spam" | "junk" => Some(Self::Junk),
+            "trash" => Some(Self::Trash),
+            "archive" => Some(Self::Archive),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

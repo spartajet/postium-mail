@@ -152,9 +152,7 @@ impl ImapClient {
             folders.push({
                 let attrs = item.attributes();
                 let special_use = SpecialUseFlag::from_attributes(attrs);
-                let no_select = attrs
-                    .iter()
-                    .any(|a| matches!(a, NameAttribute::NoSelect));
+                let no_select = attrs.iter().any(|a| matches!(a, NameAttribute::NoSelect));
                 FolderInfo {
                     name: item.name().to_string(),
                     delimiter: item.delimiter().map(|s: &str| s.to_string()),

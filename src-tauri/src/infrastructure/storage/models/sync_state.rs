@@ -9,6 +9,8 @@ pub struct Model {
     pub account_id: i32,
     /// 文件夹路径（如 "INBOX"、"Sent"）
     pub folder: String,
+    /// 标准分类（如 "inbox"、"sent"），由 FolderRegistry 写入
+    pub folder_category: Option<String>,
     /// 文件夹别名（IMAP 服务器返回的显示名称）
     pub folder_nick_name: Option<String>,
     /// IMAP UIDVALIDITY 值（文件夹重建时变化，用于检测 UID 失效）

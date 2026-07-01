@@ -415,22 +415,3 @@
         </div>
     </div>
 {/if}
-
-<!-- ==================== 组件样式 ==================== -->
-
-<!--
-  组件局部样式说明：
-  - .compose-btn：发送按钮的渐变背景样式
-    使用 CSS linear-gradient 实现从主题色到辅助色的 135° 渐变效果
-    通过 CSS 变量（--color-primary / --color-secondary）实现主题适配
--->
-<style>
-    /* 发送按钮渐变背景 */
-    .compose-btn {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-    }
-</style>
