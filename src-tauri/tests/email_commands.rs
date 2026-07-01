@@ -7,6 +7,7 @@ use postium_mail_lib::infrastructure::protocols::types::{
     AttachmentInfo, FetchedBodySection, WholeEmailDto,
 };
 use postium_mail_lib::infrastructure::storage::models::accounts;
+use postium_mail_lib::infrastructure::storage::repository::sync_repo;
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::email_service::{EmailCategory, ReloadEmailResult};
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
@@ -1191,4 +1192,28 @@ async fn test_list_by_category_starred_filters_starred_and_deleted_messages() {
             .iter()
             .all(|email| email.subject.as_deref() != Some("已删除星标"))
     );
+}
+
+#[tokio::test]
+async fn list_by_category_uses_persisted_folder_category_when_name_has_no_keyword() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+    sync_repo::upsert_folder_category(&svc.db, account_id, "VendorFolder", "sent")
+        .await
+        .unwrap();
+    insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(84, "SPECIAL-USE sent").folder("VendorFolder"),
+    )
+    .await;
+
+    let resp = svc
+        .email_service
+        .list_by_category(account_id, EmailCategory::Sent, 1, 20)
+        .await
+        .unwrap();
+
+    assert_eq!(resp.total, 1);
+    assert_eq!(resp.emails[0].subject.as_deref(), Some("SPECIAL-USE sent"));
 }

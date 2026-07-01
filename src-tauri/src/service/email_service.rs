@@ -1,9 +1,10 @@
 use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
-use crate::domain::providers::StandardFolder;
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
 use crate::infrastructure::storage::models::emails;
-use crate::infrastructure::storage::repository::{account_repo, attachment_repo, email_repo, sync_repo};
+use crate::infrastructure::storage::repository::{
+    account_repo, attachment_repo, email_repo, sync_repo,
+};
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
 use crate::service::mail_operation::{
@@ -78,50 +79,6 @@ pub enum EmailCategory {
     Trash,
     /// 归档
     Archive,
-}
-
-impl EmailCategory {
-    /// 将分类解析为实际 IMAP 文件夹列表
-    ///
-    /// 通过 Provider 提供的文件夹映射，将分类转换为实际的 IMAP 文件夹名称列表。
-    ///
-    /// # 参数
-    ///
-    /// - `mapping`: Provider 提供的文件夹映射配置
-    ///
-    /// # 返回
-    ///
-    /// - `Starred`: 返回空 vec，需要特殊处理（跨文件夹查询 is_starred = true）
-    /// - 其他分类: 返回对应的 IMAP 文件夹名称列表
-    ///
-    /// # 示例
-    ///
-    /// ```rust,ignore
-    /// let mapping = StandardFolder {
-    ///     inbox: vec!["INBOX".to_string()],
-    ///     sent: vec!["Sent".to_string()],
-    ///     drafts: vec!["Drafts".to_string()],
-    ///     spam: vec!["Spam".to_string()],
-    ///     trash: vec!["Trash".to_string()],
-    ///     archive: vec!["Archive".to_string()],
-    ///     all: vec!["All Mail".to_string()],
-    /// };
-    ///
-    /// let folders = EmailCategory::Inbox.resolve_folders(&mapping);
-    /// // folders = vec!["INBOX"]
-    /// ```
-    pub fn resolve_folders(&self, mapping: &StandardFolder) -> Vec<String> {
-        match self {
-            Self::Inbox => mapping.inbox.clone(),
-            Self::Sent => mapping.sent.clone(),
-            Self::Drafts => mapping.drafts.clone(),
-            Self::Spam => mapping.spam.clone(),
-            Self::Trash => mapping.trash.clone(),
-            Self::Archive => mapping.archive.clone(),
-            // 星标邮件是跨文件夹查询，不映射到特定文件夹
-            Self::Starred => vec![],
-        }
-    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -470,16 +427,11 @@ impl EmailService {
         // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
         // 本地文件夹名正是同步（写）路径通过 FolderRegistry 解析后写入 DB 的值，
         // 故此处与写路径保持一致，避免对中文 Provider（如网易）返回英文默认名导致查不到邮件。
-        let local_names: Vec<RemoteFolder> = {
-            let mut names = sync_repo::distinct_folders_by_account(&self.db, account_id).await?;
-            names.extend(email_repo::distinct_folders_by_account(&self.db, account_id).await?);
-            names
-                .into_iter()
-                .map(|n| RemoteFolder { name: n, special_use: vec![], no_select: false })
-                .collect()
-        };
+        let (local_names, known_categories) =
+            local_folder_registry_inputs(&self.db, account_id).await?;
         let registry = FolderRegistry::builder()
             .remote_folders(local_names)
+            .known_categories(known_categories)
             .provider_mapping(folder_mapping)
             .build();
         // Starred 已在上方单独处理，这里 category 必为文件夹型分类，from_email_category 不会为 None。
@@ -927,6 +879,28 @@ impl EmailService {
 
         Ok(deleted_count)
     }
+}
+
+pub(crate) async fn local_folder_registry_inputs(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<(Vec<RemoteFolder>, Vec<(String, FolderCategory)>), MailError> {
+    let mut names = sync_repo::distinct_folders_by_account(db, account_id).await?;
+    names.extend(email_repo::distinct_folders_by_account(db, account_id).await?);
+    let remote = names
+        .into_iter()
+        .map(|n| RemoteFolder {
+            name: n,
+            special_use: vec![],
+            no_select: false,
+        })
+        .collect();
+    let known_categories = sync_repo::folder_categories_by_account(db, account_id)
+        .await?
+        .into_iter()
+        .filter_map(|(folder, category)| FolderCategory::parse(&category).map(|cat| (folder, cat)))
+        .collect();
+    Ok((remote, known_categories))
 }
 
 // ═════════════════════════════════════════════════════════════════════════

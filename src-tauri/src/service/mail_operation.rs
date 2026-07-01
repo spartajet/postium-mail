@@ -1,14 +1,15 @@
 use crate::domain::auth::AuthManager;
 use crate::domain::auth::manager::Credentials;
+use crate::domain::folders::{FolderCategory, FolderRegistry};
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::{accounts, emails};
-use crate::infrastructure::storage::repository::{account_repo, email_repo, sync_repo};
-use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
+use crate::infrastructure::storage::repository::{account_repo, email_repo};
 use crate::service::account_connection::imap_config_from_account;
+use crate::service::email_service::local_folder_registry_inputs;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -313,15 +314,12 @@ impl MailOperationService {
             .ok_or_else(|| MailError::ProviderNotSupported(account.provider.clone()))?;
         // resolve_special_folders 不连接 IMAP，只能用本地已存文件夹名做降级解析：
         // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
-        let mut names = sync_repo::distinct_folders_by_account(&self.db, account.id).await?;
-        names.extend(email_repo::distinct_folders_by_account(&self.db, account.id).await?);
-        let remote: Vec<RemoteFolder> = names
-            .into_iter()
-            .map(|n| RemoteFolder { name: n, special_use: vec![], no_select: false })
-            .collect();
+        let (remote, known_categories) = local_folder_registry_inputs(&self.db, account.id).await?;
         let registry = FolderRegistry::builder()
             .remote_folders(remote)
+            .known_categories(known_categories)
             .provider_mapping(provider.folder_mapping())
+            .allow_unverified_provider_fallback(true)
             .build();
         Ok(registry.resolve(cat))
     }

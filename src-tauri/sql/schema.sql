@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     folder TEXT NOT NULL,
+    folder_category TEXT,
     folder_nick_name TEXT,
     uidvalidity INTEGER,
     uidnext INTEGER,

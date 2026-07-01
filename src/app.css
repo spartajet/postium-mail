@@ -407,6 +407,105 @@ input:focus-visible ~ *,
 }
 
 /**
+ * 组件级共享样式
+ *
+ * 这些规则原本位于 Svelte 组件内的 <style> 块中。Tailwind CSS v4 的 Vite
+ * 插件会处理 `*.svelte?svelte&type=style&lang.css` 虚拟模块，在当前版本组合下
+ * 开发服务器可能把整份 Svelte 源码交给 Tailwind 解析。集中到全局 CSS 后，可以
+ * 避免开发期样式虚拟模块被误解析，同时保留原有视觉效果。
+ */
+.compose-btn {
+    background: linear-gradient(
+        135deg,
+        var(--color-primary) 0%,
+        var(--color-secondary) 100%
+    );
+}
+
+[data-testid="sidebar"] .compose-btn {
+    box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
+}
+
+[data-testid="sidebar"] .compose-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.4);
+}
+
+[data-testid="sidebar"] .compose-btn:active {
+    transform: translateY(0);
+}
+
+.nav-item:hover {
+    background: var(--color-glass-hover);
+    color: var(--color-foreground);
+}
+
+.nav-item.active {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+    color: var(--color-primary);
+}
+
+.storage-fill {
+    background: linear-gradient(
+        90deg,
+        var(--color-primary) 0%,
+        var(--color-secondary) 100%
+    );
+    transition: width 300ms ease;
+}
+
+.control-btn {
+    width: 46px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: background 150ms ease;
+    color: var(--color-muted-foreground);
+}
+
+.control-btn:hover {
+    background: var(--color-glass-hover);
+    color: var(--color-foreground);
+}
+
+.close-btn:hover {
+    background: #e81123 !important;
+    color: white !important;
+}
+
+.animate-slide-in {
+    animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.tiptap {
+    outline: none;
+    min-height: 100%;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: var(--color-muted-foreground);
+    pointer-events: none;
+    height: 0;
+}
+
+/**
  * 减少动画（无障碍支持）
  *
  * 尊重用户的系统偏好设置（prefers-reduced-motion），

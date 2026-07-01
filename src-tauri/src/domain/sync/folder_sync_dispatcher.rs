@@ -125,6 +125,12 @@ impl SyncOrchestrator {
         .iter()
         .flat_map(|cat| registry.resolve(*cat))
         .collect();
+        for folder in &sync_folders {
+            if let Some(category) = registry.classify(folder) {
+                sync_repo::upsert_folder_category(&self.db, account_id, folder, category.as_str())
+                    .await?;
+            }
+        }
         tracing::info!(
             account_id,
             count = sync_folders.len(),
