@@ -153,6 +153,8 @@ export default {
   settings: {
     title: "设置",
     general: "通用",
+    generalTitle: "基础设置",
+    generalDescription: "管理应用级偏好设置。后续通用选项会放在这里。",
     accounts: "账号管理",
     appearance: "外观",
     language: "语言",
