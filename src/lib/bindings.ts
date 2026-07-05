@@ -1481,6 +1481,7 @@ export const commands = {
 	 *  ```
 	 */
 	listEmailsByLabel: (labelId: number) => typedError<number[], MailError>(__TAURI_INVOKE("list_emails_by_label", { labelId })),
+	openSettingsWindow: () => typedError<null, MailError>(__TAURI_INVOKE("open_settings_window")),
 };
 
 /** Events */

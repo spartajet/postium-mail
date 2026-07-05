@@ -117,6 +117,7 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::label::remove_label_from_email,
             command::label::get_labels_for_email,
             command::label::list_emails_by_label,
+            command::window::open_settings_window,
         ])
         // 注册所有事件类型，用于从后端向前端发送事件
         .events(tauri_specta::collect_events![

@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
     setLocale: vi.fn(),
     loadAccounts: vi.fn(),
     deleteAccount: vi.fn(),
+    closeWindow: vi.fn(),
+    minimizeWindow: vi.fn(),
+    toggleMaximizeWindow: vi.fn(),
+    isMaximized: vi.fn(),
+    onResized: vi.fn(),
 }));
 
 let currentTheme: "light" | "dark" | "system" = "system";
@@ -15,6 +20,16 @@ let currentLocale: "zh-CN" | "en-US" = "zh-CN";
 
 vi.mock("$app/navigation", () => ({
     goto: mocks.goto,
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+    getCurrentWindow: () => ({
+        minimize: mocks.minimizeWindow,
+        toggleMaximize: mocks.toggleMaximizeWindow,
+        isMaximized: mocks.isMaximized,
+        close: mocks.closeWindow,
+        onResized: mocks.onResized,
+    }),
 }));
 
 vi.mock("$lib/stores/i18n.svelte", () => ({
@@ -68,6 +83,8 @@ describe("Settings page layout", () => {
         vi.clearAllMocks();
         currentTheme = "system";
         currentLocale = "zh-CN";
+        mocks.isMaximized.mockResolvedValue(false);
+        mocks.onResized.mockResolvedValue(() => {});
     });
 
     it("默认显示通用分组", async () => {
@@ -113,5 +130,45 @@ describe("Settings page layout", () => {
         expect(screen.getByTestId("settings-accounts-panel").isConnected).toBe(
             true,
         );
+    });
+
+    it("显示和主窗口一致的自定义标题栏", () => {
+        render(SettingsPage);
+
+        expect(screen.getByTestId("window-title").textContent).toBe(
+            "Postium Mail Settings",
+        );
+        expect(
+            screen.getByRole("button", { name: "Minimize" }).isConnected,
+        ).toBe(true);
+        expect(
+            screen.getByRole("button", { name: "Maximize" }).isConnected,
+        ).toBe(true);
+        expect(screen.getByRole("button", { name: "Close" }).isConnected).toBe(
+            true,
+        );
+        expect(screen.queryByTestId("settings-close-button")).toBeNull();
+    });
+
+    it("点击标题栏关闭按钮时关闭当前设置窗口", async () => {
+        mocks.closeWindow.mockResolvedValue(undefined);
+
+        render(SettingsPage);
+
+        await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+        expect(mocks.closeWindow).toHaveBeenCalledOnce();
+        expect(mocks.goto).not.toHaveBeenCalled();
+    });
+
+    it("标题栏关闭当前设置窗口失败时回退到主页面", async () => {
+        mocks.closeWindow.mockRejectedValue(new Error("not in tauri"));
+
+        render(SettingsPage);
+
+        await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+        expect(mocks.closeWindow).toHaveBeenCalledOnce();
+        expect(mocks.goto).toHaveBeenCalledWith("/");
     });
 });

@@ -33,6 +33,8 @@
     import { getThemeState } from "$lib/stores/theme.svelte";
     // 导入账户状态管理，用于账户管理
     import { getAccountState } from "$lib/stores/account.svelte";
+    import TitleBar from "$lib/components/layout/TitleBar.svelte";
+    import { goto } from "$app/navigation";
     // 导入图标组件
     import {
         Settings,
@@ -44,10 +46,7 @@
         User,
         SlidersHorizontal,
         Trash2,
-        ChevronLeft,
     } from "lucide-svelte";
-    // 导入路由导航函数
-    import { goto } from "$app/navigation";
 
     // 获取国际化状态实例
     const i18n = getI18nState();
@@ -88,55 +87,56 @@
     $effect(() => {
         accountStore.loadAccounts();
     });
+
 </script>
 
 <div
     data-testid="settings-page"
-    class="flex h-full flex-col overflow-hidden bg-background md:flex-row"
+    class="flex h-screen flex-col overflow-hidden bg-background text-foreground"
 >
-    <aside
-        class="flex shrink-0 flex-col border-b border-border bg-card/80 md:w-60 md:border-b-0 md:border-r"
-    >
-        <div class="flex items-center gap-3 px-5 py-4">
-            <button
-                class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
-                onclick={() => goto("/")}
-                title={t.settings.title}
-            >
-                <ChevronLeft size={20} />
-            </button>
-            <Settings size={20} class="text-primary" />
-            <h1 class="text-lg font-semibold text-foreground">
-                {t.settings.title}
-            </h1>
-        </div>
+    <TitleBar
+        title="Postium Mail Settings"
+        closeBehavior="close"
+        onCloseError={() => goto("/")}
+    />
 
-        <nav
-            class="flex gap-2 overflow-x-auto px-4 pb-4 md:flex-col md:overflow-visible md:px-3"
-            aria-label={t.settings.title}
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+        <aside
+            class="flex shrink-0 flex-col border-b border-border bg-card/80 md:w-60 md:border-b-0 md:border-r"
         >
-            {#each settingsSections as section (section.id)}
-                {@const SectionIcon = section.icon}
-                <button
-                    data-testid={section.testId}
-                    class="flex min-w-max items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors md:min-w-0 {activeSection ===
-                    section.id
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-glass-hover hover:text-foreground'}"
-                    aria-current={activeSection === section.id ? "page" : undefined}
-                    onclick={() => {
-                        activeSection = section.id;
-                    }}
-                >
-                    <SectionIcon size={16} />
-                    <span>{section.label}</span>
-                </button>
-            {/each}
-        </nav>
-    </aside>
+            <div class="flex items-center gap-3 px-5 py-4">
+                <Settings size={20} class="text-primary" />
+                <h1 class="text-lg font-semibold text-foreground">
+                    {t.settings.title}
+                </h1>
+            </div>
 
-    <main class="min-w-0 flex-1 overflow-y-auto p-5 md:p-6">
-        <div class="mx-auto max-w-3xl">
+            <nav
+                class="flex gap-2 overflow-x-auto px-4 pb-4 md:flex-col md:overflow-visible md:px-3"
+                aria-label={t.settings.title}
+            >
+                {#each settingsSections as section (section.id)}
+                    {@const SectionIcon = section.icon}
+                    <button
+                        data-testid={section.testId}
+                        class="flex min-w-max items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors md:min-w-0 {activeSection ===
+                        section.id
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:bg-glass-hover hover:text-foreground'}"
+                        aria-current={activeSection === section.id ? "page" : undefined}
+                        onclick={() => {
+                            activeSection = section.id;
+                        }}
+                    >
+                        <SectionIcon size={16} />
+                        <span>{section.label}</span>
+                    </button>
+                {/each}
+            </nav>
+        </aside>
+
+        <main class="min-w-0 flex-1 overflow-y-auto p-5 md:p-6">
+            <div class="mx-auto max-w-3xl">
             {#if activeSection === "general"}
                 <section
                     data-testid="settings-panel-general"
@@ -307,6 +307,7 @@
                     </div>
                 </section>
             {/if}
-        </div>
-    </main>
+            </div>
+        </main>
+    </div>
 </div>

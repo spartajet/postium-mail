@@ -30,6 +30,7 @@
     import { getEmailState } from "$lib/stores/email.svelte"; // 邮件状态（邮件列表、当前文件夹）
     import type { EmailCategory } from "$lib/bindings"; // 邮件分类类型定义（inbox/starred/sent/drafts/spam/trash）
     import { getSyncState } from "$lib/stores/sync.svelte"; // 同步状态（同步进度、错误信息）
+    import { commands } from "$lib/bindings";
 
     // 导入模态框组件类型（仅用于类型注解，不实际实例化）
     import type ComposeModal from "$lib/components/email/ComposeModal.svelte"; // 写邮件模态框
@@ -146,6 +147,14 @@
                 emailStore.currentFolder,
             );
             await syncStore.loadFolderStats(accountStore.activeAccountId);
+        }
+    }
+
+    async function openSettings() {
+        activeFolder = "";
+        const result = await commands.openSettingsWindow();
+        if (result.status === "error") {
+            goto("/settings");
         }
     }
 
@@ -484,16 +493,13 @@
 
     <!--
       设置按钮：固定在侧边栏底部
-      点击导航到 /settings 页面
+      点击打开独立设置窗口，失败时回退到 /settings 页面
     -->
     <div class="border-t border-border px-3 py-2">
         <button
             data-testid="settings-nav"
             class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors"
-            onclick={() => {
-                activeFolder = "";
-                goto("/settings");
-            }}
+            onclick={openSettings}
         >
             <Settings size={18} class="shrink-0" />
             {t.sidebar.settings}
