@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "$lib/components/layout/Sidebar.svelte";
 import type { AccountDto, FolderStat } from "$lib/bindings";
@@ -9,6 +9,11 @@ const loadEmailsByCategory = vi.fn();
 const deselectEmail = vi.fn();
 const syncAccount = vi.fn();
 const loadFolderStats = vi.fn();
+
+const mocks = vi.hoisted(() => ({
+    goto: vi.fn(),
+    openSettingsWindow: vi.fn(),
+}));
 
 const account: AccountDto = {
     id: 1,
@@ -28,8 +33,19 @@ let activeAccountId: number | null = 1;
 let folderStats: FolderStat[] = [];
 
 vi.mock("$app/navigation", () => ({
-    goto: vi.fn(),
+    goto: mocks.goto,
 }));
+
+vi.mock("$lib/bindings", async (importOriginal) => {
+    const original = await importOriginal<typeof import("$lib/bindings")>();
+    return {
+        ...original,
+        commands: {
+            ...original.commands,
+            openSettingsWindow: mocks.openSettingsWindow,
+        },
+    };
+});
 
 vi.mock("$lib/stores/i18n.svelte", () => ({
     getI18nState: () => ({
@@ -112,5 +128,33 @@ describe("Sidebar unread badges", () => {
         expect(screen.getByTestId("folder-inbox").textContent).toContain("3");
         expect(screen.getByTestId("folder-starred").textContent).toContain("2");
         expect(screen.getByTestId("folder-sent").textContent).not.toContain("0");
+    });
+
+    it("点击设置入口时打开独立设置窗口", async () => {
+        mocks.openSettingsWindow.mockResolvedValue({
+            status: "ok",
+            data: null,
+        });
+
+        render(Sidebar);
+
+        await fireEvent.click(screen.getByTestId("settings-nav"));
+
+        expect(mocks.openSettingsWindow).toHaveBeenCalledOnce();
+        expect(mocks.goto).not.toHaveBeenCalledWith("/settings");
+    });
+
+    it("设置窗口打开失败时回退到设置路由", async () => {
+        mocks.openSettingsWindow.mockResolvedValue({
+            status: "error",
+            error: { type: "InvalidParam", message: "failed" },
+        });
+
+        render(Sidebar);
+
+        await fireEvent.click(screen.getByTestId("settings-nav"));
+
+        expect(mocks.openSettingsWindow).toHaveBeenCalledOnce();
+        expect(mocks.goto).toHaveBeenCalledWith("/settings");
     });
 });

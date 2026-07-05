@@ -33,6 +33,18 @@
     // 通过此实例可以调用 minimize()、toggleMaximize()、hide() 等窗口控制方法
     const appWindow = getCurrentWindow();
 
+    type CloseBehavior = "hide" | "close";
+
+    let {
+        title = "Postium Mail",
+        closeBehavior = "hide",
+        onCloseError,
+    } = $props<{
+        title?: string;
+        closeBehavior?: CloseBehavior;
+        onCloseError?: () => void | Promise<void>;
+    }>();
+
     // ==================== 响应式状态 ====================
 
     // 窗口是否处于最大化状态
@@ -56,11 +68,17 @@
         await updateState();
     }
 
-    // 关闭窗口（实际为隐藏窗口）
-    // 使用 hide() 而非 close()，使应用继续在系统托盘运行
-    // 用户可以通过系统托盘图标重新显示窗口
+    // 主窗口使用 hide() 保持托盘后台运行，独立窗体使用 close() 释放窗口。
     async function close() {
-        await appWindow.hide();
+        try {
+            if (closeBehavior === "close") {
+                await appWindow.close();
+                return;
+            }
+            await appWindow.hide();
+        } catch {
+            await onCloseError?.();
+        }
     }
 
     // 更新窗口最大化状态
@@ -142,8 +160,9 @@
         <!-- 应用名称文本 -->
         <!-- data-tauri-drag-region：确保文字区域也可拖拽 -->
         <span
+            data-testid="window-title"
             class="text-[13px] font-medium text-foreground"
-            data-tauri-drag-region>Postium Mail</span
+            data-tauri-drag-region>{title}</span
         >
     </div>
 

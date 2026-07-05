@@ -94,6 +94,14 @@ pub mod label;
 ///
 pub mod sync;
 
+///
+/// 窗口管理命令模块
+///
+/// 提供独立窗口相关功能：
+/// - open_settings_window: 打开或聚焦设置窗口
+///
+pub mod window;
+
 // ========== 模块重新导出 ==========
 
 ///
@@ -132,3 +140,8 @@ pub use label::*;
 /// 将 sync 模块中的所有命令导出到当前模块作用域。
 ///
 pub use sync::*;
+
+///
+/// 重新导出窗口管理命令
+///
+pub use window::*;
