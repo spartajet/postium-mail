@@ -147,6 +147,9 @@ export default {
   settings: {
     title: "Settings",
     general: "General",
+    generalTitle: "Basic Settings",
+    generalDescription:
+      "Manage app-wide preferences. General options will appear here later.",
     accounts: "Accounts",
     appearance: "Appearance",
     language: "Language",
