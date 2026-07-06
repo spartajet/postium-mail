@@ -1,3 +1,17 @@
+/**
+ * Postium Mail - Toast 状态测试
+ * Toast.test.ts
+ *
+ * 本文件测试 Toast 状态管理器的功能，包括消息的创建、显示和关闭。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 基础功能：初始状态、消息添加
+ * 2. show() 方法：默认参数、自定义参数、ID 自增
+ * 3. 快捷方法：success()、error()、info()、warning()
+ * 4. dismiss() 方法：移除消息、边界情况
+ * 5. 组合场景：多个方法交叉使用
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock Svelte Context API so createToastState can run outside a component

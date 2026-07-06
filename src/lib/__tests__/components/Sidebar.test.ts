@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 侧边栏组件测试
+ * Sidebar.test.ts
+ *
+ * 本文件测试侧边栏组件的功能，包括文件夹导航、
+ * 未读数量显示、账号切换、同步功能等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 文件夹未读数量角标显示
+ * 2. 设置窗口打开（独立窗口 vs 路由回退）
+ * 3. 账号下拉菜单和所有账号视图切换
+ * 4. 同步按钮功能
+ * 5. 文件夹点击加载邮件
+ */
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Sidebar from "$lib/components/layout/Sidebar.svelte";

@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 邮件列表组件测试
+ * EmailList.test.ts
+ *
+ * 本文件测试邮件列表组件的功能，包括邮件加载、分页、
+ * 搜索、未读筛选、所有账号视图等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 邮件列表底部操作（加载更多、加载更早邮件）
+ * 2. 未读筛选功能
+ * 3. 所有账号视图下的邮件显示和操作
+ * 4. 搜索功能
+ * 5. 账号来源显示
+ */
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EmailList from "$lib/components/email/EmailList.svelte";

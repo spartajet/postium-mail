@@ -1,3 +1,19 @@
+/**
+ * Postium Mail - 写邮件弹窗组件测试
+ * ComposeModal.test.ts
+ *
+ * 本文件测试写邮件弹窗的功能，包括发件账号选择、
+ * 邮件发送、回复和转发等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 发件账号选择器显示和隐藏
+ * 2. 所有账号视图下的发件账号选择
+ * 3. 单账号视图下的默认发件账号
+ * 4. show() 方法传参时的账号优先级
+ * 5. 无账号时的禁用状态
+ * 6. 回复和转发时的账号传递
+ */
+
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ComposeModal from "$lib/components/email/ComposeModal.svelte";

@@ -1,3 +1,15 @@
+/**
+ * Postium Mail - 所有账号同步测试
+ * sync-all-accounts.test.ts
+ *
+ * 本文件测试所有账号同步功能，包括聚合文件夹统计、
+ * 聚合同步结果等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. loadFolderStatsForAllAccounts - 加载所有账号的文件夹统计
+ * 2. syncAllAccounts - 同步所有账号并返回结果
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SyncState } from "$lib/stores/sync.svelte";
 import { mockInvoke } from "../mocks/tauri";

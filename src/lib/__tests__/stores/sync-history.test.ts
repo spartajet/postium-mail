@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 同步历史测试
+ * sync-history.test.ts
+ *
+ * 本文件测试同步历史功能，包括加载历史状态、
+ * 同步更早邮件、范围同步等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. getSyncHistoryState - 获取同步历史状态
+ * 2. syncOlderEmails - 同步更早的邮件
+ * 3. syncAccountWithRange - 按范围同步账号
+ * 4. loadHistoryState - 加载并缓存历史状态
+ * 5. isOlderSyncing - 检查同步状态
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "$lib/bindings";
 import { SyncState } from "$lib/stores/sync.svelte";

@@ -1,3 +1,23 @@
+/**
+ * Postium Mail - 邮件命令测试
+ * email.test.ts
+ *
+ * 本文件测试邮件相关的 Tauri 命令调用，确保命令参数
+ * 和返回值正确传递。
+ *
+ * ==================== 测试范围 ====================
+ * 1. listEmails - 按文件夹加载邮件
+ * 2. listEmailsByCategory - 按分类加载邮件
+ * 3. loadNextPage - 加载下一页
+ * 4. refreshLoadedEmailsByCategory - 刷新已加载邮件
+ * 5. getEmail - 获取邮件详情
+ * 6. markAsRead - 标记已读/未读
+ * 7. toggleStar - 切换星标
+ * 8. deleteEmails - 删除邮件
+ * 9. archiveEmail - 归档邮件
+ * 10. 错误响应处理
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   commands,
