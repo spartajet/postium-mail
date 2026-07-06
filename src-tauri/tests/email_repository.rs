@@ -3,6 +3,7 @@ use postium_mail_lib::infrastructure::protocols::types::{
     AttachmentInfo, EmailFlags, EmailHeader, WholeEmailDto,
 };
 use postium_mail_lib::infrastructure::storage::database::DbConn;
+use postium_mail_lib::infrastructure::storage::repository::attachment_repo;
 use postium_mail_lib::infrastructure::storage::repository::email_repo;
 
 async fn seed_account(db: &DbConn) {
@@ -171,6 +172,63 @@ async fn insert_sent_email_assigns_next_uid_and_returns_model() {
         model.message_id.as_deref(),
         Some("<local-send@example.com>")
     );
+}
+
+#[tokio::test]
+async fn insert_sent_email_with_attachments_writes_email_and_attachments() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+
+    let now = 1_900_000_100;
+    let inserted = email_repo::insert_sent_email_with_attachments(
+        &db,
+        email_repo::EmailWrite {
+            account_id: 1,
+            folder: "Sent".to_string(),
+            uid: 0,
+            message_id: Some("<sent-with-attachment@example.com>".to_string()),
+            subject: Some("Subject".to_string()),
+            sender_name: Some("Sender".to_string()),
+            sender_email: "sender@example.com".to_string(),
+            recipient_emails: "to@example.com".to_string(),
+            cc_emails: None,
+            bcc_emails: None,
+            preview: Some("Body".to_string()),
+            body_text: Some("Body".to_string()),
+            body_html: Some("<p>Body</p>".to_string()),
+            is_read: Some(true),
+            is_starred: Some(false),
+            is_draft: Some(false),
+            is_answered: Some(false),
+            is_deleted: Some(false),
+            sent_at: now,
+            received_at: now,
+            created_at: now,
+            updated_at: now,
+        },
+        vec![attachment_repo::AttachmentWrite {
+            email_id: 0,
+            filename: Some("hello.txt".to_string()),
+            content_type: Some("text/plain".to_string()),
+            size: 5,
+            section_path: "compose:0".to_string(),
+            disposition: Some("attachment".to_string()),
+            content_id: None,
+            path: Some("/tmp/hello.txt".to_string()),
+            created_at: now,
+        }],
+    )
+    .await
+    .unwrap();
+    let saved = attachment_repo::list_by_email(&db, inserted.id)
+        .await
+        .unwrap();
+
+    assert_eq!(inserted.uid, 1);
+    assert_eq!(inserted.is_draft, Some(false));
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].filename.as_deref(), Some("hello.txt"));
+    assert_eq!(saved[0].section_path, "compose:0");
 }
 
 #[tokio::test]
