@@ -17,7 +17,7 @@ use postium_mail_lib::service::email_service::{
 };
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 use postium_mail_lib::service::mail_send::{
-    build_email, smtp_config_from_account, validate_send_request,
+    ComposeAttachmentInput, build_email, smtp_config_from_account, validate_send_request,
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -106,6 +106,60 @@ fn build_email_generates_message_id_and_raw_rfc822() {
     assert!(raw.contains("Message-ID:"));
     assert!(raw.contains("Subject: Hello"));
     assert!(raw.contains("Content-Type: multipart/alternative"));
+}
+
+#[test]
+fn build_email_with_attachment_uses_multipart_mixed() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hello.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "With attachment".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: path.to_string_lossy().to_string(),
+            filename: Some("hello.txt".to_string()),
+            content_type: Some("text/plain".to_string()),
+            size: Some(5),
+        }],
+        draft_id: None,
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8_lossy(&built.raw);
+
+    assert!(raw.contains("multipart/mixed"));
+    assert!(raw.contains("multipart/alternative"));
+    assert!(raw.contains("filename=\"hello.txt\"") || raw.contains("filename=hello.txt"));
+    assert!(raw.contains("hello"));
+}
+
+#[test]
+fn build_email_does_not_write_bcc_header() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec!["hidden@example.com".to_string()],
+        subject: "Secret".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![],
+        draft_id: None,
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8_lossy(&built.raw);
+
+    assert!(!raw.to_ascii_lowercase().contains("\nbcc:"));
+    assert!(!raw.contains("hidden@example.com"));
 }
 
 #[test]
