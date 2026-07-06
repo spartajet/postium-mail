@@ -40,7 +40,7 @@ let activeAccountId: number | null = null;
 let lastConcreteAccountId: number | null = 2;
 
 function selectValue(element: HTMLElement) {
-    return (element as HTMLSelectElement).value;
+    return element.dataset.value;
 }
 
 vi.mock("$lib/stores/account.svelte", () => ({
@@ -108,15 +108,16 @@ describe("ComposeModal 发件账号选择", () => {
 
         const select = await screen.findByTestId("compose-account-select");
         expect(selectValue(select)).toBe("2");
+        expect(select.tagName).toBe("BUTTON");
+        expect(select.classList.contains("bg-transparent")).toBe(true);
     });
 
     it("所有账号视图下发送使用选择的发件账号", async () => {
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.change(await screen.findByTestId("compose-account-select"), {
-            target: { value: "1" },
-        });
+        await fireEvent.click(await screen.findByTestId("compose-account-select"));
+        await fireEvent.click(await screen.findByTestId("compose-account-option-1"));
         await fireEvent.input(screen.getByTestId("compose-to-input"), {
             target: { value: "to@example.com" },
         });
