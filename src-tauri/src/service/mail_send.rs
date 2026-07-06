@@ -107,7 +107,9 @@ impl SentArchiveWriter for RealSentArchiveWriter {
             }
         };
 
-        let result = client.append_email(&req.folder, &req.raw).await;
+        let result = client
+            .append_email_with_flags(&req.folder, Some("(\\Seen)"), &req.raw)
+            .await;
         let logout_result = client.logout().await;
         if let Err(err) = logout_result {
             tracing::warn!(
