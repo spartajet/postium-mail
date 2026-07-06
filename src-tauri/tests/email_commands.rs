@@ -163,6 +163,169 @@ fn build_email_does_not_write_bcc_header() {
 }
 
 #[test]
+fn build_email_envelope_includes_bcc_while_raw_hides_it() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec!["copy@example.com".to_string()],
+        bcc: vec!["hidden@example.com".to_string()],
+        subject: "Secret".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![],
+        draft_id: None,
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8_lossy(&built.raw);
+    let recipients: Vec<String> = built
+        .envelope
+        .to()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(
+        built.envelope.from().map(ToString::to_string).as_deref(),
+        Some("work@example.com")
+    );
+    assert_eq!(
+        recipients,
+        vec![
+            "to@example.com".to_string(),
+            "copy@example.com".to_string(),
+            "hidden@example.com".to_string()
+        ]
+    );
+    assert!(!raw.to_ascii_lowercase().contains("\nbcc:"));
+    assert!(!raw.contains("hidden@example.com"));
+}
+
+#[test]
+fn build_email_rejects_invalid_attachment_content_type() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hello.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "With attachment".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: path.to_string_lossy().to_string(),
+            filename: Some("hello.txt".to_string()),
+            content_type: Some("bad mime".to_string()),
+            size: Some(5),
+        }],
+        draft_id: None,
+    };
+
+    let err = build_email(&account, &req).err().unwrap();
+
+    assert!(
+        matches!(err, MailError::InvalidParam(message) if message.contains("附件 Content-Type 无效"))
+    );
+}
+
+#[test]
+fn build_email_reports_attachment_read_failure() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hello.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o000);
+        std::fs::set_permissions(&path, permissions).unwrap();
+    }
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "With attachment".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: path.to_string_lossy().to_string(),
+            filename: Some("hello.txt".to_string()),
+            content_type: Some("text/plain".to_string()),
+            size: Some(5),
+        }],
+        draft_id: None,
+    };
+
+    let err = build_email(&account, &req).err().unwrap();
+
+    assert!(matches!(err, MailError::InvalidParam(message) if message.contains("读取附件失败")));
+}
+
+#[test]
+fn build_email_attachment_content_type_appears_in_raw() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("payload.json");
+    std::fs::write(&path, br#"{"ok":true}"#).unwrap();
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Attachment type".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: path.to_string_lossy().to_string(),
+            filename: Some("payload.json".to_string()),
+            content_type: Some("application/json".to_string()),
+            size: Some(11),
+        }],
+        draft_id: None,
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8_lossy(&built.raw);
+
+    assert!(raw.contains("Content-Type: application/json"));
+}
+
+#[test]
+fn build_email_sanitizes_attachment_filename() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("payload.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let req = SendEmailRequest {
+        account_id: account.id,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Attachment name".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: path.to_string_lossy().to_string(),
+            filename: Some(" ..//unsafe\\\\name.txt ".to_string()),
+            content_type: Some("text/plain".to_string()),
+            size: Some(5),
+        }],
+        draft_id: None,
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8_lossy(&built.raw);
+
+    assert!(raw.contains("filename=\"..__unsafe__name.txt\""));
+}
+
+#[test]
 fn send_validation_rejects_missing_recipients() {
     let req = SendEmailRequest {
         account_id: 1,
