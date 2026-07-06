@@ -21,6 +21,7 @@ use crate::infrastructure::storage::repository::attachment_repo::{
     AttachmentWrite, INSERT_ATTACHMENT_SQL, execute_attachment_insert,
 };
 use crate::infrastructure::storage::row::{bool_to_int, opt_bool_to_int, opt_int_to_bool};
+use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
 
 /// 批量插入邮件时使用的 SQL 语句常量
@@ -188,6 +189,47 @@ fn execute_email_insert(
         model.created_at,
         model.updated_at,
     ])
+}
+
+fn update_existing_email_by_id(
+    tx: &rusqlite::Transaction<'_>,
+    email_id: i32,
+    write: &EmailWrite,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "UPDATE emails
+         SET account_id = ?1, folder = ?2, uid = ?3, message_id = ?4, subject = ?5,
+             sender_name = ?6, sender_email = ?7, recipient_emails = ?8,
+             cc_emails = ?9, bcc_emails = ?10, preview = ?11, body_text = ?12,
+             body_html = ?13, is_read = ?14, is_starred = ?15, is_draft = ?16,
+             is_answered = ?17, is_deleted = ?18, sent_at = ?19, received_at = ?20,
+             updated_at = ?21
+         WHERE id = ?22",
+        rusqlite::params![
+            write.account_id,
+            &write.folder,
+            i64::from(write.uid),
+            &write.message_id,
+            &write.subject,
+            &write.sender_name,
+            &write.sender_email,
+            &write.recipient_emails,
+            &write.cc_emails,
+            &write.bcc_emails,
+            &write.preview,
+            &write.body_text,
+            &write.body_html,
+            opt_bool_to_int(write.is_read),
+            opt_bool_to_int(write.is_starred),
+            opt_bool_to_int(write.is_draft),
+            opt_bool_to_int(write.is_answered),
+            opt_bool_to_int(write.is_deleted),
+            write.sent_at,
+            write.received_at,
+            write.updated_at,
+            email_id,
+        ],
+    )
 }
 
 /// 按文件夹分页查询邮件。
@@ -593,6 +635,37 @@ pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, Mai
     db.transaction(move |tx| {
         let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
         execute_email_insert(&mut insert_stmt, &model)?;
+        let id = tx.last_insert_rowid() as i32;
+        let mut stmt = tx.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE id = ?1",
+        )?;
+        stmt.query_row([id], map_email)
+    })
+    .await
+}
+
+/// 插入本地已发送邮件，并为目标账号文件夹分配下一个本地 UID。
+pub async fn insert_sent_email(
+    db: &DbConn,
+    mut write: EmailWrite,
+) -> Result<emails::Model, MailError> {
+    db.transaction(move |tx| {
+        let next_uid = tx.query_row(
+            "SELECT COALESCE(MAX(uid), 0) + 1
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2",
+            rusqlite::params![write.account_id, &write.folder],
+            |row| row.get::<_, i64>(0),
+        )? as u32;
+        write.uid = next_uid;
+
+        let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+        execute_email_insert(&mut insert_stmt, &write)?;
         let id = tx.last_insert_rowid() as i32;
         let mut stmt = tx.prepare(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
@@ -1175,6 +1248,32 @@ pub async fn save_batch_emails(
         let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
         let mut affected_rows = 0;
         for (email, attachments) in &writes {
+            let existing_by_message_id = if let Some(message_id) = &email.message_id {
+                tx.query_row(
+                    "SELECT id
+                     FROM emails
+                     WHERE account_id = ?1 AND folder = ?2 AND message_id = ?3
+                     LIMIT 1",
+                    rusqlite::params![email.account_id, &email.folder, message_id],
+                    |row| row.get::<_, i32>(0),
+                )
+                .optional()?
+            } else {
+                None
+            };
+
+            if let Some(email_id) = existing_by_message_id {
+                update_existing_email_by_id(tx, email_id, email)?;
+                tx.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
+                for attachment in attachments {
+                    let mut attachment = attachment.clone();
+                    attachment.email_id = email_id;
+                    execute_attachment_insert(&mut attachment_stmt, &attachment)?;
+                }
+                affected_rows += 1;
+                continue;
+            }
+
             affected_rows += execute_email_insert(&mut email_stmt, email)?;
             let email_id = tx.query_row(
                 "SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",

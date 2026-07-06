@@ -105,6 +105,13 @@
         open = true;
     }
 
+    function parseRecipients(value: string) {
+        return value
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+    }
+
     // ==================== 邮件发送逻辑 ====================
 
     /**
@@ -130,6 +137,23 @@
             : accountStore.activeAccountId;
         // 没有可用发送账户，无法发送
         if (!sendAccountId) return;
+        const toRecipients = parseRecipients(to);
+        const ccRecipients = parseRecipients(cc);
+        const trimmedSubject = subject.trim();
+        const bodyText = richEditor?.getText() || "";
+        const trimmedBodyText = bodyText.trim();
+        if (toRecipients.length === 0) {
+            error = t.email.sendRequiresRecipient;
+            return;
+        }
+        if (!trimmedSubject) {
+            error = t.email.sendRequiresSubject;
+            return;
+        }
+        if (!trimmedBodyText) {
+            error = t.email.sendRequiresBody;
+            return;
+        }
         // 进入发送中状态
         sending = true;
         // 清空之前的错误信息
@@ -140,28 +164,20 @@
                 // 实际发送账户 ID：所有账号视图下来自发件账号选择器，否则来自当前活跃账号
                 account_id: sendAccountId,
                 // 收件人列表：将逗号分隔的字符串转为数组
-                to: to
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
+                to: toRecipients,
                 // 抄送列表：如果 cc 非空则解析，否则为空数组
-                cc: cc
-                    ? cc
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                    : [],
+                cc: ccRecipients,
                 // 密送列表：当前预留为空
                 bcc: [],
                 // 邮件主题
-                subject,
+                subject: trimmedSubject,
                 // HTML 格式正文：优先使用编辑器的 HTML 输出
                 // 如果编辑器无法提供 HTML，则用 <pre> 标签包裹纯文本
                 body_html:
                     richEditor?.getHtml() ||
-                    `<pre style="white-space:pre-wrap">${richEditor?.getText() || ""}</pre>`,
+                    `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
                 // 纯文本正文：作为备用格式
-                body_text: richEditor?.getText() || "",
+                body_text: bodyText,
             });
             // 检查发送结果
             if (result.status === "error") {
@@ -455,8 +471,6 @@
                     class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
                     onclick={handleSend}
                     disabled={sending ||
-                        !to ||
-                        !subject ||
                         (accountStore.isAllAccounts && !selectedAccountId)}
                 >
                     {sending ? t.email.loading : t.email.send}

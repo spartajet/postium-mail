@@ -129,6 +129,127 @@ fn whole_email(uid: u32, body_text: &str, body_html: &str) -> WholeEmailDto {
 }
 
 #[tokio::test]
+async fn insert_sent_email_assigns_next_uid_and_returns_model() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+    insert_repo_email(&db, 1, "Sent", 41, "existing sent", 100, true, false).await;
+
+    let now = 1_900_000_000;
+    let model = email_repo::insert_sent_email(
+        &db,
+        email_repo::EmailWrite {
+            account_id: 1,
+            folder: "Sent".to_string(),
+            uid: 0,
+            message_id: Some("<local-send@example.com>".to_string()),
+            subject: Some("new sent".to_string()),
+            sender_name: Some("Me".to_string()),
+            sender_email: "me@example.com".to_string(),
+            recipient_emails: "to@example.com".to_string(),
+            cc_emails: None,
+            bcc_emails: None,
+            preview: Some("Body".to_string()),
+            body_text: Some("Body".to_string()),
+            body_html: Some("<p>Body</p>".to_string()),
+            is_read: Some(true),
+            is_starred: Some(false),
+            is_draft: Some(false),
+            is_answered: Some(false),
+            is_deleted: Some(false),
+            sent_at: now,
+            received_at: now,
+            created_at: now,
+            updated_at: now,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(model.uid, 42);
+    assert_eq!(model.folder, "Sent");
+    assert_eq!(
+        model.message_id.as_deref(),
+        Some("<local-send@example.com>")
+    );
+}
+
+#[tokio::test]
+async fn save_batch_emails_merges_remote_sent_by_message_id() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_account(&db).await;
+
+    let now = 1_900_000_000;
+    let local = email_repo::insert_sent_email(
+        &db,
+        email_repo::EmailWrite {
+            account_id: 1,
+            folder: "Sent".to_string(),
+            uid: 0,
+            message_id: Some("<same@example.com>".to_string()),
+            subject: Some("local".to_string()),
+            sender_name: Some("Me".to_string()),
+            sender_email: "me@example.com".to_string(),
+            recipient_emails: "to@example.com".to_string(),
+            cc_emails: None,
+            bcc_emails: None,
+            preview: Some("local body".to_string()),
+            body_text: Some("local body".to_string()),
+            body_html: Some("<p>local body</p>".to_string()),
+            is_read: Some(true),
+            is_starred: Some(false),
+            is_draft: Some(false),
+            is_answered: Some(false),
+            is_deleted: Some(false),
+            sent_at: now,
+            received_at: now,
+            created_at: now,
+            updated_at: now,
+        },
+    )
+    .await
+    .unwrap();
+
+    let remote = WholeEmailDto {
+        id: 0,
+        account_id: 1,
+        folder: "Sent".to_string(),
+        uid: 777,
+        message_id: Some("<same@example.com>".to_string()),
+        sender_name: Some("Me".to_string()),
+        sender_email: "me@example.com".to_string(),
+        recipient_emails: "to@example.com".to_string(),
+        cc_emails: None,
+        bcc_emails: None,
+        subject: Some("remote".to_string()),
+        preview: Some("remote body".to_string()),
+        body_text: Some("remote body".to_string()),
+        body_html: Some("<p>remote body</p>".to_string()),
+        attachments: vec![],
+        is_read: true,
+        is_starred: false,
+        is_draft: false,
+        is_answered: false,
+        is_deleted: false,
+        sent_at: now,
+        received_at: now,
+        created_at: now,
+    };
+
+    email_repo::save_batch_emails(&db, 1, "Sent", &[remote])
+        .await
+        .unwrap();
+
+    let rows = email_repo::list_by_folder(&db, 1, "Sent", 1, 10)
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, local.id);
+    assert_eq!(rows[0].uid, 777);
+    assert_eq!(rows[0].subject.as_deref(), Some("remote"));
+}
+
+#[tokio::test]
 async fn save_batch_email_headers_should_ignore_existing_account_folder_uid() {
     let db = DbConn::open_in_memory_for_test().await.unwrap();
     seed_account(&db).await;

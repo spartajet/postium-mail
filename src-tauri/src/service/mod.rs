@@ -53,6 +53,7 @@ pub mod attachment_service;
 /// - SendEmailRequest: 发送邮件请求
 pub mod email_service;
 pub mod mail_operation;
+pub mod mail_send;
 
 /// 标签服务模块
 ///

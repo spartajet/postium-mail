@@ -23,8 +23,8 @@
 //! - `SslMode::None`：不加密（明文，仅用于本地测试，对应 `builder_dangerous`）。
 //!
 
-use crate::domain::providers::SmtpServerConfig;
-use crate::domain::providers::SslMode;
+use crate::domain::auth::Credentials as MailCredentials;
+use crate::domain::providers::{SmtpServerConfig, SslMode};
 use crate::error::MailError;
 use lettre::message::MultiPart;
 use lettre::message::header::ContentType;
@@ -140,6 +140,35 @@ impl SmtpClient {
         .await
     }
 
+    /// 发送已构建好的邮件。
+    ///
+    /// 调用方负责完成 `Message` 构建和校验；本方法只负责按账号凭证选择 SMTP
+    /// 认证方式、构建 transport，并把邮件投递到服务器。
+    pub async fn send_built_email(
+        config: &SmtpServerConfig,
+        account_email: &str,
+        credentials: &MailCredentials,
+        message: Message,
+    ) -> Result<(), MailError> {
+        let (credentials, mechanisms) = match credentials {
+            MailCredentials::Password(password) => (
+                Credentials::new(account_email.to_string(), password.to_string()),
+                None,
+            ),
+            MailCredentials::OAuth2 { access_token } => (
+                Credentials::new(account_email.to_string(), access_token.to_string()),
+                Some(vec![Mechanism::Xoauth2]),
+            ),
+        };
+        let transport = Self::build_transport(config, credentials, mechanisms)?;
+        tracing::debug!(host = %config.host, "SMTP: 正在发送已构建邮件");
+        transport
+            .send(message)
+            .await
+            .map_err(|e| MailError::SmtpSendFailed(format!("发送失败: {e}")))?;
+        Ok(())
+    }
+
     /// 共用邮件构建与发送逻辑
     ///
     /// 两个公开入口（密码认证 / XOAUTH2）的差异仅在于凭证内容与是否指定认证机制，
@@ -225,8 +254,24 @@ impl SmtpClient {
             .multipart(multipart)
             .map_err(|e| MailError::SmtpSendFailed(format!("构建邮件失败: {e}")))?;
 
-        // 构建异步 SMTP transport
-        let transport: AsyncSmtpTransport<Tokio1Executor> = match config.ssl {
+        let transport = Self::build_transport(config, credentials, mechanisms)?;
+
+        tracing::debug!(host = %config.host, "SMTP: 正在发送");
+        transport
+            .send(message)
+            .await
+            .map_err(|e| MailError::SmtpSendFailed(format!("发送失败: {e}")))?;
+
+        tracing::info!(host = %config.host, subject, "SMTP: 邮件发送成功");
+        Ok("ok".to_string())
+    }
+
+    fn build_transport(
+        config: &SmtpServerConfig,
+        credentials: Credentials,
+        mechanisms: Option<Vec<Mechanism>>,
+    ) -> Result<AsyncSmtpTransport<Tokio1Executor>, MailError> {
+        let transport = match config.ssl {
             SslMode::Implicit => {
                 let mut b = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
                     .map_err(|e| MailError::SmtpSendFailed(format!("TLS 连接构建失败: {e}")))?
@@ -258,13 +303,6 @@ impl SmtpClient {
             }
         };
 
-        tracing::debug!(host = %config.host, "SMTP: 正在发送");
-        transport
-            .send(message)
-            .await
-            .map_err(|e| MailError::SmtpSendFailed(format!("发送失败: {e}")))?;
-
-        tracing::info!(host = %config.host, subject, "SMTP: 邮件发送成功");
-        Ok("ok".to_string())
+        Ok(transport)
     }
 }

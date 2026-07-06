@@ -1,7 +1,10 @@
 mod common;
 
 use async_trait::async_trait;
-use common::{TestEmail, TestServices, insert_test_email};
+use common::{
+    RecordingSentArchiveWriter, RecordingSmtpSender, TestEmail, TestServices, insert_test_email,
+};
+use postium_mail_lib::domain::providers::SslMode;
 use postium_mail_lib::error::MailError;
 use postium_mail_lib::infrastructure::protocols::types::{
     AttachmentInfo, FetchedBodySection, WholeEmailDto,
@@ -9,12 +12,150 @@ use postium_mail_lib::infrastructure::protocols::types::{
 use postium_mail_lib::infrastructure::storage::models::accounts;
 use postium_mail_lib::infrastructure::storage::repository::sync_repo;
 use postium_mail_lib::service::account_service::CreateAccountRequest;
-use postium_mail_lib::service::email_service::{EmailCategory, ReloadEmailResult};
+use postium_mail_lib::service::email_service::{
+    EmailCategory, ReloadEmailResult, SendEmailRequest,
+};
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
+use postium_mail_lib::service::mail_send::{
+    build_email, smtp_config_from_account, validate_send_request,
+};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 static ACCOUNT_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+fn account_model_with_smtp(
+    provider: &str,
+    smtp_host: Option<&str>,
+    smtp_port: Option<i32>,
+    smtp_ssl_mode: Option<&str>,
+) -> accounts::Model {
+    accounts::Model {
+        id: 1,
+        name: "Work".to_string(),
+        email: "work@example.com".to_string(),
+        display_name: Some("Work User".to_string()),
+        provider: provider.to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl: Some(true),
+        imap_ssl_mode: None,
+        smtp_host: smtp_host.map(ToOwned::to_owned),
+        smtp_port,
+        smtp_ssl: Some(true),
+        smtp_ssl_mode: smtp_ssl_mode.map(ToOwned::to_owned),
+        color: None,
+        sync_enabled: Some(true),
+        last_sync_at: None,
+        auth_type: Some("password".to_string()),
+        account_type: "personal".to_string(),
+        created_at: 1,
+        updated_at: 1,
+    }
+}
+
+#[test]
+fn smtp_config_from_account_prefers_manual_smtp_settings() {
+    postium_mail_lib::domain::providers::pool::init_provider_pool();
+    let account = account_model_with_smtp(
+        "gmail",
+        Some("smtp.manual.example.com"),
+        Some(2525),
+        Some("StartTls"),
+    );
+
+    let config = smtp_config_from_account(&account).unwrap();
+
+    assert_eq!(config.host, "smtp.manual.example.com");
+    assert_eq!(config.port, 2525);
+    assert!(matches!(config.ssl, SslMode::StartTls));
+}
+
+#[test]
+fn smtp_config_from_account_rejects_invalid_manual_port() {
+    postium_mail_lib::domain::providers::pool::init_provider_pool();
+    let account = account_model_with_smtp("gmail", Some("smtp.example.com"), Some(70000), None);
+
+    let result = smtp_config_from_account(&account);
+
+    assert!(
+        matches!(result, Err(MailError::InvalidParam(message)) if message.contains("SMTP 端口"))
+    );
+}
+
+#[test]
+fn build_email_generates_message_id_and_raw_rfc822() {
+    let account = account_model_with_smtp("gmail", None, None, None);
+    let req = SendEmailRequest {
+        account_id: 1,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Hello".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+    };
+
+    let built = build_email(&account, &req).unwrap();
+    let raw = String::from_utf8(built.raw).unwrap();
+
+    assert!(built.message_id.starts_with('<'));
+    assert!(built.message_id.ends_with('>'));
+    assert!(raw.contains("Message-ID:"));
+    assert!(raw.contains("Subject: Hello"));
+    assert!(raw.contains("Content-Type: multipart/alternative"));
+}
+
+#[test]
+fn send_validation_rejects_missing_recipients() {
+    let req = SendEmailRequest {
+        account_id: 1,
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Hello".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+    };
+
+    let result = validate_send_request(&req);
+
+    assert!(matches!(result, Err(MailError::InvalidParam(message)) if message.contains("收件人")));
+}
+
+#[test]
+fn send_validation_rejects_empty_subject() {
+    let req = SendEmailRequest {
+        account_id: 1,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "   ".to_string(),
+        body_html: "<p>Body</p>".to_string(),
+        body_text: "Body".to_string(),
+    };
+
+    let result = validate_send_request(&req);
+
+    assert!(matches!(result, Err(MailError::InvalidParam(message)) if message.contains("主题")));
+}
+
+#[test]
+fn send_validation_rejects_empty_body_text() {
+    let req = SendEmailRequest {
+        account_id: 1,
+        to: vec!["to@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "Hello".to_string(),
+        body_html: "<p><br></p>".to_string(),
+        body_text: " \n\t ".to_string(),
+    };
+
+    let result = validate_send_request(&req);
+
+    assert!(matches!(result, Err(MailError::InvalidParam(message)) if message.contains("正文")));
+}
 
 async fn account_email(svc: &TestServices, account_id: i32) -> String {
     svc.account_service
@@ -67,6 +208,151 @@ async fn create_test_account_with_display_name(svc: &TestServices, display_name:
         account_type: None,
     };
     svc.account_service.create(req).await.unwrap().id
+}
+
+fn send_request(account_id: i32) -> SendEmailRequest {
+    SendEmailRequest {
+        account_id,
+        to: vec!["recipient@example.com".to_string()],
+        cc: vec!["copy@example.com".to_string()],
+        bcc: vec![],
+        subject: "  Service Send  ".to_string(),
+        body_html: "<p>Hello from service</p>".to_string(),
+        body_text: "Hello from service".to_string(),
+    }
+}
+
+async fn sent_email_count(svc: &TestServices, account_id: i32) -> i64 {
+    svc.db
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM emails WHERE account_id = ?1 AND folder = ?2",
+                rusqlite::params![account_id, "[Gmail]/Sent Mail"],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn send_email_writes_local_sent_and_archives_remote() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp.clone(), archiver.clone()).await;
+    let account_id = create_test_account_with_display_name(&svc, "Sender Name").await;
+
+    let response = svc
+        .email_service
+        .send(send_request(account_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        smtp.sent_message_ids.lock().unwrap().as_slice(),
+        &[response.message_id.clone()]
+    );
+    assert_eq!(
+        archiver.archived_message_ids.lock().unwrap().as_slice(),
+        &[response.message_id.clone()]
+    );
+    assert!(response.remote_archived);
+    assert!(response.remote_archive_error.is_none());
+    let detail = svc
+        .email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.email.folder, "[Gmail]/Sent Mail");
+    assert_eq!(detail.email.subject.as_deref(), Some("Service Send"));
+    assert_eq!(
+        detail.email.sender_email,
+        account_email(&svc, account_id).await
+    );
+    assert_eq!(detail.recipient_emails, "recipient@example.com");
+    assert_eq!(detail.cc_emails.as_deref(), Some("copy@example.com"));
+    assert_eq!(
+        sent_email_count(&svc, account_id).await,
+        1,
+        "SMTP 成功后应写入本地 Sent"
+    );
+}
+
+#[tokio::test]
+async fn send_email_does_not_write_sent_when_smtp_fails() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(Some(MailError::SmtpSendFailed(
+            "simulated smtp failure".to_string(),
+        ))),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp, archiver.clone()).await;
+    let account_id = create_test_account(&svc).await;
+
+    let result = svc.email_service.send(send_request(account_id)).await;
+
+    assert!(
+        matches!(result, Err(MailError::SmtpSendFailed(message)) if message.contains("simulated smtp failure"))
+    );
+    assert!(archiver.archived_message_ids.lock().unwrap().is_empty());
+    assert_eq!(
+        sent_email_count(&svc, account_id).await,
+        0,
+        "SMTP 失败不能写入本地 Sent"
+    );
+}
+
+#[tokio::test]
+async fn send_email_keeps_local_sent_when_remote_archive_fails() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(Some(MailError::ImapConnectionFailed(
+            "simulated append failure".to_string(),
+        ))),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp.clone(), archiver).await;
+    let account_id = create_test_account(&svc).await;
+
+    let response = svc
+        .email_service
+        .send(send_request(account_id))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        smtp.sent_message_ids.lock().unwrap().as_slice(),
+        &[response.message_id.clone()]
+    );
+    assert!(!response.remote_archived);
+    assert!(
+        response
+            .remote_archive_error
+            .as_deref()
+            .is_some_and(|message| message.contains("simulated append failure"))
+    );
+    svc.email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        sent_email_count(&svc, account_id).await,
+        1,
+        "远端归档失败仍应保留本地 Sent"
+    );
 }
 
 async fn create_remote_test_account(svc: &TestServices) -> i32 {

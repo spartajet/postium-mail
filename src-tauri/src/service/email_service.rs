@@ -1,5 +1,8 @@
 use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
-use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
+use crate::domain::{
+    auth::AuthManager,
+    providers::{AuthType, pool::PROVIDER_POOL},
+};
 use crate::error::MailError;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::{
@@ -10,9 +13,15 @@ use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
 use crate::service::mail_operation::{
     MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
 };
+use crate::service::mail_send::{
+    RealSentArchiveWriter, RealSmtpEmailSender, SentArchiveRequest, SentArchiveWriter,
+    SmtpEmailSender, build_email, smtp_config_from_account, validate_send_request,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
+
+pub use crate::service::mail_send::SendEmailResponse;
 
 // ═════════════════════════════════════════════════════════════════════════
 // 邮件服务模块 (Email Service)
@@ -266,6 +275,10 @@ pub struct EmailService {
     db: DbConn,
     /// 远端优先邮件操作服务
     mail_operation: MailOperationService,
+    /// SMTP 投递器
+    smtp_sender: Arc<dyn SmtpEmailSender>,
+    /// 已发送远端归档器
+    sent_archiver: Arc<dyn SentArchiveWriter>,
 }
 
 impl EmailService {
@@ -281,7 +294,13 @@ impl EmailService {
     /// 返回初始化好的 EmailService 实例
     pub fn new(auth: Arc<AuthManager>, db: DbConn) -> Self {
         let remote = Arc::new(RealMailRemoteOperator::new(auth.clone()));
-        Self::new_with_mail_remote(auth, db, remote)
+        Self::new_with_dependencies(
+            auth,
+            db,
+            remote,
+            Arc::new(RealSmtpEmailSender),
+            Arc::new(RealSentArchiveWriter),
+        )
     }
 
     pub fn new_with_mail_remote(
@@ -289,11 +308,29 @@ impl EmailService {
         db: DbConn,
         remote: Arc<dyn MailRemoteOperator>,
     ) -> Self {
+        Self::new_with_dependencies(
+            auth,
+            db,
+            remote,
+            Arc::new(RealSmtpEmailSender),
+            Arc::new(RealSentArchiveWriter),
+        )
+    }
+
+    pub fn new_with_dependencies(
+        auth: Arc<AuthManager>,
+        db: DbConn,
+        remote: Arc<dyn MailRemoteOperator>,
+        smtp_sender: Arc<dyn SmtpEmailSender>,
+        sent_archiver: Arc<dyn SentArchiveWriter>,
+    ) -> Self {
         let mail_operation = MailOperationService::new(db.clone(), auth.clone(), remote);
         Self {
             auth,
             db,
             mail_operation,
+            smtp_sender,
+            sent_archiver,
         }
     }
 
@@ -781,18 +818,20 @@ impl EmailService {
     ///     body_text: "你好，这是一封测试邮件。".to_string(),
     /// };
     ///
-    /// let message_id = email_service.send(req).await?;
-    /// println!("邮件已发送，ID: {}", message_id);
+    /// let response = email_service.send(req).await?;
+    /// println!("邮件已发送，ID: {}", response.message_id);
     /// ```
-    pub async fn send(&self, req: SendEmailRequest) -> Result<String, MailError> {
+    pub async fn send(&self, req: SendEmailRequest) -> Result<SendEmailResponse, MailError> {
         tracing::info!(account_id = req.account_id, to = req.to.len(), "发送邮件");
 
-        // ─── 查询发送账号 ───
+        validate_send_request(&req)?;
+
         let account = account_repo::get_by_id(&self.db, req.account_id)
             .await?
             .ok_or(MailError::AccountNotFound(req.account_id))?;
 
-        // ─── 获取 Provider 配置 ───
+        let smtp_config = smtp_config_from_account(&account)?;
+
         let provider_pool = PROVIDER_POOL
             .get()
             .ok_or(MailError::ProviderNotSupported(
@@ -804,61 +843,98 @@ impl EmailService {
             .get(&account.provider)
             .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
 
-        // ─── 获取 SMTP 配置 ───
-        let smtp_config = provider.smtp_config(&account.email);
-
-        // ─── 构建"发件人"字段 ───
-        // 格式: "显示名称 <邮箱地址>" 或仅邮箱地址
-        let from = account
-            .display_name
-            .map(|n| format!("{} <{}>", n, account.email))
-            .unwrap_or_else(|| account.email.clone());
-
-        // ─── 获取认证凭证 ───
-        let mail_auth_type = &provider.as_ref().provider_info().auth_type;
+        let provider_auth_type = &provider.as_ref().provider_info().auth_type;
+        let account_auth_type = account
+            .auth_type
+            .as_deref()
+            .and_then(parse_account_auth_type)
+            .unwrap_or_else(|| provider_auth_type.clone());
         let credentials = self
             .auth
-            .get_credentials(&account.email, mail_auth_type, Some(&account.provider))
+            .get_credentials(&account.email, &account_auth_type, Some(&account.provider))
+            .await?;
+        let built = build_email(&account, &req)?;
+
+        self.smtp_sender
+            .send(&smtp_config, &account.email, &credentials, &built)
             .await?;
 
-        // ─── 根据认证类型发送邮件 ───
-        let result = match &credentials {
-            // 密码认证
-            crate::domain::auth::Credentials::Password(pwd) => {
-                crate::infrastructure::protocols::smtp::SmtpClient::send_email(
-                    &smtp_config,
-                    &account.email,
-                    pwd,
-                    &from,
-                    &req.to,
-                    &req.cc,
-                    &req.bcc,
-                    &req.subject,
-                    &req.body_html,
-                    &req.body_text,
-                )
-                .await
-            }
-            // OAuth2 认证（使用 XOAUTH2 机制）
-            crate::domain::auth::Credentials::OAuth2 { access_token } => {
-                crate::infrastructure::protocols::smtp::SmtpClient::send_email_xoauth2(
-                    &smtp_config,
-                    &account.email,
-                    access_token,
-                    &from,
-                    &req.to,
-                    &req.cc,
-                    &req.bcc,
-                    &req.subject,
-                    &req.body_html,
-                    &req.body_text,
-                )
-                .await
+        let sent_folder = provider
+            .folder_mapping()
+            .sent
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Sent".to_string());
+        let now = chrono::Utc::now().timestamp();
+        let sent_model = email_repo::insert_sent_email(
+            &self.db,
+            email_repo::EmailWrite {
+                account_id: account.id,
+                folder: sent_folder.clone(),
+                uid: 0,
+                message_id: Some(built.message_id.clone()),
+                subject: Some(req.subject.trim().to_string()),
+                sender_name: account.display_name.clone(),
+                sender_email: account.email.clone(),
+                recipient_emails: req
+                    .to
+                    .iter()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                cc_emails: non_empty_joined(&req.cc),
+                bcc_emails: non_empty_joined(&req.bcc),
+                preview: Some(req.body_text.chars().take(200).collect()),
+                body_text: Some(req.body_text.clone()),
+                body_html: Some(req.body_html.clone()),
+                is_read: Some(true),
+                is_starred: Some(false),
+                is_draft: Some(false),
+                is_answered: Some(false),
+                is_deleted: Some(false),
+                sent_at: now,
+                received_at: now,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .await?;
+
+        let archive_result = self
+            .sent_archiver
+            .append_to_sent(SentArchiveRequest {
+                account,
+                folder: sent_folder,
+                credentials,
+                message_id: built.message_id.clone(),
+                raw: built.raw,
+            })
+            .await;
+
+        let (remote_archived, remote_archive_error) = match archive_result {
+            Ok(()) => (true, None),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    message_id = %built.message_id,
+                    "SMTP 已成功但远端 Sent 归档失败"
+                );
+                (false, Some(error.to_string()))
             }
         };
 
-        tracing::info!(account_id = req.account_id, "邮件发送成功");
-        result
+        tracing::info!(
+            account_id = req.account_id,
+            message_id = %built.message_id,
+            "邮件发送成功"
+        );
+        Ok(SendEmailResponse {
+            message_id: built.message_id,
+            local_email_id: sent_model.id,
+            remote_archived,
+            remote_archive_error,
+        })
     }
 
     /// 删除账号指定文件夹的所有邮件
@@ -1056,4 +1132,26 @@ fn email_model_to_detail_with_account(
     detail.email.account_email = Some(account.email.clone());
     detail.email.account_display_name = account.display_name.clone();
     detail
+}
+
+fn non_empty_joined(values: &[String]) -> Option<String> {
+    let joined = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+fn parse_account_auth_type(value: &str) -> Option<AuthType> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "password" => Some(AuthType::Password),
+        "oauth2" => Some(AuthType::OAuth2),
+        _ => None,
+    }
 }
