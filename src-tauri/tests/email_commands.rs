@@ -2,18 +2,25 @@ mod common;
 
 use async_trait::async_trait;
 use common::{
-    RecordingSentArchiveWriter, RecordingSmtpSender, TestEmail, TestServices, insert_test_email,
+    RecordingSentArchiveWriter, RecordingSmtpSender, TestEmail, TestServices, create_test_db,
+    insert_test_email,
 };
 use postium_mail_lib::domain::providers::SslMode;
+use postium_mail_lib::domain::{auth::AuthManager, providers::pool::init_provider_pool};
 use postium_mail_lib::error::MailError;
 use postium_mail_lib::infrastructure::protocols::types::{
     AttachmentInfo, FetchedBodySection, WholeEmailDto,
 };
 use postium_mail_lib::infrastructure::storage::models::accounts;
 use postium_mail_lib::infrastructure::storage::repository::sync_repo;
+use postium_mail_lib::service::account_connection::NoopImapConnectionVerifier;
+use postium_mail_lib::service::account_service::AccountService;
 use postium_mail_lib::service::account_service::CreateAccountRequest;
 use postium_mail_lib::service::email_service::{
-    EmailCategory, ReloadEmailResult, SendEmailRequest,
+    EmailCategory, EmailService, ReloadEmailResult, SaveDraftRequest, SendEmailRequest,
+};
+use postium_mail_lib::service::mail_draft::{
+    DraftAppendRequest, DraftRemoteWriter, is_blank_draft,
 };
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
 use postium_mail_lib::service::mail_send::{
@@ -412,6 +419,296 @@ fn send_request(account_id: i32) -> SendEmailRequest {
         attachments: vec![],
         draft_id: None,
     }
+}
+
+#[derive(Default)]
+struct RecordingDraftWriter {
+    appended: Mutex<Vec<(String, String)>>,
+    deleted: Mutex<Vec<(String, u32)>>,
+    append_fail_with: Mutex<Option<MailError>>,
+    delete_fail_with: Mutex<Option<MailError>>,
+}
+
+#[async_trait]
+impl DraftRemoteWriter for RecordingDraftWriter {
+    async fn append_draft(&self, req: DraftAppendRequest) -> Result<(), MailError> {
+        if let Some(error) = self.append_fail_with.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.appended
+            .lock()
+            .unwrap()
+            .push((req.folder, String::from_utf8_lossy(&req.raw).into_owned()));
+        Ok(())
+    }
+
+    async fn delete_draft(
+        &self,
+        _account: &accounts::Model,
+        _credentials: &postium_mail_lib::domain::auth::Credentials,
+        folder: &str,
+        uid: u32,
+    ) -> Result<(), MailError> {
+        if let Some(error) = self.delete_fail_with.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.deleted.lock().unwrap().push((folder.to_string(), uid));
+        Ok(())
+    }
+}
+
+struct DraftTestServices {
+    db: postium_mail_lib::infrastructure::storage::database::DbConn,
+    account_service: AccountService,
+    email_service: EmailService,
+    draft_writer: Arc<RecordingDraftWriter>,
+}
+
+struct NoopMailRemoteOperator;
+
+#[async_trait]
+impl MailRemoteOperator for NoopMailRemoteOperator {
+    async fn mark_seen(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _seen: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn set_flagged(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _flagged: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn move_to_folder(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _target_folder: &str,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn reload_email(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        Ok(None)
+    }
+
+    async fn fetch_attachment_section(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        Ok(None)
+    }
+}
+
+async fn new_draft_test_services() -> DraftTestServices {
+    init_provider_pool();
+    let db = create_test_db().await;
+    let auth = Arc::new(AuthManager::in_memory());
+    let remote = Arc::new(NoopMailRemoteOperator);
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let sent_archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let draft_writer = Arc::new(RecordingDraftWriter::default());
+    let account_service = AccountService::new_with_imap_verifier(
+        db.clone(),
+        auth.clone(),
+        Arc::new(NoopImapConnectionVerifier),
+    );
+    let email_service = EmailService::new_with_full_dependencies(
+        auth.clone(),
+        db.clone(),
+        remote,
+        smtp,
+        sent_archiver,
+        draft_writer.clone(),
+    );
+
+    DraftTestServices {
+        db,
+        account_service,
+        email_service,
+        draft_writer,
+    }
+}
+
+async fn create_test_account_for_draft(svc: &DraftTestServices) -> i32 {
+    let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let req = CreateAccountRequest {
+        name: format!("Draft Test {}", index),
+        email: format!("draft-{}@gmail.com", index),
+        display_name: None,
+        provider: "gmail".to_string(),
+        auth_type: "Password".to_string(),
+        password: "pass".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+    svc.account_service.create(req).await.unwrap().id
+}
+
+async fn draft_email_count(svc: &DraftTestServices, account_id: i32) -> i64 {
+    svc.db
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM emails WHERE account_id = ?1 AND is_draft = 1",
+                rusqlite::params![account_id],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+fn blank_draft_request(account_id: i32) -> SaveDraftRequest {
+    SaveDraftRequest {
+        draft_id: None,
+        account_id,
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject: "   ".to_string(),
+        body_html: "".to_string(),
+        body_text: " \n\t ".to_string(),
+        attachments: vec![],
+    }
+}
+
+#[test]
+fn draft_blank_draft_is_not_saveable() {
+    let req = blank_draft_request(1);
+
+    assert!(is_blank_draft(&req));
+}
+
+#[test]
+fn draft_with_attachment_is_saveable_even_without_subject_or_body() {
+    let req = SaveDraftRequest {
+        draft_id: None,
+        account_id: 1,
+        to: vec![],
+        cc: vec![],
+        bcc: vec![],
+        subject: "".to_string(),
+        body_html: "".to_string(),
+        body_text: "".to_string(),
+        attachments: vec![ComposeAttachmentInput {
+            path: "/tmp/file.txt".to_string(),
+            filename: Some("file.txt".to_string()),
+            content_type: Some("text/plain".to_string()),
+            size: Some(1),
+        }],
+    };
+
+    assert!(!is_blank_draft(&req));
+}
+
+#[tokio::test]
+async fn draft_save_rejects_blank_request() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+
+    let result = svc
+        .email_service
+        .save_draft(blank_draft_request(account_id))
+        .await;
+
+    assert!(
+        matches!(result, Err(MailError::InvalidParam(message)) if message.contains("空白草稿"))
+    );
+}
+
+#[tokio::test]
+async fn draft_save_persists_remote_and_local_draft() {
+    let svc = new_draft_test_services().await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let request = SaveDraftRequest {
+        draft_id: None,
+        account_id,
+        to: vec!["recipient@example.com".to_string()],
+        cc: vec![],
+        bcc: vec![],
+        subject: "".to_string(),
+        body_html: "<p>draft body</p>".to_string(),
+        body_text: "".to_string(),
+        attachments: vec![],
+    };
+
+    let response = svc.email_service.save_draft(request).await.unwrap();
+
+    assert!(response.remote_saved);
+    assert_eq!(draft_email_count(&svc, account_id).await, 1);
+    assert_eq!(svc.draft_writer.appended.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn draft_save_replaces_previous_local_draft_and_attempts_remote_delete() {
+    let svc = new_draft_test_services().await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let first = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "first".to_string(),
+            body_html: "".to_string(),
+            body_text: "first".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+
+    let second = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: Some(first.draft_id),
+            account_id,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "second".to_string(),
+            body_html: "".to_string(),
+            body_text: "second".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(first.draft_id, second.draft_id);
+    assert_eq!(draft_email_count(&svc, account_id).await, 1);
+    assert_eq!(svc.draft_writer.appended.lock().unwrap().len(), 2);
+    assert_eq!(svc.draft_writer.deleted.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

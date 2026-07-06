@@ -10,6 +10,7 @@ use crate::infrastructure::storage::repository::{
 };
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
+use crate::service::mail_draft::{DraftRemoteWriter, RealDraftRemoteWriter};
 use crate::service::mail_operation::{
     MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
 };
@@ -21,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
 
+pub use crate::service::mail_draft::{SaveDraftRequest, SaveDraftResponse};
 pub use crate::service::mail_send::{
     ComposeAttachmentInput, LocalAttachmentDraft, SendEmailResponse,
 };
@@ -285,6 +287,8 @@ pub struct EmailService {
     smtp_sender: Arc<dyn SmtpEmailSender>,
     /// 已发送远端归档器
     sent_archiver: Arc<dyn SentArchiveWriter>,
+    /// 草稿远端写入器
+    draft_writer: Arc<dyn DraftRemoteWriter>,
 }
 
 impl EmailService {
@@ -330,6 +334,24 @@ impl EmailService {
         smtp_sender: Arc<dyn SmtpEmailSender>,
         sent_archiver: Arc<dyn SentArchiveWriter>,
     ) -> Self {
+        Self::new_with_full_dependencies(
+            auth,
+            db,
+            remote,
+            smtp_sender,
+            sent_archiver,
+            Arc::new(RealDraftRemoteWriter),
+        )
+    }
+
+    pub fn new_with_full_dependencies(
+        auth: Arc<AuthManager>,
+        db: DbConn,
+        remote: Arc<dyn MailRemoteOperator>,
+        smtp_sender: Arc<dyn SmtpEmailSender>,
+        sent_archiver: Arc<dyn SentArchiveWriter>,
+        draft_writer: Arc<dyn DraftRemoteWriter>,
+    ) -> Self {
         let mail_operation = MailOperationService::new(db.clone(), auth.clone(), remote);
         Self {
             auth,
@@ -337,6 +359,7 @@ impl EmailService {
             mail_operation,
             smtp_sender,
             sent_archiver,
+            draft_writer,
         }
     }
 
@@ -956,6 +979,14 @@ impl EmailService {
         })
     }
 
+    pub async fn save_draft(&self, req: SaveDraftRequest) -> Result<SaveDraftResponse, MailError> {
+        crate::service::mail_draft::save_draft(self, req).await
+    }
+
+    pub async fn delete_draft(&self, draft_id: i32) -> Result<(), MailError> {
+        crate::service::mail_draft::delete_draft(self, draft_id).await
+    }
+
     /// 删除账号指定文件夹的所有邮件
     ///
     /// 这通常用于文件夹清空操作，如清空垃圾箱。
@@ -1005,6 +1036,20 @@ impl EmailService {
         );
 
         Ok(deleted_count)
+    }
+}
+
+impl EmailService {
+    pub(crate) fn db_conn(&self) -> &DbConn {
+        &self.db
+    }
+
+    pub(crate) fn auth_manager(&self) -> &Arc<AuthManager> {
+        &self.auth
+    }
+
+    pub(crate) fn draft_writer(&self) -> &Arc<dyn DraftRemoteWriter> {
+        &self.draft_writer
     }
 }
 

@@ -52,6 +52,7 @@ pub mod attachment_service;
 /// - EmailCategory: 邮件分类枚举
 /// - SendEmailRequest: 发送邮件请求
 pub mod email_service;
+pub mod mail_draft;
 pub mod mail_operation;
 pub mod mail_send;
 
