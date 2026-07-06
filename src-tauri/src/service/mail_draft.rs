@@ -50,7 +50,7 @@ pub struct DraftAppendRequest {
 
 #[async_trait]
 pub trait DraftRemoteWriter: Send + Sync {
-    async fn append_draft(&self, req: DraftAppendRequest) -> Result<(), MailError>;
+    async fn append_draft(&self, req: DraftAppendRequest) -> Result<u32, MailError>;
     async fn delete_draft(
         &self,
         account: &accounts::Model,
@@ -64,7 +64,7 @@ pub struct RealDraftRemoteWriter;
 
 #[async_trait]
 impl DraftRemoteWriter for RealDraftRemoteWriter {
-    async fn append_draft(&self, req: DraftAppendRequest) -> Result<(), MailError> {
+    async fn append_draft(&self, req: DraftAppendRequest) -> Result<u32, MailError> {
         let imap_config = imap_config_from_account(&req.account)?;
         let mut client = match &req.credentials {
             Credentials::Password(password) => {
@@ -74,11 +74,12 @@ impl DraftRemoteWriter for RealDraftRemoteWriter {
                 ImapClient::connect_xoauth2(&imap_config, &req.account.email, access_token).await?
             }
         };
+        let predicted_uid = client.fetch_folder_metadata(&req.folder).await?.uidnext as u32;
         let result = client
             .append_email_with_flags(&req.folder, Some("(\\Draft \\Seen)"), &req.raw)
             .await;
         client.logout().await.ok();
-        result
+        result.map(|_| predicted_uid)
     }
 
     async fn delete_draft(
@@ -132,7 +133,7 @@ pub async fn save_draft(
     let built = build_draft_email(&account, &req)?;
     let now = chrono::Utc::now().timestamp();
 
-    service
+    let remote_uid = service
         .draft_writer()
         .append_draft(DraftAppendRequest {
             account: account.clone(),
@@ -143,12 +144,12 @@ pub async fn save_draft(
         .await?;
 
     let attachments = to_attachment_writes(&req.attachments, now)?;
-    let inserted = email_repo::insert_draft_email_with_attachments(
+    let inserted = email_repo::insert_draft_email_with_attachments_preserving_uid(
         service.db_conn(),
         email_repo::EmailWrite {
             account_id: account.id,
             folder: folder.clone(),
-            uid: 0,
+            uid: remote_uid,
             message_id: Some(built.message_id.clone()),
             subject: Some(req.subject.trim().to_string()),
             sender_name: account.display_name.clone(),
@@ -200,19 +201,10 @@ pub async fn delete_draft(service: &EmailService, draft_id: i32) -> Result<(), M
         .await?
         .ok_or(MailError::AccountNotFound(draft.account_id))?;
     let credentials = resolve_credentials(service, &account).await?;
-    if let Err(err) = service
+    service
         .draft_writer()
         .delete_draft(&account, &credentials, &draft.folder, draft.uid)
-        .await
-    {
-        tracing::warn!(
-            draft_id,
-            account_id = account.id,
-            uid = draft.uid,
-            error = %err,
-            "远端删除草稿失败"
-        );
-    }
+        .await?;
     email_repo::delete_one_with_attachments(service.db_conn(), draft_id).await?;
     Ok(())
 }
@@ -233,12 +225,16 @@ async fn cleanup_old_draft(
         Err(err) => return Some(err.to_string()),
     };
 
-    let remote_err = service
-        .draft_writer()
-        .delete_draft(account, &credentials, &old.folder, old.uid)
-        .await
-        .err()
-        .map(|err| err.to_string());
+    let remote_err = if old.uid == 0 {
+        None
+    } else {
+        service
+            .draft_writer()
+            .delete_draft(account, &credentials, &old.folder, old.uid)
+            .await
+            .err()
+            .map(|err| err.to_string())
+    };
     let local_err = email_repo::delete_one_with_attachments(service.db_conn(), draft_id)
         .await
         .err()

@@ -427,11 +427,12 @@ struct RecordingDraftWriter {
     deleted: Mutex<Vec<(String, u32)>>,
     append_fail_with: Mutex<Option<MailError>>,
     delete_fail_with: Mutex<Option<MailError>>,
+    next_uid: Mutex<u32>,
 }
 
 #[async_trait]
 impl DraftRemoteWriter for RecordingDraftWriter {
-    async fn append_draft(&self, req: DraftAppendRequest) -> Result<(), MailError> {
+    async fn append_draft(&self, req: DraftAppendRequest) -> Result<u32, MailError> {
         if let Some(error) = self.append_fail_with.lock().unwrap().take() {
             return Err(error);
         }
@@ -439,7 +440,13 @@ impl DraftRemoteWriter for RecordingDraftWriter {
             .lock()
             .unwrap()
             .push((req.folder, String::from_utf8_lossy(&req.raw).into_owned()));
-        Ok(())
+        let mut next_uid = self.next_uid.lock().unwrap();
+        if *next_uid == 0 {
+            *next_uid = 7001;
+        }
+        let uid = *next_uid;
+        *next_uid += 1;
+        Ok(uid)
     }
 
     async fn delete_draft(
@@ -588,6 +595,33 @@ async fn draft_email_count(svc: &DraftTestServices, account_id: i32) -> i64 {
         .unwrap()
 }
 
+async fn draft_uid_by_id(svc: &DraftTestServices, draft_id: i32) -> u32 {
+    svc.db
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT uid FROM emails WHERE id = ?1",
+                rusqlite::params![draft_id],
+                |row| row.get::<_, u32>(0),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+async fn draft_exists(svc: &DraftTestServices, draft_id: i32) -> bool {
+    svc.db
+        .call(move |conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM emails WHERE id = ?1)",
+                rusqlite::params![draft_id],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .unwrap()
+        != 0
+}
+
 fn blank_draft_request(account_id: i32) -> SaveDraftRequest {
     SaveDraftRequest {
         draft_id: None,
@@ -667,6 +701,7 @@ async fn draft_save_persists_remote_and_local_draft() {
     assert!(response.remote_saved);
     assert_eq!(draft_email_count(&svc, account_id).await, 1);
     assert_eq!(svc.draft_writer.appended.lock().unwrap().len(), 1);
+    assert_eq!(draft_uid_by_id(&svc, response.draft_id).await, 7001);
 }
 
 #[tokio::test]
@@ -709,6 +744,40 @@ async fn draft_save_replaces_previous_local_draft_and_attempts_remote_delete() {
     assert_eq!(draft_email_count(&svc, account_id).await, 1);
     assert_eq!(svc.draft_writer.appended.lock().unwrap().len(), 2);
     assert_eq!(svc.draft_writer.deleted.lock().unwrap().len(), 1);
+    let deleted = svc.draft_writer.deleted.lock().unwrap();
+    assert_eq!(deleted[0].0, first.folder);
+    assert_eq!(deleted[0].1, 7001);
+}
+
+#[tokio::test]
+async fn draft_delete_keeps_local_draft_when_remote_delete_fails() {
+    let svc = new_draft_test_services().await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let draft = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["recipient@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "keep me".to_string(),
+            body_html: "".to_string(),
+            body_text: "body".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    *svc.draft_writer.delete_fail_with.lock().unwrap() = Some(MailError::ImapConnectionFailed(
+        "simulated delete failure".to_string(),
+    ));
+
+    let result = svc.email_service.delete_draft(draft.draft_id).await;
+
+    assert!(
+        matches!(result, Err(MailError::ImapConnectionFailed(message)) if message.contains("simulated delete failure"))
+    );
+    assert!(draft_exists(&svc, draft.draft_id).await);
 }
 
 #[tokio::test]
