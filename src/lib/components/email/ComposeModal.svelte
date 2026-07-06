@@ -188,6 +188,8 @@
                     `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
                 // 纯文本正文：作为备用格式
                 body_text: bodyText,
+                attachments: [],
+                draft_id: null,
             });
             // 检查发送结果
             if (result.status === "error") {
