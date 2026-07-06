@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 邮件详情组件测试
+ * EmailDetail.test.ts
+ *
+ * 本文件测试邮件详情组件的功能，包括收件人显示、
+ * 附件操作、回复和转发等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 多收件人默认折叠并可展开
+ * 2. 附件渲染和下载触发
+ * 3. 附件栏停靠位置
+ * 4. 回复时传入当前账号 ID
+ * 5. 转发时传入当前账号 ID
+ */
+
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EmailDetail from "$lib/components/email/EmailDetail.svelte";

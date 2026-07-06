@@ -1,3 +1,16 @@
+/**
+ * Postium Mail - 账号添加流程测试
+ * account-add-flow.test.ts
+ *
+ * 本文件测试账号添加流程的工具函数，包括添加后的状态更新、
+ * 初始同步启动、OAuth2 完成后的账号解析等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. continueAfterAccountAdded - 账号添加后的继续操作
+ * 2. startInitialSyncAfterAccountAdded - 启动初始同步
+ * 3. resolveOAuth2CompletedAccount - OAuth2 完成后的账号解析
+ */
+
 import { describe, it, expect, vi } from "vitest";
 import {
   continueAfterAccountAdded,

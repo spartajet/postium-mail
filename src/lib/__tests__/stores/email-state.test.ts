@@ -1,3 +1,27 @@
+/**
+ * Postium Mail - 邮件状态单元测试
+ * email-state.test.ts
+ *
+ * 本文件测试邮件状态管理器的核心功能，包括邮件加载、
+ * 选择、操作、附件处理等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. loadEmailsByCategory - 按分类加载邮件
+ * 2. loadEmailsByCategoryForAllAccounts - 加载所有账号邮件
+ * 3. loadEmails - 按文件夹加载
+ * 4. loadNextPage - 加载下一页
+ * 5. selectEmail - 选择邮件并标记已读
+ * 6. toggleStar - 切换星标
+ * 7. markAsRead - 标记已读/未读
+ * 8. reloadEmail - 重新加载邮件
+ * 9. archiveEmail - 归档邮件
+ * 10. moveEmailToFolder - 移动到文件夹
+ * 11. deleteEmails - 删除邮件
+ * 12. downloadAttachment - 下载附件
+ * 13. saveAttachmentAs - 另存为附件
+ * 14. replaceCidReferences - 替换 CID 引用
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EmailState,

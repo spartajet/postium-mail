@@ -1,3 +1,18 @@
+//! IMAP 协议实现模块
+//!
+//! 本模块提供 IMAP 协议的完整实现，包括：
+//! - 连接管理（TLS、XOAUTH2 认证）
+//! - 文件夹操作（LIST、SELECT、EXAMINE）
+//! - 邮件获取（FETCH 命令）
+//! - 邮件搜索（SEARCH 命令）
+//! - 邮件标志操作（STORE、MOVE）
+//!
+//! 主要类型：
+//! - `ImapClient`：IMAP 客户端封装
+//! - `FolderInfo`：文件夹信息
+//! - `RawEmailHeader`：邮件头部摘要
+//! - `MailboxInfo`：邮箱状态信息
+
 use crate::domain::folders::SpecialUseFlag;
 use crate::domain::providers::ImapServerConfig;
 use crate::error::MailError;
@@ -19,6 +34,8 @@ pub use util::Xoauth2Authenticator;
 // ─── DTO ───
 
 /// IMAP 文件夹信息（LIST 命令返回）
+///
+/// 包含文件夹的名称、分隔符、属性和特殊用途标记。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct FolderInfo {
     /// 文件夹名称（可能包含 UTF-7 编码）
@@ -36,6 +53,8 @@ pub struct FolderInfo {
 }
 
 /// 邮件头部摘要（UID FETCH 返回的轻量信息）
+///
+/// 包含邮件的基本信息，用于列表展示和快速预览。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RawEmailHeader {
     /// IMAP UID
@@ -54,7 +73,9 @@ pub struct RawEmailHeader {
     pub message_id: Option<String>,
 }
 
-/// 选中文件夹后的邮箱状态信息（SELECT 命令返回）
+/// 选中文件夹后的邮箱状态信息（SELECT/EXAMINE 命令返回）
+///
+/// 包含文件夹的邮件计数和 UID 相关信息。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct MailboxInfo {
     /// 文件夹中的邮件总数
@@ -69,16 +90,27 @@ pub struct MailboxInfo {
     pub uid_next: Option<u32>,
 }
 
-/// IMAP 客户端 — 封装 async-imap，支持 TLS
+/// IMAP 客户端
+///
+/// 封装 async-imap 库，提供 TLS 连接和各种 IMAP 操作。
+/// 支持普通密码登录和 XOAUTH2 认证。
 #[derive(Debug)]
 pub struct ImapClient {
     session: async_imap::Session<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
 }
 
 impl ImapClient {
-    // ─── 连接 ───
+    // ─── 连接管理 ───
 
-    /// 建立 IMAP 连接并登录
+    /// 建立 IMAP 连接并使用密码登录
+    ///
+    /// # 参数
+    /// - `config`: IMAP 服务器配置
+    /// - `email`: 邮箱地址
+    /// - `password`: 密码
+    ///
+    /// # 返回
+    /// 成功时返回已认证的 ImapClient 实例
     pub async fn connect(
         config: &ImapServerConfig,
         email: &str,
@@ -109,7 +141,18 @@ impl ImapClient {
         Ok(Self { session })
     }
 
-    /// 使用 XOAUTH2 登录 (Gmail 等)
+    /// 使用 XOAUTH2 认证连接 IMAP 服务器
+    ///
+    /// # 参数
+    /// - `config`: IMAP 服务器配置
+    /// - `email`: 邮箱地址
+    /// - `access_token`: OAuth2 访问令牌
+    ///
+    /// # 返回
+    /// 成功时返回已认证的 ImapClient 实例
+    ///
+    /// # 适用场景
+    /// Gmail、Outlook 等 OAuth2 认证的服务
     pub async fn connect_xoauth2(
         config: &ImapServerConfig,
         email: &str,
@@ -137,6 +180,13 @@ impl ImapClient {
     // ─── 文件夹操作 ───
 
     /// 获取文件夹列表
+    ///
+    /// # 返回
+    /// 成功时返回文件夹信息列表
+    ///
+    /// # 功能
+    /// - 使用 IMAP LIST 命令获取所有文件夹
+    /// - 解析 RFC 6154 SPECIAL-USE 标记（\All、\Archive、\Drafts、\Flagged、\Junk、\Sent、\Trash、\Important）
     pub async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, MailError> {
         tracing::debug!("IMAP: 列出文件夹");
         let mut list = self
@@ -166,7 +216,17 @@ impl ImapClient {
         Ok(folders)
     }
 
-    /// 选择文件夹
+    /// 选择文件夹（可写模式）
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    ///
+    /// # 返回
+    /// 成功时返回邮箱状态信息
+    ///
+    /// # 功能
+    /// - 使用 IMAP SELECT 命令
+    /// - 使文件夹处于可操作状态（可修改标志）
     pub async fn select_folder(&mut self, folder: &str) -> Result<MailboxInfo, MailError> {
         tracing::debug!(folder, "IMAP: 选择文件夹");
         let mailbox =
@@ -185,8 +245,17 @@ impl ImapClient {
         Ok(info)
     }
 
-    /// 获取文件夹 IMAP 元数据（UIDVALIDITY, UIDNEXT 等）
-    /// 使用 EXAMINE 命令（只读模式）获取正确的 UIDNEXT 值
+    /// 获取文件夹 IMAP 元数据
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    ///
+    /// # 返回
+    /// 成功时返回文件夹元数据
+    ///
+    /// # 功能
+    /// - 使用 IMAP EXAMINE 命令（只读模式）获取正确的 UIDNEXT 值
+    /// - 返回 UIDVALIDITY、UIDNEXT、邮件数量等信息
     pub async fn fetch_folder_metadata(
         &mut self,
         folder: &str,
@@ -230,9 +299,13 @@ impl ImapClient {
         })
     }
 
-    // ─── 标志操作 ───
+    // ─── 邮件标志操作 ───
 
     /// 设置邮件标志
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    /// - `flags`: 标志设置字符串（如 "FLAGS (\Seen)"）
     pub async fn set_flags(&mut self, uid: u32, flags: &str) -> Result<(), MailError> {
         let uid_str = uid.to_string();
         let mut stream = self
@@ -244,20 +317,37 @@ impl ImapClient {
         Ok(())
     }
 
-    /// 添加标志
+    /// 添加邮件标志
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    /// - `flags`: 要添加的标志（如 "\Seen"）
     pub async fn add_flags(&mut self, uid: u32, flags: &str) -> Result<(), MailError> {
         self.set_flags(uid, &format!("+FLAGS ({flags})")).await
     }
 
-    /// 移除标志
+    /// 移除邮件标志
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    /// - `flags`: 要移除的标志（如 "\Seen"）
     pub async fn remove_flags(&mut self, uid: u32, flags: &str) -> Result<(), MailError> {
         self.set_flags(uid, &format!("-FLAGS ({flags})")).await
     }
 
-    /// 移动 UID 到目标文件夹。
+    /// 移动邮件到目标文件夹
     ///
-    /// 优先使用 RFC 6851 UID MOVE；服务器不支持或执行失败时，降级为
-    /// UID COPY 到目标文件夹，再给原邮件添加 \Deleted 标志。不执行 EXPUNGE。
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    /// - `target_folder`: 目标文件夹名称
+    ///
+    /// # 返回
+    /// 成功时返回 ()
+    ///
+    /// # 功能
+    /// - 优先使用 RFC 6851 UID MOVE 命令
+    /// - 服务器不支持时降级为 UID COPY + \Deleted 标志
+    /// - 不执行 EXPUNGE，由调用者决定何时清理
     pub async fn move_uid_to_folder(
         &mut self,
         uid: u32,
@@ -282,6 +372,11 @@ impl ImapClient {
         Ok(())
     }
 
+    /// 复制邮件到目标文件夹
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    /// - `target_folder`: 目标文件夹名称
     async fn copy_uid_to_folder(&mut self, uid: u32, target_folder: &str) -> Result<(), MailError> {
         let uid_str = uid.to_string();
         self.session
@@ -293,13 +388,20 @@ impl ImapClient {
         Ok(())
     }
 
+    /// 标记邮件为已删除
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
     async fn mark_uid_deleted(&mut self, uid: u32) -> Result<(), MailError> {
         self.set_flags(uid, "+FLAGS.SILENT (\\Deleted)").await
     }
 
     // ─── 连接管理 ───
 
-    /// 登出
+    /// 登出 IMAP 服务器
+    ///
+    /// # 返回
+    /// 成功时返回 ()
     pub async fn logout(mut self) -> Result<(), MailError> {
         self.session
             .logout()
@@ -308,7 +410,10 @@ impl ImapClient {
         Ok(())
     }
 
-    /// 获取能力列表
+    /// 获取服务器能力列表
+    ///
+    /// # 返回
+    /// 成功时返回能力字符串列表（如 "IMAP4rev1"、"UIDPLUS"、"MOVE" 等）
     pub async fn capabilities(&mut self) -> Result<Vec<String>, MailError> {
         let caps = self
             .session

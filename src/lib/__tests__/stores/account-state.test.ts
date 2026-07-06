@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 账号状态测试
+ * account-state.test.ts
+ *
+ * 本文件测试账号状态管理器的功能，包括账号列表管理、
+ * 当前活跃账号切换、持久化存储等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 账号列表加载和管理
+ * 2. 活跃账号切换和持久化
+ * 3. 所有账号视图和单账号视图切换
+ * 4. localStorage 持久化和容错处理
+ * 5. 账号删除后的状态回退
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountState } from "$lib/stores/account.svelte";
 import { mockInvoke } from "../mocks/tauri";

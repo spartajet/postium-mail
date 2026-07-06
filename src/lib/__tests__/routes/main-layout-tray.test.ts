@@ -1,3 +1,15 @@
+/**
+ * Postium Mail - 主布局托盘同步测试
+ * main-layout-tray.test.ts
+ *
+ * 本文件测试主布局的托盘同步功能，验证在不同账号视图下
+ * 托盘同步事件触发时调用正确的同步方法。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 所有账号视图下托盘同步调用 syncAllAccounts
+ * 2. 具体账号视图下托盘同步调用 syncAccount
+ */
+
 import { render, waitFor } from "@testing-library/svelte";
 import type { Snippet } from "svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";

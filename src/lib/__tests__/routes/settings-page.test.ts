@@ -1,3 +1,18 @@
+/**
+ * Postium Mail - 设置页面测试
+ * settings-page.test.ts
+ *
+ * 本文件测试设置页面的功能和交互，包括导航切换、
+ * 主题和语言设置、账号管理等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 设置页面默认显示通用分组
+ * 2. 导航切换功能
+ * 3. 主题和语言设置
+ * 4. 账号管理面板
+ * 5. 标题栏和关闭按钮
+ */
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsPage from "../../../routes/settings/+page.svelte";

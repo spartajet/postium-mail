@@ -1,3 +1,14 @@
+/**
+ * Postium Mail - 邮件右键菜单组件测试
+ * EmailContextMenu.test.ts
+ *
+ * 本文件测试邮件右键菜单的功能，包括各种操作的触发。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 重新加载按钮调用 onReload
+ * 2. 菜单关闭后的状态
+ */
+
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 import EmailContextMenu from "$lib/components/email/EmailContextMenu.svelte";
