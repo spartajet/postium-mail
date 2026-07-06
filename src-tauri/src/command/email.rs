@@ -231,6 +231,21 @@ pub async fn list_emails_by_category(
     Ok(result)
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn list_emails_by_category_for_all_accounts(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    category: EmailCategory,
+    page: usize,
+    limit: usize,
+    unread_only: bool,
+) -> Result<EmailListResponse, MailError> {
+    tracing::debug!(category = ?category, page, limit, unread_only, "命令: 按分类列出所有账号邮件");
+    service
+        .list_by_category_for_all_accounts(category, page, limit, unread_only)
+        .await
+}
+
 ///
 /// 获取邮件详情
 ///

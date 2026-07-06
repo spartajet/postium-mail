@@ -1,7 +1,7 @@
 use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::{auth::AuthManager, providers::pool::PROVIDER_POOL};
 use crate::error::MailError;
-use crate::infrastructure::storage::models::emails;
+use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::{
     account_repo, attachment_repo, email_repo, sync_repo,
 };
@@ -120,6 +120,10 @@ pub struct EmailDto {
     pub sender_name: Option<String>,
     /// 发送人邮箱
     pub sender_email: String,
+    /// 账号邮箱
+    pub account_email: Option<String>,
+    /// 账号显示名
+    pub account_display_name: Option<String>,
     /// 邮件内容预览
     pub preview: Option<String>,
     /// 是否已读
@@ -408,46 +412,7 @@ impl EmailService {
             .await?
             .ok_or(MailError::AccountNotFound(account_id))?;
 
-        // 获取 Provider Pool（全局单例）
-        let provider_pool = PROVIDER_POOL
-            .get()
-            .ok_or(MailError::ProviderNotSupported(
-                "未找到provider pool".into(),
-            ))?
-            .clone();
-
-        // 获取指定 Provider
-        let provider = provider_pool
-            .get(&account.provider)
-            .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
-
-        // 获取文件夹映射配置
-        let folder_mapping = provider.folder_mapping();
-
-        // list_by_category 不连接 IMAP，只能用本地已存文件夹名做降级解析：
-        // SPECIAL-USE 置空、no_select=false，仅靠跨语言关键词 + provider 候选名兜底。
-        // 本地文件夹名正是同步（写）路径通过 FolderRegistry 解析后写入 DB 的值，
-        // 故此处与写路径保持一致，避免对中文 Provider（如网易）返回英文默认名导致查不到邮件。
-        let (local_names, known_categories) =
-            local_folder_registry_inputs(&self.db, account_id).await?;
-        let registry = FolderRegistry::builder()
-            .remote_folders(local_names)
-            .known_categories(known_categories)
-            .provider_mapping(folder_mapping)
-            .build();
-        // Starred 已在上方单独处理，这里 category 必为文件夹型分类，from_email_category 不会为 None。
-        let cat = match FolderCategory::from_email_category(&category) {
-            Some(c) => c,
-            None => {
-                return Ok(EmailListResponse {
-                    emails: vec![],
-                    total: 0,
-                    page,
-                    limit,
-                });
-            }
-        };
-        let folders = registry.resolve(cat);
+        let folders = resolve_category_folders_for_account(&self.db, &account, &category).await?;
 
         // 如果没有映射的文件夹，返回空结果
         if folders.is_empty() {
@@ -465,6 +430,71 @@ impl EmailService {
                 .await?;
         Ok(EmailListResponse {
             emails: convert_models_with_attachments(&self.db, emails).await?,
+            total,
+            page,
+            limit,
+        })
+    }
+
+    pub async fn list_by_category_for_all_accounts(
+        &self,
+        category: EmailCategory,
+        page: usize,
+        limit: usize,
+        unread_only: bool,
+    ) -> Result<EmailListResponse, MailError> {
+        if category == EmailCategory::Starred {
+            let (emails, total) =
+                email_repo::list_starred_all_accounts(&self.db, page, limit, unread_only).await?;
+            return Ok(EmailListResponse {
+                emails: convert_models_with_account_display(&self.db, emails).await?,
+                total,
+                page,
+                limit,
+            });
+        }
+
+        let accounts = account_repo::list(&self.db).await?;
+        let mut filters = Vec::new();
+        let mut failures = Vec::new();
+
+        for account in accounts {
+            match resolve_category_folders_for_account(&self.db, &account, &category).await {
+                Ok(folders) if !folders.is_empty() => {
+                    filters.push(email_repo::AccountFolderFilter {
+                        account_id: account.id,
+                        folders,
+                    });
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        account_id = account.id,
+                        error = %err,
+                        "所有账号分类查询跳过异常账号"
+                    );
+                    failures.push(err);
+                }
+            }
+        }
+
+        if filters.is_empty() {
+            if let Some(err) = failures.into_iter().next() {
+                return Err(err);
+            }
+            return Ok(EmailListResponse {
+                emails: Vec::new(),
+                total: 0,
+                page,
+                limit,
+            });
+        }
+
+        let (emails, total) =
+            email_repo::list_by_account_folder_filters(&self.db, filters, page, limit, unread_only)
+                .await?;
+        Ok(EmailListResponse {
+            emails: convert_models_with_account_display(&self.db, emails).await?,
             total,
             page,
             limit,
@@ -526,7 +556,7 @@ impl EmailService {
                 .await?;
                 let attachments = list_dtos_by_email(&self.db, email_id).await?;
                 Ok(ReloadEmailResult::Reloaded {
-                    email: email_model_to_detail(updated, attachments),
+                    email: email_model_to_detail_with_account(updated, attachments, &account),
                 })
             }
             None => {
@@ -905,6 +935,33 @@ pub(crate) async fn local_folder_registry_inputs(
     Ok((remote, known_categories))
 }
 
+async fn resolve_category_folders_for_account(
+    db: &DbConn,
+    account: &crate::infrastructure::storage::models::accounts::Model,
+    category: &EmailCategory,
+) -> Result<Vec<String>, MailError> {
+    let provider_pool = PROVIDER_POOL
+        .get()
+        .ok_or(MailError::ProviderNotSupported(
+            "未找到provider pool".into(),
+        ))?
+        .clone();
+    let provider = provider_pool
+        .get(&account.provider)
+        .ok_or(MailError::ProviderNotSupported(account.provider.clone()))?;
+    let (local_names, known_categories) = local_folder_registry_inputs(db, account.id).await?;
+    let registry = FolderRegistry::builder()
+        .remote_folders(local_names)
+        .known_categories(known_categories)
+        .provider_mapping(provider.folder_mapping())
+        .build();
+    let cat = match FolderCategory::from_email_category(category) {
+        Some(cat) => cat,
+        None => return Ok(Vec::new()),
+    };
+    Ok(registry.resolve(cat))
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // 辅助函数
 // ═════════════════════════════════════════════════════════════════════════
@@ -941,6 +998,23 @@ async fn convert_models_with_attachments(
         .collect())
 }
 
+async fn convert_models_with_account_display(
+    db: &DbConn,
+    emails: Vec<emails::Model>,
+) -> Result<Vec<EmailDto>, MailError> {
+    let mut dtos = convert_models_with_attachments(db, emails).await?;
+    let accounts = account_repo::list(db).await?;
+
+    for dto in &mut dtos {
+        if let Some(account) = accounts.iter().find(|account| account.id == dto.account_id) {
+            dto.account_email = Some(account.email.clone());
+            dto.account_display_name = account.display_name.clone();
+        }
+    }
+
+    Ok(dtos)
+}
+
 fn email_model_to_dto(email: &emails::Model, has_attachments: bool) -> EmailDto {
     EmailDto {
         id: email.id,
@@ -950,6 +1024,8 @@ fn email_model_to_dto(email: &emails::Model, has_attachments: bool) -> EmailDto 
         subject: email.subject.clone(),
         sender_name: email.sender_name.clone(),
         sender_email: email.sender_email.clone(),
+        account_email: None,
+        account_display_name: None,
         preview: email.preview.clone(),
         is_read: email.is_read.unwrap_or(false),
         is_starred: email.is_starred.unwrap_or(false),
@@ -969,4 +1045,15 @@ fn email_model_to_detail(email: emails::Model, attachments: Vec<AttachmentDto>) 
         body_html: email.body_html,
         attachments,
     }
+}
+
+fn email_model_to_detail_with_account(
+    email: emails::Model,
+    attachments: Vec<AttachmentDto>,
+    account: &accounts::Model,
+) -> EmailDetail {
+    let mut detail = email_model_to_detail(email, attachments);
+    detail.email.account_email = Some(account.email.clone());
+    detail.email.account_display_name = account.display_name.clone();
+    detail
 }

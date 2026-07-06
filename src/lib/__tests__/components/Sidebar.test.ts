@@ -5,10 +5,14 @@ import type { AccountDto, FolderStat } from "$lib/bindings";
 
 const loadAccounts = vi.fn();
 const setActive = vi.fn();
+const setAllAccounts = vi.fn();
 const loadEmailsByCategory = vi.fn();
+const loadEmailsByCategoryForAllAccounts = vi.fn();
 const deselectEmail = vi.fn();
 const syncAccount = vi.fn();
+const syncAllAccounts = vi.fn();
 const loadFolderStats = vi.fn();
+const loadFolderStatsForAllAccounts = vi.fn();
 
 const mocks = vi.hoisted(() => ({
     goto: vi.fn(),
@@ -30,6 +34,7 @@ const account: AccountDto = {
 };
 
 let activeAccountId: number | null = 1;
+let isAllAccounts = false;
 let folderStats: FolderStat[] = [];
 
 vi.mock("$app/navigation", () => ({
@@ -78,6 +83,9 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
 vi.mock("$lib/stores/account.svelte", () => ({
     getAccountState: () => ({
         accounts: [account],
+        get isAllAccounts() {
+            return isAllAccounts;
+        },
         get activeAccountId() {
             return activeAccountId;
         },
@@ -86,6 +94,7 @@ vi.mock("$lib/stores/account.svelte", () => ({
         },
         loadAccounts,
         setActive,
+        setAllAccounts,
     }),
 }));
 
@@ -93,6 +102,7 @@ vi.mock("$lib/stores/email.svelte", () => ({
     getEmailState: () => ({
         currentFolder: "inbox",
         loadEmailsByCategory,
+        loadEmailsByCategoryForAllAccounts,
         deselectEmail,
     }),
 }));
@@ -104,7 +114,9 @@ vi.mock("$lib/stores/sync.svelte", () => ({
             return folderStats;
         },
         syncAccount,
+        syncAllAccounts,
         loadFolderStats,
+        loadFolderStatsForAllAccounts,
     }),
 }));
 
@@ -112,6 +124,7 @@ describe("Sidebar unread badges", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         activeAccountId = 1;
+        isAllAccounts = false;
         folderStats = [
             { folder: "inbox", total: 10, unread: 3 },
             { folder: "starred", total: 4, unread: 2 },
@@ -156,5 +169,53 @@ describe("Sidebar unread badges", () => {
 
         expect(mocks.openSettingsWindow).toHaveBeenCalledOnce();
         expect(mocks.goto).toHaveBeenCalledWith("/settings");
+    });
+
+    it("账号下拉显示所有账号选项并在点击后切换到聚合视图", async () => {
+        render(Sidebar);
+
+        await fireEvent.click(screen.getByTestId("account-switcher"));
+        await fireEvent.click(screen.getByTestId("account-option-all"));
+
+        expect(setAllAccounts).toHaveBeenCalledOnce();
+        expect(deselectEmail).toHaveBeenCalledOnce();
+        expect(loadEmailsByCategoryForAllAccounts).toHaveBeenCalledWith(
+            "inbox",
+        );
+        expect(loadFolderStatsForAllAccounts).toHaveBeenCalledOnce();
+    });
+
+    it("所有账号视图下点击文件夹时加载所有账号邮件", async () => {
+        isAllAccounts = true;
+        activeAccountId = null;
+
+        render(Sidebar);
+
+        expect(screen.getByTestId("active-account-label").textContent).toBe(
+            "所有账号",
+        );
+
+        await fireEvent.click(screen.getByTestId("folder-starred"));
+
+        expect(loadEmailsByCategoryForAllAccounts).toHaveBeenCalledWith(
+            "starred",
+        );
+        expect(loadEmailsByCategory).not.toHaveBeenCalled();
+    });
+
+    it("所有账号视图下同步后刷新当前分类和聚合统计", async () => {
+        isAllAccounts = true;
+        activeAccountId = null;
+
+        render(Sidebar);
+
+        await fireEvent.click(screen.getByTitle("同步"));
+
+        expect(syncAllAccounts).toHaveBeenCalledOnce();
+        expect(loadEmailsByCategoryForAllAccounts).toHaveBeenCalledWith(
+            "inbox",
+        );
+        expect(loadFolderStatsForAllAccounts).toHaveBeenCalled();
+        expect(syncAccount).not.toHaveBeenCalled();
     });
 });

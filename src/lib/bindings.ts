@@ -334,6 +334,7 @@ export const commands = {
 	 *  按分类加载邮件列表
 	 */
 	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number, unreadOnly: boolean) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit, unreadOnly })),
+	listEmailsByCategoryForAllAccounts: (category: EmailCategory, page: number, limit: number, unreadOnly: boolean) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category_for_all_accounts", { category, page, limit, unreadOnly })),
 	/**
 	 *  获取邮件详情
 	 * 
@@ -858,6 +859,8 @@ export const commands = {
 	 *  - 支持文件夹颜色配置
 	 */
 	getFolderStats: (accountId: number) => typedError<FolderStat[], MailError>(__TAURI_INVOKE("get_folder_stats", { accountId })),
+	getFolderStatsForAllAccounts: () => typedError<FolderStat[], MailError>(__TAURI_INVOKE("get_folder_stats_for_all_accounts")),
+	syncAllAccounts: () => typedError<SyncAllAccountsResult, MailError>(__TAURI_INVOKE("sync_all_accounts")),
 	/**
 	 *  检测邮箱服务商
 	 * 
@@ -1774,6 +1777,10 @@ export type EmailDto = {
 	sender_name: string | null,
 	// 发送人邮箱
 	sender_email: string,
+	// 账号邮箱
+	account_email: string | null,
+	// 账号显示名
+	account_display_name: string | null,
 	// 邮件内容预览
 	preview: string | null,
 	// 是否已读
@@ -1959,6 +1966,8 @@ export type ReloadEmailResult = { status: "reloaded"; email: EmailDetail } | { s
 export type SearchResult = {
 	id: number,
 	account_id: number,
+	account_email: string | null,
+	account_display_name: string | null,
 	folder: string,
 	subject: string | null,
 	sender_email: string,
@@ -2012,6 +2021,18 @@ export type SendEmailRequest = {
 	body_html: string,
 	// 纯文本正文
 	body_text: string,
+};
+
+export type SyncAccountFailure = {
+	account_id: number,
+	email: string | null,
+	message: string,
+};
+
+export type SyncAllAccountsResult = {
+	total: number,
+	succeeded: number[],
+	failed: SyncAccountFailure[],
 };
 
 /**

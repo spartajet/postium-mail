@@ -60,6 +60,7 @@ import type {
   HistorySyncState,
   InitialSyncRange,
   OlderSyncResult,
+  SyncAllAccountsResult,
   SyncProgress,
 } from "$lib/bindings";
 
@@ -264,6 +265,27 @@ export class SyncState {
     }
   }
 
+  async syncAllAccounts(): Promise<SyncAllAccountsResult | null> {
+    this.syncing = true;
+    this.error = null;
+
+    try {
+      const result = await commands.syncAllAccounts();
+
+      if (result.status === "error") {
+        this.error = result.error.message as string;
+        return null;
+      }
+
+      return result.data;
+    } catch (e: unknown) {
+      this.error = formatError(e);
+      return null;
+    } finally {
+      this.syncing = false;
+    }
+  }
+
   async syncAccountWithRange(accountId: number, range: InitialSyncRange) {
     // 设置同步中状态
     this.syncing = true;
@@ -382,6 +404,18 @@ export class SyncState {
     } catch (e: unknown) {
       // 文件夹统计加载失败不影响核心功能，仅在控制台输出错误
       console.error("Failed to load folder stats:", e);
+    }
+  }
+
+  async loadFolderStatsForAllAccounts() {
+    try {
+      const result = await commands.getFolderStatsForAllAccounts();
+
+      if (result.status === "ok") {
+        this.folderStats = result.data;
+      }
+    } catch (e: unknown) {
+      console.error("Failed to load folder stats for all accounts:", e);
     }
   }
 }

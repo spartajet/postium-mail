@@ -19,6 +19,60 @@ async fn seed_account(db: &DbConn) {
     .unwrap();
 }
 
+async fn seed_two_accounts(db: &DbConn) {
+    db.call(|conn| {
+        conn.execute(
+            "INSERT INTO accounts (
+                id, name, email, display_name, provider, auth_type, account_type, created_at, updated_at
+            ) VALUES
+                (1, 'Work', 'work@example.com', 'Work Mail', 'gmail', 'password', 'work', 1, 1),
+                (2, 'Personal', 'personal@example.com', 'Personal Mail', 'outlook', 'password', 'personal', 2, 2)",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+async fn insert_repo_email(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    uid: u32,
+    subject: &str,
+    sent_at: i64,
+    is_read: bool,
+    is_starred: bool,
+) {
+    let folder = folder.to_string();
+    let subject = subject.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO emails (
+                account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                recipient_emails, preview, body_text, body_html,
+                is_read, is_starred, is_draft, is_answered, is_deleted,
+                sent_at, received_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, 'Sender', 'sender@example.com',
+                'to@example.com', '', '', '', ?6, ?7, 0, 0, 0, ?8, ?8, ?8, ?8)",
+            rusqlite::params![
+                account_id,
+                folder,
+                uid,
+                format!("<repo-{account_id}-{uid}@example.com>"),
+                subject,
+                if is_read { 1 } else { 0 },
+                if is_starred { 1 } else { 0 },
+                sent_at,
+            ],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
 fn header(uid: u32, subject: &str, sent_at: i64) -> EmailHeader {
     EmailHeader {
         uid,
@@ -304,4 +358,169 @@ async fn distinct_folders_by_account_should_return_existing_non_deleted_folders(
         .unwrap();
 
     assert_eq!(folders, vec!["INBOX".to_string()]);
+}
+
+#[tokio::test]
+async fn list_by_account_folder_filters_should_merge_sort_and_page_across_accounts() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_two_accounts(&db).await;
+    insert_repo_email(&db, 1, "INBOX", 101, "older work inbox", 100, false, false).await;
+    insert_repo_email(
+        &db,
+        2,
+        "Inbox",
+        201,
+        "newer personal inbox",
+        300,
+        false,
+        false,
+    )
+    .await;
+    insert_repo_email(&db, 1, "Sent", 102, "work sent ignored", 400, false, false).await;
+
+    let (items, total) = email_repo::list_by_account_folder_filters(
+        &db,
+        vec![
+            email_repo::AccountFolderFilter {
+                account_id: 1,
+                folders: vec!["INBOX".to_string()],
+            },
+            email_repo::AccountFolderFilter {
+                account_id: 2,
+                folders: vec!["Inbox".to_string()],
+            },
+        ],
+        1,
+        1,
+        false,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(total, 2);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].subject.as_deref(), Some("newer personal inbox"));
+    assert_eq!(items[0].account_id, 2);
+}
+
+#[tokio::test]
+async fn list_by_account_folder_filters_should_apply_unread_filter() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_two_accounts(&db).await;
+    insert_repo_email(&db, 1, "INBOX", 101, "read work inbox", 100, true, false).await;
+    insert_repo_email(
+        &db,
+        2,
+        "Inbox",
+        201,
+        "unread personal inbox",
+        200,
+        false,
+        false,
+    )
+    .await;
+    insert_repo_email(
+        &db,
+        2,
+        "Archive",
+        202,
+        "unread archive ignored",
+        300,
+        false,
+        false,
+    )
+    .await;
+
+    let (items, total) = email_repo::list_by_account_folder_filters(
+        &db,
+        vec![
+            email_repo::AccountFolderFilter {
+                account_id: 1,
+                folders: vec!["INBOX".to_string()],
+            },
+            email_repo::AccountFolderFilter {
+                account_id: 2,
+                folders: vec!["Inbox".to_string()],
+            },
+        ],
+        1,
+        50,
+        true,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(total, 1);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].subject.as_deref(), Some("unread personal inbox"));
+    assert_eq!(items[0].account_id, 2);
+}
+
+#[tokio::test]
+async fn list_by_account_folder_filters_should_use_stable_tie_breaker_for_equal_sent_at() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_two_accounts(&db).await;
+    insert_repo_email(
+        &db,
+        1,
+        "INBOX",
+        101,
+        "older inserted inbox",
+        200,
+        false,
+        false,
+    )
+    .await;
+    insert_repo_email(
+        &db,
+        2,
+        "Inbox",
+        201,
+        "newer inserted inbox",
+        200,
+        false,
+        false,
+    )
+    .await;
+
+    let (items, total) = email_repo::list_by_account_folder_filters(
+        &db,
+        vec![
+            email_repo::AccountFolderFilter {
+                account_id: 1,
+                folders: vec!["INBOX".to_string()],
+            },
+            email_repo::AccountFolderFilter {
+                account_id: 2,
+                folders: vec!["Inbox".to_string()],
+            },
+        ],
+        1,
+        1,
+        false,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(total, 2);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].subject.as_deref(), Some("newer inserted inbox"));
+    assert_eq!(items[0].account_id, 2);
+}
+
+#[tokio::test]
+async fn list_starred_all_accounts_should_apply_unread_filter() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+    seed_two_accounts(&db).await;
+    insert_repo_email(&db, 1, "INBOX", 101, "read starred", 100, true, true).await;
+    insert_repo_email(&db, 2, "Archive", 201, "unread starred", 200, false, true).await;
+
+    let (items, total) = email_repo::list_starred_all_accounts(&db, 1, 50, true)
+        .await
+        .unwrap();
+
+    assert_eq!(total, 1);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].subject.as_deref(), Some("unread starred"));
+    assert_eq!(items[0].account_id, 2);
 }

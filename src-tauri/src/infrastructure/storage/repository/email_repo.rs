@@ -104,6 +104,12 @@ pub struct EmailWrite {
     pub updated_at: i64,
 }
 
+#[derive(Clone, Debug)]
+pub struct AccountFolderFilter {
+    pub account_id: i32,
+    pub folders: Vec<String>,
+}
+
 /// 将数据库行映射为 `emails::Model`
 ///
 /// 同时将整数形式的布尔标记字段转换为 `Option<bool>`，
@@ -363,6 +369,114 @@ pub async fn list_starred(
                 map_email,
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((items, total))
+    })
+    .await
+}
+
+pub async fn list_starred_all_accounts(
+    db: &DbConn,
+    page: usize,
+    limit: usize,
+    unread_only: bool,
+) -> Result<(Vec<emails::Model>, u64), MailError> {
+    db.call(move |conn| {
+        let unread_value = if unread_only { 1 } else { 0 };
+        let total = conn.query_row(
+            "SELECT COUNT(*)
+             FROM emails
+             WHERE is_starred = 1 AND is_deleted = 0
+               AND (?1 = 0 OR is_read = 0 OR is_read IS NULL)",
+            [unread_value],
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+
+        let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE is_starred = 1 AND is_deleted = 0
+               AND (?1 = 0 OR is_read = 0 OR is_read IS NULL)
+             ORDER BY sent_at DESC, id DESC
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let items = stmt
+            .query_map(
+                rusqlite::params![unread_value, limit as i64, offset],
+                map_email,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok((items, total))
+    })
+    .await
+}
+
+pub async fn list_by_account_folder_filters(
+    db: &DbConn,
+    filters: Vec<AccountFolderFilter>,
+    page: usize,
+    limit: usize,
+    unread_only: bool,
+) -> Result<(Vec<emails::Model>, u64), MailError> {
+    let filters = filters
+        .into_iter()
+        .filter(|filter| !filter.folders.is_empty())
+        .collect::<Vec<_>>();
+
+    if filters.is_empty() {
+        return Ok((Vec::new(), 0));
+    }
+
+    db.call(move |conn| {
+        let mut values = Vec::<Value>::new();
+        let mut groups = Vec::<String>::new();
+
+        for filter in &filters {
+            let in_clause = placeholders(filter.folders.len());
+            groups.push(format!("(account_id = ? AND folder IN ({in_clause}))"));
+            values.push(Value::from(filter.account_id));
+            values.extend(filter.folders.iter().cloned().map(Value::from));
+        }
+
+        let where_groups = groups.join(" OR ");
+        let unread_value = if unread_only { 1 } else { 0 };
+        let count_sql = format!(
+            "SELECT COUNT(*)
+             FROM emails
+             WHERE ({where_groups}) AND is_deleted = 0
+               AND (? = 0 OR is_read = 0 OR is_read IS NULL)"
+        );
+        let mut count_values = values.clone();
+        count_values.push(Value::from(unread_value));
+        let total = conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(count_values.iter()),
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+
+        let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+        let select_sql = format!(
+            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                    is_read, is_starred, is_draft, is_answered, is_deleted,
+                    sent_at, received_at, created_at, updated_at
+             FROM emails
+             WHERE ({where_groups}) AND is_deleted = 0
+               AND (? = 0 OR is_read = 0 OR is_read IS NULL)
+             ORDER BY sent_at DESC, id DESC
+             LIMIT ? OFFSET ?"
+        );
+        let mut select_values = count_values;
+        select_values.push(Value::from(limit as i64));
+        select_values.push(Value::from(offset));
+        let mut stmt = conn.prepare(&select_sql)?;
+        let items = stmt
+            .query_map(rusqlite::params_from_iter(select_values.iter()), map_email)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
         Ok((items, total))
     })
     .await

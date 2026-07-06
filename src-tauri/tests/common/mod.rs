@@ -12,7 +12,7 @@ use postium_mail_lib::service::account_connection::{
 };
 use postium_mail_lib::service::email_service::EmailService;
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
-use postium_mail_lib::service::{AccountService, LabelService};
+use postium_mail_lib::service::{AccountService, LabelService, SyncService};
 
 pub mod real_mail;
 
@@ -31,6 +31,7 @@ pub struct TestServices {
     pub account_service: AccountService,
     pub email_service: EmailService,
     pub label_service: LabelService,
+    pub sync_service: SyncService,
 }
 
 struct NoopMailRemoteOperator;
@@ -112,6 +113,7 @@ impl TestServices {
                 mail_remote,
             ),
             label_service: LabelService::new(db.clone()),
+            sync_service: SyncService::new(db.clone(), auth.clone()),
             db,
             auth,
         }
@@ -134,6 +136,7 @@ impl TestServices {
                 mail_remote,
             ),
             label_service: LabelService::new(db.clone()),
+            sync_service: SyncService::new(db.clone(), auth.clone()),
             db,
             auth,
         }

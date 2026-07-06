@@ -55,7 +55,7 @@
 use crate::domain::sync::{FolderStat, InitialSyncRange};
 use crate::error::MailError;
 use crate::service::email_service::EmailCategory;
-use crate::service::sync_service::{HistorySyncState, OlderSyncResult};
+use crate::service::sync_service::{HistorySyncState, OlderSyncResult, SyncAllAccountsResult};
 
 ///
 /// 手动同步账号
@@ -296,4 +296,23 @@ pub async fn get_folder_stats(
     // 3. 计算未读数量
     // 4. 返回统计信息列表
     service.get_folder_stats(account_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_folder_stats_for_all_accounts(
+    service: tauri::State<'_, crate::service::SyncService>,
+) -> Result<Vec<FolderStat>, MailError> {
+    tracing::debug!("命令: 获取所有账号文件夹统计");
+    service.get_folder_stats_for_all_accounts().await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_all_accounts(
+    service: tauri::State<'_, crate::service::SyncService>,
+    app_handle: tauri::AppHandle,
+) -> Result<SyncAllAccountsResult, MailError> {
+    tracing::info!("命令: 同步所有账号");
+    service.sync_all_accounts_with_progress(app_handle).await
 }
