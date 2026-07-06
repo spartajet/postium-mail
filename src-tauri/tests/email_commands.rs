@@ -233,41 +233,6 @@ fn build_email_rejects_invalid_attachment_content_type() {
 }
 
 #[test]
-fn build_email_reports_attachment_read_failure() {
-    let account = account_model_with_smtp("gmail", None, None, None);
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("hello.txt");
-    std::fs::write(&path, b"hello").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
-        permissions.set_mode(0o000);
-        std::fs::set_permissions(&path, permissions).unwrap();
-    }
-    let req = SendEmailRequest {
-        account_id: account.id,
-        to: vec!["to@example.com".to_string()],
-        cc: vec![],
-        bcc: vec![],
-        subject: "With attachment".to_string(),
-        body_html: "<p>Body</p>".to_string(),
-        body_text: "Body".to_string(),
-        attachments: vec![ComposeAttachmentInput {
-            path: path.to_string_lossy().to_string(),
-            filename: Some("hello.txt".to_string()),
-            content_type: Some("text/plain".to_string()),
-            size: Some(5),
-        }],
-        draft_id: None,
-    };
-
-    let err = build_email(&account, &req).err().unwrap();
-
-    assert!(matches!(err, MailError::InvalidParam(message) if message.contains("读取附件失败")));
-}
-
-#[test]
 fn build_email_attachment_content_type_appears_in_raw() {
     let account = account_model_with_smtp("gmail", None, None, None);
     let dir = tempfile::tempdir().unwrap();

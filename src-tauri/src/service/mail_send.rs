@@ -177,6 +177,10 @@ pub fn describe_local_attachment_sync(path: &str) -> Result<LocalAttachmentDraft
     })
 }
 
+fn read_attachment_bytes(path: &str) -> Result<Vec<u8>, MailError> {
+    std::fs::read(path).map_err(|e| MailError::InvalidParam(format!("读取附件失败: {path}: {e}")))
+}
+
 pub fn guess_content_type(filename: &str) -> String {
     match Path::new(filename)
         .extension()
@@ -361,9 +365,7 @@ pub fn build_email(
                     .content_type
                     .as_deref()
                     .unwrap_or(&described.content_type);
-                let bytes = std::fs::read(&input.path).map_err(|e| {
-                    MailError::InvalidParam(format!("读取附件失败: {}: {e}", input.path))
-                })?;
+                let bytes = read_attachment_bytes(&input.path)?;
                 let attachment = Attachment::new(filename)
                     .body(Body::new(bytes), content_type_header(content_type)?);
                 mixed = mixed.singlepart(attachment);
@@ -379,4 +381,26 @@ pub fn build_email(
         envelope,
         message,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_attachment_bytes;
+    use crate::error::MailError;
+    use uuid::Uuid;
+
+    #[test]
+    fn read_attachment_bytes_reports_read_failure_for_missing_file() {
+        let path = std::env::temp_dir().join(format!(
+            "postium-mail-missing-attachment-{}",
+            Uuid::new_v4()
+        ));
+        let path = path.to_string_lossy().into_owned();
+
+        let err = read_attachment_bytes(&path).err().unwrap();
+
+        assert!(
+            matches!(err, MailError::InvalidParam(message) if message.contains("读取附件失败"))
+        );
+    }
 }
