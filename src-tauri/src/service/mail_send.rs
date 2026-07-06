@@ -8,6 +8,7 @@ use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::SendEmailRequest;
 use async_trait::async_trait;
 use lettre::Message;
+use lettre::address::{Address, Envelope};
 use lettre::message::header::{ContentType, Date, MessageId};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,7 @@ pub struct SendEmailResponse {
 pub struct BuiltEmail {
     pub message_id: String,
     pub raw: Vec<u8>,
+    pub envelope: Envelope,
     pub message: Message,
 }
 
@@ -79,7 +81,7 @@ impl SmtpEmailSender for RealSmtpEmailSender {
             config,
             account_email,
             credentials,
-            email.message.clone(),
+            email,
         )
         .await
     }
@@ -269,6 +271,12 @@ fn content_type_header(value: &str) -> Result<ContentType, MailError> {
         .map_err(|e| MailError::InvalidParam(format!("附件 Content-Type 无效: {value}: {e}")))
 }
 
+fn parse_envelope_address(addr: &str, label: &str) -> Result<Address, MailError> {
+    addr.trim()
+        .parse()
+        .map_err(|e| MailError::InvalidParam(format!("{label}无效 '{}': {e}", addr.trim())))
+}
+
 pub fn build_email(
     account: &accounts::Model,
     req: &SendEmailRequest,
@@ -286,6 +294,12 @@ pub fn build_email(
         .as_ref()
         .map(|name| format!("{name} <{}>", account.email))
         .unwrap_or_else(|| account.email.clone());
+    let envelope_from = account
+        .email
+        .trim()
+        .parse::<Address>()
+        .map_err(|e| MailError::InvalidParam(format!("发件人地址无效: {e}")))?;
+    let mut envelope_recipients = Vec::new();
 
     let mut builder = Message::builder()
         .from(
@@ -300,16 +314,21 @@ pub fn build_email(
 
     for addr in &req.to {
         if !addr.trim().is_empty() {
-            builder = builder.to(addr.trim().parse().map_err(|e| {
+            let mailbox = addr.trim().parse().map_err(|e| {
                 MailError::InvalidParam(format!("收件人无效 '{}': {e}", addr.trim()))
-            })?);
+            })?;
+            builder = builder.to(mailbox);
+            envelope_recipients.push(parse_envelope_address(addr, "收件人")?);
         }
     }
     for addr in &req.cc {
         if !addr.trim().is_empty() {
-            builder = builder.cc(addr.trim().parse().map_err(|e| {
-                MailError::InvalidParam(format!("抄送无效 '{}': {e}", addr.trim()))
-            })?);
+            let mailbox = addr
+                .trim()
+                .parse()
+                .map_err(|e| MailError::InvalidParam(format!("抄送无效 '{}': {e}", addr.trim())))?;
+            builder = builder.cc(mailbox);
+            envelope_recipients.push(parse_envelope_address(addr, "抄送")?);
         }
     }
     for addr in &req.bcc {
@@ -318,8 +337,11 @@ pub fn build_email(
                 .trim()
                 .parse()
                 .map_err(|e| MailError::InvalidParam(format!("密送无效 '{}': {e}", addr.trim())))?;
+            envelope_recipients.push(parse_envelope_address(addr, "密送")?);
         }
     }
+    let envelope = Envelope::new(Some(envelope_from), envelope_recipients)
+        .map_err(|e| MailError::InvalidParam(format!("构建 SMTP envelope 失败: {e}")))?;
 
     let body_part = build_body_part(req);
     let message = builder
@@ -354,6 +376,7 @@ pub fn build_email(
     Ok(BuiltEmail {
         message_id,
         raw,
+        envelope,
         message,
     })
 }

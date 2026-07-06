@@ -26,6 +26,7 @@
 use crate::domain::auth::Credentials as MailCredentials;
 use crate::domain::providers::{SmtpServerConfig, SslMode};
 use crate::error::MailError;
+use crate::service::mail_send::BuiltEmail;
 use lettre::message::MultiPart;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
@@ -148,7 +149,7 @@ impl SmtpClient {
         config: &SmtpServerConfig,
         account_email: &str,
         credentials: &MailCredentials,
-        message: Message,
+        email: &BuiltEmail,
     ) -> Result<(), MailError> {
         let (credentials, mechanisms) = match credentials {
             MailCredentials::Password(password) => (
@@ -163,7 +164,7 @@ impl SmtpClient {
         let transport = Self::build_transport(config, credentials, mechanisms)?;
         tracing::debug!(host = %config.host, "SMTP: 正在发送已构建邮件");
         transport
-            .send(message)
+            .send_raw(&email.envelope, &email.raw)
             .await
             .map_err(|e| MailError::SmtpSendFailed(format!("发送失败: {e}")))?;
         Ok(())
