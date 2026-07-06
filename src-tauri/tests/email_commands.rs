@@ -423,7 +423,7 @@ fn send_request(account_id: i32) -> SendEmailRequest {
 
 #[derive(Default)]
 struct RecordingDraftWriter {
-    appended: Mutex<Vec<(String, String)>>,
+    appended: Mutex<Vec<(String, String, String)>>,
     deleted: Mutex<Vec<(String, u32)>>,
     append_fail_with: Mutex<Option<MailError>>,
     delete_fail_with: Mutex<Option<MailError>>,
@@ -436,10 +436,11 @@ impl DraftRemoteWriter for RecordingDraftWriter {
         if let Some(error) = self.append_fail_with.lock().unwrap().take() {
             return Err(error);
         }
-        self.appended
-            .lock()
-            .unwrap()
-            .push((req.folder, String::from_utf8_lossy(&req.raw).into_owned()));
+        self.appended.lock().unwrap().push((
+            req.folder,
+            req.message_id,
+            String::from_utf8_lossy(&req.raw).into_owned(),
+        ));
         let mut next_uid = self.next_uid.lock().unwrap();
         if *next_uid == 0 {
             *next_uid = 7001;
@@ -747,6 +748,57 @@ async fn draft_save_replaces_previous_local_draft_and_attempts_remote_delete() {
     let deleted = svc.draft_writer.deleted.lock().unwrap();
     assert_eq!(deleted[0].0, first.folder);
     assert_eq!(deleted[0].1, 7001);
+}
+
+#[tokio::test]
+async fn draft_save_reports_cleanup_error_and_keeps_old_local_when_old_remote_delete_fails() {
+    let svc = new_draft_test_services().await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let first = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "first".to_string(),
+            body_html: "".to_string(),
+            body_text: "first".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    *svc.draft_writer.delete_fail_with.lock().unwrap() = Some(MailError::ImapConnectionFailed(
+        "simulated cleanup failure".to_string(),
+    ));
+
+    let second = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: Some(first.draft_id),
+            account_id,
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "second".to_string(),
+            body_html: "".to_string(),
+            body_text: "second".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(first.draft_id, second.draft_id);
+    assert!(
+        second
+            .cleanup_error
+            .as_deref()
+            .is_some_and(|message| message.contains("旧远端草稿删除失败"))
+    );
+    assert_eq!(draft_email_count(&svc, account_id).await, 2);
+    assert!(draft_exists(&svc, first.draft_id).await);
+    assert!(draft_exists(&svc, second.draft_id).await);
 }
 
 #[tokio::test]

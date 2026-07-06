@@ -45,6 +45,7 @@ pub struct DraftAppendRequest {
     pub account: accounts::Model,
     pub folder: String,
     pub credentials: Credentials,
+    pub message_id: String,
     pub raw: Vec<u8>,
 }
 
@@ -74,12 +75,23 @@ impl DraftRemoteWriter for RealDraftRemoteWriter {
                 ImapClient::connect_xoauth2(&imap_config, &req.account.email, access_token).await?
             }
         };
-        let predicted_uid = client.fetch_folder_metadata(&req.folder).await?.uidnext as u32;
-        let result = client
-            .append_email_with_flags(&req.folder, Some("(\\Draft \\Seen)"), &req.raw)
-            .await;
+        let result = async {
+            client
+                .append_email_with_flags(&req.folder, Some("(\\Draft \\Seen)"), &req.raw)
+                .await?;
+            client
+                .find_uid_by_message_id(&req.folder, &req.message_id)
+                .await?
+                .ok_or_else(|| {
+                    MailError::ImapSearchFailed(format!(
+                        "追加草稿后无法确认远端 UID: {}",
+                        req.message_id
+                    ))
+                })
+        }
+        .await;
         client.logout().await.ok();
-        result.map(|_| predicted_uid)
+        result
     }
 
     async fn delete_draft(
@@ -139,6 +151,7 @@ pub async fn save_draft(
             account: account.clone(),
             folder: folder.clone(),
             credentials,
+            message_id: built.message_id.clone(),
             raw: built.raw,
         })
         .await?;
@@ -225,28 +238,23 @@ async fn cleanup_old_draft(
         Err(err) => return Some(err.to_string()),
     };
 
-    let remote_err = if old.uid == 0 {
-        None
-    } else {
-        service
+    if old.uid != 0
+        && let Err(err) = service
             .draft_writer()
             .delete_draft(account, &credentials, &old.folder, old.uid)
             .await
-            .err()
-            .map(|err| err.to_string())
-    };
+    {
+        return Some(format!("旧远端草稿删除失败: {err}"));
+    }
+
     let local_err = email_repo::delete_one_with_attachments(service.db_conn(), draft_id)
         .await
         .err()
         .map(|err| err.to_string());
 
-    match (remote_err, local_err) {
-        (None, None) => None,
-        (Some(remote), None) => Some(format!("旧远端草稿删除失败: {remote}")),
-        (None, Some(local)) => Some(format!("旧本地草稿删除失败: {local}")),
-        (Some(remote), Some(local)) => Some(format!(
-            "旧远端草稿删除失败: {remote}; 旧本地草稿删除失败: {local}"
-        )),
+    match local_err {
+        None => None,
+        Some(local) => Some(format!("旧本地草稿删除失败: {local}")),
     }
 }
 
