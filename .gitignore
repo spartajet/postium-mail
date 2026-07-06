@@ -16,3 +16,4 @@ vite.config.ts.timestamp-*
 e2e/artifacts/
 .superpowers
 .superpowers/sdd/
+.claude/
