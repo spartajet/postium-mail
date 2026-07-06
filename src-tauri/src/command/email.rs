@@ -59,7 +59,7 @@ use crate::infrastructure::storage::search::SearchResult;
 use crate::service::attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 use crate::service::email_service::{
     EmailCategory, EmailDetail, EmailListResponse, LocalAttachmentDraft, ReloadEmailResult,
-    SendEmailRequest, SendEmailResponse,
+    SaveDraftRequest, SaveDraftResponse, SendEmailRequest, SendEmailResponse,
 };
 
 ///
@@ -702,6 +702,24 @@ pub async fn describe_local_attachments(
     paths: Vec<String>,
 ) -> Result<Vec<LocalAttachmentDraft>, MailError> {
     service.describe_local_attachments(paths).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_draft(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    request: SaveDraftRequest,
+) -> Result<SaveDraftResponse, MailError> {
+    service.save_draft(request).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_draft(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    draft_id: i32,
+) -> Result<(), MailError> {
+    service.delete_draft(draft_id).await
 }
 
 ///
