@@ -9,7 +9,7 @@ use crate::service::email_service::SendEmailRequest;
 use async_trait::async_trait;
 use lettre::Message;
 use lettre::message::header::{ContentType, Date, MessageId};
-use lettre::message::{Mailbox, MultiPart, SinglePart};
+use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::path::Path;
@@ -237,6 +237,38 @@ fn parse_smtp_ssl_mode(value: &str) -> Result<SslMode, MailError> {
     }
 }
 
+fn build_body_part(req: &SendEmailRequest) -> MultiPart {
+    MultiPart::alternative()
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(req.body_text.clone()),
+        )
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_HTML)
+                .body(req.body_html.clone()),
+        )
+}
+
+fn sanitize_attachment_filename(input: &str) -> String {
+    input
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | '\0' => '_',
+            other => other,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn content_type_header(value: &str) -> Result<ContentType, MailError> {
+    value
+        .parse::<ContentType>()
+        .map_err(|e| MailError::InvalidParam(format!("附件 Content-Type 无效: {value}: {e}")))
+}
+
 pub fn build_email(
     account: &accounts::Model,
     req: &SendEmailRequest,
@@ -282,25 +314,40 @@ pub fn build_email(
     }
     for addr in &req.bcc {
         if !addr.trim().is_empty() {
-            builder = builder.bcc(addr.trim().parse().map_err(|e| {
-                MailError::InvalidParam(format!("密送无效 '{}': {e}", addr.trim()))
-            })?);
+            let _mailbox: Mailbox = addr
+                .trim()
+                .parse()
+                .map_err(|e| MailError::InvalidParam(format!("密送无效 '{}': {e}", addr.trim())))?;
         }
     }
 
-    let multipart = MultiPart::alternative()
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_PLAIN)
-                .body(req.body_text.clone()),
-        )
-        .singlepart(
-            SinglePart::builder()
-                .header(ContentType::TEXT_HTML)
-                .body(req.body_html.clone()),
-        );
+    let body_part = build_body_part(req);
     let message = builder
-        .multipart(multipart)
+        .multipart(if req.attachments.is_empty() {
+            body_part
+        } else {
+            let mut mixed = MultiPart::mixed().multipart(body_part);
+            for input in &req.attachments {
+                let described = describe_local_attachment_sync(&input.path)?;
+                let filename = input
+                    .filename
+                    .as_deref()
+                    .map(sanitize_attachment_filename)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(described.filename);
+                let content_type = input
+                    .content_type
+                    .as_deref()
+                    .unwrap_or(&described.content_type);
+                let bytes = std::fs::read(&input.path).map_err(|e| {
+                    MailError::InvalidParam(format!("读取附件失败: {}: {e}", input.path))
+                })?;
+                let attachment = Attachment::new(filename)
+                    .body(Body::new(bytes), content_type_header(content_type)?);
+                mixed = mixed.singlepart(attachment);
+            }
+            mixed
+        })
         .map_err(|e| MailError::SmtpSendFailed(format!("构建邮件失败: {e}")))?;
     let raw = message.formatted();
 
