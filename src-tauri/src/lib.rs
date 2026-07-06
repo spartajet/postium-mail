@@ -99,6 +99,7 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::email::delete_emails,
             command::email::move_email_to_folder,
             command::email::archive_email,
+            command::email::describe_local_attachments,
             command::email::send_email,
             command::sync::sync_account,
             command::sync::sync_account_with_range,

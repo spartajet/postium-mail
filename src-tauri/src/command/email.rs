@@ -58,8 +58,8 @@ use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
 use crate::service::attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 use crate::service::email_service::{
-    EmailCategory, EmailDetail, EmailListResponse, ReloadEmailResult, SendEmailRequest,
-    SendEmailResponse,
+    EmailCategory, EmailDetail, EmailListResponse, LocalAttachmentDraft, ReloadEmailResult,
+    SendEmailRequest, SendEmailResponse,
 };
 
 ///
@@ -693,6 +693,15 @@ pub async fn archive_email(
 ) -> Result<(), MailError> {
     tracing::info!(email_id, "命令: 归档邮件");
     service.archive(email_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn describe_local_attachments(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    paths: Vec<String>,
+) -> Result<Vec<LocalAttachmentDraft>, MailError> {
+    service.describe_local_attachments(paths).await
 }
 
 ///
