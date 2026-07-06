@@ -241,6 +241,24 @@ fn insert_email_with_attachments_tx(
     read_email_by_id(tx, email_id)
 }
 
+fn insert_email_with_attachments_tx_preserving_uid(
+    tx: &rusqlite::Transaction<'_>,
+    write: EmailWrite,
+    attachments: Vec<AttachmentWrite>,
+) -> rusqlite::Result<emails::Model> {
+    let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+    execute_email_insert(&mut insert_stmt, &write)?;
+    let email_id = tx.last_insert_rowid() as i32;
+
+    let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+    for mut attachment in attachments {
+        attachment.email_id = email_id;
+        execute_attachment_insert(&mut attachment_stmt, &attachment)?;
+    }
+
+    read_email_by_id(tx, email_id)
+}
+
 fn update_existing_email_by_id(
     tx: &rusqlite::Transaction<'_>,
     email_id: i32,
@@ -716,6 +734,21 @@ pub async fn insert_draft_email_with_attachments(
     write.is_draft = Some(true);
     db.transaction(move |tx| insert_email_with_attachments_tx(tx, write, attachments))
         .await
+}
+
+/// 在同一事务内插入本地草稿邮件及其附件元数据，并保留调用方传入的 UID。
+///
+/// 用于已经拿到远端或预测远端 UID 的场景，避免被本地临时 UID 覆盖。
+pub async fn insert_draft_email_with_attachments_preserving_uid(
+    db: &DbConn,
+    mut write: EmailWrite,
+    attachments: Vec<AttachmentWrite>,
+) -> Result<emails::Model, MailError> {
+    write.is_draft = Some(true);
+    db.transaction(move |tx| {
+        insert_email_with_attachments_tx_preserving_uid(tx, write, attachments)
+    })
+    .await
 }
 
 /// 批量插入邮件。
