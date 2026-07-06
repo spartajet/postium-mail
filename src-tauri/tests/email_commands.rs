@@ -562,6 +562,37 @@ async fn new_draft_test_services() -> DraftTestServices {
     }
 }
 
+async fn new_draft_test_services_with_send_dependencies(
+    smtp_sender: Arc<dyn postium_mail_lib::service::mail_send::SmtpEmailSender>,
+    sent_archiver: Arc<dyn postium_mail_lib::service::mail_send::SentArchiveWriter>,
+    draft_writer: Arc<RecordingDraftWriter>,
+) -> DraftTestServices {
+    init_provider_pool();
+    let db = create_test_db().await;
+    let auth = Arc::new(AuthManager::in_memory());
+    let remote = Arc::new(NoopMailRemoteOperator);
+    let account_service = AccountService::new_with_imap_verifier(
+        db.clone(),
+        auth.clone(),
+        Arc::new(NoopImapConnectionVerifier),
+    );
+    let email_service = EmailService::new_with_full_dependencies(
+        auth.clone(),
+        db.clone(),
+        remote,
+        smtp_sender,
+        sent_archiver,
+        draft_writer.clone(),
+    );
+
+    DraftTestServices {
+        db,
+        account_service,
+        email_service,
+        draft_writer,
+    }
+}
+
 async fn create_test_account_for_draft(svc: &DraftTestServices) -> i32 {
     let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let req = CreateAccountRequest {
@@ -997,6 +1028,237 @@ async fn send_email_keeps_local_sent_when_remote_archive_fails() {
         1,
         "远端归档失败仍应保留本地 Sent"
     );
+}
+
+#[tokio::test]
+async fn send_email_writes_attachment_metadata_to_local_sent() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp, archiver).await;
+    let account_id = create_test_account(&svc).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invoice.pdf");
+    std::fs::write(&path, b"%PDF-1.4").unwrap();
+    let mut req = send_request(account_id);
+    req.attachments = vec![ComposeAttachmentInput {
+        path: path.to_string_lossy().to_string(),
+        filename: Some("invoice.pdf".to_string()),
+        content_type: Some("application/pdf".to_string()),
+        size: Some(8),
+    }];
+
+    let response = svc.email_service.send(req).await.unwrap();
+    let detail = svc
+        .email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+
+    assert_eq!(detail.attachments.len(), 1);
+    assert_eq!(detail.attachments[0].filename, "invoice.pdf");
+    assert_eq!(detail.attachments[0].content_type, "application/pdf");
+    assert_eq!(detail.attachments[0].size, 8);
+    assert_eq!(
+        detail.attachments[0].disposition.as_deref(),
+        Some("attachment")
+    );
+    assert_eq!(
+        detail.attachments[0].cache_path.as_deref(),
+        Some(path.to_string_lossy().as_ref())
+    );
+}
+
+#[tokio::test]
+async fn send_email_stores_sanitized_attachment_filename_metadata() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp, archiver).await;
+    let account_id = create_test_account(&svc).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invoice.pdf");
+    std::fs::write(&path, b"%PDF-1.4").unwrap();
+    let mut req = send_request(account_id);
+    req.attachments = vec![ComposeAttachmentInput {
+        path: path.to_string_lossy().to_string(),
+        filename: Some("../bad\\name.pdf".to_string()),
+        content_type: Some("application/pdf".to_string()),
+        size: Some(8),
+    }];
+
+    let response = svc.email_service.send(req).await.unwrap();
+    let detail = svc
+        .email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+
+    assert_eq!(detail.attachments[0].filename, ".._bad_name.pdf");
+}
+
+#[tokio::test]
+async fn send_email_falls_back_to_described_filename_for_blank_attachment_filename() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = TestServices::new_with_send_dependencies(smtp, archiver).await;
+    let account_id = create_test_account(&svc).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("invoice.pdf");
+    std::fs::write(&path, b"%PDF-1.4").unwrap();
+    let mut req = send_request(account_id);
+    req.attachments = vec![ComposeAttachmentInput {
+        path: path.to_string_lossy().to_string(),
+        filename: Some("   ".to_string()),
+        content_type: Some("application/pdf".to_string()),
+        size: Some(8),
+    }];
+
+    let response = svc.email_service.send(req).await.unwrap();
+    let detail = svc
+        .email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+
+    assert_eq!(detail.attachments[0].filename, "invoice.pdf");
+}
+
+#[tokio::test]
+async fn send_email_deletes_source_draft_after_successful_send() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let draft_writer = Arc::new(RecordingDraftWriter::default());
+    let svc =
+        new_draft_test_services_with_send_dependencies(smtp, archiver, draft_writer.clone()).await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let draft = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["recipient@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "draft to send".to_string(),
+            body_html: "<p>body</p>".to_string(),
+            body_text: "body".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let mut req = send_request(account_id);
+    req.draft_id = Some(draft.draft_id);
+
+    svc.email_service.send(req).await.unwrap();
+
+    assert!(!draft_exists(&svc, draft.draft_id).await);
+    assert_eq!(
+        draft_writer.deleted.lock().unwrap().as_slice(),
+        &[(draft.folder, 7001)]
+    );
+}
+
+#[tokio::test]
+async fn send_email_does_not_delete_draft_from_another_account() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let draft_writer = Arc::new(RecordingDraftWriter::default());
+    let svc =
+        new_draft_test_services_with_send_dependencies(smtp, archiver, draft_writer.clone()).await;
+    let sending_account_id = create_test_account_for_draft(&svc).await;
+    let other_account_id = create_test_account_for_draft(&svc).await;
+    let other_draft = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id: other_account_id,
+            to: vec!["recipient@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "other account draft".to_string(),
+            body_html: "<p>body</p>".to_string(),
+            body_text: "body".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let mut req = send_request(sending_account_id);
+    req.draft_id = Some(other_draft.draft_id);
+
+    svc.email_service.send(req).await.unwrap();
+
+    assert!(draft_exists(&svc, other_draft.draft_id).await);
+    assert!(draft_writer.deleted.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn send_email_still_succeeds_when_source_draft_cleanup_fails() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let draft_writer = Arc::new(RecordingDraftWriter::default());
+    let svc =
+        new_draft_test_services_with_send_dependencies(smtp, archiver, draft_writer.clone()).await;
+    let account_id = create_test_account_for_draft(&svc).await;
+    let draft = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["recipient@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "draft cleanup failure".to_string(),
+            body_html: "<p>body</p>".to_string(),
+            body_text: "body".to_string(),
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    *draft_writer.delete_fail_with.lock().unwrap() = Some(MailError::ImapConnectionFailed(
+        "simulated cleanup failure".to_string(),
+    ));
+    let mut req = send_request(account_id);
+    req.draft_id = Some(draft.draft_id);
+
+    let response = svc.email_service.send(req).await.unwrap();
+
+    assert!(response.local_email_id > 0);
+    assert!(draft_exists(&svc, draft.draft_id).await);
 }
 
 async fn create_remote_test_account(svc: &TestServices) -> i32 {

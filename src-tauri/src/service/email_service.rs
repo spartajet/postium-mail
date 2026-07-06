@@ -5,6 +5,7 @@ use crate::domain::{
 };
 use crate::error::MailError;
 use crate::infrastructure::storage::models::{accounts, emails};
+use crate::infrastructure::storage::repository::attachment_repo::AttachmentWrite;
 use crate::infrastructure::storage::repository::{
     account_repo, attachment_repo, email_repo, sync_repo,
 };
@@ -16,7 +17,8 @@ use crate::service::mail_operation::{
 };
 use crate::service::mail_send::{
     RealSentArchiveWriter, RealSmtpEmailSender, SentArchiveRequest, SentArchiveWriter,
-    SmtpEmailSender, build_email, smtp_config_from_account, validate_send_request,
+    SmtpEmailSender, build_email, describe_local_attachment_sync, sanitize_attachment_filename,
+    smtp_config_from_account, validate_send_request,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -895,6 +897,8 @@ impl EmailService {
             .auth
             .get_credentials(&account.email, &account_auth_type, Some(&account.provider))
             .await?;
+        let now = chrono::Utc::now().timestamp();
+        let attachments = compose_attachment_writes(&req.attachments, now)?;
         let built = build_email(&account, &req)?;
 
         self.smtp_sender
@@ -907,8 +911,7 @@ impl EmailService {
             .first()
             .cloned()
             .unwrap_or_else(|| "Sent".to_string());
-        let now = chrono::Utc::now().timestamp();
-        let sent_model = email_repo::insert_sent_email(
+        let sent_model = email_repo::insert_sent_email_with_attachments(
             &self.db,
             email_repo::EmailWrite {
                 account_id: account.id,
@@ -940,8 +943,13 @@ impl EmailService {
                 created_at: now,
                 updated_at: now,
             },
+            attachments,
         )
         .await?;
+
+        if let Some(draft_id) = req.draft_id {
+            cleanup_sent_draft(self, req.account_id, draft_id, &built.message_id).await;
+        }
 
         let archive_result = self
             .sent_archiver
@@ -1209,6 +1217,81 @@ fn non_empty_joined(values: &[String]) -> Option<String> {
         None
     } else {
         Some(joined)
+    }
+}
+
+fn compose_attachment_writes(
+    attachments: &[ComposeAttachmentInput],
+    now: i64,
+) -> Result<Vec<AttachmentWrite>, MailError> {
+    attachments
+        .iter()
+        .map(|input| {
+            let described = describe_local_attachment_sync(&input.path)?;
+            let filename = input
+                .filename
+                .as_deref()
+                .map(sanitize_attachment_filename)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(described.filename);
+            Ok(AttachmentWrite {
+                email_id: 0,
+                filename: Some(filename),
+                content_type: Some(input.content_type.clone().unwrap_or(described.content_type)),
+                size: input.size.unwrap_or(described.size),
+                section_path: String::new(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                path: Some(input.path.clone()),
+                created_at: now,
+            })
+        })
+        .collect()
+}
+
+async fn cleanup_sent_draft(
+    service: &EmailService,
+    account_id: i32,
+    draft_id: i32,
+    message_id: &str,
+) {
+    match email_repo::get_by_id(service.db_conn(), draft_id).await {
+        Ok(Some(draft)) if draft.account_id == account_id => {
+            if let Err(error) = crate::service::mail_draft::delete_draft(service, draft_id).await {
+                tracing::warn!(
+                    draft_id,
+                    error = %error,
+                    message_id,
+                    "发送成功后清理草稿失败"
+                );
+            }
+        }
+        Ok(Some(draft)) => {
+            tracing::warn!(
+                draft_id,
+                draft_account_id = draft.account_id,
+                send_account_id = account_id,
+                message_id,
+                "发送成功后跳过非当前账号草稿清理"
+            );
+        }
+        Ok(None) => {
+            tracing::warn!(
+                draft_id,
+                send_account_id = account_id,
+                message_id,
+                "发送成功后草稿不存在，跳过清理"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                draft_id,
+                send_account_id = account_id,
+                error = %error,
+                message_id,
+                "发送成功后读取草稿失败，跳过清理"
+            );
+        }
     }
 }
 

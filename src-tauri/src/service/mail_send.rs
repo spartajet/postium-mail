@@ -259,7 +259,7 @@ fn build_body_part(req: &SendEmailRequest) -> MultiPart {
         )
 }
 
-fn sanitize_attachment_filename(input: &str) -> String {
+pub(crate) fn sanitize_attachment_filename(input: &str) -> String {
     input
         .chars()
         .map(|ch| match ch {
