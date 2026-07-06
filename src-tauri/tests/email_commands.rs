@@ -16,6 +16,17 @@ use std::sync::{Arc, Mutex};
 
 static ACCOUNT_COUNTER: AtomicU32 = AtomicU32::new(1);
 
+async fn account_email(svc: &TestServices, account_id: i32) -> String {
+    svc.account_service
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|account| account.id == account_id)
+        .unwrap()
+        .email
+}
+
 async fn create_test_account(svc: &TestServices) -> i32 {
     let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let req = CreateAccountRequest {
@@ -37,11 +48,39 @@ async fn create_test_account(svc: &TestServices) -> i32 {
     svc.account_service.create(req).await.unwrap().id
 }
 
+async fn create_test_account_with_display_name(svc: &TestServices, display_name: &str) -> i32 {
+    let index = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let req = CreateAccountRequest {
+        name: format!("Test {}", index),
+        email: format!("test-{}@gmail.com", index),
+        display_name: Some(display_name.to_string()),
+        provider: "gmail".to_string(),
+        auth_type: "Password".to_string(),
+        password: "pass".to_string(),
+        imap_host: None,
+        imap_port: None,
+        imap_ssl_mode: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_ssl_mode: None,
+        color: None,
+        account_type: None,
+    };
+    svc.account_service.create(req).await.unwrap().id
+}
+
 async fn create_remote_test_account(svc: &TestServices) -> i32 {
+    create_remote_test_account_with_display_name(svc, None).await
+}
+
+async fn create_remote_test_account_with_display_name(
+    svc: &TestServices,
+    display_name: Option<&str>,
+) -> i32 {
     let req = CreateAccountRequest {
         name: "Test Remote".to_string(),
         email: "test@example.com".to_string(),
-        display_name: None,
+        display_name: display_name.map(str::to_string),
         provider: "gmail".to_string(),
         auth_type: "Password".to_string(),
         password: "pass".to_string(),
@@ -633,7 +672,8 @@ async fn test_reload_email_replaces_local_email_when_remote_exists() {
     let remote =
         FakeMailRemote::with_reload(Ok(Some(remote_email(514, "远端新主题", "远端新正文"))));
     let svc = TestServices::new_with_mail_remote(remote.clone()).await;
-    let account_id = create_remote_test_account(&svc).await;
+    let account_id =
+        create_remote_test_account_with_display_name(&svc, Some("Reload Account")).await;
     let email_id = insert_test_email(
         &svc,
         account_id,
@@ -656,6 +696,14 @@ async fn test_reload_email_replaces_local_email_when_remote_exists() {
     assert!(email.email.is_starred);
     assert!(email.email.has_attachments);
     assert_eq!(email.email.sender_email, "reload@example.com");
+    assert_eq!(
+        email.email.account_email.as_deref(),
+        Some("test@example.com")
+    );
+    assert_eq!(
+        email.email.account_display_name.as_deref(),
+        Some("Reload Account")
+    );
     assert_eq!(remote.calls(), vec!["reload:test@example.com:INBOX:514"]);
 }
 
@@ -987,8 +1035,9 @@ async fn test_search_emails_empty() {
 #[tokio::test]
 async fn test_search_emails_matches_subject_preview_and_account_scope() {
     let svc = TestServices::new().await;
-    let account_id = create_test_account(&svc).await;
+    let account_id = create_test_account_with_display_name(&svc, "Search Account").await;
     let other_account_id = create_test_account(&svc).await;
+    let expected_email = account_email(&svc, account_id).await;
 
     let matching_id = insert_test_email(
         &svc,
@@ -1011,6 +1060,14 @@ async fn test_search_emails_matches_subject_preview_and_account_scope() {
 
     assert_eq!(scoped_results.len(), 1);
     assert_eq!(scoped_results[0].id, matching_id);
+    assert_eq!(
+        scoped_results[0].account_email.as_deref(),
+        Some(expected_email.as_str())
+    );
+    assert_eq!(
+        scoped_results[0].account_display_name.as_deref(),
+        Some("Search Account")
+    );
 
     let preview_results = svc
         .email_service
@@ -1251,4 +1308,129 @@ async fn list_by_category_uses_persisted_folder_category_when_name_has_no_keywor
 
     assert_eq!(resp.total, 1);
     assert_eq!(resp.emails[0].subject.as_deref(), Some("SPECIAL-USE sent"));
+}
+
+#[tokio::test]
+async fn list_by_category_for_all_accounts_should_merge_inbox_across_accounts() {
+    let svc = TestServices::new().await;
+    let work_id = create_test_account_with_display_name(&svc, "Work Mail").await;
+    let personal_id = create_test_account_with_display_name(&svc, "Personal Mail").await;
+
+    insert_test_email(
+        &svc,
+        work_id,
+        TestEmail::new(100, "work inbox")
+            .folder("INBOX")
+            .sent_at(100),
+    )
+    .await;
+    insert_test_email(
+        &svc,
+        personal_id,
+        TestEmail::new(200, "personal inbox")
+            .folder("INBOX")
+            .sent_at(300),
+    )
+    .await;
+    insert_test_email(
+        &svc,
+        work_id,
+        TestEmail::new(101, "work sent")
+            .folder("[Gmail]/Sent Mail")
+            .sent_at(400),
+    )
+    .await;
+
+    let response = svc
+        .email_service
+        .list_by_category_for_all_accounts(EmailCategory::Inbox, 1, 50, false)
+        .await
+        .unwrap();
+
+    assert_eq!(response.total, 2);
+    assert_eq!(response.emails.len(), 2);
+    assert_eq!(
+        response.emails[0].subject.as_deref(),
+        Some("personal inbox")
+    );
+    assert_eq!(response.emails[0].account_id, personal_id);
+    let expected_personal_email = account_email(&svc, personal_id).await;
+    assert_eq!(
+        response.emails[0].account_email.as_deref(),
+        Some(expected_personal_email.as_str())
+    );
+    assert_eq!(
+        response.emails[0].account_display_name.as_deref(),
+        Some("Personal Mail")
+    );
+    assert_eq!(response.emails[1].subject.as_deref(), Some("work inbox"));
+    assert_eq!(response.emails[1].account_id, work_id);
+    let expected_work_email = account_email(&svc, work_id).await;
+    assert_eq!(
+        response.emails[1].account_email.as_deref(),
+        Some(expected_work_email.as_str())
+    );
+    assert_eq!(
+        response.emails[1].account_display_name.as_deref(),
+        Some("Work Mail")
+    );
+}
+
+#[tokio::test]
+async fn list_by_category_for_all_accounts_should_query_starred_across_folders() {
+    let svc = TestServices::new().await;
+    let work_id = create_test_account_with_display_name(&svc, "Work Mail").await;
+    let personal_id = create_test_account_with_display_name(&svc, "Personal Mail").await;
+
+    insert_test_email(
+        &svc,
+        work_id,
+        TestEmail::new(300, "work starred")
+            .folder("INBOX")
+            .starred(true)
+            .sent_at(100),
+    )
+    .await;
+    insert_test_email(
+        &svc,
+        personal_id,
+        TestEmail::new(400, "personal starred")
+            .folder("Archive")
+            .starred(true)
+            .sent_at(200),
+    )
+    .await;
+
+    let response = svc
+        .email_service
+        .list_by_category_for_all_accounts(EmailCategory::Starred, 1, 50, false)
+        .await
+        .unwrap();
+
+    assert_eq!(response.total, 2);
+    assert_eq!(
+        response.emails[0].subject.as_deref(),
+        Some("personal starred")
+    );
+    assert_eq!(response.emails[0].account_id, personal_id);
+    let expected_personal_email = account_email(&svc, personal_id).await;
+    assert_eq!(
+        response.emails[0].account_email.as_deref(),
+        Some(expected_personal_email.as_str())
+    );
+    assert_eq!(
+        response.emails[0].account_display_name.as_deref(),
+        Some("Personal Mail")
+    );
+    assert_eq!(response.emails[1].subject.as_deref(), Some("work starred"));
+    assert_eq!(response.emails[1].account_id, work_id);
+    let expected_work_email = account_email(&svc, work_id).await;
+    assert_eq!(
+        response.emails[1].account_email.as_deref(),
+        Some(expected_work_email.as_str())
+    );
+    assert_eq!(
+        response.emails[1].account_display_name.as_deref(),
+        Some("Work Mail")
+    );
 }

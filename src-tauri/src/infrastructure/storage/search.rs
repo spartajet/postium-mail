@@ -16,6 +16,8 @@ use specta::Type;
 pub struct SearchResult {
     pub id: i32,
     pub account_id: i32,
+    pub account_email: Option<String>,
+    pub account_display_name: Option<String>,
     pub folder: String,
     pub subject: Option<String>,
     pub sender_email: String,
@@ -29,6 +31,8 @@ fn map_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> 
     Ok(SearchResult {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
+        account_email: row.get("account_email")?,
+        account_display_name: row.get("account_display_name")?,
         folder: row.get("folder")?,
         subject: row.get("subject")?,
         sender_email: row.get("sender_email")?,
@@ -64,8 +68,12 @@ pub async fn search_fts(
         let mut results = Vec::new();
         if let Some(account_id) = account_id {
             let mut stmt = conn.prepare(
-                "SELECT e.id, e.account_id, e.folder, e.subject, e.sender_email, e.sent_at, e.preview, f.rank
-                 FROM emails_fts f JOIN emails e ON f.rowid = e.id
+                "SELECT e.id, e.account_id, a.email AS account_email,
+                        a.display_name AS account_display_name, e.folder, e.subject,
+                        e.sender_email, e.sent_at, e.preview, f.rank
+                 FROM emails_fts f
+                 JOIN emails e ON f.rowid = e.id
+                 LEFT JOIN accounts a ON a.id = e.account_id
                  WHERE emails_fts MATCH ?1 AND e.account_id = ?2 AND e.is_deleted = 0
                  ORDER BY f.rank DESC LIMIT ?3",
             )?;
@@ -78,13 +86,16 @@ pub async fn search_fts(
             }
         } else {
             let mut stmt = conn.prepare(
-                "SELECT e.id, e.account_id, e.folder, e.subject, e.sender_email, e.sent_at, e.preview, f.rank
-                 FROM emails_fts f JOIN emails e ON f.rowid = e.id
+                "SELECT e.id, e.account_id, a.email AS account_email,
+                        a.display_name AS account_display_name, e.folder, e.subject,
+                        e.sender_email, e.sent_at, e.preview, f.rank
+                 FROM emails_fts f
+                 JOIN emails e ON f.rowid = e.id
+                 LEFT JOIN accounts a ON a.id = e.account_id
                  WHERE emails_fts MATCH ?1 AND e.is_deleted = 0
                  ORDER BY f.rank DESC LIMIT ?2",
             )?;
-            let rows =
-                stmt.query_map(rusqlite::params![query, limit as i64], map_search_result)?;
+            let rows = stmt.query_map(rusqlite::params![query, limit as i64], map_search_result)?;
             for row in rows {
                 results.push(row?);
             }

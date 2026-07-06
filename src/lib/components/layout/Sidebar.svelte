@@ -90,7 +90,7 @@
     // 账户下拉菜单是否展开
     // 控制账户选择器的显示/隐藏
     let showAccountDropdown = $state(false);
-    let statsLoadedAccountId = $state<number | null>(null);
+    let statsLoadedScopeKey = $state<string | null>(null);
 
     // ==================== 组件生命周期 ====================
 
@@ -100,17 +100,27 @@
         accountStore.loadAccounts();
     });
 
-    function loadFolderStatsForAccount(accountId: number, force = false) {
-        if (!force && accountId === statsLoadedAccountId) return;
-        statsLoadedAccountId = accountId;
-        syncStore.loadFolderStats(accountId);
+    function loadFolderStatsForCurrentScope(force = false) {
+        const scopeKey = accountStore.isAllAccounts
+            ? "all"
+            : `account:${accountStore.activeAccountId ?? "none"}`;
+        if (!force && scopeKey === statsLoadedScopeKey) return;
+        statsLoadedScopeKey = scopeKey;
+
+        if (accountStore.isAllAccounts) {
+            syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
+        if (accountStore.activeAccountId) {
+            syncStore.loadFolderStats(accountStore.activeAccountId);
+        }
     }
 
     $effect(() => {
-        const accountId = accountStore.activeAccountId;
-        if (accountId) {
-            loadFolderStatsForAccount(accountId);
-        }
+        accountStore.isAllAccounts;
+        accountStore.activeAccountId;
+        loadFolderStatsForCurrentScope();
     });
 
     // ==================== 文件夹选择处理 ====================
@@ -125,7 +135,9 @@
     function selectFolder(folderId: EmailCategory) {
         activeFolder = folderId;
         emailStore.currentFolder = folderId;
-        if (accountStore.activeAccountId) {
+        if (accountStore.isAllAccounts) {
+            emailStore.loadEmailsByCategoryForAllAccounts(folderId);
+        } else if (accountStore.activeAccountId) {
             emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
                 folderId,
@@ -140,7 +152,13 @@
     // 1. 同步当前活动账户的邮件
     // 2. 同步完成后重新加载当前文件夹的邮件列表
     async function handleSync() {
-        if (accountStore.activeAccountId) {
+        if (accountStore.isAllAccounts) {
+            await syncStore.syncAllAccounts();
+            await emailStore.loadEmailsByCategoryForAllAccounts(
+                emailStore.currentFolder,
+            );
+            await syncStore.loadFolderStatsForAllAccounts();
+        } else if (accountStore.activeAccountId) {
             await syncStore.syncAccount(accountStore.activeAccountId);
             await emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
@@ -162,7 +180,16 @@
         accountStore.setActive(accountId);
         emailStore.deselectEmail();
         emailStore.loadEmailsByCategory(accountId, emailStore.currentFolder);
-        loadFolderStatsForAccount(accountId, true);
+        loadFolderStatsForCurrentScope(true);
+        showAccountDropdown = false;
+    }
+
+    function handleAllAccountsSwitch() {
+        accountStore.setAllAccounts();
+        emailStore.deselectEmail();
+        emailStore.loadEmailsByCategoryForAllAccounts(emailStore.currentFolder);
+        statsLoadedScopeKey = "all";
+        syncStore.loadFolderStatsForAllAccounts();
         showAccountDropdown = false;
     }
 
@@ -288,15 +315,20 @@
             <div
                 class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary"
             >
-                {accountStore.activeAccount?.email?.charAt(0)?.toUpperCase() ||
-                    "?"}
+                {accountStore.isAllAccounts
+                    ? "全"
+                    : accountStore.activeAccount?.email
+                          ?.charAt(0)
+                          ?.toUpperCase() || "?"}
             </div>
             <!-- 账户邮箱地址：超长时截断显示 -->
             <span
                 data-testid="active-account-label"
                 class="flex-1 truncate text-muted-foreground"
-                >{accountStore.activeAccount?.email ||
-                    t.sidebar.allAccounts}</span
+                >{accountStore.isAllAccounts
+                    ? t.sidebar.allAccounts
+                    : accountStore.activeAccount?.email ||
+                      t.sidebar.allAccounts}</span
             >
             <!-- 下拉箭头图标 -->
             <ChevronDown size={14} class="shrink-0 text-muted-foreground" />
@@ -316,6 +348,21 @@
                 class="absolute left-3 right-3 top-full z-50 mt-1 rounded-lg border border-border bg-card shadow-lg"
                 onclick={(e) => e.stopPropagation()}
             >
+                <button
+                    data-testid="account-option-all"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {accountStore.isAllAccounts
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-foreground'}"
+                    onclick={handleAllAccountsSwitch}
+                >
+                    <div
+                        class="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[9px] font-bold text-primary"
+                    >
+                        全
+                    </div>
+                    <span class="truncate">{t.sidebar.allAccounts}</span>
+                </button>
+
                 <!-- 账户列表：遍历所有已登录账户 -->
                 {#each accountStore.accounts as account}
                     <!--

@@ -74,8 +74,36 @@
     let sending = $state(false);
     // 错误信息（发送失败时显示）
     let error = $state("");
+    // 所有账号视图下的当前发件账号
+    let selectedAccountId = $state<number | null>(null);
     // 富文本编辑器组件实例引用
     let richEditor = $state<RichTextEditor>();
+    let shouldShowAccountSelect = $derived(accountStore.isAllAccounts);
+
+    function hasAccount(accountId: number | null | undefined): accountId is number {
+        return (
+            typeof accountId === "number" &&
+            accountStore.accounts.some((account) => account.id === accountId)
+        );
+    }
+
+    function defaultSendAccountId(preferredAccountId?: number) {
+        if (hasAccount(preferredAccountId)) {
+            return preferredAccountId;
+        }
+        if (hasAccount(accountStore.lastConcreteAccountId)) {
+            return accountStore.lastConcreteAccountId;
+        }
+        if (hasAccount(accountStore.activeAccountId)) {
+            return accountStore.activeAccountId;
+        }
+        return accountStore.accounts[0]?.id ?? null;
+    }
+
+    function openWithAccount(preferredAccountId?: number) {
+        selectedAccountId = defaultSendAccountId(preferredAccountId);
+        open = true;
+    }
 
     // ==================== 邮件发送逻辑 ====================
 
@@ -97,8 +125,11 @@
      * - 正文优先使用 HTML 格式，如果编辑器无法提供 HTML 则用 pre 标签包裹纯文本
      */
     async function handleSend() {
-        // 没有活跃账户，无法发送
-        if (!accountStore.activeAccountId) return;
+        const sendAccountId = accountStore.isAllAccounts
+            ? selectedAccountId
+            : accountStore.activeAccountId;
+        // 没有可用发送账户，无法发送
+        if (!sendAccountId) return;
         // 进入发送中状态
         sending = true;
         // 清空之前的错误信息
@@ -106,8 +137,8 @@
         try {
             // 调用后端发送邮件命令
             const result = await commands.sendEmail({
-                // 当前活跃账户 ID
-                account_id: accountStore.activeAccountId,
+                // 实际发送账户 ID：所有账号视图下来自发件账号选择器，否则来自当前活跃账号
+                account_id: sendAccountId,
                 // 收件人列表：将逗号分隔的字符串转为数组
                 to: to
                     .split(",")
@@ -160,6 +191,7 @@
         cc = "";
         subject = "";
         error = "";
+        selectedAccountId = null;
         // 清空富文本编辑器内容
         richEditor?.clear();
     }
@@ -176,8 +208,8 @@
      *
      * 通过 bind:this 暴露给父组件使用
      */
-    export function show() {
-        open = true;
+    export function show(options: { accountId?: number } = {}) {
+        openWithAccount(options.accountId);
     }
 
     /**
@@ -198,8 +230,9 @@
         replyTo: string,
         replySubject: string,
         replyBody: string,
+        accountId?: number,
     ) {
-        open = true;
+        openWithAccount(accountId);
         // 设置收件人为原始发件人
         to = replyTo;
         // 设置主题为 "Re: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
@@ -221,8 +254,12 @@
      * @param fwdSubject - 原始邮件主题
      * @param fwdBody - 原始邮件正文（作为引用内容）
      */
-    export function showForward(fwdSubject: string, fwdBody: string) {
-        open = true;
+    export function showForward(
+        fwdSubject: string,
+        fwdBody: string,
+        accountId?: number,
+    ) {
+        openWithAccount(accountId);
         // 设置主题为 "Fwd: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
         subject = `Fwd: ${fwdSubject.replace(/^(Re|Fwd):\s*/i, "")}`;
         // 在编辑器中预填充原始正文作为引用
@@ -302,6 +339,24 @@
               每个字段占一行，左侧标签 + 右侧输入框
             -->
             <div class="border-b border-border">
+                {#if shouldShowAccountSelect}
+                    <div class="flex items-center border-b border-border px-4">
+                        <span class="w-14 shrink-0 text-sm text-muted-foreground"
+                            >发件</span
+                        >
+                        <select
+                            data-testid="compose-account-select"
+                            bind:value={selectedAccountId}
+                            class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                        >
+                            {#each accountStore.accounts as account}
+                                <option value={account.id}>
+                                    {account.display_name || account.email}
+                                </option>
+                            {/each}
+                        </select>
+                    </div>
+                {/if}
                 <!-- 收件人输入行 -->
                 <div class="flex items-center border-b border-border px-4">
                     <!-- 字段标签：固定宽度 3.5rem -->
@@ -399,7 +454,10 @@
                     data-testid="compose-send-button"
                     class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
                     onclick={handleSend}
-                    disabled={sending || !to || !subject}
+                    disabled={sending ||
+                        !to ||
+                        !subject ||
+                        (accountStore.isAllAccounts && !selectedAccountId)}
                 >
                     {sending ? t.email.loading : t.email.send}
                 </button>

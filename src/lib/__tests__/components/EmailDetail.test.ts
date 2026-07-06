@@ -5,6 +5,8 @@ import EmailDetail from "$lib/components/email/EmailDetail.svelte";
 const downloadAttachment = vi.fn();
 const saveAttachmentAs = vi.fn();
 const openAttachment = vi.fn();
+const showReply = vi.fn();
+const showForward = vi.fn();
 
 const baseSelectedEmail = {
     id: 1,
@@ -120,6 +122,8 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
     }),
 }));
 
+const composeContextKey = Symbol.for("compose-modal");
+
 describe("EmailDetail", () => {
     beforeEach(() => {
         selectedEmail = { ...baseSelectedEmail };
@@ -164,5 +168,46 @@ describe("EmailDetail", () => {
         const attachmentBar = screen.getByTestId("email-attachments-bar");
 
         expect(bodyScroller.contains(attachmentBar)).toBe(false);
+    });
+
+    it("回复时传入当前邮件所属账号 ID", async () => {
+        render(EmailDetail, {
+            context: new Map([
+                [
+                    composeContextKey,
+                    () => ({
+                        showReply,
+                        showForward,
+                    }),
+                ],
+            ]),
+        });
+
+        await fireEvent.click(screen.getByTitle("回复"));
+
+        expect(showReply).toHaveBeenCalledWith(
+            "alice@example.com",
+            "subject",
+            "",
+            1,
+        );
+    });
+
+    it("转发时传入当前邮件所属账号 ID", async () => {
+        render(EmailDetail, {
+            context: new Map([
+                [
+                    composeContextKey,
+                    () => ({
+                        showReply,
+                        showForward,
+                    }),
+                ],
+            ]),
+        });
+
+        await fireEvent.click(screen.getByTitle("转发"));
+
+        expect(showForward).toHaveBeenCalledWith("subject", "", 1);
     });
 });

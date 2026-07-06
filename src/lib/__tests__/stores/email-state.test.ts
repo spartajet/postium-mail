@@ -55,6 +55,29 @@ describe("EmailState 状态行为", () => {
     });
   });
 
+  it("loadEmailsByCategoryForAllAccounts 成功后写入列表和分页状态", async () => {
+    mockInvoke.mockResolvedValue({ emails: [email], total: 12, page: 3, limit: 50 });
+    const state = new EmailState();
+    state.unreadOnly = true;
+
+    await state.loadEmailsByCategoryForAllAccounts("inbox", 3);
+
+    expect(state.loading).toBe(false);
+    expect(state.currentFolder).toBe("inbox");
+    expect(state.emails).toEqual([email]);
+    expect(state.total).toBe(12);
+    expect(state.page).toBe(3);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "list_emails_by_category_for_all_accounts",
+      {
+        category: "inbox",
+        page: 3,
+        limit: 50,
+        unreadOnly: true,
+      },
+    );
+  });
+
   it("loadEmails 按文件夹加载并重置当前分类为 inbox", async () => {
     mockInvoke.mockResolvedValue({ emails: [email], total: 1, page: 1, limit: 50 });
     const state = new EmailState();
@@ -70,6 +93,92 @@ describe("EmailState 状态行为", () => {
       page: 1,
       limit: 50,
     });
+  });
+
+  it("loadNextPageForAllAccounts 追加下一页结果", async () => {
+    mockInvoke.mockResolvedValue({
+      emails: [{ ...email, id: 2, subject: "第二页" }],
+      total: 2,
+      page: 2,
+      limit: 50,
+    });
+    const state = new EmailState();
+    state.currentFolder = "starred";
+    state.emails = [{ ...email, id: 1, subject: "第一页" }];
+    state.total = 2;
+    state.page = 1;
+    state.unreadOnly = true;
+
+    await state.loadNextPageForAllAccounts();
+
+    expect(state.loadingNextPage).toBe(false);
+    expect(state.page).toBe(2);
+    expect(state.total).toBe(2);
+    expect(state.emails.map((item) => item.id)).toEqual([1, 2]);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "list_emails_by_category_for_all_accounts",
+      {
+        category: "starred",
+        page: 2,
+        limit: 50,
+        unreadOnly: true,
+      },
+    );
+  });
+
+  it("refreshLoadedEmailsByCategoryForAllAccounts 按已加载数量刷新列表", async () => {
+    mockInvoke.mockResolvedValue({
+      emails: [
+        { ...email, id: 1, subject: "刷新后-1" },
+        { ...email, id: 2, subject: "刷新后-2" },
+      ],
+      total: 10,
+      page: 1,
+      limit: 50,
+    });
+    const state = new EmailState();
+    state.currentFolder = "archive";
+    state.emails = [
+      { ...email, id: 1, subject: "旧-1" },
+      { ...email, id: 2, subject: "旧-2" },
+    ];
+    state.total = 10;
+    state.page = 2;
+
+    await state.refreshLoadedEmailsByCategoryForAllAccounts();
+
+    expect(state.emails.map((item) => item.subject)).toEqual(["刷新后-1", "刷新后-2"]);
+    expect(state.total).toBe(10);
+    expect(state.page).toBe(1);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "list_emails_by_category_for_all_accounts",
+      {
+        category: "archive",
+        page: 1,
+        limit: 50,
+        unreadOnly: false,
+      },
+    );
+  });
+
+  it("setUnreadOnlyForAllAccounts 切换未读筛选后重新加载当前分类", async () => {
+    mockInvoke.mockResolvedValue({ emails: [email], total: 1, page: 1, limit: 50 });
+    const state = new EmailState();
+    state.currentFolder = "spam";
+    state.page = 2;
+
+    await state.setUnreadOnlyForAllAccounts(true);
+
+    expect(state.unreadOnly).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "list_emails_by_category_for_all_accounts",
+      {
+        category: "spam",
+        page: 1,
+        limit: 50,
+        unreadOnly: true,
+      },
+    );
   });
 
   it("selectEmail 选择未读邮件后加载详情并标记本地列表为已读", async () => {
@@ -137,7 +246,16 @@ describe("EmailState 状态行为", () => {
 
   it("reloadEmail 收到 reloaded 时更新列表和当前详情", async () => {
     const state = new EmailState();
-    state.emails = [{ ...email, id: 1, subject: "旧主题", preview: "旧预览" }];
+    state.emails = [
+      {
+        ...email,
+        id: 1,
+        subject: "旧主题",
+        preview: "旧预览",
+        account_email: "account@example.com",
+        account_display_name: "账号来源",
+      },
+    ];
     state.selectedEmailId = 1;
     state.selectedEmail = { ...emailDetail, subject: "旧主题", body_text: "旧正文" };
     const reloadedEmail = { ...email, id: 1, subject: "新主题", preview: "新预览" };
@@ -150,6 +268,8 @@ describe("EmailState 状态行为", () => {
 
     expect(ok).toBe(true);
     expect(state.emails[0]?.subject).toBe("新主题");
+    expect(state.emails[0]?.account_email).toBe("account@example.com");
+    expect(state.emails[0]?.account_display_name).toBe("账号来源");
     expect(state.selectedEmail?.body_text).toBe("新正文");
     expect(mockInvoke).toHaveBeenCalledWith("reload_email", { emailId: 1 });
   });

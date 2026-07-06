@@ -28,8 +28,12 @@
         const unlisten = listen<string>("tray-action", (event) => {
             if (event.payload === "compose") {
                 composeModal?.show();
-            } else if (event.payload === "sync" && account.activeAccountId) {
-                sync.syncAccount(account.activeAccountId);
+            } else if (event.payload === "sync") {
+                if (account.isAllAccounts) {
+                    sync.syncAllAccounts();
+                } else if (account.activeAccountId) {
+                    sync.syncAccount(account.activeAccountId);
+                }
             }
         });
 

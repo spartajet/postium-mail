@@ -736,6 +736,7 @@
                             emailState.selectedEmail.sender_email, // 回复给发件人
                             emailState.selectedEmail.subject || "", // 原始主题
                             emailState.selectedEmail.body_text || "", // 原始正文（作为引用）
+                            emailState.selectedEmail.account_id,
                         );
                     }
                 }}
@@ -759,6 +760,7 @@
                         modal.showForward(
                             emailState.selectedEmail.subject || "", // 原始主题
                             emailState.selectedEmail.body_text || "", // 原始正文（作为引用）
+                            emailState.selectedEmail.account_id,
                         );
                     }
                 }}

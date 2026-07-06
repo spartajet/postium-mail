@@ -90,7 +90,9 @@
     let searching = $state(false);
 
     let supportsOlderSync = $derived(
-        searchResults === null && emailState.currentFolder !== "starred",
+        !accountStore.isAllAccounts &&
+            searchResults === null &&
+            emailState.currentFolder !== "starred",
     );
     let localHasMore = $derived(emailState.emails.length < emailState.total);
     let historyState = $derived(
@@ -172,6 +174,11 @@
     }
 
     function refreshFolderStats() {
+        if (accountStore.isAllAccounts) {
+            void syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
         const accountId = accountStore.activeAccountId;
         if (accountId) {
             void syncStore.loadFolderStats(accountId);
@@ -184,10 +191,14 @@
         await emailState.selectEmail(emailId);
         if (wasUnread) {
             refreshFolderStats();
-            if (emailState.unreadOnly && accountStore.activeAccountId) {
-                await emailState.refreshLoadedEmailsByCategory(
-                    accountStore.activeAccountId,
-                );
+            if (emailState.unreadOnly) {
+                if (accountStore.isAllAccounts) {
+                    await emailState.refreshLoadedEmailsByCategoryForAllAccounts();
+                } else if (accountStore.activeAccountId) {
+                    await emailState.refreshLoadedEmailsByCategory(
+                        accountStore.activeAccountId,
+                    );
+                }
             }
         }
     }
@@ -198,6 +209,16 @@
      * 触发当前活跃账号同步，并重新加载当前邮件分类。
      */
     async function handleRefresh() {
+        if (accountStore.isAllAccounts) {
+            await syncStore.syncAllAccounts();
+            await emailState.loadEmailsByCategoryForAllAccounts(
+                emailState.currentFolder,
+                emailState.page,
+            );
+            await syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
         if (accountStore.activeAccountId) {
             await syncStore.syncAccount(accountStore.activeAccountId);
             await emailState.loadEmailsByCategory(
@@ -210,6 +231,11 @@
     }
 
     async function toggleUnreadOnly() {
+        if (accountStore.isAllAccounts) {
+            await emailState.setUnreadOnlyForAllAccounts(!emailState.unreadOnly);
+            return;
+        }
+
         if (!accountStore.activeAccountId) return;
         await emailState.setUnreadOnly(
             accountStore.activeAccountId,
@@ -252,6 +278,7 @@
             modal.showForward(
                 email.subject || "",
                 email.body_text || email.body_html || "",
+                email.account_id,
             );
         }
     }
@@ -271,8 +298,10 @@
         // 追踪依赖：当 activeAccountId 或 currentFolder 变化时重新执行
         const accountId = accountStore.activeAccountId;
         const folder = emailState.currentFolder;
-        // 确保有活跃账户才加载
-        if (accountId) {
+        const isAllAccounts = accountStore.isAllAccounts;
+        if (isAllAccounts) {
+            emailState.loadEmailsByCategoryForAllAccounts(folder);
+        } else if (accountId) {
             emailState.loadEmailsByCategory(accountId, folder);
         }
     });
@@ -281,8 +310,9 @@
         const accountId = accountStore.activeAccountId;
         const category = emailState.currentFolder;
         const searchingNow = searchResults !== null;
+        const isAllAccounts = accountStore.isAllAccounts;
 
-        if (accountId && !searchingNow && category !== "starred") {
+        if (!isAllAccounts && accountId && !searchingNow && category !== "starred") {
             void syncStore.loadHistoryState(accountId, category);
         }
     });
@@ -310,7 +340,9 @@
         const timeout = setTimeout(async () => {
             try {
                 // 获取当前活跃账户 ID
-                const accountId = accountStore.activeAccountId;
+                const accountId = accountStore.isAllAccounts
+                    ? null
+                    : accountStore.activeAccountId;
                 // 调用后端搜索命令
                 const result = await commands.searchEmails(q, accountId, 50);
                 // 搜索成功：更新搜索结果
@@ -342,6 +374,11 @@
     }
 
     async function handleLoadMore() {
+        if (accountStore.isAllAccounts) {
+            await emailState.loadNextPageForAllAccounts();
+            return;
+        }
+
         if (accountStore.activeAccountId) {
             await emailState.loadNextPage(accountStore.activeAccountId);
         }
@@ -491,7 +528,11 @@
                 class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.sidebar.sync}
                 onclick={handleRefresh}
-                disabled={!accountStore.activeAccountId || emailState.loading}
+                disabled={
+                    (!accountStore.activeAccountId &&
+                        !accountStore.isAllAccounts) ||
+                    emailState.loading
+                }
             >
                 <RefreshCw
                     size={18}
@@ -508,7 +549,11 @@
                     ? "显示全部邮件"
                     : "仅显示未读邮件"}
                 onclick={toggleUnreadOnly}
-                disabled={!accountStore.activeAccountId || emailState.loading}
+                disabled={
+                    (!accountStore.activeAccountId &&
+                        !accountStore.isAllAccounts) ||
+                    emailState.loading
+                }
             >
                 {emailState.unreadOnly ? "全部" : "未读"}
             </button>
@@ -594,6 +639,14 @@
                                 class="mt-0.5 truncate text-xs text-muted-foreground"
                             >
                                 {result.preview}
+                            </p>
+                        {/if}
+                        {#if accountStore.isAllAccounts}
+                            <p
+                                data-testid="email-account-source"
+                                class="mt-1 truncate text-[11px] text-muted-foreground"
+                            >
+                                {result.account_display_name || result.account_email || `账号 #${result.account_id}`}
                             </p>
                         {/if}
                     </button>
@@ -733,6 +786,14 @@
                             class="mt-0.5 truncate text-xs text-muted-foreground"
                         >
                             {email.preview}
+                        </p>
+                    {/if}
+                    {#if accountStore.isAllAccounts}
+                        <p
+                            data-testid="email-account-source"
+                            class="mt-1 truncate text-[11px] text-muted-foreground"
+                        >
+                            {email.account_display_name || email.account_email || `账号 #${email.account_id}`}
                         </p>
                     {/if}
                 </button>

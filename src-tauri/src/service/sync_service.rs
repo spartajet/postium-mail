@@ -35,6 +35,7 @@ use crate::service::email_service::local_folder_registry_inputs;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -55,6 +56,20 @@ pub struct OlderSyncResult {
     pub window_end: i64,
     pub history_exhausted: bool,
     pub folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SyncAccountFailure {
+    pub account_id: i32,
+    pub email: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SyncAllAccountsResult {
+    pub total: usize,
+    pub succeeded: Vec<i32>,
+    pub failed: Vec<SyncAccountFailure>,
 }
 
 /// 同步服务
@@ -264,6 +279,34 @@ impl SyncService {
             .sync_account_with_range(account_id, range)
             .await
             .map(|_| ())
+    }
+
+    pub async fn sync_all_accounts_with_progress(
+        &self,
+        app_handle: tauri::AppHandle,
+    ) -> Result<SyncAllAccountsResult, MailError> {
+        self.sync_all_accounts_with_runner(|account_id| {
+            self.sync_account_with_progress(app_handle.clone(), account_id)
+        })
+        .await
+    }
+
+    async fn sync_all_accounts_with_runner<F, Fut>(
+        &self,
+        mut runner: F,
+    ) -> Result<SyncAllAccountsResult, MailError>
+    where
+        F: FnMut(i32) -> Fut,
+        Fut: Future<Output = Result<(), MailError>>,
+    {
+        let accounts = account_repo::list(&self.db).await?;
+        let mut outcomes = Vec::with_capacity(accounts.len());
+
+        for account in &accounts {
+            outcomes.push(runner(account.id).await);
+        }
+
+        collect_sync_all_accounts_result(accounts, outcomes)
     }
 
     pub async fn get_history_state(
@@ -593,6 +636,17 @@ impl SyncService {
         }
         Ok(stats)
     }
+
+    pub async fn get_folder_stats_for_all_accounts(&self) -> Result<Vec<FolderStat>, MailError> {
+        let accounts = account_repo::list(&self.db).await?;
+        let mut outcomes = Vec::with_capacity(accounts.len());
+
+        for account in &accounts {
+            outcomes.push(self.get_folder_stats(account.id).await);
+        }
+
+        collect_all_account_folder_stats(accounts, outcomes)
+    }
 }
 
 fn aggregate_folder_stats_by_category(
@@ -618,6 +672,87 @@ fn aggregate_folder_stats_by_category(
     let mut stats = grouped.into_values().collect::<Vec<_>>();
     stats.sort_by(|a, b| a.folder.cmp(&b.folder));
     stats
+}
+
+fn collect_sync_all_accounts_result(
+    accounts: Vec<crate::infrastructure::storage::models::accounts::Model>,
+    outcomes: Vec<Result<(), MailError>>,
+) -> Result<SyncAllAccountsResult, MailError> {
+    let total = accounts.len();
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+
+    for (account, outcome) in accounts.into_iter().zip(outcomes) {
+        match outcome {
+            Ok(()) => succeeded.push(account.id),
+            Err(err) => {
+                failed.push(SyncAccountFailure {
+                    account_id: account.id,
+                    email: Some(account.email),
+                    message: err.to_string(),
+                });
+            }
+        }
+    }
+
+    if total > 0 && succeeded.is_empty() && !failed.is_empty() {
+        return Err(MailError::SyncFailed(format!(
+            "所有账号同步失败: {}",
+            failed
+                .iter()
+                .map(|failure| failure.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        )));
+    }
+
+    Ok(SyncAllAccountsResult {
+        total,
+        succeeded,
+        failed,
+    })
+}
+
+fn collect_all_account_folder_stats(
+    accounts: Vec<crate::infrastructure::storage::models::accounts::Model>,
+    outcomes: Vec<Result<Vec<FolderStat>, MailError>>,
+) -> Result<Vec<FolderStat>, MailError> {
+    let mut grouped = HashMap::<String, FolderStat>::new();
+    let mut failures = Vec::new();
+
+    for (account, outcome) in accounts.into_iter().zip(outcomes) {
+        match outcome {
+            Ok(stats) => {
+                for stat in stats {
+                    let entry = grouped.entry(stat.folder.clone()).or_insert(FolderStat {
+                        folder: stat.folder,
+                        total: 0,
+                        unread: 0,
+                    });
+                    entry.total += stat.total;
+                    entry.unread += stat.unread;
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    account_id = account.id,
+                    error = %err,
+                    "所有账号统计跳过异常账号"
+                );
+                failures.push(err);
+            }
+        }
+    }
+
+    if grouped.is_empty() {
+        if let Some(err) = failures.into_iter().next() {
+            return Err(err);
+        }
+    }
+
+    let mut stats = grouped.into_values().collect::<Vec<_>>();
+    stats.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(stats)
 }
 
 fn all_history_exhausted(states: impl IntoIterator<Item = bool>) -> bool {
@@ -668,6 +803,11 @@ fn normalized_history_window_bound(value: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::MailError;
+    use crate::infrastructure::storage::DbConn;
+    use crate::infrastructure::storage::models::accounts;
+    use crate::infrastructure::storage::repository::account_repo::{self, AccountWrite};
+    use std::sync::{Arc, Mutex};
 
     fn remote_folder(name: &str) -> RemoteFolder {
         RemoteFolder {
@@ -738,5 +878,174 @@ mod tests {
                 .map(|stat| stat.unread),
             Some(5)
         );
+    }
+
+    fn test_account(id: i32, email: &str) -> accounts::Model {
+        accounts::Model {
+            id,
+            name: format!("Account {id}"),
+            email: email.to_string(),
+            display_name: None,
+            provider: "gmail".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl: None,
+            smtp_ssl_mode: None,
+            color: None,
+            sync_enabled: Some(true),
+            last_sync_at: None,
+            auth_type: Some("Password".to_string()),
+            account_type: "personal".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    async fn insert_test_account(db: &DbConn, email: &str) -> accounts::Model {
+        account_repo::create(
+            db,
+            AccountWrite {
+                name: email.to_string(),
+                email: email.to_string(),
+                display_name: None,
+                provider: "gmail".to_string(),
+                imap_host: None,
+                imap_port: None,
+                imap_ssl: None,
+                imap_ssl_mode: None,
+                smtp_host: None,
+                smtp_port: None,
+                smtp_ssl: None,
+                smtp_ssl_mode: None,
+                color: None,
+                sync_enabled: Some(true),
+                last_sync_at: None,
+                auth_type: Some("Password".to_string()),
+                account_type: "personal".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[test]
+    fn sync_all_accounts_with_progress_should_return_partial_failures_when_some_accounts_fail() {
+        let accounts = vec![
+            test_account(1, "ok@example.com"),
+            test_account(2, "fail@example.com"),
+        ];
+        let outcomes = vec![Ok(()), Err(MailError::SyncFailed("imap offline".into()))];
+
+        let result = collect_sync_all_accounts_result(accounts, outcomes).unwrap();
+
+        assert_eq!(result.total, 2);
+        assert_eq!(result.succeeded, vec![1]);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].account_id, 2);
+        assert_eq!(result.failed[0].email.as_deref(), Some("fail@example.com"));
+        assert!(result.failed[0].message.contains("imap offline"));
+    }
+
+    #[test]
+    fn sync_all_accounts_with_progress_should_return_error_when_all_accounts_fail() {
+        let accounts = vec![
+            test_account(1, "a@example.com"),
+            test_account(2, "b@example.com"),
+        ];
+        let outcomes = vec![
+            Err(MailError::SyncFailed("first failed".into())),
+            Err(MailError::AuthFailed("bad password".into())),
+        ];
+
+        let err = collect_sync_all_accounts_result(accounts, outcomes).unwrap_err();
+
+        match err {
+            MailError::SyncFailed(message) => {
+                assert!(message.contains("所有账号同步失败"));
+                assert!(message.contains("first failed"));
+                assert!(message.contains("bad password"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_all_accounts_with_runner_should_call_every_account_and_return_partial_failures() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_a = insert_test_account(&db, "ok@example.com").await;
+        let account_b = insert_test_account(&db, "fail@example.com").await;
+        let service = SyncService::new(db, Arc::new(AuthManager::in_memory()));
+        let called_ids = Arc::new(Mutex::new(Vec::new()));
+        let called_ids_for_runner = called_ids.clone();
+
+        let result = service
+            .sync_all_accounts_with_runner(move |account_id| {
+                let called_ids = called_ids_for_runner.clone();
+                async move {
+                    called_ids.lock().unwrap().push(account_id);
+                    if account_id == account_b.id {
+                        Err(MailError::SyncFailed("imap offline".into()))
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *called_ids.lock().unwrap(),
+            vec![account_a.id, account_b.id]
+        );
+        assert_eq!(result.total, 2);
+        assert_eq!(result.succeeded, vec![account_a.id]);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].account_id, account_b.id);
+        assert_eq!(result.failed[0].email.as_deref(), Some("fail@example.com"));
+        assert!(result.failed[0].message.contains("imap offline"));
+    }
+
+    #[tokio::test]
+    async fn sync_all_accounts_with_runner_should_return_error_when_all_accounts_fail() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_a = insert_test_account(&db, "a@example.com").await;
+        let account_b = insert_test_account(&db, "b@example.com").await;
+        let service = SyncService::new(db, Arc::new(AuthManager::in_memory()));
+        let called_ids = Arc::new(Mutex::new(Vec::new()));
+        let called_ids_for_runner = called_ids.clone();
+
+        let err = service
+            .sync_all_accounts_with_runner(move |account_id| {
+                let called_ids = called_ids_for_runner.clone();
+                async move {
+                    called_ids.lock().unwrap().push(account_id);
+                    if account_id == account_a.id {
+                        Err(MailError::SyncFailed("first failed".into()))
+                    } else {
+                        Err(MailError::AuthFailed("bad password".into()))
+                    }
+                }
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            *called_ids.lock().unwrap(),
+            vec![account_a.id, account_b.id]
+        );
+        match err {
+            MailError::SyncFailed(message) => {
+                assert!(message.contains("所有账号同步失败"));
+                assert!(message.contains("first failed"));
+                assert!(message.contains("bad password"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
