@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
 
-pub use crate::service::mail_send::SendEmailResponse;
+pub use crate::service::mail_send::{
+    ComposeAttachmentInput, LocalAttachmentDraft, SendEmailResponse,
+};
 
 // ═════════════════════════════════════════════════════════════════════════
 // 邮件服务模块 (Email Service)
@@ -247,6 +249,10 @@ pub struct SendEmailRequest {
     pub body_html: String,
     /// 纯文本正文
     pub body_text: String,
+    #[serde(default)]
+    pub attachments: Vec<ComposeAttachmentInput>,
+    #[serde(default)]
+    pub draft_id: Option<i32>,
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -773,6 +779,17 @@ impl EmailService {
         self.mail_operation.archive(id).await
     }
 
+    pub async fn describe_local_attachments(
+        &self,
+        paths: Vec<String>,
+    ) -> Result<Vec<LocalAttachmentDraft>, MailError> {
+        let mut result = Vec::with_capacity(paths.len());
+        for path in paths {
+            result.push(crate::service::mail_send::describe_local_attachment(path).await?);
+        }
+        Ok(result)
+    }
+
     /// 发送邮件
     ///
     /// 通过 SMTP 协议发送邮件，支持密码认证和 OAuth2 认证。
@@ -816,6 +833,8 @@ impl EmailService {
     ///     subject: "测试邮件".to_string(),
     ///     body_html: "<p>你好，这是一封测试邮件。</p>".to_string(),
     ///     body_text: "你好，这是一封测试邮件。".to_string(),
+    ///     attachments: vec![],
+    ///     draft_id: None,
     /// };
     ///
     /// let response = email_service.send(req).await?;

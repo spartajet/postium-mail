@@ -94,6 +94,8 @@ fn build_email_generates_message_id_and_raw_rfc822() {
         subject: "Hello".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        attachments: vec![],
+        draft_id: None,
     };
 
     let built = build_email(&account, &req).unwrap();
@@ -116,6 +118,8 @@ fn send_validation_rejects_missing_recipients() {
         subject: "Hello".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        attachments: vec![],
+        draft_id: None,
     };
 
     let result = validate_send_request(&req);
@@ -133,6 +137,8 @@ fn send_validation_rejects_empty_subject() {
         subject: "   ".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        attachments: vec![],
+        draft_id: None,
     };
 
     let result = validate_send_request(&req);
@@ -150,6 +156,8 @@ fn send_validation_rejects_empty_body_text() {
         subject: "Hello".to_string(),
         body_html: "<p><br></p>".to_string(),
         body_text: " \n\t ".to_string(),
+        attachments: vec![],
+        draft_id: None,
     };
 
     let result = validate_send_request(&req);
@@ -219,7 +227,43 @@ fn send_request(account_id: i32) -> SendEmailRequest {
         subject: "  Service Send  ".to_string(),
         body_html: "<p>Hello from service</p>".to_string(),
         body_text: "Hello from service".to_string(),
+        attachments: vec![],
+        draft_id: None,
     }
+}
+
+#[tokio::test]
+async fn describe_local_attachments_rejects_missing_path() {
+    let svc = TestServices::new().await;
+
+    let result = svc
+        .email_service
+        .describe_local_attachments(vec!["/tmp/postium-missing-file-for-test.txt".to_string()])
+        .await;
+
+    assert!(result.is_err());
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains("附件文件不存在") || message.contains("not found"));
+}
+
+#[tokio::test]
+async fn describe_local_attachments_returns_file_metadata() {
+    let svc = TestServices::new().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hello.txt");
+    std::fs::write(&path, b"hello").unwrap();
+
+    let result = svc
+        .email_service
+        .describe_local_attachments(vec![path.to_string_lossy().to_string()])
+        .await
+        .unwrap();
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].filename, "hello.txt");
+    assert_eq!(result[0].content_type, "text/plain");
+    assert_eq!(result[0].size, 5);
+    assert_eq!(result[0].path, path.to_string_lossy());
 }
 
 async fn sent_email_count(svc: &TestServices, account_id: i32) -> i64 {
