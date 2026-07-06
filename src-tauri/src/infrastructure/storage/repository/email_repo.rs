@@ -191,6 +191,56 @@ fn execute_email_insert(
     ])
 }
 
+fn next_local_uid(
+    tx: &rusqlite::Transaction<'_>,
+    account_id: i32,
+    folder: &str,
+) -> rusqlite::Result<u32> {
+    tx.query_row(
+        "SELECT COALESCE(MAX(uid), 0) + 1
+         FROM emails
+         WHERE account_id = ?1 AND folder = ?2",
+        rusqlite::params![account_id, folder],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|value| value as u32)
+}
+
+fn read_email_by_id(
+    tx: &rusqlite::Transaction<'_>,
+    email_id: i32,
+) -> rusqlite::Result<emails::Model> {
+    let mut stmt = tx.prepare(
+        "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                is_read, is_starred, is_draft, is_answered, is_deleted,
+                sent_at, received_at, created_at, updated_at
+         FROM emails
+         WHERE id = ?1",
+    )?;
+    stmt.query_row([email_id], map_email)
+}
+
+fn insert_email_with_attachments_tx(
+    tx: &rusqlite::Transaction<'_>,
+    mut write: EmailWrite,
+    attachments: Vec<AttachmentWrite>,
+) -> rusqlite::Result<emails::Model> {
+    write.uid = next_local_uid(tx, write.account_id, &write.folder)?;
+
+    let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
+    execute_email_insert(&mut insert_stmt, &write)?;
+    let email_id = tx.last_insert_rowid() as i32;
+
+    let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
+    for mut attachment in attachments {
+        attachment.email_id = email_id;
+        execute_attachment_insert(&mut attachment_stmt, &attachment)?;
+    }
+
+    read_email_by_id(tx, email_id)
+}
+
 fn update_existing_email_by_id(
     tx: &rusqlite::Transaction<'_>,
     email_id: i32,
@@ -636,48 +686,36 @@ pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, Mai
         let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
         execute_email_insert(&mut insert_stmt, &model)?;
         let id = tx.last_insert_rowid() as i32;
-        let mut stmt = tx.prepare(
-            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
-                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
-                    is_read, is_starred, is_draft, is_answered, is_deleted,
-                    sent_at, received_at, created_at, updated_at
-             FROM emails
-             WHERE id = ?1",
-        )?;
-        stmt.query_row([id], map_email)
+        read_email_by_id(tx, id)
     })
     .await
 }
 
 /// 插入本地已发送邮件，并为目标账号文件夹分配下一个本地 UID。
-pub async fn insert_sent_email(
+pub async fn insert_sent_email(db: &DbConn, write: EmailWrite) -> Result<emails::Model, MailError> {
+    insert_sent_email_with_attachments(db, write, vec![]).await
+}
+
+/// 在同一事务内插入本地已发送邮件及其附件元数据，并分配下一个本地 UID。
+pub async fn insert_sent_email_with_attachments(
     db: &DbConn,
     mut write: EmailWrite,
+    attachments: Vec<AttachmentWrite>,
 ) -> Result<emails::Model, MailError> {
-    db.transaction(move |tx| {
-        let next_uid = tx.query_row(
-            "SELECT COALESCE(MAX(uid), 0) + 1
-             FROM emails
-             WHERE account_id = ?1 AND folder = ?2",
-            rusqlite::params![write.account_id, &write.folder],
-            |row| row.get::<_, i64>(0),
-        )? as u32;
-        write.uid = next_uid;
+    write.is_draft = Some(false);
+    db.transaction(move |tx| insert_email_with_attachments_tx(tx, write, attachments))
+        .await
+}
 
-        let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
-        execute_email_insert(&mut insert_stmt, &write)?;
-        let id = tx.last_insert_rowid() as i32;
-        let mut stmt = tx.prepare(
-            "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
-                    recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
-                    is_read, is_starred, is_draft, is_answered, is_deleted,
-                    sent_at, received_at, created_at, updated_at
-             FROM emails
-             WHERE id = ?1",
-        )?;
-        stmt.query_row([id], map_email)
-    })
-    .await
+/// 在同一事务内插入本地草稿邮件及其附件元数据，并分配下一个本地 UID。
+pub async fn insert_draft_email_with_attachments(
+    db: &DbConn,
+    mut write: EmailWrite,
+    attachments: Vec<AttachmentWrite>,
+) -> Result<emails::Model, MailError> {
+    write.is_draft = Some(true);
+    db.transaction(move |tx| insert_email_with_attachments_tx(tx, write, attachments))
+        .await
 }
 
 /// 批量插入邮件。
