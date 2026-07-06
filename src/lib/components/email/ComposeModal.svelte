@@ -47,7 +47,7 @@
     // 导入 Tauri 后端命令接口，用于调用发送邮件等后端方法
     import { commands } from "$lib/bindings";
     // 导入关闭/清除图标
-    import { X } from "lucide-svelte";
+    import { ChevronDown, X } from "lucide-svelte";
     // 导入富文本编辑器子组件
     import RichTextEditor from "./RichTextEditor.svelte";
 
@@ -76,9 +76,13 @@
     let error = $state("");
     // 所有账号视图下的当前发件账号
     let selectedAccountId = $state<number | null>(null);
+    let accountDropdownOpen = $state(false);
     // 富文本编辑器组件实例引用
     let richEditor = $state<RichTextEditor>();
     let shouldShowAccountSelect = $derived(accountStore.isAllAccounts);
+    let selectedSendAccount = $derived(
+        accountStore.accounts.find((account) => account.id === selectedAccountId),
+    );
 
     function hasAccount(accountId: number | null | undefined): accountId is number {
         return (
@@ -102,7 +106,13 @@
 
     function openWithAccount(preferredAccountId?: number) {
         selectedAccountId = defaultSendAccountId(preferredAccountId);
+        accountDropdownOpen = false;
         open = true;
+    }
+
+    function selectSendAccount(accountId: number) {
+        selectedAccountId = accountId;
+        accountDropdownOpen = false;
     }
 
     function parseRecipients(value: string) {
@@ -208,6 +218,7 @@
         subject = "";
         error = "";
         selectedAccountId = null;
+        accountDropdownOpen = false;
         // 清空富文本编辑器内容
         richEditor?.clear();
     }
@@ -360,17 +371,64 @@
                         <span class="w-14 shrink-0 text-sm text-muted-foreground"
                             >发件</span
                         >
-                        <select
-                            data-testid="compose-account-select"
-                            bind:value={selectedAccountId}
-                            class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
-                        >
-                            {#each accountStore.accounts as account}
-                                <option value={account.id}>
-                                    {account.display_name || account.email}
-                                </option>
-                            {/each}
-                        </select>
+                        <div class="relative min-w-0 flex-1 py-1">
+                            <button
+                                type="button"
+                                data-testid="compose-account-select"
+                                data-value={selectedAccountId}
+                                aria-haspopup="listbox"
+                                aria-expanded={accountDropdownOpen}
+                                class="flex h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent bg-transparent px-0 text-left text-sm text-foreground outline-none transition-colors hover:bg-glass-hover hover:px-2 focus:border-border focus:bg-glass-hover focus:px-2"
+                                onclick={() =>
+                                    (accountDropdownOpen = !accountDropdownOpen)}
+                            >
+                                <span class="truncate">
+                                    {selectedSendAccount?.display_name ||
+                                        selectedSendAccount?.email ||
+                                        "选择发件账号"}
+                                </span>
+                                <ChevronDown
+                                    size={14}
+                                    class="shrink-0 text-muted-foreground"
+                                />
+                            </button>
+
+                            {#if accountDropdownOpen}
+                                <div
+                                    data-testid="compose-account-options"
+                                    role="listbox"
+                                    class="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-xl"
+                                >
+                                    {#each accountStore.accounts as account}
+                                        <button
+                                            type="button"
+                                            role="option"
+                                            aria-selected={account.id ===
+                                                selectedAccountId}
+                                            data-testid={`compose-account-option-${account.id}`}
+                                            class="flex w-full flex-col px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {account.id ===
+                                            selectedAccountId
+                                                ? 'bg-primary/10 text-primary'
+                                                : 'text-foreground'}"
+                                            onclick={() =>
+                                                selectSendAccount(account.id)}
+                                        >
+                                            <span class="truncate font-medium">
+                                                {account.display_name ||
+                                                    account.email}
+                                            </span>
+                                            {#if account.display_name}
+                                                <span
+                                                    class="truncate text-xs text-muted-foreground"
+                                                >
+                                                    {account.email}
+                                                </span>
+                                            {/if}
+                                        </button>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
                     </div>
                 {/if}
                 <!-- 收件人输入行 -->
