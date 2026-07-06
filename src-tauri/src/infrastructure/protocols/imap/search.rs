@@ -74,6 +74,13 @@ fn build_uid_since_search_command(uid_since: u32) -> Option<String> {
     (uid_since >= 1).then(|| format!("UID {uid_since}:*"))
 }
 
+/// 构建按 Message-ID 搜索 UID 的命令
+fn build_message_id_search_command(message_id: &str) -> String {
+    let normalized = message_id.trim().trim_matches(['<', '>']);
+    let escaped = normalized.replace(['\\', '"'], "");
+    format!("HEADER Message-ID \"{escaped}\"")
+}
+
 // ─── ImapClient SEARCH 实现 ───
 
 impl ImapClient {
@@ -322,6 +329,30 @@ impl ImapClient {
         }
         Ok(uid_list)
     }
+
+    /// 通过 Message-ID 查找邮件 UID
+    ///
+    /// 草稿追加后用于确认服务器实际分配的 UID，避免依赖 UIDNEXT 预测值。
+    pub async fn find_uid_by_message_id(
+        &mut self,
+        folder: &str,
+        message_id: &str,
+    ) -> Result<Option<u32>, MailError> {
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
+
+        let search_cmd = build_message_id_search_command(message_id);
+        tracing::info!("📤 使用 IMAP Message-ID 搜索命令: '{}'", search_cmd);
+        let uids = self
+            .session
+            .uid_search(&search_cmd)
+            .await
+            .map_err(|e| MailError::ImapSearchFailed(e.to_string()))?;
+
+        Ok(uids.into_iter().max())
+    }
 }
 
 // ─── 测试模块 ───
@@ -329,8 +360,9 @@ impl ImapClient {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_all_search_command, build_before_search_command, build_since_before_search_command,
-        build_uid_before_search_command, build_uid_since_search_command,
+        build_all_search_command, build_before_search_command, build_message_id_search_command,
+        build_since_before_search_command, build_uid_before_search_command,
+        build_uid_since_search_command,
     };
 
     /// 测试构建全量搜索命令
@@ -385,5 +417,13 @@ mod tests {
     #[test]
     fn build_uid_since_search_command_should_return_none_for_zero() {
         assert_eq!(build_uid_since_search_command(0), None);
+    }
+
+    #[test]
+    fn build_message_id_search_command_should_search_normalized_header_value() {
+        assert_eq!(
+            build_message_id_search_command("<abc@example.com>"),
+            "HEADER Message-ID \"abc@example.com\""
+        );
     }
 }
