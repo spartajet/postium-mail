@@ -396,15 +396,31 @@ impl ImapClient {
         self.set_flags(uid, "+FLAGS.SILENT (\\Deleted)").await
     }
 
+    /// 标记指定 UID 邮件为已删除。
+    pub async fn delete_uid(&mut self, uid: u32) -> Result<(), MailError> {
+        self.mark_uid_deleted(uid).await
+    }
+
+    /// 将一封完整 RFC822 邮件追加到目标文件夹，并可显式传入 IMAP flags。
+    pub async fn append_email_with_flags(
+        &mut self,
+        folder: &str,
+        flags: Option<&str>,
+        raw: &[u8],
+    ) -> Result<(), MailError> {
+        self.session
+            .append(folder, flags, None, raw)
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("追加邮件失败: {e}")))?;
+        Ok(())
+    }
+
     /// 将一封完整 RFC822 邮件追加到目标文件夹。
     ///
     /// 发送成功后的 Sent 远端归档使用 IMAP APPEND，并标记为已读。
     pub async fn append_email(&mut self, folder: &str, raw: &[u8]) -> Result<(), MailError> {
-        self.session
-            .append(folder, Some("(\\Seen)"), None, raw)
+        self.append_email_with_flags(folder, Some("(\\Seen)"), raw)
             .await
-            .map_err(|e| MailError::ImapConnectionFailed(format!("追加邮件失败: {e}")))?;
-        Ok(())
     }
 
     // ─── 连接管理 ───
