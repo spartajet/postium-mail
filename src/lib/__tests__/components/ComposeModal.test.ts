@@ -14,7 +14,7 @@
  * 6. 回复和转发时的账号传递
  */
 
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ComposeModal from "$lib/components/email/ComposeModal.svelte";
 import { mockInvoke } from "../mocks/tauri";
@@ -66,6 +66,9 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
                 to: "收件人",
                 cc: "抄送",
                 subject: "主题",
+                sendRequiresRecipient: "请填写至少一个收件人",
+                sendRequiresSubject: "请填写邮件主题",
+                sendRequiresBody: "请填写邮件正文",
                 send: "发送",
                 loading: "发送中",
             },
@@ -74,10 +77,24 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
     }),
 }));
 
+async function fillBody(value: string) {
+    await waitFor(() => {
+        expect(document.querySelector(".ProseMirror")).toBeTruthy();
+    });
+    const editor = document.querySelector(".ProseMirror") as HTMLElement;
+    editor.textContent = value;
+    await fireEvent.input(editor);
+}
+
 describe("ComposeModal 发件账号选择", () => {
     beforeEach(() => {
         mockInvoke.mockReset();
-        mockInvoke.mockResolvedValue({ status: "ok", data: "message-id" });
+        mockInvoke.mockResolvedValue({
+            message_id: "<message-id@example.com>",
+            local_email_id: 1,
+            remote_archived: true,
+            remote_archive_error: null,
+        });
         accounts = [...defaultAccounts];
         isAllAccounts = true;
         activeAccountId = null;
@@ -106,6 +123,7 @@ describe("ComposeModal 发件账号选择", () => {
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
+        await fillBody("Body");
         await fireEvent.click(screen.getByTestId("compose-send-button"));
 
         expect(mockInvoke).toHaveBeenCalledWith("send_email", {
@@ -129,6 +147,7 @@ describe("ComposeModal 发件账号选择", () => {
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
+        await fillBody("Body");
         await fireEvent.click(screen.getByTestId("compose-send-button"));
 
         expect(mockInvoke).toHaveBeenCalledWith("send_email", {
@@ -184,6 +203,39 @@ describe("ComposeModal 发件账号选择", () => {
         const sendButton = screen.getByTestId("compose-send-button");
         expect((sendButton as HTMLButtonElement).disabled).toBe(true);
         await fireEvent.click(sendButton);
+        expect(mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it("主题为空时不发送并显示校验错误", async () => {
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
+            target: { value: "to@example.com" },
+        });
+        await fillBody("Body");
+
+        const sendButton = screen.getByTestId("compose-send-button");
+        expect((sendButton as HTMLButtonElement).disabled).toBe(false);
+        await fireEvent.click(sendButton);
+        expect(await screen.findByText("请填写邮件主题")).toBeTruthy();
+        expect(mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it("正文为空时不发送并显示校验错误", async () => {
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
+            target: { value: "to@example.com" },
+        });
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "Hello" },
+        });
+
+        await fireEvent.click(screen.getByTestId("compose-send-button"));
+
+        expect(await screen.findByText("请填写邮件正文")).toBeTruthy();
         expect(mockInvoke).not.toHaveBeenCalled();
     });
 

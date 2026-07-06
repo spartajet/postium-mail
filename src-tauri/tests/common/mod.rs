@@ -12,7 +12,11 @@ use postium_mail_lib::service::account_connection::{
 };
 use postium_mail_lib::service::email_service::EmailService;
 use postium_mail_lib::service::mail_operation::MailRemoteOperator;
+use postium_mail_lib::service::mail_send::{
+    BuiltEmail, SentArchiveRequest, SentArchiveWriter, SmtpEmailSender,
+};
 use postium_mail_lib::service::{AccountService, LabelService, SyncService};
+use std::sync::Mutex;
 
 pub mod real_mail;
 
@@ -35,6 +39,50 @@ pub struct TestServices {
 }
 
 struct NoopMailRemoteOperator;
+
+pub struct RecordingSmtpSender {
+    pub sent_message_ids: Mutex<Vec<String>>,
+    pub fail_with: Mutex<Option<MailError>>,
+}
+
+pub struct RecordingSentArchiveWriter {
+    pub archived_message_ids: Mutex<Vec<String>>,
+    pub fail_with: Mutex<Option<MailError>>,
+}
+
+#[async_trait]
+impl SmtpEmailSender for RecordingSmtpSender {
+    async fn send(
+        &self,
+        _config: &postium_mail_lib::domain::providers::SmtpServerConfig,
+        _account_email: &str,
+        _credentials: &postium_mail_lib::domain::auth::Credentials,
+        email: &BuiltEmail,
+    ) -> Result<(), MailError> {
+        if let Some(error) = self.fail_with.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.sent_message_ids
+            .lock()
+            .unwrap()
+            .push(email.message_id.clone());
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl SentArchiveWriter for RecordingSentArchiveWriter {
+    async fn append_to_sent(&self, req: SentArchiveRequest) -> Result<(), MailError> {
+        if let Some(error) = self.fail_with.lock().unwrap().take() {
+            return Err(error);
+        }
+        self.archived_message_ids
+            .lock()
+            .unwrap()
+            .push(req.message_id);
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl MailRemoteOperator for NoopMailRemoteOperator {
@@ -134,6 +182,35 @@ impl TestServices {
                 auth.clone(),
                 db.clone(),
                 mail_remote,
+            ),
+            label_service: LabelService::new(db.clone()),
+            sync_service: SyncService::new(db.clone(), auth.clone()),
+            db,
+            auth,
+        }
+    }
+
+    pub async fn new_with_send_dependencies(
+        smtp_sender: Arc<dyn SmtpEmailSender>,
+        sent_archiver: Arc<dyn SentArchiveWriter>,
+    ) -> Self {
+        init_provider_pool();
+        let db = create_test_db().await;
+        let auth = Arc::new(AuthManager::in_memory());
+        let mail_remote = Arc::new(NoopMailRemoteOperator);
+
+        Self {
+            account_service: AccountService::new_with_imap_verifier(
+                db.clone(),
+                auth.clone(),
+                Arc::new(NoopImapConnectionVerifier),
+            ),
+            email_service: EmailService::new_with_dependencies(
+                auth.clone(),
+                db.clone(),
+                mail_remote,
+                smtp_sender,
+                sent_archiver,
             ),
             label_service: LabelService::new(db.clone()),
             sync_service: SyncService::new(db.clone(), auth.clone()),

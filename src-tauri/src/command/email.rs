@@ -59,6 +59,7 @@ use crate::infrastructure::storage::search::SearchResult;
 use crate::service::attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 use crate::service::email_service::{
     EmailCategory, EmailDetail, EmailListResponse, ReloadEmailResult, SendEmailRequest,
+    SendEmailResponse,
 };
 
 ///
@@ -776,7 +777,7 @@ pub async fn archive_email(
 pub async fn send_email(
     service: tauri::State<'_, crate::service::email_service::EmailService>,
     request: SendEmailRequest,
-) -> Result<String, MailError> {
+) -> Result<SendEmailResponse, MailError> {
     // 记录信息日志，包含关键的发送信息
     tracing::info!(
         account_id = request.account_id,

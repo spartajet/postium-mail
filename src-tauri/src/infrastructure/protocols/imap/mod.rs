@@ -396,6 +396,17 @@ impl ImapClient {
         self.set_flags(uid, "+FLAGS.SILENT (\\Deleted)").await
     }
 
+    /// 将一封完整 RFC822 邮件追加到目标文件夹。
+    ///
+    /// 发送成功后的 Sent 远端归档使用 IMAP APPEND，并标记为已读。
+    pub async fn append_email(&mut self, folder: &str, raw: &[u8]) -> Result<(), MailError> {
+        self.session
+            .append(folder, Some("(\\Seen)"), None, raw)
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("追加邮件失败: {e}")))?;
+        Ok(())
+    }
+
     // ─── 连接管理 ───
 
     /// 登出 IMAP 服务器

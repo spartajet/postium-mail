@@ -703,7 +703,7 @@ export const commands = {
 	 *  console.log('邮件发送成功，Message-ID:', messageId);
 	 *  ```
 	 */
-	sendEmail: (request: SendEmailRequest) => typedError<string, MailError>(__TAURI_INVOKE("send_email", { request })),
+	sendEmail: (request: SendEmailRequest) => typedError<SendEmailResponse, MailError>(__TAURI_INVOKE("send_email", { request })),
 	/**
 	 *  手动同步账号
 	 * 
@@ -1484,6 +1484,41 @@ export const commands = {
 	 *  ```
 	 */
 	listEmailsByLabel: (labelId: number) => typedError<number[], MailError>(__TAURI_INVOKE("list_emails_by_label", { labelId })),
+	/**
+	 *  打开设置窗口
+	 * 
+	 *  在独立窗口中打开应用设置页，并将窗口居中显示在主窗口之上。
+	 *  若设置窗口已存在，则不会重复创建，而是直接显示并聚焦。
+	 * 
+	 *  功能说明：
+	 *  1. 查找是否已存在 label 为 "settings" 的窗口
+	 *  2. 若已存在，则直接 show 并 set_focus，立即返回（避免重复窗口）
+	 *  3. 若不存在，则构建一个新的无装饰（无边框）窗口，初始不可见
+	 *  4. 获取主窗口（"main"）的外部位置和尺寸，计算设置窗口的居中坐标
+	 *  5. 将设置窗口移动到居中位置后再显示，避免窗口先在默认位置闪现
+	 *  6. 显示并聚焦新创建的设置窗口
+	 * 
+	 *  参数：
+	 *  - app: Tauri 应用句柄，用于查找和创建窗口
+	 * 
+	 *  返回值：
+	 *  - Ok(()): 窗口成功打开（或已存在窗口成功聚焦）
+	 *  - Err(MailError): 窗口的显示、聚焦或创建失败时返回
+	 *    MailError::InvalidParam，错误信息包含底层原因
+	 * 
+	 *  使用场景：
+	 *  1. 用户点击界面中的"设置"按钮，弹出独立的设置窗口
+	 *  2. 设置窗口需要相对主窗口居中，提供视觉一致的多窗口体验
+	 *  3. 用户多次点击设置时，复用已存在的设置窗口而非重复创建
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 * 
+	 *  // 打开设置窗口（已存在时会自动聚焦）
+	 *  await invoke('open_settings_window');
+	 *  ```
+	 */
 	openSettingsWindow: () => typedError<null, MailError>(__TAURI_INVOKE("open_settings_window")),
 };
 
@@ -1555,16 +1590,46 @@ export type AccountType =
 // 企业邮箱
 "Enterprise";
 
+/**
+ *  附件数据传输对象
+ * 
+ *  这是附件信息对外展示的标准格式，用于前后端数据交换。
+ *  由数据库模型 `attachments::Model` 转换而来，
+ *  自动补全缺失的文件名、Content-Type 等字段。
+ * 
+ *  # 字段说明
+ * 
+ *  - `id`: 附件在数据库中的唯一标识
+ *  - `email_id`: 所属邮件的数据库 ID
+ *  - `filename`: 文件名（若原始数据缺失则自动生成兜底名）
+ *  - `content_type`: MIME 类型（缺失时默认 `application/octet-stream`）
+ *  - `size`: 附件字节大小
+ *  - `disposition`: Content-Disposition 值（如 `attachment` / `inline`）
+ *  - `content_id`: 内联资源的 Content-ID（对应正文中的 `cid:` 引用）
+ *  - `is_inline`: 是否为内联资源（disposition 为 inline 或存在 content_id）
+ *  - `is_cached`: 是否已缓存到本地磁盘
+ *  - `cache_path`: 本地缓存文件的绝对路径（未缓存时为 None）
+ */
 export type AttachmentDto = {
+	// 数据库主键 ID
 	id: number,
+	// 所属邮件的数据库 ID
 	email_id: number,
+	// 文件名
 	filename: string,
+	// MIME 类型
 	content_type: string,
+	// 附件字节大小
 	size: number,
+	// Content-Disposition（可选）
 	disposition: string | null,
+	// 内联资源 Content-ID（可选）
 	content_id: string | null,
+	// 是否为内联资源
 	is_inline: boolean,
+	// 是否已缓存到本地
 	is_cached: boolean,
+	// 本地缓存文件路径（可选）
 	cache_path: string | null,
 };
 
@@ -1859,8 +1924,21 @@ export type HistorySyncState = {
 // 初始同步范围
 export type InitialSyncRange = "week" | "month" | "three_months" | "year" | "all";
 
+/**
+ *  内联附件数据传输对象
+ * 
+ *  用于将邮件正文中引用的内联图片（`cid:` 引用）解析为
+ *  可直接访问的本地文件 URL，供前端渲染正文时替换 `cid:` 占位符。
+ * 
+ *  # 字段说明
+ * 
+ *  - `content_id`: 内联资源的 Content-ID（不含尖括号）
+ *  - `url`: 本地缓存文件的路径，作为 `cid:` 的替换目标
+ */
 export type InlineAttachmentDto = {
+	// 内联资源 Content-ID
 	content_id: string,
+	// 本地文件路径（用于替换 cid: 引用）
 	url: string,
 };
 
@@ -1892,18 +1970,32 @@ export type MailError = { type: "AccountNotFound"; message: number } | { type: "
 
 // OAuth2 授权 URL 结果
 export type OAuth2AuthUrl = {
+	// 完整的授权 URL，前端打开此 URL 进入服务商登录/授权页
 	url: string,
+	// CSRF state，前端必须保存并在轮询时回传用于匹配会话
 	state: string,
+	// 本地回调监听端口（由系统分配的临时端口）
 	port: number,
 };
 
 // OAuth2 授权完成信息（返回给前端的最小信息）
 export type OAuth2CompletedInfo = {
+	// 授权成功的邮箱地址（token 等敏感信息不返回前端）
 	email: string,
 };
 
-// OAuth2 轮询状态
-export type OAuth2PollResult = "Pending" | ({ Completed: OAuth2CompletedInfo }) & { Error?: never } | ({ Error: string }) & { Completed?: never };
+/**
+ *  OAuth2 轮询状态
+ * 
+ *  前端通过 [`OAuth2Manager::poll_oauth2`] 周期性轮询某个 `state` 的结果。
+ */
+export type OAuth2PollResult = 
+// 授权仍在进行中（回调尚未到达或 token 交换未完成）
+"Pending" | 
+// 授权已完成，携带返回给前端的最小信息（邮箱）
+({ Completed: OAuth2CompletedInfo }) & { Error?: never } | 
+// 授权失败，携带错误描述字符串
+({ Error: string }) & { Completed?: never };
 
 export type OlderSyncResult = {
 	new_emails: number,
@@ -1914,10 +2006,22 @@ export type OlderSyncResult = {
 	folders: string[],
 };
 
+/**
+ *  服务商探测结果。
+ * 
+ *  由 [`detect_provider`] 返回，描述一个邮箱地址是否匹配到服务商，以及匹配到的服务商元信息。
+ */
 export type ProviderDetectionResult = {
+	// 是否成功探测到匹配的服务商。
 	detected: boolean,
+	// 探测到的服务商 ID（如 `"gmail"`、`"qq"`）；未匹配时为 `None`。
 	provider_id: string | null,
+	// 探测到的服务商展示名称（如 `"Gmail"`）；未匹配时为 `None`。
 	provider_name: string | null,
+	/**
+	 *  该服务商支持的认证方式描述字符串（如 `"password"` / `"oauth2"` / `"both"`）。
+	 *  未匹配时为空字符串。
+	 */
 	auth_types: string,
 };
 
@@ -2021,6 +2125,13 @@ export type SendEmailRequest = {
 	body_html: string,
 	// 纯文本正文
 	body_text: string,
+};
+
+export type SendEmailResponse = {
+	message_id: string,
+	local_email_id: number,
+	remote_archived: boolean,
+	remote_archive_error: string | null,
 };
 
 export type SyncAccountFailure = {
