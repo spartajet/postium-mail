@@ -392,6 +392,9 @@ export const commands = {
 	saveAttachmentAs: (attachmentId: number, targetPath: string) => typedError<null, MailError>(__TAURI_INVOKE("save_attachment_as", { attachmentId, targetPath })),
 	openAttachment: (attachmentId: number) => typedError<null, MailError>(__TAURI_INVOKE("open_attachment", { attachmentId })),
 	resolveInlineAttachments: (emailId: number) => typedError<InlineAttachmentDto[], MailError>(__TAURI_INVOKE("resolve_inline_attachments", { emailId })),
+	describeLocalAttachments: (paths: string[]) => typedError<LocalAttachmentDraft[], MailError>(__TAURI_INVOKE("describe_local_attachments", { paths })),
+	saveDraft: (request: SaveDraftRequest) => typedError<SaveDraftResponse, MailError>(__TAURI_INVOKE("save_draft", { request })),
+	deleteDraft: (draftId: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_draft", { draftId })),
 	/**
 	 *  搜索邮件
 	 * 
@@ -1733,6 +1736,13 @@ export type CreateLabelRequest = {
 	color: string,
 };
 
+export type ComposeAttachmentInput = {
+	path: string,
+	filename: string | null,
+	content_type: string | null,
+	size: number | null,
+};
+
 /**
  *  邮件分类（前端侧边栏导航使用）
  * 
@@ -2080,6 +2090,34 @@ export type SearchResult = {
 	rank: number,
 };
 
+export type LocalAttachmentDraft = {
+	path: string,
+	filename: string,
+	content_type: string,
+	size: number,
+};
+
+export type SaveDraftRequest = {
+	draft_id: number | null,
+	account_id: number,
+	to: string[],
+	cc: string[],
+	bcc: string[],
+	subject: string,
+	body_html: string,
+	body_text: string,
+	attachments: ComposeAttachmentInput[],
+};
+
+export type SaveDraftResponse = {
+	draft_id: number,
+	message_id: string,
+	folder: string,
+	saved_at: number,
+	remote_saved: boolean,
+	cleanup_error: string | null,
+};
+
 /**
  *  发送邮件请求
  * 
@@ -2125,6 +2163,8 @@ export type SendEmailRequest = {
 	body_html: string,
 	// 纯文本正文
 	body_text: string,
+	attachments: ComposeAttachmentInput[],
+	draft_id: number | null,
 };
 
 export type SendEmailResponse = {
@@ -2329,4 +2369,3 @@ function makeEvent<T>(name: string) {
 
     return Object.assign(fn, base);
 }
-
