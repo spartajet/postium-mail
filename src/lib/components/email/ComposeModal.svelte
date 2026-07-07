@@ -46,8 +46,10 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入 Tauri 后端命令接口，用于调用发送邮件等后端方法
     import { commands } from "$lib/bindings";
+    import type { LocalAttachmentDraft } from "$lib/bindings";
+    import { open as openDialog } from "@tauri-apps/plugin-dialog";
     // 导入关闭/清除图标
-    import { ChevronDown, X } from "lucide-svelte";
+    import { ChevronDown, Paperclip, Trash2, X } from "lucide-svelte";
     // 导入富文本编辑器子组件
     import RichTextEditor from "./RichTextEditor.svelte";
 
@@ -74,6 +76,17 @@
     let sending = $state(false);
     // 错误信息（发送失败时显示）
     let error = $state("");
+    let attachments = $state<LocalAttachmentDraft[]>([]);
+    let draftId = $state<number | null>(null);
+    let draftSaveStatus = $state<"idle" | "saving" | "saved" | "failed">(
+        "idle",
+    );
+    let draftTimer: ReturnType<typeof setTimeout> | null = null;
+    let draftSavePromise: Promise<void> | null = null;
+    let draftResaveRequested = false;
+    let draftDirty = false;
+    let draftRevision = 0;
+    let composeSessionId = 0;
     // 所有账号视图下的当前发件账号
     let selectedAccountId = $state<number | null>(null);
     let accountDropdownOpen = $state(false);
@@ -105,14 +118,24 @@
     }
 
     function openWithAccount(preferredAccountId?: number) {
+        composeSessionId += 1;
         selectedAccountId = defaultSendAccountId(preferredAccountId);
         accountDropdownOpen = false;
         open = true;
     }
 
     function selectSendAccount(accountId: number) {
+        if (selectedAccountId !== accountId) {
+            draftId = null;
+            draftSaveStatus = "idle";
+            draftResaveRequested = false;
+            draftDirty = hasDraftContent();
+            draftRevision += 1;
+            clearDraftTimer();
+        }
         selectedAccountId = accountId;
         accountDropdownOpen = false;
+        scheduleDraftSave();
     }
 
     function parseRecipients(value: string) {
@@ -120,6 +143,170 @@
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
+    }
+
+    function formatBytes(size: number) {
+        if (size < 1024) return `${size} B`;
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+        return `${(size / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function currentSendAccountId() {
+        return accountStore.isAllAccounts
+            ? selectedAccountId
+            : accountStore.activeAccountId;
+    }
+
+    function hasDraftContent() {
+        return Boolean(
+            to.trim() ||
+                cc.trim() ||
+                subject.trim() ||
+                (richEditor?.getText() || "").trim() ||
+                attachments.length > 0,
+        );
+    }
+
+    function scheduleDraftSave() {
+        if (!open || sending || !hasDraftContent()) return;
+        draftDirty = true;
+        draftRevision += 1;
+        clearDraftTimer();
+        draftTimer = setTimeout(() => void saveDraftNow(), 800);
+    }
+
+    function clearDraftTimer() {
+        if (draftTimer) clearTimeout(draftTimer);
+        draftTimer = null;
+    }
+
+    async function saveDraftNow(force = false, allowWhileSending = false) {
+        if (draftSavePromise) {
+            draftResaveRequested = true;
+            return draftSavePromise;
+        }
+
+        if (!force && !draftDirty) return;
+
+        const sessionId = composeSessionId;
+        const revision = draftRevision;
+        draftSavePromise = persistDraftNow(
+            sessionId,
+            revision,
+            allowWhileSending,
+        ).finally(() => {
+            draftSavePromise = null;
+        });
+        await draftSavePromise;
+
+        if (draftResaveRequested && open && !sending && hasDraftContent()) {
+            draftResaveRequested = false;
+            await saveDraftNow(true);
+        }
+    }
+
+    async function persistDraftNow(
+        sessionId: number,
+        revision: number,
+        allowWhileSending = false,
+    ) {
+        const sendAccountId = currentSendAccountId();
+        if (
+            !open ||
+            sessionId !== composeSessionId ||
+            (!allowWhileSending && sending) ||
+            !sendAccountId ||
+            !hasDraftContent()
+        ) {
+            return;
+        }
+
+        draftSaveStatus = "saving";
+        const bodyText = richEditor?.getText() || "";
+        const saveDraftId = draftId;
+        const saveSubject = subject;
+        const saveAttachments = attachments;
+        let result: Awaited<ReturnType<typeof commands.saveDraft>>;
+        try {
+            result = await commands.saveDraft({
+                draft_id: saveDraftId,
+                account_id: sendAccountId,
+                to: parseRecipients(to),
+                cc: parseRecipients(cc),
+                bcc: [],
+                subject: saveSubject,
+                body_html:
+                    richEditor?.getHtml() ||
+                    `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
+                body_text: bodyText,
+                attachments: saveAttachments,
+            });
+        } catch (e: unknown) {
+            if (open && sessionId === composeSessionId) {
+                draftSaveStatus = "failed";
+                error = e instanceof Error ? e.message : String(e);
+            }
+            return;
+        }
+
+        if (
+            !open ||
+            sessionId !== composeSessionId ||
+            currentSendAccountId() !== sendAccountId
+        ) {
+            return;
+        }
+
+        if (result.status === "error") {
+            draftSaveStatus = "failed";
+            error = result.error.message as string;
+            return;
+        }
+
+        draftId = result.data.draft_id;
+        if (revision === draftRevision) {
+            draftDirty = false;
+            draftResaveRequested = false;
+        } else {
+            draftResaveRequested = true;
+        }
+        draftSaveStatus = "saved";
+    }
+
+    async function chooseAttachments() {
+        const selected = await openDialog({
+            multiple: true,
+            directory: false,
+        });
+        const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+        if (paths.length === 0) return;
+
+        const result = await commands.describeLocalAttachments(paths);
+        if (result.status === "error") {
+            error = result.error.message as string;
+            return;
+        }
+
+        const existingPaths = new Set(attachments.map((attachment) => attachment.path));
+        const nextAttachments = result.data.filter((attachment) => {
+            if (existingPaths.has(attachment.path)) return false;
+            existingPaths.add(attachment.path);
+            return true;
+        });
+        attachments = [...attachments, ...nextAttachments];
+        scheduleDraftSave();
+    }
+
+    function removeAttachment(path: string) {
+        attachments = attachments.filter((attachment) => attachment.path !== path);
+        scheduleDraftSave();
+    }
+
+    function draftStatusText() {
+        if (draftSaveStatus === "saving") return t.email.draftSaving;
+        if (draftSaveStatus === "saved") return t.email.draftSaved;
+        if (draftSaveStatus === "failed") return t.email.draftSaveFailed;
+        return "";
     }
 
     // ==================== 邮件发送逻辑 ====================
@@ -142,9 +329,8 @@
      * - 正文优先使用 HTML 格式，如果编辑器无法提供 HTML 则用 pre 标签包裹纯文本
      */
     async function handleSend() {
-        const sendAccountId = accountStore.isAllAccounts
-            ? selectedAccountId
-            : accountStore.activeAccountId;
+        if (sending) return;
+        const sendAccountId = currentSendAccountId();
         // 没有可用发送账户，无法发送
         if (!sendAccountId) return;
         const toRecipients = parseRecipients(to);
@@ -166,6 +352,9 @@
         }
         // 进入发送中状态
         sending = true;
+        clearDraftTimer();
+        if (draftSavePromise) await draftSavePromise;
+        if (draftId !== null && draftDirty) await saveDraftNow(true, true);
         // 清空之前的错误信息
         error = "";
         try {
@@ -188,8 +377,8 @@
                     `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
                 // 纯文本正文：作为备用格式
                 body_text: bodyText,
-                attachments: [],
-                draft_id: null,
+                attachments,
+                draft_id: draftId,
             });
             // 检查发送结果
             if (result.status === "error") {
@@ -219,6 +408,14 @@
         cc = "";
         subject = "";
         error = "";
+        attachments = [];
+        draftId = null;
+        draftSaveStatus = "idle";
+        draftResaveRequested = false;
+        draftDirty = false;
+        draftRevision += 1;
+        composeSessionId += 1;
+        clearDraftTimer();
         selectedAccountId = null;
         accountDropdownOpen = false;
         // 清空富文本编辑器内容
@@ -446,6 +643,7 @@
                         bind:value={to}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
                         placeholder="email@example.com"
+                        oninput={scheduleDraftSave}
                     />
                 </div>
 
@@ -461,6 +659,7 @@
                         type="text"
                         bind:value={cc}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                        oninput={scheduleDraftSave}
                     />
                 </div>
 
@@ -476,6 +675,7 @@
                         type="text"
                         bind:value={subject}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                        oninput={scheduleDraftSave}
                     />
                 </div>
             </div>
@@ -497,8 +697,42 @@
                   bind:this 将组件实例绑定到 richEditor 变量
                   以便在脚本中调用编辑器的方法（getHtml、setText、clear 等）
                 -->
-                <RichTextEditor bind:this={richEditor} />
+                <RichTextEditor
+                    bind:this={richEditor}
+                    onContentChange={scheduleDraftSave}
+                />
             </div>
+
+            {#if attachments.length > 0}
+                <div class="border-t border-border px-4 py-2">
+                    {#each attachments as attachment (attachment.path)}
+                        <div
+                            class="flex h-8 items-center gap-2 text-sm"
+                            data-testid="compose-attachment-row"
+                        >
+                            <Paperclip
+                                size={14}
+                                class="shrink-0 text-muted-foreground"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-foreground">
+                                {attachment.filename}
+                            </span>
+                            <span class="shrink-0 text-xs text-muted-foreground">
+                                {formatBytes(attachment.size)}
+                            </span>
+                            <button
+                                type="button"
+                                class="rounded p-1 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                                onclick={() => removeAttachment(attachment.path)}
+                                aria-label={t.email.removeAttachment}
+                                title={t.email.removeAttachment}
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
 
             <!-- ==================== 错误提示 ==================== -->
 
@@ -509,6 +743,12 @@
             -->
             {#if error}
                 <div class="px-4 py-2 text-sm text-destructive">{error}</div>
+            {/if}
+
+            {#if draftSaveStatus !== "idle"}
+                <div class="px-4 py-1 text-xs text-muted-foreground">
+                    {draftStatusText()}
+                </div>
             {/if}
 
             <!-- ==================== 底部操作栏 ==================== -->
@@ -526,15 +766,28 @@
                   - disabled 条件：发送中、收件人为空、主题为空
                   - 显示发送中/发送文本（根据状态切换）
                 -->
-                <button
-                    data-testid="compose-send-button"
-                    class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
-                    onclick={handleSend}
-                    disabled={sending ||
-                        (accountStore.isAllAccounts && !selectedAccountId)}
-                >
-                    {sending ? t.email.loading : t.email.send}
-                </button>
+                <div class="flex items-center gap-2">
+                    <button
+                        data-testid="compose-send-button"
+                        class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
+                        onclick={handleSend}
+                        disabled={sending ||
+                            (accountStore.isAllAccounts && !selectedAccountId)}
+                    >
+                        {sending ? t.email.loading : t.email.send}
+                    </button>
+
+                    <button
+                        type="button"
+                        data-testid="compose-attach-button"
+                        class="rounded-md p-2 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                        onclick={chooseAttachments}
+                        aria-label={t.email.attach}
+                        title={t.email.attach}
+                    >
+                        <Paperclip size={16} />
+                    </button>
+                </div>
 
                 <!-- 取消按钮：关闭模态框 -->
                 <button
