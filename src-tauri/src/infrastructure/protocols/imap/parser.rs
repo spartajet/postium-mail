@@ -12,6 +12,7 @@ use base64::Engine;
 use encoding_rs::GB18030;
 
 use mail_parser::{Encoding, MessageParser, PartType};
+use std::borrow::Cow;
 
 // ──────────────────────────────────────────────
 // mail_parser 辅助函数
@@ -520,11 +521,11 @@ pub fn is_attachment(
         if disposition.ty.eq_ignore_ascii_case("attachment") {
             return true;
         }
-        if disposition.params.as_ref().is_some_and(|params| {
-            params
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case("filename"))
-        }) {
+        if disposition
+            .params
+            .as_ref()
+            .is_some_and(|params| find_mime_param(params, "filename").is_some())
+        {
             return true;
         }
     }
@@ -533,7 +534,7 @@ pub fn is_attachment(
         .ty
         .params
         .as_ref()
-        .is_some_and(|params| params.iter().any(|(k, _)| k.eq_ignore_ascii_case("name")))
+        .is_some_and(|params| find_mime_param(params, "name").is_some())
     {
         return true;
     }
@@ -562,6 +563,111 @@ fn decode_rfc2047(raw: &str) -> String {
     }
 }
 
+fn decode_rfc2231_value(raw: &str) -> String {
+    let mut parts = raw.splitn(3, '\'');
+    let value = match (parts.next(), parts.next(), parts.next()) {
+        (Some(charset), Some(_language), Some(encoded)) if !charset.is_empty() => {
+            let bytes = percent_decode_to_bytes(encoded);
+            if charset.eq_ignore_ascii_case("gb18030")
+                || charset.eq_ignore_ascii_case("gbk")
+                || charset.eq_ignore_ascii_case("gb2312")
+            {
+                let (decoded, _, _) = GB18030.decode(&bytes);
+                decoded.into_owned()
+            } else {
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+        _ => String::from_utf8_lossy(&percent_decode_to_bytes(raw)).into_owned(),
+    };
+    decode_rfc2047(&value)
+}
+
+fn percent_decode_to_bytes(value: &str) -> Vec<u8> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                decoded.push((high << 4) | low);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    decoded
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn find_mime_param(params: &[(Cow<'_, str>, Cow<'_, str>)], name: &str) -> Option<String> {
+    if let Some((_, value)) = params
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+    {
+        return Some(decode_rfc2047(value));
+    }
+
+    let extended_name = format!("{name}*");
+    if let Some((_, value)) = params
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&extended_name))
+    {
+        return Some(decode_rfc2231_value(value));
+    }
+
+    let prefix = format!("{name}*");
+    let mut segments = params
+        .iter()
+        .filter_map(|(key, value)| parse_continuation_param(key, value, &prefix))
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
+        return None;
+    }
+
+    segments.sort_by_key(|(index, _, _)| *index);
+    if segments.first().is_none_or(|(index, _, _)| *index != 0) {
+        return None;
+    }
+
+    let is_encoded = segments.iter().any(|(_, encoded, _)| *encoded);
+    let joined = segments
+        .into_iter()
+        .map(|(_, _, value)| value)
+        .collect::<String>();
+    Some(if is_encoded {
+        decode_rfc2231_value(&joined)
+    } else {
+        decode_rfc2047(&joined)
+    })
+}
+
+fn parse_continuation_param(key: &str, value: &str, prefix: &str) -> Option<(usize, bool, String)> {
+    if key.len() <= prefix.len() || !key[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let suffix = &key[prefix.len()..];
+    let (digits, encoded) = suffix
+        .strip_suffix('*')
+        .map_or((suffix, false), |digits| (digits, true));
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some((digits.parse().ok()?, encoded, value.to_string()))
+}
+
 /// 从 BODYSTRUCTURE 的单部分节点构建 AttachmentInfo
 ///
 /// # 参数
@@ -587,20 +693,16 @@ pub fn build_attachment_info(
         .disposition
         .as_ref()
         .and_then(|d| {
-            d.params.as_ref().and_then(|params| {
-                params
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("filename"))
-                    .map(|(_, v)| decode_rfc2047(&v.clone()))
-            })
+            d.params
+                .as_ref()
+                .and_then(|params| find_mime_param(params, "filename"))
         })
         .or_else(|| {
-            common.ty.params.as_ref().and_then(|params| {
-                params
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("name"))
-                    .map(|(_, v)| decode_rfc2047(&v.clone()))
-            })
+            common
+                .ty
+                .params
+                .as_ref()
+                .and_then(|params| find_mime_param(params, "name"))
         });
 
     AttachmentInfo {
@@ -743,6 +845,143 @@ mod tests {
         assert_eq!(
             attachments[0].filename.as_deref(),
             Some("邀请函-2026 暑假（第 16 届）全国高校大模型、智能体与生成式编程实战研修班.pdf")
+        );
+    }
+
+    /// 测试解码 RFC 2231 编码的 Content-Disposition 文件名
+    #[test]
+    fn decodes_rfc2231_encoded_attachment_filename() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentDisposition,
+            ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("application"),
+                    subtype: Cow::Borrowed("pdf"),
+                    params: None,
+                },
+                disposition: Some(ContentDisposition {
+                    ty: Cow::Borrowed("attachment"),
+                    params: Some(vec![(
+                        Cow::Borrowed("filename*"),
+                        Cow::Borrowed("utf-8'en'ni-supported-operating-systems-roadmap.pdf"),
+                    )]),
+                }),
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: None,
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 431,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "2");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].filename.as_deref(),
+            Some("ni-supported-operating-systems-roadmap.pdf")
+        );
+    }
+
+    /// 测试从 RFC 2231 分段参数中还原附件文件名
+    #[test]
+    fn decodes_rfc2231_continued_attachment_filename() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentDisposition,
+            ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("application"),
+                    subtype: Cow::Borrowed("pdf"),
+                    params: None,
+                },
+                disposition: Some(ContentDisposition {
+                    ty: Cow::Borrowed("attachment"),
+                    params: Some(vec![
+                        (
+                            Cow::Borrowed("filename*0*"),
+                            Cow::Borrowed("utf-8''ni-supported-"),
+                        ),
+                        (
+                            Cow::Borrowed("filename*1*"),
+                            Cow::Borrowed("operating-systems-roadmap.pdf"),
+                        ),
+                    ]),
+                }),
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: None,
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 431,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "2");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].filename.as_deref(),
+            Some("ni-supported-operating-systems-roadmap.pdf")
+        );
+    }
+
+    /// 测试仅 Content-Type name* 参数也能识别并提取附件文件名
+    #[test]
+    fn detects_attachment_from_rfc2231_content_type_name_param() {
+        use async_imap::imap_proto::{
+            BodyContentCommon, BodyContentSinglePart, BodyStructure, ContentEncoding, ContentType,
+        };
+        use std::borrow::Cow;
+
+        let body = BodyStructure::Basic {
+            common: BodyContentCommon {
+                ty: ContentType {
+                    ty: Cow::Borrowed("application"),
+                    subtype: Cow::Borrowed("pdf"),
+                    params: Some(vec![(
+                        Cow::Borrowed("name*"),
+                        Cow::Borrowed("utf-8''ni-supported-operating-systems-roadmap.pdf"),
+                    )]),
+                },
+                disposition: None,
+                language: None,
+                location: None,
+            },
+            other: BodyContentSinglePart {
+                id: None,
+                md5: None,
+                description: None,
+                transfer_encoding: ContentEncoding::Base64,
+                octets: 431,
+            },
+            extension: None,
+        };
+
+        let attachments = extract_attachments(&body, "2");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].filename.as_deref(),
+            Some("ni-supported-operating-systems-roadmap.pdf")
         );
     }
 

@@ -37,6 +37,8 @@ const email = {
   subject: "测试邮件",
   sender_name: "Alice",
   sender_email: "alice@example.com",
+  account_email: null,
+  account_display_name: null,
   preview: "预览",
   is_read: false,
   is_starred: false,
@@ -439,8 +441,10 @@ describe("EmailState 状态行为", () => {
 
     await state.downloadAttachment(7);
 
-    expect(state.selectedEmail.attachments[0]?.is_cached).toBe(true);
-    expect(state.selectedEmail.attachments[0]?.cache_path).toBe("/tmp/a.txt");
+    const selectedEmail = state.selectedEmail;
+    expect(selectedEmail).not.toBeNull();
+    expect(selectedEmail!.attachments[0]?.is_cached).toBe(true);
+    expect(selectedEmail!.attachments[0]?.cache_path).toBe("/tmp/a.txt");
     expect(state.attachmentOperatingIds.has(7)).toBe(false);
     expect(mockInvoke).toHaveBeenCalledWith("ensure_attachment_cached", {
       attachmentId: 7,

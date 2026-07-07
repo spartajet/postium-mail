@@ -48,6 +48,8 @@ const baseEmail: EmailDto = {
     subject: "Hello",
     sender_name: "Alice",
     sender_email: "alice@example.com",
+    account_email: null,
+    account_display_name: null,
     preview: "Preview",
     is_read: true,
     is_starred: false,
