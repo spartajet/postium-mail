@@ -392,9 +392,6 @@ export const commands = {
 	saveAttachmentAs: (attachmentId: number, targetPath: string) => typedError<null, MailError>(__TAURI_INVOKE("save_attachment_as", { attachmentId, targetPath })),
 	openAttachment: (attachmentId: number) => typedError<null, MailError>(__TAURI_INVOKE("open_attachment", { attachmentId })),
 	resolveInlineAttachments: (emailId: number) => typedError<InlineAttachmentDto[], MailError>(__TAURI_INVOKE("resolve_inline_attachments", { emailId })),
-	describeLocalAttachments: (paths: string[]) => typedError<LocalAttachmentDraft[], MailError>(__TAURI_INVOKE("describe_local_attachments", { paths })),
-	saveDraft: (request: SaveDraftRequest) => typedError<SaveDraftResponse, MailError>(__TAURI_INVOKE("save_draft", { request })),
-	deleteDraft: (draftId: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_draft", { draftId })),
 	/**
 	 *  搜索邮件
 	 * 
@@ -629,6 +626,9 @@ export const commands = {
 	 *  远端成功后再更新本地邮件文件夹。
 	 */
 	archiveEmail: (emailId: number) => typedError<null, MailError>(__TAURI_INVOKE("archive_email", { emailId })),
+	describeLocalAttachments: (paths: string[]) => typedError<LocalAttachmentDraft[], MailError>(__TAURI_INVOKE("describe_local_attachments", { paths })),
+	saveDraft: (request: SaveDraftRequest) => typedError<SaveDraftResponse, MailError>(__TAURI_INVOKE("save_draft", { request })),
+	deleteDraft: (draftId: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_draft", { draftId })),
 	/**
 	 *  发送邮件
 	 * 
@@ -1652,6 +1652,13 @@ export type AuthType =
 // OAuth2 认证
 "OAuth2";
 
+export type ComposeAttachmentInput = {
+	path: string,
+	filename: string | null,
+	content_type: string | null,
+	size: number | null,
+};
+
 /**
  *  创建账号请求
  * 
@@ -1734,13 +1741,6 @@ export type CreateLabelRequest = {
 	name: string,
 	// 标签颜色
 	color: string,
-};
-
-export type ComposeAttachmentInput = {
-	path: string,
-	filename: string | null,
-	content_type: string | null,
-	size: number | null,
 };
 
 /**
@@ -1975,6 +1975,13 @@ export type LabelDto = {
 	color: string,
 };
 
+export type LocalAttachmentDraft = {
+	path: string,
+	filename: string,
+	content_type: string,
+	size: number,
+};
+
 // 统一错误类型 — 前端通过 tauri-specta Result 模式拿到类型化错误
 export type MailError = { type: "AccountNotFound"; message: number } | { type: "AuthFailed"; message: string } | { type: "ImapConnectionFailed"; message: string } | { type: "SmtpSendFailed"; message: string } | { type: "SyncFailed"; message: string } | { type: "DatabaseError"; message: string } | { type: "KeyringError"; message: string } | { type: "ProviderNotSupported"; message: string } | { type: "InvalidParam"; message: string } | { type: "EmailNotFound"; message: number } | { type: "AttachmentNotFound"; message: number } | { type: "AttachmentUnavailable"; message: string } | { type: "AttachmentDownloadFailed"; message: string } | { type: "AttachmentDecodeFailed"; message: string } | { type: "FileSystemError"; message: string } | { type: "FolderNotFound"; message: string } | { type: "OAuthError"; message: string } | { type: "InvalidProvider"; message: string } | { type: "OAuth2Error"; message: string } | { type: "NotImplemented"; message: string } | { type: "LabelNotFound"; message: number } | { type: "ImapFolderMetadataFailed"; message: string } | { type: "ImapSearchFailed"; message: string } | { type: "BatchFetchHeadersFailed"; message: string } | { type: "ImapError"; message: string } | { type: "EmailMissingUid"; message: string };
 
@@ -2072,6 +2079,27 @@ export type ProviderInfo = {
 
 export type ReloadEmailResult = { status: "reloaded"; email: EmailDetail } | { status: "removed"; email_id: number };
 
+export type SaveDraftRequest = {
+	draft_id: number | null,
+	account_id: number,
+	to: string[],
+	cc: string[],
+	bcc: string[],
+	subject: string,
+	body_html: string,
+	body_text: string,
+	attachments?: ComposeAttachmentInput[],
+};
+
+export type SaveDraftResponse = {
+	draft_id: number,
+	message_id: string,
+	folder: string,
+	saved_at: number,
+	remote_saved: boolean,
+	cleanup_error: string | null,
+};
+
 /**
  *  全文搜索的返回结果
  * 
@@ -2088,34 +2116,6 @@ export type SearchResult = {
 	sent_at: number,
 	preview: string | null,
 	rank: number,
-};
-
-export type LocalAttachmentDraft = {
-	path: string,
-	filename: string,
-	content_type: string,
-	size: number,
-};
-
-export type SaveDraftRequest = {
-	draft_id: number | null,
-	account_id: number,
-	to: string[],
-	cc: string[],
-	bcc: string[],
-	subject: string,
-	body_html: string,
-	body_text: string,
-	attachments: ComposeAttachmentInput[],
-};
-
-export type SaveDraftResponse = {
-	draft_id: number,
-	message_id: string,
-	folder: string,
-	saved_at: number,
-	remote_saved: boolean,
-	cleanup_error: string | null,
 };
 
 /**
@@ -2163,8 +2163,8 @@ export type SendEmailRequest = {
 	body_html: string,
 	// 纯文本正文
 	body_text: string,
-	attachments: ComposeAttachmentInput[],
-	draft_id: number | null,
+	attachments?: ComposeAttachmentInput[],
+	draft_id?: number | null,
 };
 
 export type SendEmailResponse = {
@@ -2369,3 +2369,4 @@ function makeEvent<T>(name: string) {
 
     return Object.assign(fn, base);
 }
+

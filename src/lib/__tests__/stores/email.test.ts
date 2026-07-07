@@ -41,6 +41,8 @@ type Email = {
   subject: string;
   sender_name: string;
   sender_email: string;
+  account_email: string | null;
+  account_display_name: string | null;
   preview: string;
   is_read: boolean;
   is_starred: boolean;
@@ -86,6 +88,8 @@ describe("EmailState invoke 测试", () => {
           subject: "Test Email",
           sender_name: "Alice",
           sender_email: "alice@test.com",
+          account_email: null,
+          account_display_name: null,
           preview: "Hello...",
           is_read: false,
           is_starred: false,
@@ -148,6 +152,8 @@ describe("EmailState invoke 测试", () => {
       subject: "First",
       sender_name: "Alice",
       sender_email: "alice@test.com",
+      account_email: null,
+      account_display_name: null,
       preview: "Hello",
       is_read: false,
       is_starred: false,
@@ -200,6 +206,8 @@ describe("EmailState invoke 测试", () => {
       subject: "Unread",
       sender_name: "Alice",
       sender_email: "alice@test.com",
+      account_email: null,
+      account_display_name: null,
       preview: "Hello",
       is_read: false,
       is_starred: false,
@@ -266,6 +274,8 @@ describe("EmailState invoke 测试", () => {
       subject: "First",
       sender_name: "Alice",
       sender_email: "alice@test.com",
+      account_email: null,
+      account_display_name: null,
       preview: "Hello",
       is_read: false,
       is_starred: false,
@@ -315,6 +325,8 @@ describe("EmailState invoke 测试", () => {
       subject: "First",
       sender_name: "Alice",
       sender_email: "alice@test.com",
+      account_email: null,
+      account_display_name: null,
       preview: "Hello",
       is_read: false,
       is_starred: false,
@@ -368,6 +380,8 @@ describe("EmailState invoke 测试", () => {
       subject: "Detail",
       sender_name: "Bob",
       sender_email: "bob@test.com",
+      account_email: null,
+      account_display_name: null,
       preview: "preview",
       is_read: false,
       is_starred: false,
