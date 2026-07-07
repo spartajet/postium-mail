@@ -123,7 +123,7 @@ impl ImapClient {
 /// 实现 async-imap 的 Authenticator trait，用于 OAuth2 认证。
 ///
 /// # 格式
-/// ```
+/// ```text
 /// user={user}\x01auth=Bearer {access_token}\x01\x01
 /// ```
 #[derive(Debug)]
