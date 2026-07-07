@@ -77,6 +77,12 @@
         Quote, // 引用块图标
     } from "lucide-svelte";
 
+    let {
+        onContentChange,
+    }: {
+        onContentChange?: (content: { html: string; text: string }) => void;
+    } = $props();
+
     // ==================== 编辑器状态 ====================
 
     // 编辑器挂载的 DOM 元素引用
@@ -140,6 +146,10 @@
             onUpdate: ({ editor: e }) => {
                 // 获取编辑器的 HTML 内容并更新状态
                 htmlContent = e.getHTML();
+                onContentChange?.({
+                    html: htmlContent,
+                    text: e.getText(),
+                });
             },
         });
 
