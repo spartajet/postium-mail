@@ -1,12 +1,8 @@
-import { waitForAppReady } from '../../helpers/app.js';
-import sidebarPage from '../../pageobjects/sidebar.page.js';
 import settingsPage from '../../pageobjects/settings.page.js';
 
 describe('Theme Switching', () => {
   beforeEach(async () => {
-    await waitForAppReady();
-    await sidebarPage.clickSettings();
-    await settingsPage.waitForReady();
+    await settingsPage.openInCurrentWindow();
   });
 
   it('切换到深色主题', async () => {

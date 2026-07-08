@@ -30,6 +30,13 @@ class SettingsPage {
     await this.page.waitForDisplayed({ timeout: 10000 });
   }
 
+  async openInCurrentWindow() {
+    await browser.execute(() => {
+      window.location.href = '/settings';
+    });
+    await this.waitForReady();
+  }
+
   async navigateToSettings() {
     await sidebarPage.clickSettings();
     await this.waitForReady();
