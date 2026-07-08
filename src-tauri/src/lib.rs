@@ -214,7 +214,14 @@ pub fn run() {
     let account_service = service::account_service::AccountService::new(db.clone(), auth.clone());
 
     // 邮件服务：负责邮件的收发、搜索等操作
-    let email_service = service::email_service::EmailService::new(auth.clone(), db.clone());
+    let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
+    let e2e_truth_enabled = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
+    let email_service = service::email_service::EmailService::new_for_runtime(
+        auth.clone(),
+        db.clone(),
+        e2e_enabled,
+        e2e_truth_enabled,
+    );
 
     // 同步服务：负责与邮件服务器同步数据
     let sync_service = service::SyncService::new(db.clone(), auth.clone());

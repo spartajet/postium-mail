@@ -13,7 +13,7 @@ use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
 use crate::service::mail_draft::{DraftRemoteWriter, RealDraftRemoteWriter};
 use crate::service::mail_operation::{
-    MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
+    LocalOnlyMailRemoteOperator, MailOperationService, MailRemoteOperator, RealMailRemoteOperator,
 };
 use crate::service::mail_send::{
     RealSentArchiveWriter, RealSmtpEmailSender, SentArchiveRequest, SentArchiveWriter,
@@ -312,6 +312,27 @@ impl EmailService {
     /// 返回初始化好的 EmailService 实例
     pub fn new(auth: Arc<AuthManager>, db: DbConn) -> Self {
         let remote = Arc::new(RealMailRemoteOperator::new(auth.clone()));
+        Self::new_with_dependencies(
+            auth,
+            db,
+            remote,
+            Arc::new(RealSmtpEmailSender),
+            Arc::new(RealSentArchiveWriter),
+        )
+    }
+
+    pub fn new_for_runtime(
+        auth: Arc<AuthManager>,
+        db: DbConn,
+        e2e_enabled: bool,
+        e2e_truth_enabled: bool,
+    ) -> Self {
+        let remote: Arc<dyn MailRemoteOperator> = if e2e_enabled && !e2e_truth_enabled {
+            Arc::new(LocalOnlyMailRemoteOperator)
+        } else {
+            Arc::new(RealMailRemoteOperator::new(auth.clone()))
+        };
+
         Self::new_with_dependencies(
             auth,
             db,

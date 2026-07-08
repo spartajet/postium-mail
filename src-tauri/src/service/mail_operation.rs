@@ -105,6 +105,12 @@ pub struct RealMailRemoteOperator {
     auth: Arc<AuthManager>,
 }
 
+/// 仅用于固定 seed E2E 的本地远端操作实现。
+///
+/// seed E2E 使用 `imap.postium.test` 假账号验证 UI 与本地数据流，不能连接真实 IMAP。
+/// 状态变更由 `MailOperationService` 后续本地写入完成，因此这里把远端步骤视为成功。
+pub struct LocalOnlyMailRemoteOperator;
+
 impl RealMailRemoteOperator {
     /// 创建一个使用指定 [`AuthManager`] 的真实远程操作器
     pub fn new(auth: Arc<AuthManager>) -> Self {
@@ -229,6 +235,58 @@ impl MailRemoteOperator for RealMailRemoteOperator {
             .await;
         client.logout().await.ok();
         result
+    }
+}
+
+#[async_trait]
+impl MailRemoteOperator for LocalOnlyMailRemoteOperator {
+    async fn mark_seen(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _seen: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn set_flagged(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _flagged: bool,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn move_to_folder(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _target_folder: &str,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+
+    async fn reload_email(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        Ok(None)
+    }
+
+    async fn fetch_attachment_section(
+        &self,
+        _account: &accounts::Model,
+        _folder: &str,
+        _uid: u32,
+        _section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        Ok(None)
     }
 }
 

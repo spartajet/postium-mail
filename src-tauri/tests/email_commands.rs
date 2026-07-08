@@ -1358,6 +1358,33 @@ async fn create_remote_test_account_with_display_name(
     svc.account_service.create(req).await.unwrap().id
 }
 
+#[tokio::test]
+async fn e2e_seed_runtime_email_service_uses_local_remote_operations() {
+    init_provider_pool();
+    let db = create_test_db().await;
+    let auth = Arc::new(AuthManager::in_memory());
+    let svc = TestServices {
+        account_service: AccountService::new_with_imap_verifier(
+            db.clone(),
+            auth.clone(),
+            Arc::new(NoopImapConnectionVerifier),
+        ),
+        email_service: EmailService::new_for_runtime(auth.clone(), db.clone(), true, false),
+        label_service: postium_mail_lib::service::LabelService::new(db.clone()),
+        sync_service: postium_mail_lib::service::SyncService::new(db.clone(), auth.clone()),
+        db,
+        auth,
+    };
+    let account_id = create_remote_test_account(&svc).await;
+    let email_id = insert_test_email(&svc, account_id, TestEmail::new(530, "E2E fake IMAP")).await;
+
+    let new_state = svc.email_service.toggle_star(email_id).await.unwrap();
+
+    assert!(new_state);
+    let detail = svc.email_service.get(email_id).await.unwrap();
+    assert!(detail.email.is_starred);
+}
+
 fn remote_email(uid: u32, subject: &str, body: &str) -> WholeEmailDto {
     WholeEmailDto {
         id: 0,
