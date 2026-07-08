@@ -6,11 +6,15 @@ describe('Compose Email', () => {
     await waitForAppReady();
   });
 
+  afterEach(async () => {
+    await composePage.closeIfOpen();
+  });
+
   it('打开写邮件弹窗并填写字段', async () => {
     await composePage.openCompose();
     await composePage.fillEmail('recipient.e2e@postium.test', 'E2E Compose Subject');
 
-    await expect(composePage.toInput).toHaveValue('recipient.e2e@postium.test');
+    await expect(await composePage.recipientText()).toContain('recipient.e2e@postium.test');
     await expect(composePage.subjectInput).toHaveValue('E2E Compose Subject');
 
     await composePage.closeCompose();
