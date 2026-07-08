@@ -35,6 +35,21 @@ pub enum MailError {
     #[error("邮件不存在: {0}")]
     EmailNotFound(i32),
 
+    #[error("附件不存在: {0}")]
+    AttachmentNotFound(i32),
+
+    #[error("附件不可下载: {0}")]
+    AttachmentUnavailable(String),
+
+    #[error("附件下载失败: {0}")]
+    AttachmentDownloadFailed(String),
+
+    #[error("附件解码失败: {0}")]
+    AttachmentDecodeFailed(String),
+
+    #[error("文件系统错误: {0}")]
+    FileSystemError(String),
+
     #[error("文件夹不存在: {0}")]
     FolderNotFound(String),
 
@@ -69,9 +84,14 @@ pub enum MailError {
     EmailMissingUid(String),
 }
 
-// SeaORM 错误转换
-impl From<sea_orm::DbErr> for MailError {
-    fn from(err: sea_orm::DbErr) -> Self {
+impl From<rusqlite::Error> for MailError {
+    fn from(err: rusqlite::Error) -> Self {
+        MailError::DatabaseError(err.to_string())
+    }
+}
+
+impl From<tokio_rusqlite::Error> for MailError {
+    fn from(err: tokio_rusqlite::Error) -> Self {
         MailError::DatabaseError(err.to_string())
     }
 }
@@ -101,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_from_db_error() {
-        let db_err = sea_orm::DbErr::RecordNotFound("not found".to_string());
+        let db_err = rusqlite::Error::QueryReturnedNoRows;
         let mail_err: MailError = db_err.into();
         assert!(matches!(mail_err, MailError::DatabaseError(_)));
     }

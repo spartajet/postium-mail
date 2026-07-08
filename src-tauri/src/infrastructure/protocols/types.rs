@@ -137,6 +137,13 @@ pub struct AttachmentInfo {
     pub content_id: Option<String>,
 }
 
+/// IMAP 单个 MIME section 下载结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedBodySection {
+    pub body: Vec<u8>,
+    pub transfer_encoding: Option<String>,
+}
+
 /// 完整邮件 DTO
 ///
 /// 包含邮件的所有字段，用于邮件详情展示和完整数据传输。

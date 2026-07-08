@@ -4,6 +4,10 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 
+/// 设置系统托盘图标和菜单
+///
+/// 创建包含「显示窗口」「写邮件」「同步」「退出」的托盘菜单，
+/// 并绑定点击事件。左键单击托盘图标会显示并聚焦主窗口。
 pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
     let new_email_item = MenuItemBuilder::with_id("new_email", "写邮件").build(app)?;

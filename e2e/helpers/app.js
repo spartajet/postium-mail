@@ -12,3 +12,7 @@ export async function waitForAppReady() {
   await emailPage.clearSearch();
   await waitForText('Primary Inbox Message 01');
 }
+
+export async function waitForTruthAppShell() {
+  await sidebarPage.root.waitForDisplayed({ timeout: 15000 });
+}

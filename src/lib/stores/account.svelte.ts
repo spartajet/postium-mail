@@ -49,6 +49,67 @@ import type { AccountDto } from "$lib/bindings";
 // 导入错误格式化工具
 import { formatError } from "$lib/utils/error.js";
 
+const ACCOUNT_SCOPE_STORAGE_KEY = "postium-account-scope";
+
+export type AccountScope =
+  | { kind: "all" }
+  | { kind: "account"; accountId: number };
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof localStorage !== "undefined";
+}
+
+function safeGetLocalStorageItem(key: string): string | null {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetLocalStorageItem(key: string, value: string) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Ignore persistence failures in restricted or quota-limited environments.
+  }
+}
+
+function readPersistedAccountScope(): AccountScope {
+  const raw = safeGetLocalStorageItem(ACCOUNT_SCOPE_STORAGE_KEY);
+  if (!raw) {
+    return { kind: "all" };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as
+      | { kind?: unknown; accountId?: unknown }
+      | null;
+    if (parsed?.kind === "all") {
+      return { kind: "all" };
+    }
+    if (
+      parsed?.kind === "account" &&
+      typeof parsed.accountId === "number" &&
+      Number.isInteger(parsed.accountId)
+    ) {
+      return { kind: "account", accountId: parsed.accountId };
+    }
+  } catch {
+    // Ignore malformed persisted data and fall back to the default scope.
+  }
+
+  return { kind: "all" };
+}
+
 /**
  * 账号状态管理类
  *
@@ -77,8 +138,13 @@ export class AccountState {
   /** 所有账号列表（响应式状态） */
   accounts = $state<AccountDto[]>([]);
 
-  /** 当前活跃账号的 ID（响应式状态），null 表示没有选中任何账号 */
-  activeAccountId = $state<number | null>(null);
+  /** 当前账号范围（响应式状态） */
+  accountScope = $state<AccountScope>(readPersistedAccountScope());
+
+  /** 最近一次选择的具体账号 ID（响应式状态） */
+  lastConcreteAccountId = $state<number | null>(
+    this.accountScope.kind === "account" ? this.accountScope.accountId : null,
+  );
 
   /** 是否正在加载账号数据（响应式状态） */
   loading = $state(false);
@@ -95,21 +161,74 @@ export class AccountState {
    * @returns 当前活跃的 AccountDto 对象，或 null
    */
   activeAccount = $derived(
-    this.accounts.find((a) => a.id === this.activeAccountId) ?? null,
+    this.accounts.find((a) => a.id === this.selectedAccountId) ?? null,
   );
+
+  /** 是否当前处于所有账号范围 */
+  isAllAccounts = $derived(this.accountScope.kind === "all");
+
+  /** 当前选中的具体账号 ID；所有账号范围下返回 null */
+  selectedAccountId = $derived(
+    this.accountScope.kind === "account" ? this.accountScope.accountId : null,
+  );
+
+  get activeAccountId() {
+    return this.selectedAccountId;
+  }
+
+  set activeAccountId(id: number | null) {
+    if (id == null) {
+      this.setAllAccounts();
+      return;
+    }
+
+    this.setActive(id);
+  }
+
+  persistAccountScope(scope: AccountScope) {
+    safeSetLocalStorageItem(
+      ACCOUNT_SCOPE_STORAGE_KEY,
+      JSON.stringify(scope),
+    );
+  }
+
+  applyAccountScope(scope: AccountScope) {
+    this.accountScope = scope;
+    if (scope.kind === "account") {
+      this.lastConcreteAccountId = scope.accountId;
+    }
+    this.persistAccountScope(scope);
+  }
+
+  normalizeAccountScope() {
+    if (this.accountScope.kind === "all") {
+      this.persistAccountScope(this.accountScope);
+      return;
+    }
+
+    const accountId = this.accountScope.accountId;
+    const exists = this.accounts.some((account) => account.id === accountId);
+    if (exists) {
+      this.lastConcreteAccountId = accountId;
+      this.persistAccountScope(this.accountScope);
+      return;
+    }
+
+    this.setAllAccounts();
+  }
 
   /**
    * 加载所有账号列表
    *
    * 从后端获取用户的所有邮件账号，并更新状态。
-   * 如果当前没有选中任何账号，自动选中第一个账号。
+   * 如果当前持久化的是不存在的具体账号，会回退到所有账号范围。
    *
    * ==================== 工作流程 ====================
    * 1. 设置 loading 状态为 true
    * 2. 清除之前的错误信息
    * 3. 调用后端 listAccounts 命令获取账号列表
    * 4. 成功时更新 accounts 列表
-   * 5. 如果没有活跃账号，自动选中第一个
+   * 5. 规范化当前账号范围，必要时回退到所有账号
    * 6. 失败时设置错误信息
    * 7. 最终将 loading 设置为 false
    *
@@ -139,11 +258,7 @@ export class AccountState {
       if (result.status === "ok") {
         // 成功时更新账号列表
         this.accounts = result.data;
-
-        // 如果没有选中任何账号且列表不为空，自动选中第一个
-        if (!this.activeAccountId && this.accounts.length > 0) {
-          this.activeAccountId = this.accounts[0]!.id;
-        }
+        this.normalizeAccountScope();
       } else {
         // 后端返回错误时，设置错误信息
         this.error = result.error.message as string;
@@ -178,14 +293,18 @@ export class AccountState {
    * - UI 中显示的账号相关信息会刷新
    */
   setActive(id: number) {
-    this.activeAccountId = id;
+    this.applyAccountScope({ kind: "account", accountId: id });
+  }
+
+  setAllAccounts() {
+    this.applyAccountScope({ kind: "all" });
   }
 
   /**
    * 删除指定账号
    *
    * 永久删除指定的邮件账号及其所有相关数据。
-   * 如果删除的是当前活跃账号，会自动切换到第一个剩余账号。
+   * 如果删除的是当前具体账号，会自动回退到所有账号范围。
    *
    * ⚠️ **警告：此操作不可逆！** 删除账号会同时删除：
    * - 账号配置信息
@@ -197,8 +316,8 @@ export class AccountState {
    * ==================== 工作流程 ====================
    * 1. 调用后端 deleteAccount 命令删除账号
    * 2. 从本地账号列表中移除该账号
-   * 3. 如果删除的是当前活跃账号，切换到第一个剩余账号
-   * 4. 如果没有剩余账号，设置活跃账号为 null
+   * 3. 如果删除的是当前具体账号，回退到所有账号范围
+   * 4. 同步更新最近一次具体账号记录
    *
    * ==================== 错误处理 ====================
    * - 删除失败时设置错误信息，但不回滚本地状态
@@ -216,20 +335,26 @@ export class AccountState {
    * @returns Promise<void>
    */
   async deleteAccount(id: number) {
+    this.error = null;
+
     try {
       // 调用后端命令删除账号
       const result = await commands.deleteAccount(id);
 
-      if (result.status === "ok") {
-        // 从本地列表中移除已删除的账号
-        this.accounts = this.accounts.filter((a) => a.id !== id);
+      if (result.status === "error") {
+        this.error = String(result.error.message);
+        return;
+      }
 
-        // 如果删除的是当前活跃账号，需要切换到其他账号
-        if (this.activeAccountId === id) {
-          // 如果还有其他账号，选中第一个；否则设为 null
-          this.activeAccountId =
-            this.accounts.length > 0 ? this.accounts[0]!.id : null;
-        }
+      // 从本地列表中移除已删除的账号
+      this.accounts = this.accounts.filter((a) => a.id !== id);
+      if (this.lastConcreteAccountId === id) {
+        this.lastConcreteAccountId = this.accounts[0]?.id ?? null;
+      }
+
+      // 如果删除的是当前具体账号，需要回退到所有账号范围
+      if (this.selectedAccountId === id) {
+        this.setAllAccounts();
       }
     } catch (e: unknown) {
       // 捕获异常并格式化错误消息

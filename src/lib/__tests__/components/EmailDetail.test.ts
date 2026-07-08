@@ -1,0 +1,228 @@
+/**
+ * Postium Mail - 邮件详情组件测试
+ * EmailDetail.test.ts
+ *
+ * 本文件测试邮件详情组件的功能，包括收件人显示、
+ * 附件操作、回复和转发等。
+ *
+ * ==================== 测试范围 ====================
+ * 1. 多收件人默认折叠并可展开
+ * 2. 附件渲染和下载触发
+ * 3. 附件栏停靠位置
+ * 4. 回复时传入当前账号 ID
+ * 5. 转发时传入当前账号 ID
+ */
+
+import { fireEvent, render, screen } from "@testing-library/svelte";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import EmailDetail from "$lib/components/email/EmailDetail.svelte";
+
+const downloadAttachment = vi.fn();
+const saveAttachmentAs = vi.fn();
+const openAttachment = vi.fn();
+const showReply = vi.fn();
+const showForward = vi.fn();
+
+const baseSelectedEmail = {
+    id: 1,
+    account_id: 1,
+    folder: "INBOX",
+    uid: 10,
+    subject: "subject",
+    sender_name: "Alice",
+    sender_email: "alice@example.com",
+    preview: null,
+    is_read: true,
+    is_starred: false,
+    sent_at: 1,
+    has_attachments: true,
+    recipient_emails: "bob@example.com",
+    cc_emails: null,
+    body_text: null,
+    body_html: "<p>Hello</p>",
+    attachments: [
+        {
+            id: 7,
+            email_id: 1,
+            filename: "report.pdf",
+            content_type: "application/pdf",
+            size: 1024,
+            disposition: "attachment",
+            content_id: null,
+            is_inline: false,
+            is_cached: false,
+            cache_path: null,
+        },
+    ],
+};
+
+let selectedEmail = { ...baseSelectedEmail };
+
+const accounts = [
+    {
+        id: 1,
+        name: "Main",
+        email: "gxz04220427@163.com",
+        display_name: null,
+        provider: "imap",
+        color: null,
+        sync_enabled: true,
+        auth_type: "password",
+        account_type: "personal",
+        last_sync_at: null,
+        created_at: 1,
+    },
+];
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+    save: vi.fn(),
+}));
+
+vi.mock("$lib/stores/email.svelte", () => ({
+    getEmailState: () => ({
+        selectedEmail,
+        resolvedBodyHtml: "<p>Hello</p>",
+        attachmentOperatingIds: new Set(),
+        attachmentErrors: {},
+        operatingIds: new Set(),
+        downloadAttachment,
+        saveAttachmentAs,
+        openAttachment,
+        toggleStar: vi.fn(),
+        archiveEmail: vi.fn(),
+        deleteEmails: vi.fn(),
+    }),
+}));
+
+vi.mock("$lib/stores/account.svelte", () => ({
+    getAccountState: () => ({
+        accounts,
+    }),
+}));
+
+vi.mock("$lib/stores/i18n.svelte", () => ({
+    getI18nState: () => ({
+        t: {
+            email: {
+                noEmailSelected: "选择一封邮件开始阅读",
+                from: "发件人",
+                to: "收件人",
+                otherRecipients: "及其他 {count} 个收件人",
+                expandRecipients: "展开收件人",
+                collapseRecipients: "收起收件人",
+                cc: "抄送",
+                attachments: "附件",
+                attachmentDownload: "下载",
+                attachmentOpen: "打开",
+                attachmentSaveAs: "另存为",
+                attachmentSave: "保存",
+                attachmentCached: "已缓存",
+                attachmentNotDownloaded: "未下载",
+                reply: "回复",
+                forward: "转发",
+                star: "星标",
+                archive: "归档",
+            },
+            ai: {
+                summary: "AI 摘要",
+                smartReply: "智能回复",
+                translate: "翻译",
+                tasks: "提取任务",
+                provider: "助手",
+            },
+            common: {
+                delete: "删除",
+            },
+        },
+    }),
+}));
+
+const composeContextKey = Symbol.for("compose-modal");
+
+describe("EmailDetail", () => {
+    beforeEach(() => {
+        selectedEmail = { ...baseSelectedEmail };
+        vi.clearAllMocks();
+    });
+
+    it("多收件人默认折叠并可展开完整列表", async () => {
+        selectedEmail = {
+            ...selectedEmail,
+            recipient_emails:
+                "alice@example.com, gxz04220427@163.com, bob@example.com",
+        };
+
+        render(EmailDetail);
+
+        expect(
+            screen.getByText("gxz04220427@163.com 及其他 2 个收件人"),
+        ).toBeTruthy();
+        expect(screen.queryByText("alice@example.com")).toBeNull();
+
+        await fireEvent.click(
+            screen.getByRole("button", { name: "展开收件人" }),
+        );
+
+        expect(screen.getByText("alice@example.com")).toBeTruthy();
+        expect(screen.getByText("bob@example.com")).toBeTruthy();
+    });
+
+    it("渲染真实附件并触发下载", async () => {
+        render(EmailDetail);
+
+        expect(screen.getByText("report.pdf")).toBeTruthy();
+        await fireEvent.click(screen.getByRole("button", { name: "下载" }));
+
+        expect(downloadAttachment).toHaveBeenCalledWith(7);
+    });
+
+    it("附件栏停靠在正文滚动区外部", () => {
+        render(EmailDetail);
+
+        const bodyScroller = screen.getByTestId("email-body-scroller");
+        const attachmentBar = screen.getByTestId("email-attachments-bar");
+
+        expect(bodyScroller.contains(attachmentBar)).toBe(false);
+    });
+
+    it("回复时传入当前邮件所属账号 ID", async () => {
+        render(EmailDetail, {
+            context: new Map([
+                [
+                    composeContextKey,
+                    () => ({
+                        showReply,
+                        showForward,
+                    }),
+                ],
+            ]),
+        });
+
+        await fireEvent.click(screen.getByTitle("回复"));
+
+        expect(showReply).toHaveBeenCalledWith(
+            "alice@example.com",
+            "subject",
+            "",
+            1,
+        );
+    });
+
+    it("转发时传入当前邮件所属账号 ID", async () => {
+        render(EmailDetail, {
+            context: new Map([
+                [
+                    composeContextKey,
+                    () => ({
+                        showReply,
+                        showForward,
+                    }),
+                ],
+            ]),
+        });
+
+        await fireEvent.click(screen.getByTitle("转发"));
+
+        expect(showForward).toHaveBeenCalledWith("subject", "", 1);
+    });
+});

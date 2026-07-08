@@ -30,6 +30,7 @@
     import { getEmailState } from "$lib/stores/email.svelte"; // 邮件状态（邮件列表、当前文件夹）
     import type { EmailCategory } from "$lib/bindings"; // 邮件分类类型定义（inbox/starred/sent/drafts/spam/trash）
     import { getSyncState } from "$lib/stores/sync.svelte"; // 同步状态（同步进度、错误信息）
+    import { commands } from "$lib/bindings";
 
     // 导入模态框组件类型（仅用于类型注解，不实际实例化）
     import type ComposeModal from "$lib/components/email/ComposeModal.svelte"; // 写邮件模态框
@@ -89,6 +90,7 @@
     // 账户下拉菜单是否展开
     // 控制账户选择器的显示/隐藏
     let showAccountDropdown = $state(false);
+    let statsLoadedScopeKey = $state<string | null>(null);
 
     // ==================== 组件生命周期 ====================
 
@@ -96,6 +98,29 @@
     // 加载账户列表，填充账户选择器
     onMount(() => {
         accountStore.loadAccounts();
+    });
+
+    function loadFolderStatsForCurrentScope(force = false) {
+        const scopeKey = accountStore.isAllAccounts
+            ? "all"
+            : `account:${accountStore.activeAccountId ?? "none"}`;
+        if (!force && scopeKey === statsLoadedScopeKey) return;
+        statsLoadedScopeKey = scopeKey;
+
+        if (accountStore.isAllAccounts) {
+            syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
+        if (accountStore.activeAccountId) {
+            syncStore.loadFolderStats(accountStore.activeAccountId);
+        }
+    }
+
+    $effect(() => {
+        accountStore.isAllAccounts;
+        accountStore.activeAccountId;
+        loadFolderStatsForCurrentScope();
     });
 
     // ==================== 文件夹选择处理 ====================
@@ -110,7 +135,9 @@
     function selectFolder(folderId: EmailCategory) {
         activeFolder = folderId;
         emailStore.currentFolder = folderId;
-        if (accountStore.activeAccountId) {
+        if (accountStore.isAllAccounts) {
+            emailStore.loadEmailsByCategoryForAllAccounts(folderId);
+        } else if (accountStore.activeAccountId) {
             emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
                 folderId,
@@ -125,12 +152,27 @@
     // 1. 同步当前活动账户的邮件
     // 2. 同步完成后重新加载当前文件夹的邮件列表
     async function handleSync() {
-        if (accountStore.activeAccountId) {
+        if (accountStore.isAllAccounts) {
+            await syncStore.syncAllAccounts();
+            await emailStore.loadEmailsByCategoryForAllAccounts(
+                emailStore.currentFolder,
+            );
+            await syncStore.loadFolderStatsForAllAccounts();
+        } else if (accountStore.activeAccountId) {
             await syncStore.syncAccount(accountStore.activeAccountId);
             await emailStore.loadEmailsByCategory(
                 accountStore.activeAccountId,
                 emailStore.currentFolder,
             );
+            await syncStore.loadFolderStats(accountStore.activeAccountId);
+        }
+    }
+
+    async function openSettings() {
+        activeFolder = "";
+        const result = await commands.openSettingsWindow();
+        if (result.status === "error") {
+            goto("/settings");
         }
     }
 
@@ -138,7 +180,24 @@
         accountStore.setActive(accountId);
         emailStore.deselectEmail();
         emailStore.loadEmailsByCategory(accountId, emailStore.currentFolder);
+        loadFolderStatsForCurrentScope(true);
         showAccountDropdown = false;
+    }
+
+    function handleAllAccountsSwitch() {
+        accountStore.setAllAccounts();
+        emailStore.deselectEmail();
+        emailStore.loadEmailsByCategoryForAllAccounts(emailStore.currentFolder);
+        statsLoadedScopeKey = "all";
+        syncStore.loadFolderStatsForAllAccounts();
+        showAccountDropdown = false;
+    }
+
+    function unreadCount(folderId: EmailCategory) {
+        return (
+            syncStore.folderStats.find((stat) => stat.folder === folderId)
+                ?.unread ?? 0
+        );
     }
 
     // ==================== 文件夹配置列表 ====================
@@ -256,15 +315,20 @@
             <div
                 class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary"
             >
-                {accountStore.activeAccount?.email?.charAt(0)?.toUpperCase() ||
-                    "?"}
+                {accountStore.isAllAccounts
+                    ? "全"
+                    : accountStore.activeAccount?.email
+                          ?.charAt(0)
+                          ?.toUpperCase() || "?"}
             </div>
             <!-- 账户邮箱地址：超长时截断显示 -->
             <span
                 data-testid="active-account-label"
                 class="flex-1 truncate text-muted-foreground"
-                >{accountStore.activeAccount?.email ||
-                    t.sidebar.allAccounts}</span
+                >{accountStore.isAllAccounts
+                    ? t.sidebar.allAccounts
+                    : accountStore.activeAccount?.email ||
+                      t.sidebar.allAccounts}</span
             >
             <!-- 下拉箭头图标 -->
             <ChevronDown size={14} class="shrink-0 text-muted-foreground" />
@@ -284,6 +348,21 @@
                 class="absolute left-3 right-3 top-full z-50 mt-1 rounded-lg border border-border bg-card shadow-lg"
                 onclick={(e) => e.stopPropagation()}
             >
+                <button
+                    data-testid="account-option-all"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {accountStore.isAllAccounts
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-foreground'}"
+                    onclick={handleAllAccountsSwitch}
+                >
+                    <div
+                        class="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[9px] font-bold text-primary"
+                    >
+                        全
+                    </div>
+                    <span class="truncate">{t.sidebar.allAccounts}</span>
+                </button>
+
                 <!-- 账户列表：遍历所有已登录账户 -->
                 {#each accountStore.accounts as account}
                     <!--
@@ -297,7 +376,8 @@
                             ? "account-option-primary"
                             : account.email === "secondary.e2e@postium.test"
                               ? "account-option-secondary"
-                              : undefined}
+                              : "account-option"}
+                        data-email={account.email}
                         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {account.id ===
                         accountStore.activeAccountId
                             ? 'bg-primary/10 text-primary'
@@ -318,6 +398,7 @@
                 <div class="border-t border-border">
                     <!-- 添加新账户按钮：打开添加账户模态框 -->
                     <button
+                        data-testid="account-add-button"
                         class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-glass-hover"
                         onclick={() => {
                             getAddAccountModal?.()?.show();
@@ -379,7 +460,17 @@
                     <!-- 文件夹图标：动态渲染对应图标组件 -->
                     <folder.icon size={18} class="shrink-0" />
                     <!-- 文件夹名称（国际化文本） -->
-                    <span class="flex-1">{folder.label}</span>
+                    <span class="min-w-0 flex-1 truncate">{folder.label}</span>
+                    {#if unreadCount(folder.id) > 0}
+                        <span
+                            class="min-w-5 shrink-0 rounded-full bg-primary/12 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-primary"
+                            aria-label={`${folder.label} ${unreadCount(folder.id)} 封未读`}
+                        >
+                            {unreadCount(folder.id) > 99
+                                ? "99+"
+                                : unreadCount(folder.id)}
+                        </span>
+                    {/if}
                 </button>
             {/each}
         </div>
@@ -449,16 +540,13 @@
 
     <!--
       设置按钮：固定在侧边栏底部
-      点击导航到 /settings 页面
+      点击打开独立设置窗口，失败时回退到 /settings 页面
     -->
     <div class="border-t border-border px-3 py-2">
         <button
             data-testid="settings-nav"
             class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-colors"
-            onclick={() => {
-                activeFolder = "";
-                goto("/settings");
-            }}
+            onclick={openSettings}
         >
             <Settings size={18} class="shrink-0" />
             {t.sidebar.settings}
@@ -485,70 +573,3 @@
         </div>
     </div>
 </aside>
-
-<style>
-    /* ==================== 写邮件按钮样式 ==================== */
-
-    /*
-      .compose-btn：写邮件按钮样式
-      - 使用主色到次要色的渐变背景（135度斜角方向）
-      - 紫色发光阴影效果，提升视觉层次感
-    */
-    .compose-btn {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-        box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
-    }
-
-    /* 悬停效果：按钮轻微上移，阴影增强 */
-    .compose-btn:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 6px 20px rgba(124, 58, 237, 0.4);
-    }
-
-    /* 按下效果：按钮恢复原位 */
-    .compose-btn:active {
-        transform: translateY(0);
-    }
-
-    /* ==================== 导航项样式 ==================== */
-
-    /*
-      .nav-item：侧边栏导航项通用样式
-      - 悬停时显示玻璃态背景
-      - 文字颜色变亮
-    */
-    .nav-item:hover {
-        background: var(--color-glass-hover);
-        color: var(--color-foreground);
-    }
-
-    /*
-      .nav-item.active：当前选中导航项的高亮样式
-      - 主色半透明背景（15% 不透明度混合）
-      - 主色文字
-    */
-    .nav-item.active {
-        background: color-mix(in srgb, var(--color-primary) 15%, transparent);
-        color: var(--color-primary);
-    }
-
-    /* ==================== 存储空间进度条样式 ==================== */
-
-    /*
-      .storage-fill：存储进度条填充部分
-      - 使用主色到次要色的水平渐变
-      - 宽度变化时带有 300ms 的过渡动画
-    */
-    .storage-fill {
-        background: linear-gradient(
-            90deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-        transition: width 300ms ease;
-    }
-</style>

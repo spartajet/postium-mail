@@ -38,7 +38,7 @@
  * await emailState.toggleStar(emailId);
  *
  * // 删除邮件
- * await emailState.deleteEmails([emailId1, emailId2]);
+ * await emailState.deleteEmails([emailId]);
  * ```
  */
 
@@ -46,10 +46,17 @@
 import { getContext, setContext } from "svelte";
 
 // 导入 Tauri 命令绑定，用于调用后端 API
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { commands } from "$lib/bindings";
 
 // 导入邮件相关的数据传输对象类型
-import type { EmailDto, EmailDetail, EmailCategory } from "$lib/bindings";
+import type {
+  AttachmentDto,
+  EmailDto,
+  EmailDetail,
+  EmailCategory,
+  InlineAttachmentDto,
+} from "$lib/bindings";
 
 // 导入错误格式化工具
 import { formatError } from "$lib/utils/error.js";
@@ -104,8 +111,95 @@ export class EmailState {
   /** 是否正在加载邮件数据（响应式状态） */
   loading = $state(false);
 
+  /** 是否正在追加下一页邮件，不替换当前列表 */
+  loadingNextPage = $state(false);
+
+  /** 最近一次邮件操作错误，空字符串表示无错误 */
+  error = $state("");
+
+  /** 正在执行远端操作的邮件 ID 集合 */
+  operatingIds = $state<Set<number>>(new Set());
+
+  /** 正在执行附件操作的附件 ID 集合 */
+  attachmentOperatingIds = $state<Set<number>>(new Set());
+
+  /** 按附件 ID 保存的操作错误 */
+  attachmentErrors = $state<Record<number, string>>({});
+
+  /** 已替换 CID 图片后的正文 HTML */
+  resolvedBodyHtml = $state<string | null>(null);
+
   /** 当前查看的邮件分类（响应式状态），如 "inbox"、"sent" 等 */
   currentFolder = $state<EmailCategory>("inbox");
+
+  /** 是否只显示未读邮件 */
+  unreadOnly = $state(false);
+
+  private inlineResolveRequestId = 0;
+
+  private beginOperation(emailId: number) {
+    this.error = "";
+    this.operatingIds = new Set([...this.operatingIds, emailId]);
+  }
+
+  private endOperation(emailId: number) {
+    const next = new Set(this.operatingIds);
+    next.delete(emailId);
+    this.operatingIds = next;
+  }
+
+  private setError(e: unknown, fallback: string) {
+    this.error = e instanceof Error ? e.message : fallback;
+    console.error(fallback, e);
+  }
+
+  private beginAttachmentOperation(attachmentId: number) {
+    this.attachmentErrors = { ...this.attachmentErrors, [attachmentId]: "" };
+    this.attachmentOperatingIds = new Set([
+      ...this.attachmentOperatingIds,
+      attachmentId,
+    ]);
+  }
+
+  private endAttachmentOperation(attachmentId: number) {
+    const next = new Set(this.attachmentOperatingIds);
+    next.delete(attachmentId);
+    this.attachmentOperatingIds = next;
+  }
+
+  private replaceSelectedAttachment(updated: AttachmentDto) {
+    if (!this.selectedEmail) return;
+
+    this.selectedEmail = {
+      ...this.selectedEmail,
+      attachments: this.selectedEmail.attachments.map((attachment) =>
+        attachment.id === updated.id ? updated : attachment,
+      ),
+    };
+  }
+
+  private setAttachmentError(
+    attachmentId: number,
+    error: unknown,
+    fallback: string,
+  ) {
+    const message = formatError(error);
+    this.attachmentErrors = {
+      ...this.attachmentErrors,
+      [attachmentId]: message || fallback,
+    };
+  }
+
+  private removeFromCurrentList(emailId: number) {
+    const before = this.emails.length;
+    this.emails = this.emails.filter((email) => email.id !== emailId);
+    if (this.total > 0 && this.emails.length < before) {
+      this.total -= 1;
+    }
+    if (this.selectedEmailId === emailId) {
+      this.deselectEmail();
+    }
+  }
 
   /**
    * 按文件夹加载邮件列表
@@ -227,6 +321,7 @@ export class EmailState {
         category,
         page,
         this.limit,
+        this.unreadOnly,
       );
 
       if (result.status === "ok") {
@@ -242,6 +337,143 @@ export class EmailState {
       // 无论成功或失败，都重置加载状态
       this.loading = false;
     }
+  }
+
+  async loadEmailsByCategoryForAllAccounts(
+    category: EmailCategory,
+    page = 1,
+  ) {
+    this.loading = true;
+    this.currentFolder = category;
+
+    try {
+      const result = await commands.listEmailsByCategoryForAllAccounts(
+        category,
+        page,
+        this.limit,
+        this.unreadOnly,
+      );
+
+      if (result.status === "ok") {
+        this.emails = result.data.emails;
+        this.total = result.data.total;
+        this.page = result.data.page;
+      }
+    } catch (e: unknown) {
+      console.error("Failed to load emails for all accounts:", e);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async loadNextPage(accountId: number) {
+    if (this.loading || this.loadingNextPage || this.emails.length >= this.total)
+      return;
+
+    const nextPage = this.page + 1;
+    this.loadingNextPage = true;
+
+    try {
+      const result = await commands.listEmailsByCategory(
+        accountId,
+        this.currentFolder,
+        nextPage,
+        this.limit,
+        this.unreadOnly,
+      );
+
+      if (result.status === "ok") {
+        this.emails = [...this.emails, ...result.data.emails];
+        this.total = result.data.total;
+        this.page = result.data.page;
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to load next email page");
+    } finally {
+      this.loadingNextPage = false;
+    }
+  }
+
+  async loadNextPageForAllAccounts() {
+    if (this.loading || this.loadingNextPage || this.emails.length >= this.total)
+      return;
+
+    const nextPage = this.page + 1;
+    this.loadingNextPage = true;
+
+    try {
+      const result = await commands.listEmailsByCategoryForAllAccounts(
+        this.currentFolder,
+        nextPage,
+        this.limit,
+        this.unreadOnly,
+      );
+
+      if (result.status === "ok") {
+        this.emails = [...this.emails, ...result.data.emails];
+        this.total = result.data.total;
+        this.page = result.data.page;
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to load next email page for all accounts");
+    } finally {
+      this.loadingNextPage = false;
+    }
+  }
+
+  async refreshLoadedEmailsByCategory(accountId: number, minimumLimit = 0) {
+    const loadedCount = Math.max(this.emails.length, minimumLimit, this.limit);
+
+    try {
+      const result = await commands.listEmailsByCategory(
+        accountId,
+        this.currentFolder,
+        1,
+        loadedCount,
+        this.unreadOnly,
+      );
+
+      if (result.status === "ok") {
+        this.emails = result.data.emails;
+        this.total = result.data.total;
+        this.page = Math.max(1, Math.ceil(result.data.emails.length / this.limit));
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to refresh loaded emails");
+    }
+  }
+
+  async refreshLoadedEmailsByCategoryForAllAccounts(minimumLimit = 0) {
+    const loadedCount = Math.max(this.emails.length, minimumLimit, this.limit);
+
+    try {
+      const result = await commands.listEmailsByCategoryForAllAccounts(
+        this.currentFolder,
+        1,
+        loadedCount,
+        this.unreadOnly,
+      );
+
+      if (result.status === "ok") {
+        this.emails = result.data.emails;
+        this.total = result.data.total;
+        this.page = Math.max(1, Math.ceil(result.data.emails.length / this.limit));
+      }
+    } catch (e: unknown) {
+      this.setError(e, "Failed to refresh loaded emails for all accounts");
+    }
+  }
+
+  async setUnreadOnly(accountId: number, unreadOnly: boolean) {
+    if (this.unreadOnly === unreadOnly && this.page === 1) return;
+    this.unreadOnly = unreadOnly;
+    await this.loadEmailsByCategory(accountId, this.currentFolder, 1);
+  }
+
+  async setUnreadOnlyForAllAccounts(unreadOnly: boolean) {
+    if (this.unreadOnly === unreadOnly && this.page === 1) return;
+    this.unreadOnly = unreadOnly;
+    await this.loadEmailsByCategoryForAllAccounts(this.currentFolder, 1);
   }
 
   /**
@@ -291,16 +523,13 @@ export class EmailState {
       if (result.status === "ok") {
         // 更新选中邮件的详情
         this.selectedEmail = result.data;
+        this.resolvedBodyHtml = result.data.body_html;
+        void this.resolveInlineAttachmentsForSelectedEmail();
 
         // 自动标记已读
         // 如果邮件当前是未读状态，调用后端标记为已读
         if (!this.selectedEmail.is_read) {
-          await commands.markAsRead(id, true);
-
-          // 更新本地邮件列表中的已读状态
-          // 这样列表中的邮件预览也会显示为已读
-          const email = this.emails.find((e) => e.id === id);
-          if (email) email.is_read = true;
+          await this.markAsRead(id, true);
         }
       }
     } catch (e: unknown) {
@@ -336,6 +565,130 @@ export class EmailState {
   deselectEmail() {
     this.selectedEmailId = null;
     this.selectedEmail = null;
+    this.resolvedBodyHtml = null;
+    this.attachmentErrors = {};
+    this.attachmentOperatingIds = new Set();
+    this.inlineResolveRequestId += 1;
+  }
+
+  async markAsRead(emailId: number, isRead: boolean): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.markAsRead(emailId, isRead);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+
+      const email = this.emails.find((item) => item.id === emailId);
+      if (email) email.is_read = isRead;
+
+      if (this.selectedEmail?.id === emailId) {
+        this.selectedEmail.is_read = isRead;
+      }
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to mark email read state");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
+  async reloadEmail(emailId: number): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.reloadEmail(emailId);
+
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+
+      if (result.data.status === "reloaded") {
+        const detail = result.data.email;
+        const existingEmail = this.emails.find((email) => email.id === emailId);
+        const updatedEmail: EmailDto = {
+          id: detail.id,
+          account_id: detail.account_id,
+          account_email: detail.account_email ?? existingEmail?.account_email ?? null,
+          account_display_name:
+            detail.account_display_name ??
+            existingEmail?.account_display_name ??
+            null,
+          folder: detail.folder,
+          uid: detail.uid,
+          subject: detail.subject,
+          sender_name: detail.sender_name,
+          sender_email: detail.sender_email,
+          preview: detail.preview,
+          is_read: detail.is_read,
+          is_starred: detail.is_starred,
+          sent_at: detail.sent_at,
+          has_attachments: detail.has_attachments,
+        };
+        this.emails = this.emails.map((email) =>
+          email.id === emailId ? updatedEmail : email,
+        );
+        if (this.selectedEmailId === emailId) {
+          this.selectedEmail = detail;
+          this.resolvedBodyHtml = detail.body_html;
+          void this.resolveInlineAttachmentsForSelectedEmail();
+        }
+        return true;
+      }
+
+      const removedId = result.data.email_id;
+      const before = this.emails.length;
+      this.emails = this.emails.filter((email) => email.id !== removedId);
+      const removed = before - this.emails.length;
+      if (this.selectedEmailId === removedId) {
+        this.deselectEmail();
+      }
+      this.total = Math.max(0, this.total - removed);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to reload email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
+  async archiveEmail(emailId: number): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.archiveEmail(emailId);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+      this.removeFromCurrentList(emailId);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to archive email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
+  }
+
+  async moveEmailToFolder(emailId: number, folder: string): Promise<boolean> {
+    this.beginOperation(emailId);
+    try {
+      const result = await commands.moveEmailToFolder(emailId, folder);
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return false;
+      }
+      this.removeFromCurrentList(emailId);
+      return true;
+    } catch (e: unknown) {
+      this.setError(e, "Failed to move email");
+      return false;
+    } finally {
+      this.endOperation(emailId);
+    }
   }
 
   /**
@@ -373,36 +726,40 @@ export class EmailState {
    * @returns Promise<void>
    */
   async toggleStar(emailId: number) {
+    this.beginOperation(emailId);
     try {
       // 调用后端命令切换星标状态
       const result = await commands.toggleStar(emailId);
 
-      if (result.status === "ok") {
-        // 获取切换后的新状态
-        const newState = result.data;
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return;
+      }
 
-        // 更新本地邮件列表中的星标状态
-        const email = this.emails.find((e) => e.id === emailId);
-        if (email) email.is_starred = newState;
+      // 获取切换后的新状态
+      const newState = result.data;
 
-        // 如果该邮件是当前选中的邮件，同时更新详情视图的状态
-        if (this.selectedEmail?.id === emailId) {
-          this.selectedEmail.is_starred = newState;
-        }
+      // 更新本地邮件列表中的星标状态
+      const email = this.emails.find((e) => e.id === emailId);
+      if (email) email.is_starred = newState;
+
+      // 如果该邮件是当前选中的邮件，同时更新详情视图的状态
+      if (this.selectedEmail?.id === emailId) {
+        this.selectedEmail.is_starred = newState;
       }
     } catch (e: unknown) {
-      // 记录错误日志
-      console.error("Failed to toggle star:", e);
+      this.setError(e, "Failed to toggle star");
+    } finally {
+      this.endOperation(emailId);
     }
   }
 
   /**
    * 删除邮件
    *
-   * 删除指定的邮件（支持批量删除）。
-   * 删除行为取决于邮件当前所在的文件夹：
-   * - 普通文件夹：移动到垃圾箱
-   * - 垃圾箱：永久删除
+   * 删除指定的邮件。第一阶段仅支持单封邮件。
+   * 第一阶段删除语义是移动到服务商配置的 Trash 文件夹，
+   * 不执行永久删除或 EXPUNGE。
    *
    * ==================== 工作流程 ====================
    * 1. 调用后端 deleteEmails 命令删除邮件
@@ -411,8 +768,6 @@ export class EmailState {
    * 4. 更新邮件总数
    * 5. 失败时记录错误日志
    *
-   * ⚠️ **警告：垃圾箱中的邮件会被永久删除，不可恢复！**
-   *
    * ==================== 使用示例 ====================
    * ```typescript
    * const emailState = getEmailState();
@@ -420,38 +775,147 @@ export class EmailState {
    * // 删除单封邮件
    * await emailState.deleteEmails([123]);
    *
-   * // 批量删除
-   * const selectedIds = [1, 2, 3, 4, 5];
-   * if (confirm(`确定要删除 ${selectedIds.length} 封邮件吗？`)) {
-   *   await emailState.deleteEmails(selectedIds);
-   * }
    * ```
    *
    * @param ids - 要删除的邮件 ID 数组
    * @returns Promise<void>
    */
   async deleteEmails(ids: number[]) {
+    ids.forEach((id) => this.beginOperation(id));
     try {
       // 调用后端命令删除邮件
       const result = await commands.deleteEmails(ids);
 
-      if (result.status === "ok") {
-        // 从本地列表中移除已删除的邮件
-        this.emails = this.emails.filter((e) => !ids.includes(e.id));
-
-        // 如果删除的是当前选中的邮件，取消选择
-        if (this.selectedEmailId && ids.includes(this.selectedEmailId)) {
-          this.deselectEmail();
-        }
-
-        // 更新邮件总数
-        this.total -= ids.length;
+      if (result.status === "error") {
+        this.error = formatError(result.error);
+        return;
       }
+
+      // 从本地列表中移除已删除的邮件
+      const before = this.emails.length;
+      this.emails = this.emails.filter((e) => !ids.includes(e.id));
+      const removed = before - this.emails.length;
+
+      // 如果删除的是当前选中的邮件，取消选择
+      if (this.selectedEmailId && ids.includes(this.selectedEmailId)) {
+        this.deselectEmail();
+      }
+
+      // 更新邮件总数
+      this.total = Math.max(0, this.total - removed);
     } catch (e: unknown) {
-      // 记录错误日志
-      console.error("Failed to delete emails:", e);
+      this.setError(e, "Failed to delete emails");
+    } finally {
+      ids.forEach((id) => this.endOperation(id));
     }
   }
+
+  async refreshCurrentCategory(accountId: number) {
+    try {
+      await this.loadEmailsByCategory(accountId, this.currentFolder, this.page);
+    } catch (e: unknown) {
+      this.setError(e, "Failed to refresh emails");
+    }
+  }
+
+  async downloadAttachment(attachmentId: number) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.ensureAttachmentCached(attachmentId);
+      if (result.status === "ok") {
+        this.replaceSelectedAttachment(result.data);
+      } else {
+        this.setAttachmentError(attachmentId, result.error, "附件下载失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件下载失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async saveAttachmentAs(attachmentId: number, targetPath: string) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.saveAttachmentAs(attachmentId, targetPath);
+      if (result.status === "error") {
+        this.setAttachmentError(attachmentId, result.error, "附件保存失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件保存失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async openAttachment(attachmentId: number) {
+    this.beginAttachmentOperation(attachmentId);
+    try {
+      const result = await commands.openAttachment(attachmentId);
+      if (result.status === "error") {
+        this.setAttachmentError(attachmentId, result.error, "附件打开失败");
+      }
+    } catch (error: unknown) {
+      this.setAttachmentError(attachmentId, error, "附件打开失败");
+    } finally {
+      this.endAttachmentOperation(attachmentId);
+    }
+  }
+
+  async resolveInlineAttachmentsForSelectedEmail() {
+    const email = this.selectedEmail;
+    const requestId = ++this.inlineResolveRequestId;
+    if (!email?.body_html) {
+      this.resolvedBodyHtml = email?.body_html ?? null;
+      return;
+    }
+
+    const smallInlineImages = email.attachments.filter(
+      (attachment) =>
+        attachment.content_id &&
+        attachment.content_type.startsWith("image/") &&
+        attachment.size <= 10 * 1024 * 1024,
+    );
+    if (smallInlineImages.length === 0) {
+      this.resolvedBodyHtml = email.body_html;
+      return;
+    }
+
+    const result = await commands.resolveInlineAttachments(email.id);
+    if (requestId !== this.inlineResolveRequestId || this.selectedEmail?.id !== email.id) {
+      return;
+    }
+    if (result.status !== "ok") {
+      this.resolvedBodyHtml = email.body_html;
+      return;
+    }
+
+    const mapped = result.data.map((attachment) => ({
+      ...attachment,
+      url: convertFileSrc(attachment.url),
+    }));
+    this.resolvedBodyHtml = replaceCidReferences(email.body_html, mapped);
+  }
+}
+
+export function normalizeContentId(contentId: string): string {
+  return contentId.trim().replace(/^<|>$/g, "");
+}
+
+export function replaceCidReferences(
+  html: string,
+  inlineAttachments: InlineAttachmentDto[],
+): string {
+  let next = html;
+  for (const attachment of inlineAttachments) {
+    const cid = normalizeContentId(attachment.content_id);
+    const candidates = new Set([cid, encodeURIComponent(cid)]);
+    for (const candidate of candidates) {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      next = next.replace(new RegExp(`cid:${escaped}`, "gi"), attachment.url);
+    }
+  }
+  return next;
 }
 
 /**

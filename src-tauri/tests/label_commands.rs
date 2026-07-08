@@ -95,7 +95,11 @@ async fn test_delete_label() {
     let created = svc.label_service.create_label(create_req).await.unwrap();
 
     let delete_result = svc.label_service.delete_label(created.id).await;
-    assert!(delete_result.is_ok(), "删除标签应成功: {:?}", delete_result.err());
+    assert!(
+        delete_result.is_ok(),
+        "删除标签应成功: {:?}",
+        delete_result.err()
+    );
 
     let labels = svc.label_service.list_labels(account_id).await.unwrap();
     assert!(labels.is_empty(), "删除后标签列表应为空");
@@ -179,7 +183,11 @@ async fn test_add_label_to_email_is_idempotent_for_duplicate_relation() {
         .list_emails_by_label(label.id)
         .await
         .unwrap();
-    assert_eq!(email_ids, vec![email_id], "重复添加同一标签不应产生重复关联");
+    assert_eq!(
+        email_ids,
+        vec![email_id],
+        "重复添加同一标签不应产生重复关联"
+    );
 }
 
 #[tokio::test]

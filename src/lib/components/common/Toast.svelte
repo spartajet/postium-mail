@@ -23,6 +23,7 @@
     // 导入全局提示消息状态管理器
     // getToastState：获取 toast 状态单例，包含 toasts 数组和 dismiss 方法
     import { getToastState } from "$lib/stores/toast.svelte";
+    import { SvelteSet } from "svelte/reactivity";
 
     // 导入消息类型定义
     // ToastType：消息类型枚举（"success" | "error" | "info" | "warning"）
@@ -42,7 +43,7 @@
     // 已处理消息 ID 集合
     // 用于追踪哪些消息已经启动了自动消失计时器
     // 防止同一条消息被重复设置计时器（$effect 可能多次触发）
-    let seen = new Set<number>();
+    let seen = new SvelteSet<number>();
 
     // ==================== 自动消失逻辑 ====================
 
@@ -187,32 +188,3 @@
         {/each}
     </div>
 {/if}
-
-<style>
-    /* ==================== 滑入动画定义 ==================== */
-
-    /*
-      .animate-slide-in：消息弹出时的滑入动画类
-      从右侧滑入并淡入，持续 0.2 秒
-    */
-    .animate-slide-in {
-        animation: slideIn 0.2s ease-out;
-    }
-
-    /*
-      @keyframes slideIn：滑入动画关键帧
-      - from：初始状态，完全在右侧视口外（translateX(100%)），完全透明
-      - to：结束状态，回到正常位置（translateX(0)），完全显示
-      使用 ease-out 缓动函数，使动画开始快结束慢，更自然
-    */
-    @keyframes slideIn {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-</style>

@@ -115,6 +115,9 @@
 /// 包含 `SyncOrchestrator` 同步编排器，负责协调完整的同步流程。
 pub mod folder_sync_dispatcher;
 
+/// 同步历史窗口模块
+pub mod history;
+
 /// 文件夹全量同步模块
 ///
 /// 实现文件夹的全量同步逻辑，用于首次同步或重建索引。
@@ -144,6 +147,37 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use tauri::{AppHandle, Emitter};
+
+pub const HISTORY_UID_BATCH_SIZE: usize = 50;
+
+pub fn history_exhausted_before_uid(before_uid: u32) -> bool {
+    before_uid <= 1
+}
+
+pub fn next_history_before_uid(batch: &[u32], previous_before_uid: u32) -> u32 {
+    batch.iter().copied().min().unwrap_or(previous_before_uid)
+}
+
+/// 初始同步范围
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialSyncRange {
+    Week,
+    Month,
+    ThreeMonths,
+    Year,
+    All,
+}
+
+/// 同步时间窗口
+///
+/// `start` 和 `end` 都使用 Unix 秒级时间戳。
+/// 当窗口映射到 IMAP 搜索条件时，`end` 对应 `BEFORE <date>` 的排他上界。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncWindow {
+    pub start: Option<i64>,
+    pub end: Option<i64>,
+}
 
 /// 同步进度事件
 ///
@@ -271,6 +305,7 @@ pub enum SyncStage {
 /// - `account_id`: 正在同步的账号 ID
 /// - `stage`: 当前同步阶段
 /// - `folder`: 当前正在同步的文件夹（可选）
+/// - `folder_display_name`: 当前文件夹的可读展示名（可选）
 /// - `current`: 当前进度值（已处理的邮件数）
 /// - `total`: 总数量（当前文件夹的总邮件数）
 /// - `message`: 进度描述消息
@@ -282,6 +317,7 @@ pub enum SyncStage {
 ///     account_id: 1,
 ///     stage: SyncStage::SyncingEmails,
 ///     folder: Some("INBOX".to_string()),
+///     folder_display_name: Some("INBOX".to_string()),
 ///     current: 25,
 ///     total: 100,
 ///     message: "正在同步 INBOX...".to_string(),
@@ -296,6 +332,8 @@ pub struct SyncProgress {
     pub stage: SyncStage,
     /// 当前正在同步的文件夹名称（可选）
     pub folder: Option<String>,
+    /// 当前文件夹的可读展示名（可选）
+    pub folder_display_name: Option<String>,
     /// 当前进度值（已处理的数量）
     pub current: usize,
     /// 总数量（当前任务的总数）
@@ -403,6 +441,8 @@ pub enum SyncMode {
     Full {
         /// IMAP 文件夹的 UIDVALIDITY 值
         uidvalidity: u64,
+        /// IMAP UIDNEXT 值，用于空窗口首次同步时建立安全高水位
+        uidnext: u64,
     },
     /// 增量同步模式
     ///
@@ -416,4 +456,31 @@ pub enum SyncMode {
         /// 上次同步的最高 UID
         last_sync_uid: u32,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_batch_size_should_default_to_fifty() {
+        assert_eq!(HISTORY_UID_BATCH_SIZE, 50);
+    }
+
+    #[test]
+    fn history_exhausted_before_uid_should_be_true_for_first_uid() {
+        assert!(history_exhausted_before_uid(1));
+        assert!(history_exhausted_before_uid(0));
+        assert!(!history_exhausted_before_uid(2));
+    }
+
+    #[test]
+    fn next_history_before_uid_should_move_to_minimum_batch_uid() {
+        assert_eq!(next_history_before_uid(&[41, 39, 40], 50), 39);
+    }
+
+    #[test]
+    fn next_history_before_uid_should_keep_previous_when_batch_empty() {
+        assert_eq!(next_history_before_uid(&[], 50), 50);
+    }
 }

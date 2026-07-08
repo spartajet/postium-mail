@@ -1,19 +1,31 @@
 use crate::domain::auth::AuthManager;
+use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::folder_sync_full::sync_folder_full;
 use crate::domain::sync::folder_sync_increment::sync_folder_incremental;
-use crate::domain::sync::{SyncMode, SyncProgress, SyncProgressEmitter, SyncResult, SyncStage};
+use crate::domain::sync::{
+    InitialSyncRange, SyncMode, SyncProgress, SyncProgressEmitter, SyncResult, SyncStage,
+    SyncWindow,
+};
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::{account_repo, sync_repo};
+use crate::service::account_connection::imap_config_from_account;
 use std::sync::Arc;
+use utf7_imap::decode_utf7_imap;
 
 /// 同步编排器 — 只负责同步流程编排，不负责进度通知
 pub struct SyncOrchestrator {
     db: DbConn,
     auth: Arc<AuthManager>,
     emitter: Option<SyncProgressEmitter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyncFolder {
+    raw_name: String,
+    display_name: String,
 }
 
 impl SyncOrchestrator {
@@ -32,6 +44,26 @@ impl SyncOrchestrator {
 
     /// 同步账号的所有文件夹
     pub async fn sync_account(&self, account_id: i32) -> Result<SyncResult, MailError> {
+        self.sync_account_with_initial_window(account_id, None)
+            .await
+    }
+
+    pub async fn sync_account_with_range(
+        &self,
+        account_id: i32,
+        range: InitialSyncRange,
+    ) -> Result<SyncResult, MailError> {
+        let now = chrono::Utc::now().timestamp();
+        let initial_window = crate::domain::sync::history::window_for_initial_range(range, now);
+        self.sync_account_with_initial_window(account_id, Some(initial_window))
+            .await
+    }
+
+    async fn sync_account_with_initial_window(
+        &self,
+        account_id: i32,
+        initial_window: Option<SyncWindow>,
+    ) -> Result<SyncResult, MailError> {
         tracing::info!(account_id, "开始同步账号");
         let start = std::time::Instant::now();
 
@@ -60,7 +92,7 @@ impl SyncOrchestrator {
             .get_credentials(&account.email, mail_auth_type, Some(provider_id))
             .await?;
 
-        let imap_config = provider.imap_config(&account.email);
+        let imap_config = imap_config_from_account(&account)?;
 
         // 3. 连接 IMAP
         let mut client = match &credentials {
@@ -75,9 +107,52 @@ impl SyncOrchestrator {
         tracing::debug!(account_id, "IMAP 连接成功");
 
         // 4. 列出远程文件夹
-        // let sync_folders = client.list_folders().await?;
-        let folder_mapping = provider.folder_mapping();
-        let sync_folders = folder_mapping.list();
+        let remote_folders = client.list_folders().await?;
+        let remote: Vec<RemoteFolder> = remote_folders
+            .iter()
+            .map(|f| RemoteFolder {
+                name: f.name.clone(),
+                special_use: f.special_use.clone(),
+                no_select: f.no_select,
+            })
+            .collect();
+        let registry = FolderRegistry::builder()
+            .remote_folders(remote)
+            .provider_mapping(provider.folder_mapping())
+            .build();
+        // 同步所有被识别为标准类别的文件夹（多选）
+        let sync_folders: Vec<String> = [
+            FolderCategory::Inbox,
+            FolderCategory::Sent,
+            FolderCategory::Drafts,
+            FolderCategory::Junk,
+            FolderCategory::Trash,
+            FolderCategory::Archive,
+        ]
+        .iter()
+        .flat_map(|cat| registry.resolve(*cat))
+        .collect();
+        let sync_folders: Vec<SyncFolder> = sync_folders
+            .into_iter()
+            .map(|folder| {
+                let display_name = decoded_folder_display_name(&folder);
+                SyncFolder {
+                    raw_name: folder,
+                    display_name,
+                }
+            })
+            .collect();
+        for folder in &sync_folders {
+            if let Some(category) = registry.classify(&folder.raw_name) {
+                sync_repo::upsert_folder_category(
+                    &self.db,
+                    account_id,
+                    &folder.raw_name,
+                    category.as_str(),
+                )
+                .await?;
+            }
+        }
         tracing::info!(
             account_id,
             count = sync_folders.len(),
@@ -93,6 +168,7 @@ impl SyncOrchestrator {
                 account_id,
                 stage: SyncStage::SyncingFolders,
                 folder: None,
+                folder_display_name: None,
                 current: 0,
                 total: total_folders,
                 message: format!("发现 {} 个文件夹需要同步", total_folders),
@@ -106,25 +182,37 @@ impl SyncOrchestrator {
                 emitter.emit(SyncProgress {
                     account_id,
                     stage: SyncStage::SyncingEmails,
-                    folder: Some(folder.clone()),
+                    folder: Some(folder.raw_name.clone()),
+                    folder_display_name: Some(folder.display_name.clone()),
                     current: idx + 1,
                     total: total_folders,
-                    message: format!("正在同步文件夹 {} ({}/{})", folder, idx + 1, total_folders),
+                    message: syncing_folder_message(folder, idx + 1, total_folders),
                 });
             }
-            tracing::debug!(account_id, folder = %folder, "开始同步文件夹");
+            tracing::debug!(account_id, folder = %folder.raw_name, "开始同步文件夹");
             let sync_mode = self
-                .determine_sync_mode(account_id, folder, &mut client)
+                .determine_sync_mode(account_id, &folder.raw_name, &mut client)
                 .await?;
-            tracing::debug!(account_id, folder = %folder, "同步模式: {:?}", sync_mode);
+            tracing::debug!(account_id, folder = %folder.raw_name, "同步模式: {:?}", sync_mode);
             let sync_result = match sync_mode {
-                SyncMode::Full { uidvalidity } => {
+                SyncMode::Full {
+                    uidvalidity,
+                    uidnext,
+                } => {
+                    let window = initial_window.unwrap_or_else(|| {
+                        crate::domain::sync::history::window_for_initial_range(
+                            InitialSyncRange::ThreeMonths,
+                            chrono::Utc::now().timestamp(),
+                        )
+                    });
                     sync_folder_full(
                         self.db.clone(),
                         account_id,
-                        folder,
+                        &folder.raw_name,
                         uidvalidity as u32,
+                        uidnext as u32,
                         &mut client,
+                        window,
                     )
                     .await?
                 }
@@ -132,14 +220,14 @@ impl SyncOrchestrator {
                     sync_folder_incremental(
                         self.db.clone(),
                         account_id,
-                        folder,
+                        &folder.raw_name,
                         last_sync_uid,
                         &mut client,
                     )
                     .await?
                 }
             };
-            tracing::info!(account_id, folder = %folder, "同步完成");
+            tracing::info!(account_id, folder = %folder.raw_name, "同步完成");
             sync_results.push(sync_result);
         }
 
@@ -214,141 +302,58 @@ impl SyncOrchestrator {
                 );
                 return Ok(SyncMode::Full {
                     uidvalidity: server_uidvalidity,
+                    uidnext: metadata.uidnext,
                 });
             }
         }
 
         Ok(SyncMode::Full {
             uidvalidity: server_uidvalidity,
+            uidnext: metadata.uidnext,
         })
     }
 }
 
-// /// 从 header 和可选 body 构建邮件模型
-// fn build_email_model(
-//     account_id: i32,
-//     folder: &str,
-//     uid: u32,
-//     header: &crate::infrastructure::protocols::imap::RawEmailHeader,
-//     body_bytes: Option<&[u8]>,
-// ) -> emails::ActiveModel {
-//     let now = chrono::Utc::now().timestamp();
-//     let flags = &header.flags;
-//     let is_read = !flags
-//         .iter()
-//         .any(|f| f.contains("Seen") || f.contains("\\Seen"));
-//     let is_starred = flags
-//         .iter()
-//         .any(|f| f.contains("Flagged") || f.contains("\\Flagged"));
-//     let is_draft = flags
-//         .iter()
-//         .any(|f| f.contains("Draft") || f.contains("\\Draft"));
-//     let is_answered = flags
-//         .iter()
-//         .any(|f| f.contains("Answered") || f.contains("\\Answered"));
+fn syncing_folder_message(folder: &SyncFolder, current: usize, total: usize) -> String {
+    format!(
+        "正在同步文件夹 {} ({}/{})",
+        folder.display_name, current, total
+    )
+}
 
-//     // 尝试解析 body
-//     if let Some(bytes) = body_bytes
-//         && let Some(msg) = mail_parser::MessageParser::default().parse(bytes)
-//     {
-//         let sender_name = msg
-//             .from()
-//             .and_then(|a| a.first().and_then(|p| p.name().map(|n| n.to_string())));
-//         let sender_email = msg
-//             .from()
-//             .and_then(|a| a.first().and_then(|p| p.address().map(|a| a.to_string())))
-//             .or_else(|| header.from.clone())
-//             .unwrap_or_default();
+fn decoded_folder_display_name(raw_name: &str) -> String {
+    let decoded = decode_utf7_imap(raw_name.to_string());
+    if decoded.trim().is_empty() {
+        raw_name.to_string()
+    } else {
+        decoded
+    }
+}
 
-//         let recipient_emails = msg
-//             .to()
-//             .map(|addr| {
-//                 addr.iter()
-//                     .filter_map(|a| a.address().map(|a| a.to_string()))
-//                     .collect::<Vec<_>>()
-//                     .join(", ")
-//             })
-//             .or_else(|| header.to.clone())
-//             .unwrap_or_default();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//         let body_text = msg.body_text(0).map(|t| t.to_string());
-//         let body_html = msg.body_html(0).map(|t| t.to_string());
-//         let preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
+    #[test]
+    fn progress_message_should_use_decoded_folder_name_for_display() {
+        let folder = SyncFolder {
+            raw_name: "&XfJT0ZAB-".to_string(),
+            display_name: "已发送".to_string(),
+        };
 
-//         let sent_at = msg
-//             .date()
-//             .map(|d| d.to_timestamp())
-//             .unwrap_or_else(|| parse_date_to_timestamp(header.date.as_deref()).unwrap_or(now));
+        assert_eq!(folder.raw_name, "&XfJT0ZAB-");
+        assert_eq!(
+            syncing_folder_message(&folder, 1, 3),
+            "正在同步文件夹 已发送 (1/3)"
+        );
+    }
 
-//         let subject = msg
-//             .subject()
-//             .map(|s| s.to_string())
-//             .or_else(|| header.subject.clone());
-//         let message_id = msg
-//             .message_id()
-//             .map(|s| s.to_string())
-//             .or_else(|| header.message_id.clone());
-
-//         return emails::ActiveModel {
-//             account_id: Set(account_id),
-//             folder: Set(folder.to_string()),
-//             uid: Set(uid),
-//             message_id: Set(message_id),
-//             subject: Set(subject),
-//             sender_name: Set(sender_name),
-//             sender_email: Set(sender_email),
-//             recipient_emails: Set(recipient_emails),
-//             cc_emails: Set(None),
-//             bcc_emails: Set(None),
-//             preview: Set(preview),
-//             body_text: Set(body_text),
-//             body_html: Set(body_html),
-//             is_read: Set(Some(is_read)),
-//             is_starred: Set(Some(is_starred)),
-//             is_draft: Set(Some(is_draft)),
-//             is_answered: Set(Some(is_answered)),
-//             is_deleted: Set(Some(false)),
-//             sent_at: Set(sent_at),
-//             received_at: Set(now),
-//             created_at: Set(now),
-//             updated_at: Set(now),
-//             ..Default::default()
-//         };
-//     }
-
-//     // 解析失败或无 body — 只存 header
-//     emails::ActiveModel {
-//         account_id: Set(account_id),
-//         folder: Set(folder.to_string()),
-//         uid: Set(uid),
-//         message_id: Set(header.message_id.clone()),
-//         subject: Set(header.subject.clone()),
-//         sender_name: Set(None),
-//         sender_email: Set(header.from.clone().unwrap_or_default()),
-//         recipient_emails: Set(header.to.clone().unwrap_or_default()),
-//         cc_emails: Set(None),
-//         bcc_emails: Set(None),
-//         preview: Set(None),
-//         body_text: Set(None),
-//         body_html: Set(None),
-//         is_read: Set(Some(is_read)),
-//         is_starred: Set(Some(is_starred)),
-//         is_draft: Set(Some(is_draft)),
-//         is_answered: Set(Some(is_answered)),
-//         is_deleted: Set(Some(false)),
-//         sent_at: Set(parse_date_to_timestamp(header.date.as_deref()).unwrap_or(now)),
-//         received_at: Set(now),
-//         created_at: Set(now),
-//         updated_at: Set(now),
-//         ..Default::default()
-//     }
-// }
-
-// /// 解析 RFC2822 日期字符串为 Unix 时间戳
-// fn parse_date_to_timestamp(date_str: Option<&str>) -> Option<i64> {
-//     let date_str = date_str?;
-//     // 尝试 chrono 的 RFC2822 解析
-//     chrono::DateTime::parse_from_rfc2822(date_str)
-//         .map(|dt| dt.timestamp())
-//         .ok()
-// }
+    #[test]
+    fn decoded_folder_display_name_should_keep_plain_folder_name() {
+        assert_eq!(decoded_folder_display_name("INBOX"), "INBOX");
+        assert_eq!(
+            decoded_folder_display_name("Sent Messages"),
+            "Sent Messages"
+        );
+    }
+}

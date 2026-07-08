@@ -333,7 +333,8 @@ export const commands = {
 	 * 
 	 *  按分类加载邮件列表
 	 */
-	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit })),
+	listEmailsByCategory: (accountId: number, category: EmailCategory, page: number, limit: number, unreadOnly: boolean) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category", { accountId, category, page, limit, unreadOnly })),
+	listEmailsByCategoryForAllAccounts: (category: EmailCategory, page: number, limit: number, unreadOnly: boolean) => typedError<EmailListResponse, MailError>(__TAURI_INVOKE("list_emails_by_category_for_all_accounts", { category, page, limit, unreadOnly })),
 	/**
 	 *  获取邮件详情
 	 * 
@@ -386,6 +387,11 @@ export const commands = {
 	 *  ```
 	 */
 	getEmail: (id: number) => typedError<EmailDetail, MailError>(__TAURI_INVOKE("get_email", { id })),
+	reloadEmail: (emailId: number) => typedError<ReloadEmailResult, MailError>(__TAURI_INVOKE("reload_email", { emailId })),
+	ensureAttachmentCached: (attachmentId: number) => typedError<AttachmentDto, MailError>(__TAURI_INVOKE("ensure_attachment_cached", { attachmentId })),
+	saveAttachmentAs: (attachmentId: number, targetPath: string) => typedError<null, MailError>(__TAURI_INVOKE("save_attachment_as", { attachmentId, targetPath })),
+	openAttachment: (attachmentId: number) => typedError<null, MailError>(__TAURI_INVOKE("open_attachment", { attachmentId })),
+	resolveInlineAttachments: (emailId: number) => typedError<InlineAttachmentDto[], MailError>(__TAURI_INVOKE("resolve_inline_attachments", { emailId })),
 	/**
 	 *  搜索邮件
 	 * 
@@ -528,29 +534,18 @@ export const commands = {
 	/**
 	 *  删除邮件
 	 * 
-	 *  删除一封或多封邮件。
-	 *  根据邮件当前所在文件夹，此命令的行为可能不同：
-	 * 
-	 *  删除行为说明：
-	 *  1. 如果邮件在普通文件夹（收件箱、已发送等）：
-	 *     - 移动到"垃圾箱"（Trash）文件夹
-	 *     - 实际上是移动操作，不是物理删除
-	 * 
-	 *  2. 如果邮件已经在"垃圾箱"文件夹：
-	 *     - 永久删除邮件
-	 *     - 从数据库中完全移除
-	 * 
-	 *  3. 支持批量删除
+	 *  第一阶段删除语义为移动到服务商配置的 Trash 文件夹。
+	 *  不执行永久删除，不执行 EXPUNGE。
 	 * 
 	 *  功能说明：
 	 *  1. 验证邮件存在
-	 *  2. 检查邮件当前文件夹
-	 *  3. 根据文件夹决定移动到垃圾箱还是永久删除
-	 *  4. 更新文件夹统计信息
+	 *  2. 将邮件移动到服务商配置的 Trash 文件夹
+	 *  3. 远端移动成功后更新本地文件夹
+	 *  4. 第一阶段仅支持单封删除，避免远端批量移动产生部分成功状态
 	 * 
 	 *  参数：
 	 *  - service: EmailService 实例
-	 *  - email_ids: 要删除的邮件 ID 列表，支持批量删除
+	 *  - email_ids: 要删除的邮件 ID 列表，第一阶段仅支持单封邮件
 	 * 
 	 *  返回值：
 	 *  - Ok(usize): 实际删除的邮件数量
@@ -558,12 +553,9 @@ export const commands = {
 	 *    - NotFound: 部分邮件不存在
 	 *    - DatabaseError: 数据库操作错误
 	 * 
-	 *  ⚠️ 警告：永久删除操作不可恢复！
-	 * 
 	 *  使用场景：
 	 *  1. 用户点击删除按钮删除单封邮件
-	 *  2. 用户选择多封邮件批量删除
-	 *  3. 用户清空垃圾箱
+	 *  2. 用户删除当前邮件
 	 * 
 	 *  调用示例：
 	 *  ```typescript
@@ -573,12 +565,8 @@ export const commands = {
 	 *  // 删除单封邮件
 	 *  await invoke('delete_emails', { email_ids: [123] });
 	 * 
-	 *  // 批量删除
-	 *  const confirmed = await confirm(`确定要删除这 ${ids.length} 封邮件吗？`);
-	 *  if (confirmed) {
-	 *    const deleted = await invoke('delete_emails', { email_ids: ids });
-	 *    console.log(`已删除 ${deleted} 封邮件`);
-	 *  }
+	 *  const deleted = await invoke('delete_emails', { email_ids: [123] });
+	 *  console.log(`已删除 ${deleted} 封邮件`);
 	 *  ```
 	 */
 	deleteEmails: (emailIds: number[]) => typedError<number, MailError>(__TAURI_INVOKE("delete_emails", { emailIds })),
@@ -631,6 +619,17 @@ export const commands = {
 	 *  ```
 	 */
 	moveEmailToFolder: (emailId: number, folder: string) => typedError<null, MailError>(__TAURI_INVOKE("move_email_to_folder", { emailId, folder })),
+	/**
+	 *  归档邮件
+	 * 
+	 *  将邮件移动到当前服务商配置的归档文件夹。该操作先写入 IMAP 远端，
+	 *  远端成功后再更新本地邮件文件夹。
+	 */
+	archiveEmail: (emailId: number) => typedError<null, MailError>(__TAURI_INVOKE("archive_email", { emailId })),
+	describeLocalAttachments: (paths: string[]) => typedError<LocalAttachmentDraft[], MailError>(__TAURI_INVOKE("describe_local_attachments", { paths })),
+	saveDraft: (request: SaveDraftRequest) => typedError<SaveDraftResponse, MailError>(__TAURI_INVOKE("save_draft", { request })),
+	deleteDraft: (draftId: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_draft", { draftId })),
+	parseEmailAddresses: (input: string) => typedError<ParseEmailAddressesResponse, MailError>(__TAURI_INVOKE("parse_email_addresses", { input })),
 	/**
 	 *  发送邮件
 	 * 
@@ -708,7 +707,7 @@ export const commands = {
 	 *  console.log('邮件发送成功，Message-ID:', messageId);
 	 *  ```
 	 */
-	sendEmail: (request: SendEmailRequest) => typedError<string, MailError>(__TAURI_INVOKE("send_email", { request })),
+	sendEmail: (request: SendEmailRequest) => typedError<SendEmailResponse, MailError>(__TAURI_INVOKE("send_email", { request })),
 	/**
 	 *  手动同步账号
 	 * 
@@ -797,6 +796,9 @@ export const commands = {
 	 *  ```
 	 */
 	syncAccount: (accountId: number) => typedError<null, MailError>(__TAURI_INVOKE("sync_account", { accountId })),
+	syncAccountWithRange: (accountId: number, range: InitialSyncRange) => typedError<null, MailError>(__TAURI_INVOKE("sync_account_with_range", { accountId, range })),
+	getSyncHistoryState: (accountId: number, category: EmailCategory) => typedError<HistorySyncState, MailError>(__TAURI_INVOKE("get_sync_history_state", { accountId, category })),
+	syncOlderEmails: (accountId: number, category: EmailCategory) => typedError<OlderSyncResult, MailError>(__TAURI_INVOKE("sync_older_emails", { accountId, category })),
 	/**
 	 *  获取文件夹统计信息
 	 * 
@@ -861,6 +863,8 @@ export const commands = {
 	 *  - 支持文件夹颜色配置
 	 */
 	getFolderStats: (accountId: number) => typedError<FolderStat[], MailError>(__TAURI_INVOKE("get_folder_stats", { accountId })),
+	getFolderStatsForAllAccounts: () => typedError<FolderStat[], MailError>(__TAURI_INVOKE("get_folder_stats_for_all_accounts")),
+	syncAllAccounts: () => typedError<SyncAllAccountsResult, MailError>(__TAURI_INVOKE("sync_all_accounts")),
 	/**
 	 *  检测邮箱服务商
 	 * 
@@ -1484,6 +1488,42 @@ export const commands = {
 	 *  ```
 	 */
 	listEmailsByLabel: (labelId: number) => typedError<number[], MailError>(__TAURI_INVOKE("list_emails_by_label", { labelId })),
+	/**
+	 *  打开设置窗口
+	 * 
+	 *  在独立窗口中打开应用设置页，并将窗口居中显示在主窗口之上。
+	 *  若设置窗口已存在，则不会重复创建，而是直接显示并聚焦。
+	 * 
+	 *  功能说明：
+	 *  1. 查找是否已存在 label 为 "settings" 的窗口
+	 *  2. 若已存在，则直接 show 并 set_focus，立即返回（避免重复窗口）
+	 *  3. 若不存在，则构建一个新的无装饰（无边框）窗口，初始不可见
+	 *  4. 获取主窗口（"main"）的外部位置和尺寸，计算设置窗口的居中坐标
+	 *  5. 将设置窗口移动到居中位置后再显示，避免窗口先在默认位置闪现
+	 *  6. 显示并聚焦新创建的设置窗口
+	 * 
+	 *  参数：
+	 *  - app: Tauri 应用句柄，用于查找和创建窗口
+	 * 
+	 *  返回值：
+	 *  - Ok(()): 窗口成功打开（或已存在窗口成功聚焦）
+	 *  - Err(MailError): 窗口的显示、聚焦或创建失败时返回
+	 *    MailError::InvalidParam，错误信息包含底层原因
+	 * 
+	 *  使用场景：
+	 *  1. 用户点击界面中的"设置"按钮，弹出独立的设置窗口
+	 *  2. 设置窗口需要相对主窗口居中，提供视觉一致的多窗口体验
+	 *  3. 用户多次点击设置时，复用已存在的设置窗口而非重复创建
+	 * 
+	 *  调用示例：
+	 *  ```typescript
+	 *  import { invoke } from '@tauri-apps/api/tauri';
+	 * 
+	 *  // 打开设置窗口（已存在时会自动聚焦）
+	 *  await invoke('open_settings_window');
+	 *  ```
+	 */
+	openSettingsWindow: () => typedError<null, MailError>(__TAURI_INVOKE("open_settings_window")),
 };
 
 /** Events */
@@ -1555,6 +1595,49 @@ export type AccountType =
 "Enterprise";
 
 /**
+ *  附件数据传输对象
+ * 
+ *  这是附件信息对外展示的标准格式，用于前后端数据交换。
+ *  由数据库模型 `attachments::Model` 转换而来，
+ *  自动补全缺失的文件名、Content-Type 等字段。
+ * 
+ *  # 字段说明
+ * 
+ *  - `id`: 附件在数据库中的唯一标识
+ *  - `email_id`: 所属邮件的数据库 ID
+ *  - `filename`: 文件名（若原始数据缺失则自动生成兜底名）
+ *  - `content_type`: MIME 类型（缺失时默认 `application/octet-stream`）
+ *  - `size`: 附件字节大小
+ *  - `disposition`: Content-Disposition 值（如 `attachment` / `inline`）
+ *  - `content_id`: 内联资源的 Content-ID（对应正文中的 `cid:` 引用）
+ *  - `is_inline`: 是否为内联资源（disposition 为 inline 或存在 content_id）
+ *  - `is_cached`: 是否已缓存到本地磁盘
+ *  - `cache_path`: 本地缓存文件的绝对路径（未缓存时为 None）
+ */
+export type AttachmentDto = {
+	// 数据库主键 ID
+	id: number,
+	// 所属邮件的数据库 ID
+	email_id: number,
+	// 文件名
+	filename: string,
+	// MIME 类型
+	content_type: string,
+	// 附件字节大小
+	size: number,
+	// Content-Disposition（可选）
+	disposition: string | null,
+	// 内联资源 Content-ID（可选）
+	content_id: string | null,
+	// 是否为内联资源
+	is_inline: boolean,
+	// 是否已缓存到本地
+	is_cached: boolean,
+	// 本地缓存文件路径（可选）
+	cache_path: string | null,
+};
+
+/**
  *  认证方式枚举
  * 
  *  定义邮箱支持的认证方式，不同服务商可能支持不同的认证方式。
@@ -1569,6 +1652,13 @@ export type AuthType =
 "Password" | 
 // OAuth2 认证
 "OAuth2";
+
+export type ComposeAttachmentInput = {
+	path: string,
+	filename: string | null,
+	content_type: string | null,
+	size: number | null,
+};
 
 /**
  *  创建账号请求
@@ -1654,6 +1744,11 @@ export type CreateLabelRequest = {
 	color: string,
 };
 
+export type DuplicateEmailAddress = {
+	raw: string,
+	email: string,
+};
+
 /**
  *  邮件分类（前端侧边栏导航使用）
  * 
@@ -1708,18 +1803,24 @@ export type EmailCategory =
  *  - `email`: 邮件基本信息（EmailDto 的扁平化版本）
  *  - `recipient_emails`: 收件人邮箱列表（逗号分隔）
  *  - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
+ *  - `bcc_emails`: 密送邮箱列表（可选，逗号分隔）
  *  - `body_text`: 纯文本正文
  *  - `body_html`: HTML 格式正文
+ *  - `attachments`: 附件列表
  */
 export type EmailDetail = {
 	// 收件人邮箱列表（逗号分隔）
 	recipient_emails: string,
 	// 抄送邮箱列表（可选）
 	cc_emails: string | null,
+	// 密送邮箱列表（可选）
+	bcc_emails: string | null,
 	// 纯文本正文
 	body_text: string | null,
 	// HTML 正文
 	body_html: string | null,
+	// 附件列表
+	attachments: AttachmentDto[],
 } & 
 // 邮件基本信息
 (EmailDto);
@@ -1743,7 +1844,7 @@ export type EmailDetail = {
  *  - `is_read`: 是否已读
  *  - `is_starred`: 是否星标
  *  - `sent_at`: 发送时间（Unix 时间戳，秒）
- *  - `has_attachments`: 是否有附件（暂时固定为 false）
+ *  - `has_attachments`: 是否有附件（根据附件表真实计算）
  */
 export type EmailDto = {
 	// 数据库主键
@@ -1760,6 +1861,10 @@ export type EmailDto = {
 	sender_name: string | null,
 	// 发送人邮箱
 	sender_email: string,
+	// 账号邮箱
+	account_email: string | null,
+	// 账号显示名
+	account_display_name: string | null,
 	// 邮件内容预览
 	preview: string | null,
 	// 是否已读
@@ -1826,6 +1931,41 @@ export type FolderStat = {
 	unread: number,
 };
 
+export type HistorySyncState = {
+	account_id: number,
+	category: EmailCategory,
+	history_synced_since: number | null,
+	history_before_uid: number | null,
+	history_exhausted: boolean,
+	folders: string[],
+};
+
+// 初始同步范围
+export type InitialSyncRange = "week" | "month" | "three_months" | "year" | "all";
+
+/**
+ *  内联附件数据传输对象
+ * 
+ *  用于将邮件正文中引用的内联图片（`cid:` 引用）解析为
+ *  可直接访问的本地文件 URL，供前端渲染正文时替换 `cid:` 占位符。
+ * 
+ *  # 字段说明
+ * 
+ *  - `content_id`: 内联资源的 Content-ID（不含尖括号）
+ *  - `url`: 本地缓存文件的路径，作为 `cid:` 的替换目标
+ */
+export type InlineAttachmentDto = {
+	// 内联资源 Content-ID
+	content_id: string,
+	// 本地文件路径（用于替换 cid: 引用）
+	url: string,
+};
+
+export type InvalidEmailAddress = {
+	raw: string,
+	reason: string,
+};
+
 /**
  *  标签数据传输对象
  * 
@@ -1849,28 +1989,82 @@ export type LabelDto = {
 	color: string,
 };
 
+export type LocalAttachmentDraft = {
+	path: string,
+	filename: string,
+	content_type: string,
+	size: number,
+};
+
 // 统一错误类型 — 前端通过 tauri-specta Result 模式拿到类型化错误
-export type MailError = { type: "AccountNotFound"; message: number } | { type: "AuthFailed"; message: string } | { type: "ImapConnectionFailed"; message: string } | { type: "SmtpSendFailed"; message: string } | { type: "SyncFailed"; message: string } | { type: "DatabaseError"; message: string } | { type: "KeyringError"; message: string } | { type: "ProviderNotSupported"; message: string } | { type: "InvalidParam"; message: string } | { type: "EmailNotFound"; message: number } | { type: "FolderNotFound"; message: string } | { type: "OAuthError"; message: string } | { type: "InvalidProvider"; message: string } | { type: "OAuth2Error"; message: string } | { type: "NotImplemented"; message: string } | { type: "LabelNotFound"; message: number } | { type: "ImapFolderMetadataFailed"; message: string } | { type: "ImapSearchFailed"; message: string } | { type: "BatchFetchHeadersFailed"; message: string } | { type: "ImapError"; message: string } | { type: "EmailMissingUid"; message: string };
+export type MailError = { type: "AccountNotFound"; message: number } | { type: "AuthFailed"; message: string } | { type: "ImapConnectionFailed"; message: string } | { type: "SmtpSendFailed"; message: string } | { type: "SyncFailed"; message: string } | { type: "DatabaseError"; message: string } | { type: "KeyringError"; message: string } | { type: "ProviderNotSupported"; message: string } | { type: "InvalidParam"; message: string } | { type: "EmailNotFound"; message: number } | { type: "AttachmentNotFound"; message: number } | { type: "AttachmentUnavailable"; message: string } | { type: "AttachmentDownloadFailed"; message: string } | { type: "AttachmentDecodeFailed"; message: string } | { type: "FileSystemError"; message: string } | { type: "FolderNotFound"; message: string } | { type: "OAuthError"; message: string } | { type: "InvalidProvider"; message: string } | { type: "OAuth2Error"; message: string } | { type: "NotImplemented"; message: string } | { type: "LabelNotFound"; message: number } | { type: "ImapFolderMetadataFailed"; message: string } | { type: "ImapSearchFailed"; message: string } | { type: "BatchFetchHeadersFailed"; message: string } | { type: "ImapError"; message: string } | { type: "EmailMissingUid"; message: string };
 
 // OAuth2 授权 URL 结果
 export type OAuth2AuthUrl = {
+	// 完整的授权 URL，前端打开此 URL 进入服务商登录/授权页
 	url: string,
+	// CSRF state，前端必须保存并在轮询时回传用于匹配会话
 	state: string,
+	// 本地回调监听端口（由系统分配的临时端口）
 	port: number,
 };
 
 // OAuth2 授权完成信息（返回给前端的最小信息）
 export type OAuth2CompletedInfo = {
+	// 授权成功的邮箱地址（token 等敏感信息不返回前端）
 	email: string,
 };
 
-// OAuth2 轮询状态
-export type OAuth2PollResult = "Pending" | ({ Completed: OAuth2CompletedInfo }) & { Error?: never } | ({ Error: string }) & { Completed?: never };
+/**
+ *  OAuth2 轮询状态
+ * 
+ *  前端通过 [`OAuth2Manager::poll_oauth2`] 周期性轮询某个 `state` 的结果。
+ */
+export type OAuth2PollResult = 
+// 授权仍在进行中（回调尚未到达或 token 交换未完成）
+"Pending" | 
+// 授权已完成，携带返回给前端的最小信息（邮箱）
+({ Completed: OAuth2CompletedInfo }) & { Error?: never } | 
+// 授权失败，携带错误描述字符串
+({ Error: string }) & { Completed?: never };
 
+export type OlderSyncResult = {
+	new_emails: number,
+	updated_emails: number,
+	window_start: number,
+	window_end: number,
+	history_exhausted: boolean,
+	folders: string[],
+};
+
+export type ParseEmailAddressesResponse = {
+	addresses: ParsedEmailAddress[],
+	invalid: InvalidEmailAddress[],
+	duplicates: DuplicateEmailAddress[],
+};
+
+export type ParsedEmailAddress = {
+	name: string | null,
+	email: string,
+	raw: string,
+};
+
+/**
+ *  服务商探测结果。
+ * 
+ *  由 [`detect_provider`] 返回，描述一个邮箱地址是否匹配到服务商，以及匹配到的服务商元信息。
+ */
 export type ProviderDetectionResult = {
+	// 是否成功探测到匹配的服务商。
 	detected: boolean,
+	// 探测到的服务商 ID（如 `"gmail"`、`"qq"`）；未匹配时为 `None`。
 	provider_id: string | null,
+	// 探测到的服务商展示名称（如 `"Gmail"`）；未匹配时为 `None`。
 	provider_name: string | null,
+	/**
+	 *  该服务商支持的认证方式描述字符串（如 `"password"` / `"oauth2"` / `"both"`）。
+	 *  未匹配时为空字符串。
+	 */
 	auth_types: string,
 };
 
@@ -1909,9 +2103,39 @@ export type ProviderInfo = {
 	sort_order: number,
 };
 
+export type ReloadEmailResult = { status: "reloaded"; email: EmailDetail } | { status: "removed"; email_id: number };
+
+export type SaveDraftRequest = {
+	draft_id: number | null,
+	account_id: number,
+	to: string[],
+	cc: string[],
+	bcc: string[],
+	subject: string,
+	body_html: string,
+	body_text: string,
+	attachments?: ComposeAttachmentInput[],
+};
+
+export type SaveDraftResponse = {
+	draft_id: number,
+	message_id: string,
+	folder: string,
+	saved_at: number,
+	remote_saved: boolean,
+	cleanup_error: string | null,
+};
+
+/**
+ *  全文搜索的返回结果
+ * 
+ *  包含邮件基本信息及 FTS 相关性排名（rank），rank 越高表示匹配度越高。
+ */
 export type SearchResult = {
 	id: number,
 	account_id: number,
+	account_email: string | null,
+	account_display_name: string | null,
 	folder: string,
 	subject: string | null,
 	sender_email: string,
@@ -1965,6 +2189,27 @@ export type SendEmailRequest = {
 	body_html: string,
 	// 纯文本正文
 	body_text: string,
+	attachments?: ComposeAttachmentInput[],
+	draft_id?: number | null,
+};
+
+export type SendEmailResponse = {
+	message_id: string,
+	local_email_id: number,
+	remote_archived: boolean,
+	remote_archive_error: string | null,
+};
+
+export type SyncAccountFailure = {
+	account_id: number,
+	email: string | null,
+	message: string,
+};
+
+export type SyncAllAccountsResult = {
+	total: number,
+	succeeded: number[],
+	failed: SyncAccountFailure[],
 };
 
 /**
@@ -1977,6 +2222,7 @@ export type SendEmailRequest = {
  *  - `account_id`: 正在同步的账号 ID
  *  - `stage`: 当前同步阶段
  *  - `folder`: 当前正在同步的文件夹（可选）
+ *  - `folder_display_name`: 当前文件夹的可读展示名（可选）
  *  - `current`: 当前进度值（已处理的邮件数）
  *  - `total`: 总数量（当前文件夹的总邮件数）
  *  - `message`: 进度描述消息
@@ -1988,6 +2234,7 @@ export type SendEmailRequest = {
  *      account_id: 1,
  *      stage: SyncStage::SyncingEmails,
  *      folder: Some("INBOX".to_string()),
+ *      folder_display_name: Some("INBOX".to_string()),
  *      current: 25,
  *      total: 100,
  *      message: "正在同步 INBOX...".to_string(),
@@ -2002,6 +2249,8 @@ export type SyncProgress = {
 	stage: SyncStage,
 	// 当前正在同步的文件夹名称（可选）
 	folder: string | null,
+	// 当前文件夹的可读展示名（可选）
+	folder_display_name: string | null,
 	// 当前进度值（已处理的数量）
 	current: number,
 	// 总数量（当前任务的总数）
