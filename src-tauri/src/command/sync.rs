@@ -52,8 +52,10 @@
 /// - SyncService: 同步服务层，处理同步的业务逻辑
 /// - FolderStat: 文件夹统计信息
 ///
-use crate::domain::sync::FolderStat;
+use crate::domain::sync::{FolderStat, InitialSyncRange};
 use crate::error::MailError;
+use crate::service::email_service::EmailCategory;
+use crate::service::sync_service::{HistorySyncState, OlderSyncResult, SyncAllAccountsResult};
 
 ///
 /// 手动同步账号
@@ -182,6 +184,39 @@ pub async fn sync_account(
     result
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_account_with_range(
+    service: tauri::State<'_, crate::service::SyncService>,
+    app_handle: tauri::AppHandle,
+    account_id: i32,
+    range: InitialSyncRange,
+) -> Result<(), MailError> {
+    service
+        .sync_account_with_range(app_handle, account_id, range)
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_sync_history_state(
+    service: tauri::State<'_, crate::service::SyncService>,
+    account_id: i32,
+    category: EmailCategory,
+) -> Result<HistorySyncState, MailError> {
+    service.get_history_state(account_id, category).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_older_emails(
+    service: tauri::State<'_, crate::service::SyncService>,
+    account_id: i32,
+    category: EmailCategory,
+) -> Result<OlderSyncResult, MailError> {
+    service.sync_older_emails(account_id, category).await
+}
+
 ///
 /// 获取文件夹统计信息
 ///
@@ -261,4 +296,23 @@ pub async fn get_folder_stats(
     // 3. 计算未读数量
     // 4. 返回统计信息列表
     service.get_folder_stats(account_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_folder_stats_for_all_accounts(
+    service: tauri::State<'_, crate::service::SyncService>,
+) -> Result<Vec<FolderStat>, MailError> {
+    tracing::debug!("命令: 获取所有账号文件夹统计");
+    service.get_folder_stats_for_all_accounts().await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_all_accounts(
+    service: tauri::State<'_, crate::service::SyncService>,
+    app_handle: tauri::AppHandle,
+) -> Result<SyncAllAccountsResult, MailError> {
+    tracing::info!("命令: 同步所有账号");
+    service.sync_all_accounts_with_progress(app_handle).await
 }

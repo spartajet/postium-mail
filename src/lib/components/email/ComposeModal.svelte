@@ -46,10 +46,19 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入 Tauri 后端命令接口，用于调用发送邮件等后端方法
     import { commands } from "$lib/bindings";
+    import type { LocalAttachmentDraft } from "$lib/bindings";
+    import { open as openDialog } from "@tauri-apps/plugin-dialog";
     // 导入关闭/清除图标
-    import { X } from "lucide-svelte";
+    import { ChevronDown, Paperclip, Trash2, X } from "lucide-svelte";
     // 导入富文本编辑器子组件
     import RichTextEditor from "./RichTextEditor.svelte";
+    import RecipientField from "./RecipientField.svelte";
+    import {
+        createRecipientChipId,
+        hasInvalidRecipients,
+        validEmails,
+        type RecipientChip,
+    } from "./recipient";
 
     // ==================== 状态初始化 ====================
 
@@ -64,18 +73,270 @@
 
     // 模态框是否打开（visible 状态）
     let open = $state(false);
-    // 收件人邮箱地址（多个用逗号分隔）
-    let to = $state("");
-    // 抄送邮箱地址（多个用逗号分隔，可选）
-    let cc = $state("");
+    let toRecipients = $state<RecipientChip[]>([]);
+    let ccRecipients = $state<RecipientChip[]>([]);
+    let bccRecipients = $state<RecipientChip[]>([]);
+    let showCcField = $state(false);
+    let showBccField = $state(false);
     // 邮件主题
     let subject = $state("");
     // 发送中状态标志（防止重复提交）
     let sending = $state(false);
     // 错误信息（发送失败时显示）
     let error = $state("");
+    let attachments = $state<LocalAttachmentDraft[]>([]);
+    let draftId = $state<number | null>(null);
+    let draftSaveStatus = $state<"idle" | "saving" | "saved" | "failed">(
+        "idle",
+    );
+    let draftTimer: ReturnType<typeof setTimeout> | null = null;
+    let draftSavePromise: Promise<void> | null = null;
+    let draftResaveRequested = false;
+    let draftDirty = false;
+    let draftRevision = 0;
+    let composeSessionId = 0;
+    // 所有账号视图下的当前发件账号
+    let selectedAccountId = $state<number | null>(null);
+    let accountDropdownOpen = $state(false);
     // 富文本编辑器组件实例引用
     let richEditor = $state<RichTextEditor>();
+    let shouldShowAccountSelect = $derived(accountStore.isAllAccounts);
+    let selectedSendAccount = $derived(
+        accountStore.accounts.find((account) => account.id === selectedAccountId),
+    );
+
+    function hasAccount(accountId: number | null | undefined): accountId is number {
+        return (
+            typeof accountId === "number" &&
+            accountStore.accounts.some((account) => account.id === accountId)
+        );
+    }
+
+    function defaultSendAccountId(preferredAccountId?: number) {
+        if (hasAccount(preferredAccountId)) {
+            return preferredAccountId;
+        }
+        if (hasAccount(accountStore.lastConcreteAccountId)) {
+            return accountStore.lastConcreteAccountId;
+        }
+        if (hasAccount(accountStore.activeAccountId)) {
+            return accountStore.activeAccountId;
+        }
+        return accountStore.accounts[0]?.id ?? null;
+    }
+
+    function openWithAccount(preferredAccountId?: number) {
+        composeSessionId += 1;
+        selectedAccountId = defaultSendAccountId(preferredAccountId);
+        accountDropdownOpen = false;
+        open = true;
+    }
+
+    function selectSendAccount(accountId: number) {
+        if (selectedAccountId !== accountId) {
+            draftId = null;
+            draftSaveStatus = "idle";
+            draftResaveRequested = false;
+            draftDirty = hasDraftContent();
+            draftRevision += 1;
+            clearDraftTimer();
+        }
+        selectedAccountId = accountId;
+        accountDropdownOpen = false;
+        scheduleDraftSave();
+    }
+
+    function validRecipientChip(email: string): RecipientChip {
+        return {
+            id: createRecipientChipId(),
+            email,
+            raw: email,
+            valid: true,
+        };
+    }
+
+    function hasRecipientErrors() {
+        return (
+            hasInvalidRecipients(toRecipients) ||
+            hasInvalidRecipients(ccRecipients) ||
+            hasInvalidRecipients(bccRecipients)
+        );
+    }
+
+    function recipientRequestParts() {
+        return {
+            to: validEmails(toRecipients),
+            cc: validEmails(ccRecipients),
+            bcc: validEmails(bccRecipients),
+        };
+    }
+
+    function formatBytes(size: number) {
+        if (size < 1024) return `${size} B`;
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+        return `${(size / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function currentSendAccountId() {
+        return accountStore.isAllAccounts
+            ? selectedAccountId
+            : accountStore.activeAccountId;
+    }
+
+    function hasDraftContent() {
+        const recipients = recipientRequestParts();
+        return Boolean(
+            recipients.to.length > 0 ||
+                recipients.cc.length > 0 ||
+                recipients.bcc.length > 0 ||
+                subject.trim() ||
+                (richEditor?.getText() || "").trim() ||
+                attachments.length > 0,
+        );
+    }
+
+    function scheduleDraftSave() {
+        if (!open || sending || !hasDraftContent()) return;
+        draftDirty = true;
+        draftRevision += 1;
+        clearDraftTimer();
+        draftTimer = setTimeout(() => void saveDraftNow(), 800);
+    }
+
+    function clearDraftTimer() {
+        if (draftTimer) clearTimeout(draftTimer);
+        draftTimer = null;
+    }
+
+    async function saveDraftNow(force = false, allowWhileSending = false) {
+        if (draftSavePromise) {
+            draftResaveRequested = true;
+            return draftSavePromise;
+        }
+
+        if (!force && !draftDirty) return;
+
+        const sessionId = composeSessionId;
+        const revision = draftRevision;
+        draftSavePromise = persistDraftNow(
+            sessionId,
+            revision,
+            allowWhileSending,
+        ).finally(() => {
+            draftSavePromise = null;
+        });
+        await draftSavePromise;
+
+        if (draftResaveRequested && open && !sending && hasDraftContent()) {
+            draftResaveRequested = false;
+            await saveDraftNow(true);
+        }
+    }
+
+    async function persistDraftNow(
+        sessionId: number,
+        revision: number,
+        allowWhileSending = false,
+    ) {
+        const sendAccountId = currentSendAccountId();
+        if (
+            !open ||
+            sessionId !== composeSessionId ||
+            (!allowWhileSending && sending) ||
+            !sendAccountId ||
+            !hasDraftContent()
+        ) {
+            return;
+        }
+
+        draftSaveStatus = "saving";
+        const bodyText = richEditor?.getText() || "";
+        const saveDraftId = draftId;
+        const saveSubject = subject;
+        const saveAttachments = attachments;
+        const recipients = recipientRequestParts();
+        let result: Awaited<ReturnType<typeof commands.saveDraft>>;
+        try {
+            result = await commands.saveDraft({
+                draft_id: saveDraftId,
+                account_id: sendAccountId,
+                to: recipients.to,
+                cc: recipients.cc,
+                bcc: recipients.bcc,
+                subject: saveSubject,
+                body_html:
+                    richEditor?.getHtml() ||
+                    `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
+                body_text: bodyText,
+                attachments: saveAttachments,
+            });
+        } catch (e: unknown) {
+            if (open && sessionId === composeSessionId) {
+                draftSaveStatus = "failed";
+                error = e instanceof Error ? e.message : String(e);
+            }
+            return;
+        }
+
+        if (
+            !open ||
+            sessionId !== composeSessionId ||
+            currentSendAccountId() !== sendAccountId
+        ) {
+            return;
+        }
+
+        if (result.status === "error") {
+            draftSaveStatus = "failed";
+            error = result.error.message as string;
+            return;
+        }
+
+        draftId = result.data.draft_id;
+        if (revision === draftRevision) {
+            draftDirty = false;
+            draftResaveRequested = false;
+        } else {
+            draftResaveRequested = true;
+        }
+        draftSaveStatus = "saved";
+    }
+
+    async function chooseAttachments() {
+        const selected = await openDialog({
+            multiple: true,
+            directory: false,
+        });
+        const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+        if (paths.length === 0) return;
+
+        const result = await commands.describeLocalAttachments(paths);
+        if (result.status === "error") {
+            error = result.error.message as string;
+            return;
+        }
+
+        const existingPaths = new Set(attachments.map((attachment) => attachment.path));
+        const nextAttachments = result.data.filter((attachment) => {
+            if (existingPaths.has(attachment.path)) return false;
+            existingPaths.add(attachment.path);
+            return true;
+        });
+        attachments = [...attachments, ...nextAttachments];
+        scheduleDraftSave();
+    }
+
+    function removeAttachment(path: string) {
+        attachments = attachments.filter((attachment) => attachment.path !== path);
+        scheduleDraftSave();
+    }
+
+    function draftStatusText() {
+        if (draftSaveStatus === "saving") return t.email.draftSaving;
+        if (draftSaveStatus === "saved") return t.email.draftSaved;
+        if (draftSaveStatus === "failed") return t.email.draftSaveFailed;
+        return "";
+    }
 
     // ==================== 邮件发送逻辑 ====================
 
@@ -85,52 +346,74 @@
      * 验证并发送当前编辑的邮件。流程如下：
      * 1. 检查是否有活跃账户
      * 2. 设置发送中状态（禁用按钮）
-     * 3. 解析收件人列表（逗号分隔 → 数组）
+     * 3. 从收件人 chip 派生有效地址列表
      * 4. 调用后端 sendEmail 命令发送邮件
      * 5. 成功：关闭模态框并清空表单
      * 6. 失败：显示错误信息
      *
      * 注意：
-     * - to 字段按逗号分隔并去除空白，生成收件人数组
-     * - cc 字段如果非空，同样按逗号分隔生成抄送数组
-     * - bcc（密送）当前为空数组，预留扩展
+     * - To/Cc/Bcc 字段只发送有效 chip 中的邮箱地址
+     * - 存在无效 chip 时阻止发送并提示用户修正
      * - 正文优先使用 HTML 格式，如果编辑器无法提供 HTML 则用 pre 标签包裹纯文本
      */
     async function handleSend() {
-        // 没有活跃账户，无法发送
-        if (!accountStore.activeAccountId) return;
+        if (sending) return;
+        const sendAccountId = currentSendAccountId();
+        // 没有可用发送账户，无法发送
+        if (!sendAccountId) return;
+        const recipients = recipientRequestParts();
+        const trimmedSubject = subject.trim();
+        const bodyText = richEditor?.getText() || "";
+        const trimmedBodyText = bodyText.trim();
+        if (hasRecipientErrors()) {
+            error = t.email.invalidRecipients;
+            return;
+        }
+        if (
+            recipients.to.length === 0 &&
+            recipients.cc.length === 0 &&
+            recipients.bcc.length === 0
+        ) {
+            error = t.email.sendRequiresRecipient;
+            return;
+        }
+        if (!trimmedSubject) {
+            error = t.email.sendRequiresSubject;
+            return;
+        }
+        if (!trimmedBodyText) {
+            error = t.email.sendRequiresBody;
+            return;
+        }
         // 进入发送中状态
         sending = true;
+        clearDraftTimer();
+        if (draftSavePromise) await draftSavePromise;
+        if (draftId !== null && draftDirty) await saveDraftNow(true, true);
         // 清空之前的错误信息
         error = "";
         try {
             // 调用后端发送邮件命令
             const result = await commands.sendEmail({
-                // 当前活跃账户 ID
-                account_id: accountStore.activeAccountId,
-                // 收件人列表：将逗号分隔的字符串转为数组
-                to: to
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                // 抄送列表：如果 cc 非空则解析，否则为空数组
-                cc: cc
-                    ? cc
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                    : [],
-                // 密送列表：当前预留为空
-                bcc: [],
+                // 实际发送账户 ID：所有账号视图下来自发件账号选择器，否则来自当前活跃账号
+                account_id: sendAccountId,
+                // 收件人列表：来自有效收件人 chip
+                to: recipients.to,
+                // 抄送列表：来自有效抄送 chip
+                cc: recipients.cc,
+                // 密送列表：来自有效密送 chip
+                bcc: recipients.bcc,
                 // 邮件主题
-                subject,
+                subject: trimmedSubject,
                 // HTML 格式正文：优先使用编辑器的 HTML 输出
                 // 如果编辑器无法提供 HTML，则用 <pre> 标签包裹纯文本
                 body_html:
                     richEditor?.getHtml() ||
-                    `<pre style="white-space:pre-wrap">${richEditor?.getText() || ""}</pre>`,
+                    `<pre style="white-space:pre-wrap">${bodyText}</pre>`,
                 // 纯文本正文：作为备用格式
-                body_text: richEditor?.getText() || "",
+                body_text: bodyText,
+                attachments,
+                draft_id: draftId,
             });
             // 检查发送结果
             if (result.status === "error") {
@@ -156,12 +439,30 @@
      */
     function close() {
         open = false;
-        to = "";
-        cc = "";
-        subject = "";
-        error = "";
+        resetComposeState();
+        selectedAccountId = null;
+        accountDropdownOpen = false;
         // 清空富文本编辑器内容
         richEditor?.clear();
+    }
+
+    function resetComposeState() {
+        toRecipients = [];
+        ccRecipients = [];
+        bccRecipients = [];
+        showCcField = false;
+        showBccField = false;
+        subject = "";
+        error = "";
+        attachments = [];
+        draftId = null;
+        draftSaveStatus = "idle";
+        draftResaveRequested = false;
+        draftDirty = false;
+        draftRevision += 1;
+        composeSessionId += 1;
+        clearDraftTimer();
+        accountDropdownOpen = false;
     }
 
     // ==================== 公开方法（供外部调用） ====================
@@ -176,8 +477,10 @@
      *
      * 通过 bind:this 暴露给父组件使用
      */
-    export function show() {
-        open = true;
+    export function show(options: { accountId?: number } = {}) {
+        resetComposeState();
+        richEditor?.clear();
+        openWithAccount(options.accountId);
     }
 
     /**
@@ -198,10 +501,12 @@
         replyTo: string,
         replySubject: string,
         replyBody: string,
+        accountId?: number,
     ) {
-        open = true;
+        resetComposeState();
+        openWithAccount(accountId);
         // 设置收件人为原始发件人
-        to = replyTo;
+        toRecipients = [validRecipientChip(replyTo)];
         // 设置主题为 "Re: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
         subject = `Re: ${replySubject.replace(/^(Re|Fwd):\s*/i, "")}`;
         // 在编辑器中预填充原始正文作为引用
@@ -221,8 +526,13 @@
      * @param fwdSubject - 原始邮件主题
      * @param fwdBody - 原始邮件正文（作为引用内容）
      */
-    export function showForward(fwdSubject: string, fwdBody: string) {
-        open = true;
+    export function showForward(
+        fwdSubject: string,
+        fwdBody: string,
+        accountId?: number,
+    ) {
+        resetComposeState();
+        openWithAccount(accountId);
         // 设置主题为 "Fwd: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
         subject = `Fwd: ${fwdSubject.replace(/^(Re|Fwd):\s*/i, "")}`;
         // 在编辑器中预填充原始正文作为引用
@@ -302,36 +612,129 @@
               每个字段占一行，左侧标签 + 右侧输入框
             -->
             <div class="border-b border-border">
-                <!-- 收件人输入行 -->
-                <div class="flex items-center border-b border-border px-4">
-                    <!-- 字段标签：固定宽度 3.5rem -->
-                    <span class="w-14 shrink-0 text-sm text-muted-foreground"
-                        >{t.email.to}</span
-                    >
-                    <!-- 收件人输入框 -->
-                    <input
-                        data-testid="compose-to-input"
-                        type="text"
-                        bind:value={to}
-                        class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                {#if shouldShowAccountSelect}
+                    <div class="flex items-center border-b border-border px-4">
+                        <span class="w-14 shrink-0 text-sm text-muted-foreground"
+                            >发件</span
+                        >
+                        <div class="relative min-w-0 flex-1 py-1">
+                            <button
+                                type="button"
+                                data-testid="compose-account-select"
+                                data-value={selectedAccountId}
+                                aria-haspopup="listbox"
+                                aria-expanded={accountDropdownOpen}
+                                class="flex h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent bg-transparent px-0 text-left text-sm text-foreground outline-none transition-colors hover:bg-glass-hover hover:px-2 focus:border-border focus:bg-glass-hover focus:px-2"
+                                onclick={() =>
+                                    (accountDropdownOpen = !accountDropdownOpen)}
+                            >
+                                <span class="truncate">
+                                    {selectedSendAccount?.display_name ||
+                                        selectedSendAccount?.email ||
+                                        "选择发件账号"}
+                                </span>
+                                <ChevronDown
+                                    size={14}
+                                    class="shrink-0 text-muted-foreground"
+                                />
+                            </button>
+
+                            {#if accountDropdownOpen}
+                                <div
+                                    data-testid="compose-account-options"
+                                    role="listbox"
+                                    class="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-xl"
+                                >
+                                    {#each accountStore.accounts as account}
+                                        <button
+                                            type="button"
+                                            role="option"
+                                            aria-selected={account.id ===
+                                                selectedAccountId}
+                                            data-testid={`compose-account-option-${account.id}`}
+                                            class="flex w-full flex-col px-3 py-2 text-left text-sm transition-colors hover:bg-glass-hover {account.id ===
+                                            selectedAccountId
+                                                ? 'bg-primary/10 text-primary'
+                                                : 'text-foreground'}"
+                                            onclick={() =>
+                                                selectSendAccount(account.id)}
+                                        >
+                                            <span class="truncate font-medium">
+                                                {account.display_name ||
+                                                    account.email}
+                                            </span>
+                                            {#if account.display_name}
+                                                <span
+                                                    class="truncate text-xs text-muted-foreground"
+                                                >
+                                                    {account.email}
+                                                </span>
+                                            {/if}
+                                        </button>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                {/if}
+                <div class="relative">
+                    <RecipientField
+                        label={t.email.to}
+                        chips={toRecipients}
                         placeholder="email@example.com"
+                        testIdPrefix="to"
+                        onChange={(chips) => {
+                            toRecipients = chips;
+                            scheduleDraftSave();
+                        }}
                     />
+                    <div class="absolute right-4 top-2 flex gap-2">
+                        {#if !showCcField && ccRecipients.length === 0}
+                            <button
+                                type="button"
+                                data-testid="compose-show-cc-button"
+                                class="text-xs text-muted-foreground hover:text-foreground"
+                                onclick={() => (showCcField = true)}
+                            >
+                                {t.email.showCc}
+                            </button>
+                        {/if}
+                        {#if !showBccField && bccRecipients.length === 0}
+                            <button
+                                type="button"
+                                data-testid="compose-show-bcc-button"
+                                class="text-xs text-muted-foreground hover:text-foreground"
+                                onclick={() => (showBccField = true)}
+                            >
+                                {t.email.showBcc}
+                            </button>
+                        {/if}
+                    </div>
                 </div>
 
-                <!-- 抄送输入行 -->
-                <div class="flex items-center border-b border-border px-4">
-                    <!-- 字段标签 -->
-                    <span class="w-14 shrink-0 text-sm text-muted-foreground"
-                        >{t.email.cc}</span
-                    >
-                    <!-- 抄送输入框 -->
-                    <input
-                        data-testid="compose-cc-input"
-                        type="text"
-                        bind:value={cc}
-                        class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                {#if showCcField || ccRecipients.length > 0}
+                    <RecipientField
+                        label={t.email.cc}
+                        chips={ccRecipients}
+                        testIdPrefix="cc"
+                        onChange={(chips) => {
+                            ccRecipients = chips;
+                            scheduleDraftSave();
+                        }}
                     />
-                </div>
+                {/if}
+
+                {#if showBccField || bccRecipients.length > 0}
+                    <RecipientField
+                        label={t.email.bcc}
+                        chips={bccRecipients}
+                        testIdPrefix="bcc"
+                        onChange={(chips) => {
+                            bccRecipients = chips;
+                            scheduleDraftSave();
+                        }}
+                    />
+                {/if}
 
                 <!-- 主题输入行 -->
                 <div class="flex items-center px-4">
@@ -345,6 +748,7 @@
                         type="text"
                         bind:value={subject}
                         class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                        oninput={scheduleDraftSave}
                     />
                 </div>
             </div>
@@ -366,8 +770,42 @@
                   bind:this 将组件实例绑定到 richEditor 变量
                   以便在脚本中调用编辑器的方法（getHtml、setText、clear 等）
                 -->
-                <RichTextEditor bind:this={richEditor} />
+                <RichTextEditor
+                    bind:this={richEditor}
+                    onContentChange={scheduleDraftSave}
+                />
             </div>
+
+            {#if attachments.length > 0}
+                <div class="border-t border-border px-4 py-2">
+                    {#each attachments as attachment (attachment.path)}
+                        <div
+                            class="flex h-8 items-center gap-2 text-sm"
+                            data-testid="compose-attachment-row"
+                        >
+                            <Paperclip
+                                size={14}
+                                class="shrink-0 text-muted-foreground"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-foreground">
+                                {attachment.filename}
+                            </span>
+                            <span class="shrink-0 text-xs text-muted-foreground">
+                                {formatBytes(attachment.size)}
+                            </span>
+                            <button
+                                type="button"
+                                class="rounded p-1 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                                onclick={() => removeAttachment(attachment.path)}
+                                aria-label={t.email.removeAttachment}
+                                title={t.email.removeAttachment}
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
 
             <!-- ==================== 错误提示 ==================== -->
 
@@ -378,6 +816,12 @@
             -->
             {#if error}
                 <div class="px-4 py-2 text-sm text-destructive">{error}</div>
+            {/if}
+
+            {#if draftSaveStatus !== "idle"}
+                <div class="px-4 py-1 text-xs text-muted-foreground">
+                    {draftStatusText()}
+                </div>
             {/if}
 
             <!-- ==================== 底部操作栏 ==================== -->
@@ -395,14 +839,28 @@
                   - disabled 条件：发送中、收件人为空、主题为空
                   - 显示发送中/发送文本（根据状态切换）
                 -->
-                <button
-                    data-testid="compose-send-button"
-                    class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
-                    onclick={handleSend}
-                    disabled={sending || !to || !subject}
-                >
-                    {sending ? t.email.loading : t.email.send}
-                </button>
+                <div class="flex items-center gap-2">
+                    <button
+                        data-testid="compose-send-button"
+                        class="compose-btn rounded-lg px-5 py-2 text-sm font-medium text-white transition-all disabled:opacity-50"
+                        onclick={handleSend}
+                        disabled={sending ||
+                            (accountStore.isAllAccounts && !selectedAccountId)}
+                    >
+                        {sending ? t.email.loading : t.email.send}
+                    </button>
+
+                    <button
+                        type="button"
+                        data-testid="compose-attach-button"
+                        class="rounded-md p-2 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                        onclick={chooseAttachments}
+                        aria-label={t.email.attach}
+                        title={t.email.attach}
+                    >
+                        <Paperclip size={16} />
+                    </button>
+                </div>
 
                 <!-- 取消按钮：关闭模态框 -->
                 <button
@@ -415,22 +873,3 @@
         </div>
     </div>
 {/if}
-
-<!-- ==================== 组件样式 ==================== -->
-
-<!--
-  组件局部样式说明：
-  - .compose-btn：发送按钮的渐变背景样式
-    使用 CSS linear-gradient 实现从主题色到辅助色的 135° 渐变效果
-    通过 CSS 变量（--color-primary / --color-secondary）实现主题适配
--->
-<style>
-    /* 发送按钮渐变背景 */
-    .compose-btn {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-    }
-</style>

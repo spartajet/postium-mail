@@ -1,11 +1,16 @@
 use crate::domain::providers::*;
 
-/// 网易邮箱 — 统一支持 163.com、126.com、yeah.net
+/// 网易邮箱服务商
+///
+/// 网易提供的邮箱服务，使用密码认证，
+/// 统一支持 163.com、126.com、yeah.net 域名，
+/// 不同域名对应不同的服务器地址。
 pub struct NetEaseProvider {
     info: ProviderInfo,
 }
 
 impl NetEaseProvider {
+    /// 创建网易邮箱服务商实例
     pub fn new() -> Self {
         Self {
             info: ProviderInfo {
@@ -22,17 +27,21 @@ impl NetEaseProvider {
     }
 }
 
+/// 默认实现，等同于 [`NetEaseProvider::new`]
 impl Default for NetEaseProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// 网易邮箱的 [`MailProvider`] 实现
 impl MailProvider for NetEaseProvider {
     fn provider_info(&self) -> &ProviderInfo {
         &self.info
     }
 
+    /// IMAP 配置：根据邮箱域名动态选择服务器（端口 993，隐式 SSL/TLS），
+    /// 126.com 使用 imap.126.com，yeah.net 使用 imap.yeah.net
     fn imap_config(&self, email: &str) -> ImapServerConfig {
         let domain = email.split('@').next_back().unwrap_or("163.com");
         let host = match domain {
@@ -47,6 +56,8 @@ impl MailProvider for NetEaseProvider {
         }
     }
 
+    /// SMTP 配置：根据邮箱域名动态选择服务器（端口 465，隐式 SSL/TLS），
+    /// 126.com 使用 smtp.126.com，yeah.net 使用 smtp.yeah.net
     fn smtp_config(&self, email: &str) -> SmtpServerConfig {
         let domain = email.split('@').next_back().unwrap_or("163.com");
         let host = match domain {
@@ -61,10 +72,12 @@ impl MailProvider for NetEaseProvider {
         }
     }
 
+    /// 支持的域名：163.com、126.com、yeah.net
     fn supported_domains(&self) -> Vec<&'static str> {
         vec!["163.com", "126.com", "yeah.net"]
     }
 
+    /// 网易邮箱文件夹映射，包含中文环境下 IMAP UTF-7 编码的文件夹名
     fn folder_mapping(&self) -> StandardFolder {
         StandardFolder {
             inbox: vec!["INBOX".into()],

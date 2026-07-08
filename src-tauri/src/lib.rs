@@ -46,14 +46,12 @@ fn resolve_data_dir() -> PathBuf {
     let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
 
     if e2e_enabled {
-        let data_dir = std::env::var("POSTIUM_DATA_DIR")
-            .expect("POSTIUM_E2E=1 时必须设置 POSTIUM_DATA_DIR");
+        let data_dir =
+            std::env::var("POSTIUM_DATA_DIR").expect("POSTIUM_E2E=1 时必须设置 POSTIUM_DATA_DIR");
         return PathBuf::from(data_dir);
     }
 
-    dirs::home_dir()
-        .expect("无法获取数据目录")
-        .join(".postium")
+    dirs::home_dir().expect("无法获取数据目录").join(".postium")
 }
 
 ///
@@ -88,15 +86,31 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::account::delete_account,
             command::email::list_emails,
             command::email::list_emails_by_category,
+            command::email::list_emails_by_category_for_all_accounts,
             command::email::get_email,
+            command::email::reload_email,
+            command::email::ensure_attachment_cached,
+            command::email::save_attachment_as,
+            command::email::open_attachment,
+            command::email::resolve_inline_attachments,
             command::email::search_emails,
             command::email::mark_as_read,
             command::email::toggle_star,
             command::email::delete_emails,
             command::email::move_email_to_folder,
+            command::email::archive_email,
+            command::email::describe_local_attachments,
+            command::email::save_draft,
+            command::email::delete_draft,
+            command::email::parse_email_addresses,
             command::email::send_email,
             command::sync::sync_account,
+            command::sync::sync_account_with_range,
+            command::sync::get_sync_history_state,
+            command::sync::sync_older_emails,
             command::sync::get_folder_stats,
+            command::sync::get_folder_stats_for_all_accounts,
+            command::sync::sync_all_accounts,
             command::auth::detect_provider,
             command::auth::list_providers,
             command::auth::start_oauth2,
@@ -110,6 +124,7 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::label::remove_label_from_email,
             command::label::get_labels_for_email,
             command::label::list_emails_by_label,
+            command::window::open_settings_window,
         ])
         // 注册所有事件类型，用于从后端向前端发送事件
         .events(tauri_specta::collect_events![
@@ -157,10 +172,9 @@ pub fn run() {
 
     // ========== 步骤 3: 初始化数据库 ==========
     // 使用 block_on 在同步上下文中执行异步初始化
+    let data_dir = resolve_data_dir();
     let db = tauri::async_runtime::block_on(async {
         // 获取用户主目录，创建应用数据目录
-        let data_dir = resolve_data_dir();
-
         // 确保数据目录存在，如果不存在则创建
         std::fs::create_dir_all(&data_dir).expect("无法创建数据目录");
 
@@ -171,7 +185,10 @@ pub fn run() {
             .await
             .expect("数据库初始化失败");
 
-        if std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1") {
+        let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
+        let e2e_truth_enabled = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
+
+        if e2e_enabled && !e2e_truth_enabled {
             infrastructure::testing::e2e_seed::seed_e2e_data(&db)
                 .await
                 .expect("E2E seed 数据初始化失败");
@@ -197,13 +214,24 @@ pub fn run() {
     let account_service = service::account_service::AccountService::new(db.clone(), auth.clone());
 
     // 邮件服务：负责邮件的收发、搜索等操作
-    let email_service = service::email_service::EmailService::new(auth.clone(), db.clone());
+    let e2e_enabled = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
+    let e2e_truth_enabled = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
+    let email_service = service::email_service::EmailService::new_for_runtime(
+        auth.clone(),
+        db.clone(),
+        e2e_enabled,
+        e2e_truth_enabled,
+    );
 
     // 同步服务：负责与邮件服务器同步数据
     let sync_service = service::SyncService::new(db.clone(), auth.clone());
 
     // 标签服务：负责邮件标签的管理
     let label_service = service::LabelService::new(db.clone());
+
+    // 附件服务：负责附件缓存、保存和系统打开
+    let attachment_service =
+        service::AttachmentService::new(db.clone(), auth.clone(), data_dir.clone());
 
     // ========== 步骤 6: 初始化 OAuth2 管理器 ==========
     // OAuth2Manager 处理 OAuth2 授权流程
@@ -225,6 +253,8 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         // 窗口定位器插件：支持窗口位置管理
         .plugin(tauri_plugin_positioner::init())
+        // 对话框插件：支持文件选择和保存路径选择
+        .plugin(tauri_plugin_dialog::init())
         // URL 打开器插件：支持在浏览器中打开链接
         .plugin(tauri_plugin_opener::init())
         // 使用 manage 方法将服务实例注入到应用状态中
@@ -233,6 +263,7 @@ pub fn run() {
         .manage(email_service)
         .manage(sync_service)
         .manage(label_service)
+        .manage(attachment_service)
         .manage(oauth2_manager);
 
     // 在 Debug 模式下启用 MCP Bridge 插件

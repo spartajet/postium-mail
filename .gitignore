@@ -12,5 +12,8 @@ vite.config.ts.timestamp-*
 .test_mail_accounts.json
 .idea/
 .e2e-data/
+.e2e-truth-data/
 e2e/artifacts/
 .superpowers
+.superpowers/sdd/
+.claude/

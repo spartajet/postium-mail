@@ -1,33 +1,5 @@
 {
   "accounts": {
-    "163": {
-      "email": "your_email@163.com",
-      "password": "your_163_password_or_auth_code",
-      "imap": {
-        "host": "imap.163.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp.163.com",
-        "port": 465,
-        "ssl": true
-      }
-    },
-    "qq": {
-      "email": "your_email@qq.com",
-      "password": "your_qq_password_or_auth_code",
-      "imap": {
-        "host": "imap.qq.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp.qq.com",
-        "port": 465,
-        "ssl": true
-      }
-    },
     "gmail": {
       "email": "your_email@gmail.com",
       "password": "your_gmail_app_password",
@@ -42,44 +14,16 @@
         "ssl": true
       }
     },
-    "yahoo": {
-      "email": "your_email@yahoo.com",
-      "password": "your_yahoo_app_password",
+    "qq": {
+      "email": "your_email@qq.com",
+      "password": "your_qq_authorization_code",
       "imap": {
-        "host": "imap.mail.yahoo.com",
+        "host": "imap.qq.com",
         "port": 993,
         "ssl": true
       },
       "smtp": {
-        "host": "smtp.mail.yahoo.com",
-        "port": 465,
-        "ssl": true
-      }
-    },
-    "icloud": {
-      "email": "your_email@icloud.com",
-      "password": "your_icloud_app_password",
-      "imap": {
-        "host": "imap.mail.me.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp.mail.me.com",
-        "port": 587,
-        "ssl": true
-      }
-    },
-    "custom_imap": {
-      "email": "your_email@example.com",
-      "password": "your_password",
-      "imap": {
-        "host": "imap.example.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp.example.com",
+        "host": "smtp.qq.com",
         "port": 465,
         "ssl": true
       }

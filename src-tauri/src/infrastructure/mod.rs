@@ -70,9 +70,7 @@
 //! │   ├── 依赖: lettre (SMTP 协议)
 //! │   └── 依赖: tokio (异步运行时)
 //! └── storage (存储)
-//!     ├── 依赖: sea-orm (ORM)
-//!     ├── 依赖: rusqlite (SQLite FTS)
-//!     └── 依赖: migration (数据库迁移)
+//!     └── 依赖: rusqlite (SQLite)
 //! ```
 //!
 //! ## 使用示例

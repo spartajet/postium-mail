@@ -42,23 +42,36 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入邮件状态管理，用于获取选中邮件和执行邮件操作
     import { getEmailState } from "$lib/stores/email.svelte";
+    // 导入账号状态管理，用于识别当前邮件所属账号邮箱
+    import { getAccountState } from "$lib/stores/account.svelte";
     // 导入写邮件模态框类型定义（用于 Context 引用类型）
     import type ComposeModal from "./ComposeModal.svelte";
+    import type { AttachmentDto } from "$lib/bindings";
     // 导入 HTML 净化库，防止 XSS 攻击
     // 邮件正文可能包含恶意脚本，渲染前必须经过净化处理
     import DOMPurify from "dompurify";
+    import { save } from "@tauri-apps/plugin-dialog";
     // 导入图标组件（Lucide 图标库）
     import {
+        Archive, // 归档图标
         ChevronUp, // 上箭头（导航：上一封邮件）
         ChevronDown, // 下箭头（导航：下一封邮件）
-        Layers, // AI 图标（AI 摘要卡片和操作栏）
-        Paperclip, // 附件图标
-        Reply, // 回复图标
+        Download, // 下载图标
+        ExternalLink, // 打开图标
+        File, // 通用文件图标
+        FileArchive, // 压缩包图标
+        FileAudio, // 音频图标
+        FileImage, // 图片图标
+        FileText, // 文档图标
+        FileVideo, // 视频图标
+        FolderDown, // 保存图标
         Forward, // 转发图标
-        Star, // 星标图标
-        Archive, // 归档图标
-        Trash2, // 删除图标
+        Layers, // AI 图标（AI 摘要卡片和操作栏）
         Mail, // 邮件图标（空状态占位）
+        Reply, // 回复图标
+        Star, // 星标图标
+        Trash2, // 删除图标
+        Paperclip, // 附件图标
     } from "lucide-svelte";
 
     // ==================== Context 引用 ====================
@@ -79,11 +92,17 @@
     const t = $derived(i18n.t);
     // 获取邮件状态实例（包含选中邮件、邮件列表等）
     const emailState = getEmailState();
+    // 获取账号状态实例（用于从 account_id 反查账号邮箱）
+    const accountState = getAccountState();
 
     // AI 摘要文本内容
     let aiSummary = $state("");
     // AI 摘要加载状态标志
     let isLoadingSummary = $state(false);
+    // 多收件人列表是否展开
+    let recipientsExpanded = $state(false);
+    // 记录当前邮件 ID，用于切换邮件时重置展开状态
+    let lastRecipientEmailId = $state<number | null>(null);
 
     // ==================== 工具函数 ====================
 
@@ -120,6 +139,47 @@
         });
     }
 
+    function splitEmailList(value: string | null | undefined): string[] {
+        return (value ?? "")
+            .split(/[;,]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+
+    const recipientList = $derived(
+        splitEmailList(emailState.selectedEmail?.recipient_emails),
+    );
+
+    const currentAccountEmail = $derived(
+        accountState.accounts.find(
+            (account) => account.id === emailState.selectedEmail?.account_id,
+        )?.email ?? "",
+    );
+
+    const recipientSummary = $derived.by(() => {
+        if (recipientList.length === 0) return "";
+        if (recipientList.length === 1) return recipientList[0]!;
+
+        const accountEmail = currentAccountEmail.toLowerCase();
+        const accountRecipient = recipientList.find(
+            (recipient) => recipient.toLowerCase() === accountEmail,
+        );
+        const primaryRecipient = accountRecipient ?? recipientList[0]!;
+        const otherRecipients = t.email.otherRecipients.replace(
+            "{count}",
+            String(recipientList.length - 1),
+        );
+        return `${primaryRecipient} ${otherRecipients}`;
+    });
+
+    $effect(() => {
+        const emailId = emailState.selectedEmail?.id ?? null;
+        if (emailId !== lastRecipientEmailId) {
+            lastRecipientEmailId = emailId;
+            recipientsExpanded = false;
+        }
+    });
+
     /**
      * 手动加载 AI 摘要
      *
@@ -150,21 +210,32 @@
      * 将当前选中邮件的星标状态进行反转（已星标 → 取消，未星标 → 添加）。
      * 操作委托给 emailState 处理，确保全局状态一致。
      */
-    function handleToggleStar() {
+    async function handleToggleStar() {
         if (emailState.selectedEmail) {
-            emailState.toggleStar(emailState.selectedEmail.id);
+            await emailState.toggleStar(emailState.selectedEmail.id);
+        }
+    }
+
+    /**
+     * 归档当前选中邮件
+     *
+     * 将当前邮件移出当前分类。操作委托给 emailState 处理。
+     */
+    async function handleArchive() {
+        if (emailState.selectedEmail) {
+            await emailState.archiveEmail(emailState.selectedEmail.id);
         }
     }
 
     /**
      * 删除当前选中邮件
      *
-     * 将当前邮件移至废纸篓（或永久删除，取决于后端实现）。
+     * 第一阶段将当前邮件移至服务商 Trash 文件夹，不执行永久删除。
      * 操作委托给 emailState 处理。
      */
-    function handleDelete() {
+    async function handleDelete() {
         if (emailState.selectedEmail) {
-            emailState.deleteEmails([emailState.selectedEmail.id]);
+            await emailState.deleteEmails([emailState.selectedEmail.id]);
         }
     }
 
@@ -228,71 +299,54 @@
         { id: "tasks", label: t.ai.tasks },
     ]);
 
-    // ==================== 附件相关函数 ====================
+    const sanitizedHtml = $derived(
+        emailState.resolvedBodyHtml
+            ? DOMPurify.sanitize(emailState.resolvedBodyHtml)
+            : emailState.selectedEmail?.body_html
+              ? DOMPurify.sanitize(emailState.selectedEmail.body_html)
+              : "",
+    );
 
-    /**
-     * 根据文件扩展名获取对应的颜色
-     *
-     * 为不同类型的附件显示不同的标识颜色：
-     * - PDF：红色 (#F40F02)
-     * - 图片（jpg/png/gif 等）：紫色 (#9C27B0)
-     * - 视频（mp4/avi 等）：橙色 (#FF9800)
-     * - 音频（mp3/wav 等）：蓝色 (#2196F3)
-     * - Word 文档：深蓝色 (#2B579A)
-     * - Excel 表格：绿色 (#217346)
-     * - PPT 演示：红棕色 (#D24726)
-     * - 压缩文件：绿色 (#4CAF50)
-     * - 其他：灰色 (#757575)
-     *
-     * @param filename - 文件名（含扩展名）
-     * @returns 十六进制颜色值
-     */
-    function getFileExtensionColor(filename: string): string {
-        // 提取文件扩展名（小写）
-        const ext = filename.split(".").pop()?.toLowerCase() || "";
-        // 文件扩展名 → 颜色映射表
-        const colors: Record<string, string> = {
-            pdf: "#F40F02", // PDF 文档 - 红色
-            jpg: "#9C27B0",
-            jpeg: "#9C27B0",
-            png: "#9C27B0", // 图片 - 紫色
-            gif: "#9C27B0",
-            svg: "#9C27B0",
-            webp: "#9C27B0",
-            mp4: "#FF9800",
-            avi: "#FF9800",
-            mov: "#FF9800",
-            mkv: "#FF9800", // 视频 - 橙色
-            mp3: "#2196F3",
-            wav: "#2196F3",
-            flac: "#2196F3",
-            aac: "#2196F3", // 音频 - 蓝色
-            doc: "#2B579A",
-            docx: "#2B579A", // Word 文档 - 深蓝
-            xls: "#217346",
-            xlsx: "#217346", // Excel 表格 - 绿色
-            ppt: "#D24726",
-            pptx: "#D24726", // PPT 演示 - 红棕
-            txt: "#757575", // 纯文本 - 灰色
-            zip: "#4CAF50",
-            rar: "#4CAF50",
-            "7z": "#4CAF50", // 压缩文件 - 绿色
-        };
-        // 返回对应颜色或默认灰色
-        return colors[ext] || "#757575";
+    function formatFileSize(size: number): string {
+        if (size < 1024) return `${size} B`;
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+        return `${(size / 1024 / 1024).toFixed(1)} MB`;
     }
 
-    /**
-     * 获取文件扩展名的大写标签
-     *
-     * 用于在附件图标中显示文件类型缩写。
-     * 例如："document.pdf" → "PDF"，"image.png" → "PNG"
-     *
-     * @param filename - 文件名（含扩展名）
-     * @returns 大写的扩展名字符串，无扩展名时返回 "FILE"
-     */
-    function getFileExtensionLabel(filename: string): string {
-        return filename.split(".").pop()?.toUpperCase() || "FILE";
+    function isLargeAttachment(attachment: AttachmentDto): boolean {
+        return attachment.size > 10 * 1024 * 1024;
+    }
+
+    function attachmentIcon(attachment: AttachmentDto) {
+        const type = attachment.content_type;
+        if (type.startsWith("image/")) return FileImage;
+        if (type.startsWith("audio/")) return FileAudio;
+        if (type.startsWith("video/")) return FileVideo;
+        if (type.includes("zip") || type.includes("rar") || type.includes("7z")) {
+            return FileArchive;
+        }
+        if (type.startsWith("text/") || type.includes("pdf")) return FileText;
+        return File;
+    }
+
+    async function handleDownload(attachment: AttachmentDto) {
+        if (isLargeAttachment(attachment)) {
+            await handleSaveAs(attachment);
+            return;
+        }
+        await emailState.downloadAttachment(attachment.id);
+    }
+
+    async function handleSaveAs(attachment: AttachmentDto) {
+        const targetPath = await save({
+            defaultPath: attachment.filename,
+        });
+        if (!targetPath) return;
+        await emailState.saveAttachmentAs(attachment.id, targetPath);
+    }
+
+    async function handleOpen(attachment: AttachmentDto) {
+        await emailState.openAttachment(attachment.id);
     }
 </script>
 
@@ -393,12 +447,49 @@
                     </span>
                 </div>
                 <!-- 第二行：收件人 + 抄送信息 -->
-                <div class="mt-0.5 text-xs text-muted-foreground">
-                    {t.email.to}: {emailState.selectedEmail.recipient_emails}
+                <div
+                    class="mt-0.5 flex min-w-0 flex-wrap items-start gap-x-1 gap-y-1 text-xs text-muted-foreground"
+                >
+                    <span class="shrink-0">{t.email.to}:</span>
+                    {#if recipientList.length > 1 && !recipientsExpanded}
+                        <span class="min-w-0 break-all">
+                            {recipientSummary}
+                        </span>
+                    {:else}
+                        <span class="min-w-0 break-all">
+                            {#each recipientList as recipient, index}
+                                <span>{recipient}</span>{#if index < recipientList.length - 1}, {/if}
+                            {/each}
+                        </span>
+                    {/if}
+
+                    {#if recipientList.length > 1}
+                        <button
+                            type="button"
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            aria-label={recipientsExpanded
+                                ? t.email.collapseRecipients
+                                : t.email.expandRecipients}
+                            title={recipientsExpanded
+                                ? t.email.collapseRecipients
+                                : t.email.expandRecipients}
+                            onclick={() =>
+                                (recipientsExpanded = !recipientsExpanded)}
+                        >
+                            {#if recipientsExpanded}
+                                <ChevronUp size={14} />
+                            {:else}
+                                <ChevronDown size={14} />
+                            {/if}
+                        </button>
+                    {/if}
+
                     <!-- 如果有抄送，显示抄送信息 -->
                     {#if emailState.selectedEmail.cc_emails}
-                        &nbsp;|&nbsp; {t.email.cc}: {emailState.selectedEmail
-                            .cc_emails}
+                        <span class="shrink-0">&nbsp;|&nbsp; {t.email.cc}:</span>
+                        <span class="min-w-0 break-all">
+                            {emailState.selectedEmail.cc_emails}
+                        </span>
                     {/if}
                 </div>
             </div>
@@ -411,10 +502,10 @@
 
         <!--
       可滚动内容区域
-      包含：AI 摘要卡片、邮件正文、附件列表
+      包含：AI 摘要卡片、邮件正文
       使用 flex-1 overflow-y-auto 实现独立滚动
     -->
-        <div class="flex-1 overflow-y-auto">
+        <div data-testid="email-body-scroller" class="flex-1 overflow-y-auto">
             <!-- ==================== AI 摘要卡片 ==================== -->
 
             <!--
@@ -487,9 +578,7 @@
             使用 {@html} 指令渲染原始 HTML
             DOMPurify.sanitize() 会移除 <script>、onerror 等危险标签和属性
           -->
-                    {@html DOMPurify.sanitize(
-                        emailState.selectedEmail.body_html,
-                    )}
+                    {@html sanitizedHtml}
                 {:else}
                     <!--
             纯文本格式邮件正文
@@ -502,59 +591,125 @@
                 {/if}
             </div>
 
-            <!-- ==================== 附件列表 ==================== -->
+        </div>
 
-            <!--
-        附件区域
-        仅当邮件包含附件时显示 (has_attachments 为 true)
-        包含附件标题栏和附件文件卡片列表
-      -->
-            {#if emailState.selectedEmail.has_attachments}
-                <div class="border-t border-border px-5 py-4">
-                    <!-- 附件标题栏：回形针图标 + "附件" 文本 -->
+        <!-- ==================== 附件列表 ==================== -->
+
+        <!--
+      附件区域
+      仅当邮件包含附件时显示，固定在正文滚动区下方、操作按钮栏上方
+      高度由内容自然撑开；附件较多时仅附件区域内部滚动
+    -->
+        {#if emailState.selectedEmail.attachments.length > 0}
+            <section
+                data-testid="email-attachments-bar"
+                class="shrink-0 border-t border-border px-5 py-3"
+                aria-label={t.email.attachments}
+            >
+                <!-- 附件标题栏：回形针图标 + "附件" 文本 -->
+                <div
+                    class="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground"
+                >
+                    <Paperclip size={18} />
+                    <span>{t.email.attachments}</span>
+                </div>
+
+                <!-- 附件文件卡片列表：窄屏单列，中等宽度两列，宽屏三列 -->
+                <div class="max-h-48 overflow-y-auto pr-1">
                     <div
-                        class="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground"
+                        class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
                     >
-                        <Paperclip size={18} />
-                        <span>{t.email.attachments}</span>
-                    </div>
-
-                    <!-- 附件文件卡片列表（flex-wrap 支持多行排列） -->
-                    <div class="flex flex-wrap gap-3">
-                        <!--
-              单个附件卡片（当前为占位符，显示示例 PDF 附件）
-              TODO: 改为遍历真实附件列表渲染
-
-              结构说明：
-              - 左侧：文件类型图标（彩色圆角方块，显示扩展名）
-              - 右侧：文件名 + 文件大小
-              - 悬停效果：边框变主题色
-            -->
-                        <div
-                            class="attachment-item flex items-center gap-2 rounded-lg border border-border bg-glass px-3 py-2 transition-colors hover:border-primary hover:bg-glass-hover"
-                        >
-                            <!-- 文件类型图标（蓝色背景 + "PDF" 文字） -->
+                        {#each emailState.selectedEmail.attachments as attachment (attachment.id)}
+                            {@const Icon = attachmentIcon(attachment)}
+                            {@const operating = emailState.attachmentOperatingIds.has(
+                                attachment.id,
+                            )}
+                            {@const large = isLargeAttachment(attachment)}
                             <div
-                                class="flex h-8 w-8 items-center justify-center rounded bg-blue-500/10 text-xs font-bold text-blue-500"
+                                class="flex min-w-0 items-center gap-3 rounded-md border border-border bg-glass px-3 py-2 transition-colors hover:border-primary hover:bg-glass-hover"
                             >
-                                PDF
-                            </div>
-                            <!-- 文件信息：名称 + 大小 -->
-                            <div class="min-w-0">
                                 <div
-                                    class="truncate text-sm font-medium text-foreground"
+                                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
                                 >
-                                    document.pdf
+                                    <Icon size={20} />
                                 </div>
-                                <div class="text-xs text-muted-foreground">
-                                    2.4 MB
+                                <div class="min-w-0 flex-1">
+                                    <div
+                                        class="truncate text-sm font-medium text-foreground"
+                                    >
+                                        {attachment.filename}
+                                    </div>
+                                    <div
+                                        class="text-xs text-muted-foreground"
+                                    >
+                                        {formatFileSize(attachment.size)}
+                                        ·
+                                        {attachment.is_cached
+                                            ? t.email.attachmentCached
+                                            : t.email.attachmentNotDownloaded}
+                                    </div>
+                                    {#if emailState.attachmentErrors[attachment.id]}
+                                        <div
+                                            class="mt-1 text-xs text-destructive"
+                                        >
+                                            {emailState.attachmentErrors[
+                                                attachment.id
+                                            ]}
+                                        </div>
+                                    {/if}
+                                </div>
+                                <div class="flex shrink-0 items-center gap-1">
+                                    <button
+                                        type="button"
+                                        class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                        title={large
+                                            ? t.email.attachmentSave
+                                            : t.email.attachmentDownload}
+                                        aria-label={large
+                                            ? t.email.attachmentSave
+                                            : t.email.attachmentDownload}
+                                        disabled={operating}
+                                        onclick={() =>
+                                            handleDownload(attachment)}
+                                    >
+                                        {#if large}
+                                            <FolderDown size={16} />
+                                        {:else}
+                                            <Download size={16} />
+                                        {/if}
+                                    </button>
+                                    {#if !large}
+                                        <button
+                                            type="button"
+                                            class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                            title={t.email.attachmentOpen}
+                                            aria-label={t.email.attachmentOpen}
+                                            disabled={operating}
+                                            onclick={() =>
+                                                handleOpen(attachment)}
+                                        >
+                                            <ExternalLink size={16} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                            title={t.email.attachmentSaveAs}
+                                            aria-label={t.email
+                                                .attachmentSaveAs}
+                                            disabled={operating}
+                                            onclick={() =>
+                                                handleSaveAs(attachment)}
+                                        >
+                                            <FolderDown size={16} />
+                                        </button>
+                                    {/if}
                                 </div>
                             </div>
-                        </div>
+                        {/each}
                     </div>
                 </div>
-            {/if}
-        </div>
+            </section>
+        {/if}
 
         <!-- ==================== 邮件操作按钮栏 ==================== -->
 
@@ -581,6 +736,7 @@
                             emailState.selectedEmail.sender_email, // 回复给发件人
                             emailState.selectedEmail.subject || "", // 原始主题
                             emailState.selectedEmail.body_text || "", // 原始正文（作为引用）
+                            emailState.selectedEmail.account_id,
                         );
                     }
                 }}
@@ -604,6 +760,7 @@
                         modal.showForward(
                             emailState.selectedEmail.subject || "", // 原始主题
                             emailState.selectedEmail.body_text || "", // 原始正文（作为引用）
+                            emailState.selectedEmail.account_id,
                         );
                     }
                 }}
@@ -627,6 +784,9 @@
                     : 'text-muted-foreground hover:text-foreground'}"
                 title={t.email.star}
                 onclick={handleToggleStar}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Star
                     size={18}
@@ -636,10 +796,14 @@
                 />
             </button>
 
-            <!-- 归档按钮（功能占位） -->
+            <!-- 归档按钮 -->
             <button
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.email.archive}
+                onclick={handleArchive}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Archive size={18} />
             </button>
@@ -653,6 +817,9 @@
                 class="icon-btn-sm flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-destructive"
                 title={t.common.delete}
                 onclick={handleDelete}
+                disabled={emailState.selectedEmail
+                    ? emailState.operatingIds.has(emailState.selectedEmail.id)
+                    : false}
             >
                 <Trash2 size={18} />
             </button>

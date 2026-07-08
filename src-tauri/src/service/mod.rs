@@ -30,7 +30,10 @@
 /// - AccountDto: 账号数据传输对象
 /// - CreateAccountRequest: 创建账号请求
 /// - UpdateAccountRequest: 更新账号请求
+pub mod account_connection;
 pub mod account_service;
+pub mod attachment_service;
+pub mod email_address;
 
 /// 邮件服务模块
 ///
@@ -50,6 +53,9 @@ pub mod account_service;
 /// - EmailCategory: 邮件分类枚举
 /// - SendEmailRequest: 发送邮件请求
 pub mod email_service;
+pub mod mail_draft;
+pub mod mail_operation;
+pub mod mail_send;
 
 /// 标签服务模块
 ///
@@ -88,6 +94,9 @@ pub mod sync_service;
 /// - CreateAccountRequest: 创建账号时的请求参数
 /// - UpdateAccountRequest: 更新账号时的请求参数
 pub use account_service::{AccountDto, AccountService, CreateAccountRequest, UpdateAccountRequest};
+
+/// 附件相关导出
+pub use attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 
 /// 标签相关导出
 ///

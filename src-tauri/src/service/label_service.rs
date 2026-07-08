@@ -21,9 +21,7 @@
 
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
-use crate::infrastructure::storage::entities::labels;
 use crate::infrastructure::storage::repository::label_repo;
-use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -211,13 +209,11 @@ impl LabelService {
         // 获取当前时间戳
         let now = chrono::Utc::now().timestamp();
 
-        // 构建数据库模型
-        let model = labels::ActiveModel {
-            account_id: Set(req.account_id),
-            name: Set(req.name),
-            color: Set(req.color),
-            created_at: Set(now),
-            ..Default::default()
+        let model = label_repo::LabelWrite {
+            account_id: req.account_id,
+            name: req.name,
+            color: req.color,
+            created_at: now,
         };
 
         // 持久化到数据库
@@ -260,15 +256,13 @@ impl LabelService {
             .await?
             .ok_or(MailError::LabelNotFound(id))?;
 
-        // 构建更新模型，保留未修改的字段
-        let model = labels::ActiveModel {
-            id: Set(existing.id),
-            account_id: Set(existing.account_id),
+        let model = label_repo::LabelWrite {
+            account_id: existing.account_id,
             // 如果提供了新名称则更新，否则保持原值
-            name: Set(req.name.unwrap_or(existing.name)),
+            name: req.name.unwrap_or(existing.name),
             // 如果提供了新颜色则更新，否则保持原值
-            color: Set(req.color.unwrap_or(existing.color)),
-            created_at: Set(existing.created_at),
+            color: req.color.unwrap_or(existing.color),
+            created_at: existing.created_at,
         };
 
         // 保存到数据库
@@ -343,7 +337,7 @@ impl LabelService {
     /// label_service.add_label_to_email(123, 1).await?;
     /// ```
     pub async fn add_label_to_email(&self, email_id: i32, label_id: i32) -> Result<(), MailError> {
-        label_repo::add_label_to_email(&self.db, email_id, label_id).await
+        label_repo::add_to_email(&self.db, email_id, label_id).await
     }
 
     /// 从邮件移除标签
@@ -375,7 +369,7 @@ impl LabelService {
         email_id: i32,
         label_id: i32,
     ) -> Result<(), MailError> {
-        label_repo::remove_label_from_email(&self.db, email_id, label_id).await
+        label_repo::remove_from_email(&self.db, email_id, label_id).await
     }
 
     /// 获取邮件的所有标签

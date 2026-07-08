@@ -34,25 +34,29 @@
 <script lang="ts">
     // ==================== 导入依赖 ====================
 
+    // 导入 Svelte Context API，用于获取父组件共享的模态框引用
+    import { getContext } from "svelte";
     // 导入国际化状态管理，用于多语言支持
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入邮件状态管理，用于邮件列表数据、选中状态、加载操作等
     import { getEmailState } from "$lib/stores/email.svelte";
     // 导入账户状态管理，用于获取当前活跃账户 ID
     import { getAccountState } from "$lib/stores/account.svelte";
+    // 导入同步状态管理，用于加载历史同步状态和同步更早邮件
+    import { getSyncState } from "$lib/stores/sync.svelte";
     // 导入 Tauri 后端命令接口，用于调用搜索等后端方法
     import { commands } from "$lib/bindings";
     // 导入搜索结果类型定义
     import type { SearchResult } from "$lib/bindings";
     // 导入右键菜单子组件
     import EmailContextMenu from "./EmailContextMenu.svelte";
+    // 导入写邮件模态框类型定义（用于 Context 引用类型）
+    import type ComposeModal from "./ComposeModal.svelte";
     // 导入图标组件（Lucide 图标库）
     import {
         Search, // 搜索图标
         RefreshCw, // 刷新/同步图标
         X, // 关闭/清除图标
-        List, // 列表视图图标
-        LayoutGrid, // 网格视图图标
         Mail, // 邮件图标（空状态占位）
         Star, // 星标图标
     } from "lucide-svelte";
@@ -67,6 +71,14 @@
     const emailState = getEmailState();
     // 获取账户状态实例（包含当前活跃账户信息）
     const accountStore = getAccountState();
+    // 获取同步状态实例（包含历史同步状态和更早邮件同步操作）
+    const syncStore = getSyncState();
+
+    // 写邮件模态框的 Context 键（与 +layout.svelte 中设置的键一致）
+    const COMPOSE_MODAL_KEY = Symbol.for("compose-modal");
+    // 从 Context 中获取写邮件模态框的引用函数
+    const getComposeModal =
+        getContext<() => ComposeModal | undefined>(COMPOSE_MODAL_KEY);
 
     // ==================== 搜索相关状态 ====================
 
@@ -76,6 +88,34 @@
     let searchResults = $state<SearchResult[] | null>(null);
     // 搜索加载状态标志
     let searching = $state(false);
+
+    let supportsOlderSync = $derived(
+        !accountStore.isAllAccounts &&
+            searchResults === null &&
+            emailState.currentFolder !== "starred",
+    );
+    let localHasMore = $derived(emailState.emails.length < emailState.total);
+    let historyState = $derived(
+        accountStore.activeAccountId
+            ? syncStore.getHistoryState(
+                  accountStore.activeAccountId,
+                  emailState.currentFolder,
+              )
+            : null,
+    );
+    let canSyncOlder = $derived(
+        supportsOlderSync &&
+            !localHasMore &&
+            (historyState === null || !historyState.history_exhausted),
+    );
+    let olderSyncing = $derived(
+        accountStore.activeAccountId
+            ? syncStore.isOlderSyncing(
+                  accountStore.activeAccountId,
+                  emailState.currentFolder,
+              )
+            : false,
+    );
 
     // ==================== 右键菜单状态 ====================
 
@@ -133,6 +173,123 @@
         contextMenu.visible = false;
     }
 
+    function refreshFolderStats() {
+        if (accountStore.isAllAccounts) {
+            void syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
+        const accountId = accountStore.activeAccountId;
+        if (accountId) {
+            void syncStore.loadFolderStats(accountId);
+        }
+    }
+
+    async function handleSelectEmail(emailId: number) {
+        const email = emailState.emails.find((item) => item.id === emailId);
+        const wasUnread = email ? !email.is_read : false;
+        await emailState.selectEmail(emailId);
+        if (wasUnread) {
+            refreshFolderStats();
+            if (emailState.unreadOnly) {
+                if (accountStore.isAllAccounts) {
+                    await emailState.refreshLoadedEmailsByCategoryForAllAccounts();
+                } else if (accountStore.activeAccountId) {
+                    await emailState.refreshLoadedEmailsByCategory(
+                        accountStore.activeAccountId,
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * 刷新当前分类邮件
+     *
+     * 触发当前活跃账号同步，并重新加载当前邮件分类。
+     */
+    async function handleRefresh() {
+        if (accountStore.isAllAccounts) {
+            await syncStore.syncAllAccounts();
+            await emailState.loadEmailsByCategoryForAllAccounts(
+                emailState.currentFolder,
+                emailState.page,
+            );
+            await syncStore.loadFolderStatsForAllAccounts();
+            return;
+        }
+
+        if (accountStore.activeAccountId) {
+            await syncStore.syncAccount(accountStore.activeAccountId);
+            await emailState.loadEmailsByCategory(
+                accountStore.activeAccountId,
+                emailState.currentFolder,
+                emailState.page,
+            );
+            await syncStore.loadFolderStats(accountStore.activeAccountId);
+        }
+    }
+
+    async function toggleUnreadOnly() {
+        if (accountStore.isAllAccounts) {
+            await emailState.setUnreadOnlyForAllAccounts(!emailState.unreadOnly);
+            return;
+        }
+
+        if (!accountStore.activeAccountId) return;
+        await emailState.setUnreadOnly(
+            accountStore.activeAccountId,
+            !emailState.unreadOnly,
+        );
+    }
+
+    /**
+     * 右键菜单：切换星标状态
+     */
+    async function handleContextToggleStar(emailId: number) {
+        await emailState.toggleStar(emailId);
+        refreshFolderStats();
+    }
+
+    /**
+     * 右键菜单：切换已读/未读状态
+     */
+    async function handleContextToggleRead(emailId: number, isRead: boolean) {
+        await emailState.markAsRead(emailId, isRead);
+        refreshFolderStats();
+    }
+
+    /**
+     * 右键菜单：删除邮件
+     */
+    async function handleContextDelete(emailId: number) {
+        await emailState.deleteEmails([emailId]);
+        refreshFolderStats();
+    }
+
+    /**
+     * 右键菜单：转发邮件
+     */
+    async function handleContextForward(emailId: number) {
+        const result = await commands.getEmail(emailId);
+        const modal = getComposeModal?.();
+        if (result.status === "ok" && modal) {
+            const email = result.data;
+            modal.showForward(
+                email.subject || "",
+                email.body_text || email.body_html || "",
+                email.account_id,
+            );
+        }
+    }
+
+    /**
+     * 右键菜单：重新加载单封邮件
+     */
+    async function handleContextReload(emailId: number) {
+        await emailState.reloadEmail(emailId);
+    }
+
     // ==================== 自动加载邮件 ====================
 
     // 当活跃账号或当前文件夹变化时，自动重新加载邮件列表
@@ -141,9 +298,22 @@
         // 追踪依赖：当 activeAccountId 或 currentFolder 变化时重新执行
         const accountId = accountStore.activeAccountId;
         const folder = emailState.currentFolder;
-        // 确保有活跃账户才加载
-        if (accountId) {
+        const isAllAccounts = accountStore.isAllAccounts;
+        if (isAllAccounts) {
+            emailState.loadEmailsByCategoryForAllAccounts(folder);
+        } else if (accountId) {
             emailState.loadEmailsByCategory(accountId, folder);
+        }
+    });
+
+    $effect(() => {
+        const accountId = accountStore.activeAccountId;
+        const category = emailState.currentFolder;
+        const searchingNow = searchResults !== null;
+        const isAllAccounts = accountStore.isAllAccounts;
+
+        if (!isAllAccounts && accountId && !searchingNow && category !== "starred") {
+            void syncStore.loadHistoryState(accountId, category);
         }
     });
 
@@ -170,7 +340,9 @@
         const timeout = setTimeout(async () => {
             try {
                 // 获取当前活跃账户 ID
-                const accountId = accountStore.activeAccountId;
+                const accountId = accountStore.isAllAccounts
+                    ? null
+                    : accountStore.activeAccountId;
                 // 调用后端搜索命令
                 const result = await commands.searchEmails(q, accountId, 50);
                 // 搜索成功：更新搜索结果
@@ -199,6 +371,33 @@
     function clearSearch() {
         searchQuery = "";
         searchResults = null;
+    }
+
+    async function handleLoadMore() {
+        if (accountStore.isAllAccounts) {
+            await emailState.loadNextPageForAllAccounts();
+            return;
+        }
+
+        if (accountStore.activeAccountId) {
+            await emailState.loadNextPage(accountStore.activeAccountId);
+        }
+    }
+
+    async function handleSyncOlder() {
+        const accountId = accountStore.activeAccountId;
+        if (!accountId) return;
+
+        const result = await syncStore.syncOlderEmails(
+            accountId,
+            emailState.currentFolder,
+        );
+        if (result) {
+            await emailState.refreshLoadedEmailsByCategory(
+                accountId,
+                emailState.emails.length + result.new_emails,
+            );
+        }
     }
 
     /**
@@ -328,20 +527,35 @@
                 data-testid="email-refresh-button"
                 class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                 title={t.sidebar.sync}
+                onclick={handleRefresh}
+                disabled={
+                    (!accountStore.activeAccountId &&
+                        !accountStore.isAllAccounts) ||
+                    emailState.loading
+                }
             >
-                <RefreshCw size={18} />
+                <RefreshCw
+                    size={18}
+                    class={emailState.loading ? "animate-spin" : ""}
+                />
             </button>
-            <!-- 列表视图按钮 -->
             <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {emailState.unreadOnly
+                    ? 'border-primary bg-primary/12 text-primary'
+                    : 'border-border text-muted-foreground hover:bg-glass-hover hover:text-foreground'}"
+                type="button"
+                aria-pressed={emailState.unreadOnly}
+                aria-label={emailState.unreadOnly
+                    ? "显示全部邮件"
+                    : "仅显示未读邮件"}
+                onclick={toggleUnreadOnly}
+                disabled={
+                    (!accountStore.activeAccountId &&
+                        !accountStore.isAllAccounts) ||
+                    emailState.loading
+                }
             >
-                <List size={18} />
-            </button>
-            <!-- 网格视图按钮 -->
-            <button
-                class="icon-btn-sm flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
-            >
-                <LayoutGrid size={18} />
+                {emailState.unreadOnly ? "全部" : "未读"}
             </button>
             <!--
               邮件数量统计
@@ -388,23 +602,17 @@
                     <!--
                       单个搜索结果项
                       - 点击：选中该邮件
-                      - 右键：打开上下文菜单
-                      - 根据是否选中添加 active 样式类
+                      - 搜索结果不提供右键菜单，因为 SearchResult 不包含可靠的已读/星标状态
+                      - 根据是否选中添加选中态样式
                     -->
                     <button
                         data-testid="email-item"
                         data-subject={result.subject || "(No Subject)"}
-                        class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
+                        class="group relative flex w-full cursor-pointer flex-col border-b border-border px-5 py-3 text-left transition-colors hover:bg-glass-hover {emailState.selectedEmailId ===
                         result.id
-                            ? 'active'
+                            ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                             : ''}"
-                        onclick={() => emailState.selectEmail(result.id)}
-                        oncontextmenu={(e) =>
-                            openContextMenu(e, {
-                                id: result.id,
-                                is_read: true,
-                                is_starred: false,
-                            })}
+                        onclick={() => handleSelectEmail(result.id)}
                     >
                         <!-- 第一行：发件人 + 时间 -->
                         <div class="flex items-center justify-between gap-2">
@@ -431,6 +639,14 @@
                                 class="mt-0.5 truncate text-xs text-muted-foreground"
                             >
                                 {result.preview}
+                            </p>
+                        {/if}
+                        {#if accountStore.isAllAccounts}
+                            <p
+                                data-testid="email-account-source"
+                                class="mt-1 truncate text-[11px] text-muted-foreground"
+                            >
+                                {result.account_display_name || result.account_email || `账号 #${result.account_id}`}
                             </p>
                         {/if}
                     </button>
@@ -465,6 +681,15 @@
                     {t.email.noEmails}
                 </h3>
                 <p class="text-sm">{t.email.noEmails}</p>
+                {#if canSyncOlder}
+                    <button
+                        class="mt-4 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:opacity-60"
+                        onclick={handleSyncOlder}
+                        disabled={olderSyncing}
+                    >
+                        {olderSyncing ? t.email.syncingOlder : t.email.syncOlder}
+                    </button>
+                {/if}
             </div>
         {:else}
             <!--
@@ -477,10 +702,9 @@
                   单个邮件项
 
                   类名说明：
-                  - email-item：自定义邮件项基础样式
                   - group：Tailwind 的组标记，用于 hover 子元素联动
                   - relative：相对定位（为未读圆点的绝对定位提供参考）
-                  - active：选中状态（通过条件判断动态添加）
+                  - 选中态：通过条件类动态添加左边框和主题色背景
 
                   交互事件：
                   - onclick：选中该邮件，更新全局状态
@@ -489,11 +713,11 @@
                 <button
                     data-testid="email-item"
                     data-subject={email.subject || "(No Subject)"}
-                    class="email-item group relative flex w-full flex-col border-b border-border px-5 py-3 text-left transition-colors {emailState.selectedEmailId ===
+                    class="group relative flex w-full cursor-pointer flex-col border-b border-border px-5 py-3 text-left transition-colors hover:bg-glass-hover {emailState.selectedEmailId ===
                     email.id
-                        ? 'active'
+                        ? 'border-l-[3px] border-l-primary bg-[color-mix(in_srgb,var(--color-primary)_15%,transparent)] pl-[calc(1.25rem_-_3px)]'
                         : ''}"
-                    onclick={() => emailState.selectEmail(email.id)}
+                    onclick={() => handleSelectEmail(email.id)}
                     oncontextmenu={(e) => openContextMenu(e, email)}
                 >
                     <!--
@@ -503,7 +727,7 @@
                     -->
                     {#if !email.is_read}
                         <div
-                            class="unread-dot absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary"
+                            class="absolute left-2 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-primary"
                         ></div>
                     {/if}
 
@@ -564,8 +788,40 @@
                             {email.preview}
                         </p>
                     {/if}
+                    {#if accountStore.isAllAccounts}
+                        <p
+                            data-testid="email-account-source"
+                            class="mt-1 truncate text-[11px] text-muted-foreground"
+                        >
+                            {email.account_display_name || email.account_email || `账号 #${email.account_id}`}
+                        </p>
+                    {/if}
                 </button>
             {/each}
+
+            {#if searchResults === null && emailState.emails.length > 0}
+                <div class="border-t border-border p-3">
+                    {#if localHasMore}
+                        <button
+                            class="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            onclick={handleLoadMore}
+                            disabled={emailState.loadingNextPage}
+                        >
+                            {t.email.loadMore}
+                        </button>
+                    {:else if canSyncOlder}
+                        <button
+                            class="w-full rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground disabled:opacity-60"
+                            onclick={handleSyncOlder}
+                            disabled={olderSyncing}
+                        >
+                            {olderSyncing
+                                ? t.email.syncingOlder
+                                : t.email.syncOlder}
+                        </button>
+                    {/if}
+                </div>
+            {/if}
         {/if}
     </div>
 
@@ -583,40 +839,13 @@
             emailId={contextMenu.emailId}
             isRead={contextMenu.isRead}
             isStarred={contextMenu.isStarred}
+            disabled={emailState.operatingIds.has(contextMenu.emailId)}
+            onToggleStar={handleContextToggleStar}
+            onToggleRead={handleContextToggleRead}
+            onDelete={handleContextDelete}
+            onForward={handleContextForward}
+            onReload={handleContextReload}
             onClose={closeContextMenu}
         />
     {/if}
 </div>
-
-<!-- ==================== 组件样式 ====================-->
-
-<!--
-  组件局部样式说明：
-  - .email-item：邮件列表项的基础样式，包括悬停和选中效果
-  - .email-item.active：选中状态的邮件项，带主题色左边框高亮
-  - .unread-dot：未读指示圆点样式（在模板中已通过 Tailwind 类实现）
--->
-<style>
-    /* 邮件列表项基础样式 */
-    .email-item {
-        cursor: pointer;
-        transition: background 150ms ease;
-    }
-
-    /* 邮件列表项悬停效果：浅色玻璃态背景 */
-    .email-item:hover {
-        background: var(--color-glass-hover);
-    }
-
-    /*
-      邮件列表项选中效果
-      - 背景色：主题色与透明的 15% 混合，产生淡主题色背景
-      - 左边框：3px 实线主题色，作为选中指示条
-      - 左内边距：减去边框宽度，保持内容不偏移
-    */
-    .email-item.active {
-        background: color-mix(in srgb, var(--color-primary) 15%, transparent);
-        border-left: 3px solid var(--color-primary);
-        padding-left: calc(1.25rem - 3px);
-    }
-</style>

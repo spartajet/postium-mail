@@ -1,3 +1,30 @@
+//! OAuth2 PKCE 授权流程管理器
+//!
+//! 本模块实现基于 PKCE（Proof Key for Code Exchange）的 OAuth2 授权码流程，
+//! 支持 Google、Microsoft 等邮件服务商。完整流程如下：
+//!
+//! 1. **生成授权 URL**（[`OAuth2Manager::start_auth`]）：生成 PKCE challenge/verifier
+//!    与 CSRF state，构造带 `offline_access` / `access_type=offline` 的授权 URL，
+//!    返回给前端打开浏览器。
+//! 2. **浏览器授权**：用户在浏览器中登录并授权，服务商重定向回本地回调地址。
+//! 3. **localhost 回调监听**（[`handle_callback`]）：`start_auth` 时已绑定临时端口
+//!    并 spawn 一个后台任务，监听 `http://localhost:{port}/oauth/callback`，
+//!    在 5 分钟超时内接收携带 `code` 与 `state` 的回调请求。
+//! 4. **code 换 token**（[`do_token_exchange`]）：用 PKCE verifier 和授权 code
+//!    向服务商 token 端点交换 access_token / refresh_token。
+//! 5. **持久化**：refresh_token 写入系统 Keyring，access_token 缓存到内存，
+//!    并通过 `AccountService` 在数据库中创建账号。
+//! 6. **轮询完成状态**（[`OAuth2Manager::poll_oauth2`]）：前端定时轮询 state，
+//!    直到拿到 [`OAuth2PollResult::Completed`]（仅含 email，不泄露 token）。
+//!
+//! # Microsoft token 端点特殊处理
+//!
+//! Microsoft 的 token 端点要求 `client_id` 必须出现在请求体中，不接受仅靠
+//! HTTP Basic Auth 传递 `client_id`。因此在 [`OAuth2Manager::refresh_token`] 中
+//! 故意不在 oauth2 client 上设置 `client_secret`（否则 oauth2 crate 会改用
+//! Basic Auth），而是手动把 `client_id` / `client_secret` 作为额外参数加入请求体。
+//! 详见该方法内的注释。
+
 use crate::domain::auth::AuthManager;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::providers::{ProviderPool, SslMode};
@@ -20,58 +47,110 @@ use tokio::sync::Mutex;
 /// OAuth2 授权 URL 结果
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OAuth2AuthUrl {
+    /// 完整的授权 URL，前端打开此 URL 进入服务商登录/授权页
     pub url: String,
+    /// CSRF state，前端必须保存并在轮询时回传用于匹配会话
     pub state: String,
+    /// 本地回调监听端口（由系统分配的临时端口）
     pub port: u16,
 }
 
 /// OAuth2 Token 结果（仅内部使用，不暴露给前端）
 #[derive(Debug, Clone)]
 pub struct OAuth2TokenResult {
+    /// 访问令牌，用于调用 IMAP/SMTP XOAUTH2 认证
     pub access_token: String,
+    /// 刷新令牌，用于在 access_token 过期后换取新令牌（部分 provider 可能不返回）
     pub refresh_token: Option<String>,
+    /// access_token 有效期（秒），为空时上层按默认值处理
     pub expires_in: Option<i64>,
 }
 
 /// OAuth2 授权完成信息（返回给前端的最小信息）
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OAuth2CompletedInfo {
+    /// 授权成功的邮箱地址（token 等敏感信息不返回前端）
     pub email: String,
 }
 
 /// OAuth2 轮询状态
+///
+/// 前端通过 [`OAuth2Manager::poll_oauth2`] 周期性轮询某个 `state` 的结果。
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum OAuth2PollResult {
+    /// 授权仍在进行中（回调尚未到达或 token 交换未完成）
     Pending,
+    /// 授权已完成，携带返回给前端的最小信息（邮箱）
     Completed(OAuth2CompletedInfo),
+    /// 授权失败，携带错误描述字符串
     Error(String),
 }
 
 /// 正在进行中的 OAuth2 会话
+///
+/// 在 `start_auth` 时创建并按 `state` 存入 `Inner::sessions`，
+/// 回调到达后取出并消费（PKCE verifier 仅可使用一次）。
 struct PendingSession {
+    /// PKCE 验证器，code 换 token 时使用，使用后置空防止重复消费
     pkce_verifier: Option<PkceCodeVerifier>,
+    /// 本地回调监听端口
     port: u16,
+    /// 提供商标识（如 "gmail"、"outlook"）
     provider_id: String,
+    /// 用户邮箱
     email: String,
+    /// 可选的显示名称，用于在数据库创建账号时回填
     display_name: Option<String>,
 }
 
 /// 内部共享状态
+///
+/// 被 [`OAuth2Manager`] 以 `Arc` 形式持有，并克隆给后台回调任务使用。
+/// 所有可变状态都通过 `Mutex` 保护，可跨异步任务共享。
 struct Inner {
+    /// 进行中的会话表：state → 会话（回调到达后移除）
     sessions: Mutex<HashMap<String, PendingSession>>,
+    /// 完成结果表：state → 轮询结果（供 `poll_oauth2` 读取）
     completed: Mutex<HashMap<String, OAuth2PollResult>>,
+    /// 提供商池，用于读取 OAuth2/IMAP/SMTP 配置
     provider_pool: Arc<ProviderPool>,
+    /// 共享的 reqwest 客户端（关闭重定向，避免跟随 token 端点的 302）
     http_client: reqwest::Client,
+    /// 认证管理器，用于 Keyring 存取和 access_token 缓存
     auth_manager: Arc<AuthManager>,
+    /// 数据库连接，用于创建 OAuth2 账号
     db: DbConn,
 }
 
 /// OAuth2 PKCE 流程管理器
+///
+/// 负责协调一次完整的 OAuth2 授权码 + PKCE 流程：生成授权 URL、监听本地回调、
+/// code 换 token、将 token 持久化到 Keyring / 内存缓存 / 数据库，并暴露轮询接口
+/// 供前端查询授权结果。
+///
+/// 内部状态封装在 [`Inner`] 中并以 `Arc` 共享，因此 [`OAuth2Manager`] 本身可廉价克隆，
+/// 也能被后台回调任务持有。实例在应用启动时由 [`AuthManager::set_oauth2_manager`]
+/// 注入，全局唯一。
+///
+/// [`AuthManager::set_oauth2_manager`]: crate::domain::auth::AuthManager::set_oauth2_manager
 pub struct OAuth2Manager {
     inner: Arc<Inner>,
 }
 
 impl OAuth2Manager {
+    /// 创建 OAuth2 管理器。
+    ///
+    /// 初始化一个禁用重定向的共享 reqwest 客户端（避免 token 端点 302 干扰），
+    /// 并从全局 [`PROVIDER_POOL`] 获取 provider 配置来源。
+    ///
+    /// # 参数
+    ///
+    /// - `auth_manager`: 认证管理器（Keyring 存取 + access_token 缓存）
+    /// - `db`: 数据库连接（用于创建 OAuth2 账号）
+    ///
+    /// # 错误
+    ///
+    /// 当全局 provider pool 未初始化时返回 [`MailError::ProviderNotSupported`]。
     pub fn new(auth_manager: Arc<AuthManager>, db: DbConn) -> Result<Self, MailError> {
         let http_client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
@@ -96,6 +175,26 @@ impl OAuth2Manager {
     }
 
     /// Step 1: 生成带 PKCE 的授权 URL，启动后台回调监听
+    ///
+    /// 生成 PKCE challenge/verifier 与 CSRF state，绑定一个临时本地端口，
+    /// 构造授权 URL 返回给前端打开浏览器；同时 spawn 一个最长等待 5 分钟的
+    /// 后台任务（[`handle_callback`]）监听回调。
+    ///
+    /// # 参数
+    ///
+    /// - `provider_id`: 提供商标识（如 "gmail"、"outlook"），必须支持 OAuth2
+    /// - `email`: 用户邮箱
+    /// - `display_name`: 可选显示名称，用于后续在数据库创建账号时回填
+    ///
+    /// # 返回
+    ///
+    /// [`OAuth2AuthUrl`]，包含授权 URL、state（轮询时回传）和本地回调端口。
+    ///
+    /// # 错误
+    ///
+    /// - [`MailError::InvalidProvider`]: 未知 provider
+    /// - [`MailError::OAuth2Error`]: provider 不支持 OAuth2、端口绑定失败、
+    ///   或授权/重定向 URL 非法
     pub async fn start_auth(
         &self,
         provider_id: &str,
@@ -212,6 +311,19 @@ impl OAuth2Manager {
     }
 
     /// 轮询 OAuth2 状态
+    ///
+    /// 前端在打开授权 URL 后，使用 `start_auth` 返回的 `state` 周期性调用本方法，
+    /// 直到拿到 [`OAuth2PollResult::Completed`] 或 [`OAuth2PollResult::Error`]。
+    /// 若 `state` 仍在进行中（回调尚未到达 / token 交换未完成），返回
+    /// [`OAuth2PollResult::Pending`]。
+    ///
+    /// # 参数
+    ///
+    /// - `state`: `start_auth` 返回的 CSRF state
+    ///
+    /// # 返回
+    ///
+    /// 当前 [`OAuth2PollResult`]；本方法目前不会返回 `Err`。
     pub async fn poll_oauth2(&self, state: &str) -> Result<OAuth2PollResult, MailError> {
         tracing::trace!(state = %state, "轮询 OAuth2 状态");
         let completed = self.inner.completed.lock().await;
@@ -223,6 +335,33 @@ impl OAuth2Manager {
     }
 
     /// 刷新过期的 access_token
+    ///
+    /// 使用存储在 Keyring 中的 refresh_token 向服务商 token 端点换取新的
+    /// access_token（必要时还会拿到新的 refresh_token）。主要由
+    /// [`AuthManager::get_credentials`] 在缓存未命中时调用。
+    ///
+    /// # 参数
+    ///
+    /// - `provider_id`: 提供商标识，必须支持 OAuth2
+    /// - `refresh_token`: 有效的 refresh_token（通常来自 Keyring）
+    ///
+    /// # 返回
+    ///
+    /// [`OAuth2TokenResult`]，包含新的 access_token（以及可能的新 refresh_token）。
+    ///
+    /// # Microsoft token 端点特殊处理
+    ///
+    /// Microsoft 要求 `client_id` 必须出现在请求体中，**不接受**仅靠 HTTP Basic Auth
+    /// 传递 `client_id`。oauth2 crate 在 client 上设置了 `client_secret` 时会改用
+    /// Basic Auth，导致请求被拒。因此这里故意不在 client 上设置 `client_secret`，
+    /// 而是把 `client_id` / `client_secret` 作为额外参数加入请求体（见下方注释行）。
+    ///
+    /// # 错误
+    ///
+    /// - [`MailError::InvalidProvider`]: 未知 provider
+    /// - [`MailError::OAuth2Error`]: provider 不支持 OAuth2、token_url 非法或刷新请求失败
+    ///
+    /// [`AuthManager::get_credentials`]: crate::domain::auth::AuthManager::get_credentials
     pub async fn refresh_token(
         &self,
         provider_id: &str,
@@ -245,7 +384,12 @@ impl OAuth2Manager {
         let client = BasicClient::new(client_id).set_token_uri(token_url);
 
         // 不在 client 上设置 client_secret，确保 oauth2 crate 将 client_id 放入请求体。
-        // Microsoft 的 token 端点要求 client_id 在请求体中，不接受仅靠 Basic Auth 传递。
+        // ── Microsoft token 端点的硬性要求 ──
+        // Microsoft 的 token 端点要求 client_id 必须出现在请求体中，不接受仅靠 Basic Auth
+        // 传递 client_id。oauth2 crate 一旦在 client 上设置了 client_secret，就会把
+        // client_id/client_secret 放进 HTTP Basic Auth 头而不是请求体，导致刷新被拒。
+        // 因此这里保持 client 不带 secret，再通过 add_extra_param 把 client_secret
+        // 补进请求体（下方）。如未来更换 oauth2 crate 行为，需重新验证此流程。
         let refresh_token = RefreshToken::new(refresh_token.to_string());
         let mut refresh_req = client.exchange_refresh_token(&refresh_token);
 
@@ -263,6 +407,22 @@ impl OAuth2Manager {
 }
 
 /// 后台处理 OAuth2 回调：解析 code + state → 交换 token → 存储 + 创建账号
+///
+/// 由 [`OAuth2Manager::start_auth`] spawn，在 5 分钟超时内等待一次回调连接。
+/// 成功路径：解析出 `code`/`state` → 校验 state → code 换 token → 把 refresh_token
+/// 写入 Keyring、access_token 缓存到内存、经 `AccountService` 在数据库创建账号，
+/// 最后把 [`OAuth2PollResult::Completed`] 写入 `completed` 表供前端轮询读取。
+///
+/// # 参数
+///
+/// - `listener`: 已绑定临时端口的 TCP 监听器（来自 `start_auth`）
+/// - `expected_state`: 期望的 CSRF state，用于和回调带回的 state 比对
+/// - `inner`: 共享内部状态
+///
+/// # 返回
+///
+/// 成功返回 `Ok(())`；任意环节失败返回 `Err(String)`，
+/// 调用方会把它转成 [`OAuth2PollResult::Error`]。
 async fn handle_callback(
     listener: tokio::net::TcpListener,
     expected_state: &str,
@@ -401,6 +561,20 @@ async fn handle_callback(
 }
 
 /// 执行 OAuth2 code → token 交换
+///
+/// 用会话中保存的 PKCE verifier 和回调拿到的授权 code，向服务商 token 端点
+/// 换取 access_token / refresh_token。verifier 取出后置空，防止被重复使用。
+///
+/// # 参数
+///
+/// - `inner`: 共享内部状态（用于读取 provider 配置和 http_client）
+/// - `session`: 已从 `sessions` 表移除的待处理会话（消费其中 PKCE verifier）
+/// - `code`: 回调拿到的授权码
+///
+/// # 返回
+///
+/// 成功返回 [`TokenExchangeResult`]（含 token 与回填的邮箱/provider 信息），
+/// 失败返回 `Err(String)`。
 async fn do_token_exchange(
     inner: &Inner,
     mut session: PendingSession,
@@ -467,11 +641,17 @@ async fn do_token_exchange(
 
 /// Token 交换内部结果（包含会话信息，仅 handle_callback 使用）
 struct TokenExchangeResult {
+    /// 访问令牌
     access_token: String,
+    /// 刷新令牌（部分 provider 可能不返回）
     refresh_token: Option<String>,
+    /// access_token 有效期（秒）
     expires_in: Option<i64>,
+    /// 用户邮箱（来自会话）
     email: String,
+    /// 可选显示名称（来自会话）
     display_name: Option<String>,
+    /// 提供商标识（来自会话）
     provider_id: String,
 }
 
@@ -503,6 +683,7 @@ fn urldecode(s: &str) -> String {
     result
 }
 
+/// 单个十六进制字节 → 数值（非十六进制字符返回 0），供 [`urldecode`] 解析 `%XX` 使用。
 fn hex_val(b: u8) -> u8 {
     match b {
         b'0'..=b'9' => b - b'0',

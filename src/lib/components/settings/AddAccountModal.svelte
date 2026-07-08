@@ -5,17 +5,18 @@
   本组件是邮箱账号添加的核心模态框，支持多种邮箱服务商的账号配置。
 
   ==================== 功能说明 ====================
-  1. 三步式添加流程：
+  1. 四步式添加流程：
      - 第一步：选择邮箱服务商（Gmail、Outlook等）或手动配置
      - 第二步：输入账号凭据（OAuth2授权 或 密码登录）
-     - 第三步：显示添加成功结果
+     - 第三步：选择首次同步范围
+     - 第四步：显示添加成功结果
   2. OAuth2 授权流程：在默认浏览器中打开授权页面，轮询等待授权完成
   3. 密码认证流程：支持自动检测邮箱服务商、手动配置 IMAP/SMTP
   4. SSL/TLS 加密模式配置，自动推荐端口
 
   ==================== 组件状态 ====================
   - open: 模态框是否打开
-  - step: 当前步骤（"select" | "credentials" | "done"）
+  - step: 当前步骤（"select" | "credentials" | "sync-scope" | "done"）
   - selectedProvider: 选中的服务商信息
   - isManual: 是否为手动配置模式
   - providers: 可用的服务商列表
@@ -50,8 +51,16 @@
     import { getI18nState } from "$lib/stores/i18n.svelte";
     // 导入账户状态管理，用于刷新账户列表
     import { getAccountState } from "$lib/stores/account.svelte";
+    // 导入同步状态管理，用于首次同步新建账号
+    import { getSyncState } from "$lib/stores/sync.svelte";
     // 导入 Tauri 后端命令，用于与服务端通信
     import { commands } from "$lib/bindings";
+    import { goto } from "$app/navigation";
+    import {
+        continueAfterAccountAdded,
+        resolveOAuth2CompletedAccount,
+        startInitialSyncAfterAccountAdded,
+    } from "./account-add-flow";
 
     // 导入 Tauri 的 URL 打开插件，用于在默认浏览器中打开 OAuth2 授权页面
     import { openUrl } from "@tauri-apps/plugin-opener";
@@ -67,7 +76,7 @@
         Shield, // 盾牌图标（用于密码登录按钮）
     } from "lucide-svelte";
     // 导入服务商信息类型定义
-    import type { ProviderInfo } from "$lib/bindings";
+    import type { InitialSyncRange, ProviderInfo } from "$lib/bindings";
 
     // 获取国际化状态实例
     const i18n = getI18nState();
@@ -75,13 +84,17 @@
     const t = $derived(i18n.t);
     // 获取账户状态实例
     const accountStore = getAccountState();
+    // 获取同步状态实例
+    const syncStore = getSyncState();
 
     // ─── 模态框基础状态 ───
 
     // 模态框是否打开（外部通过 show() 方法控制）
     let open = $state(false);
-    // 当前步骤：选择服务商 → 输入凭据 → 完成
-    let step = $state<"select" | "credentials" | "done">("select");
+    // 当前步骤：选择服务商 → 输入凭据 → 选择同步范围 → 完成
+    let step = $state<"select" | "credentials" | "sync-scope" | "done">(
+        "select",
+    );
     // 选中的邮箱服务商信息，null 表示手动配置模式
     let selectedProvider = $state<ProviderInfo | null>(null);
     // 是否为手动配置模式（未选择预设服务商）
@@ -132,6 +145,15 @@
     let submitting = $state(false);
     // 错误信息
     let error = $state("");
+    // 当前提交阶段：空闲、验证中、完成
+    let phase = $state<"idle" | "validating" | "done">("idle");
+    // 首次同步错误信息
+    let syncError = $state("");
+    // 等待用户选择首次同步范围的账号 ID
+    let pendingInitialSyncAccountId = $state<number | null>(null);
+    // 首次同步范围，默认同步最近三个月
+    let selectedInitialSyncRange =
+        $state<InitialSyncRange>("three_months");
 
     // ─── OAuth2 授权流程状态 ───
 
@@ -178,6 +200,24 @@
         None: 25, // 无加密端口
     };
 
+    type InitialSyncRangeOption = {
+        value: InitialSyncRange;
+        label: string;
+        hint?: string;
+    };
+
+    const initialSyncRangeOptions = $derived<InitialSyncRangeOption[]>([
+        { value: "week", label: t.account.syncRangeWeek },
+        { value: "month", label: t.account.syncRangeMonth },
+        { value: "three_months", label: t.account.syncRangeThreeMonths },
+        { value: "year", label: t.account.syncRangeYear },
+        {
+            value: "all",
+            label: t.account.syncRangeAll,
+            hint: t.account.syncRangeAllHint,
+        },
+    ]);
+
     // ─── 副作用 ───
 
     // 当模态框打开时自动加载服务商列表
@@ -209,6 +249,8 @@
             : "Password";
         step = "credentials";
         error = "";
+        syncError = "";
+        phase = "idle";
         oauthError = "";
     }
 
@@ -222,6 +264,8 @@
         authType = "Password";
         step = "credentials";
         error = "";
+        syncError = "";
+        phase = "idle";
         oauthError = "";
     }
 
@@ -259,6 +303,8 @@
     async function startOAuth2Flow() {
         if (!selectedProvider || !email) return;
         oauthError = "";
+        syncError = "";
+        phase = "idle";
         oauthPolling = true;
 
         try {
@@ -268,7 +314,6 @@
                 email,
                 displayName || null,
             );
-            console.log(result);
 
             if (result.status === "error") {
                 oauthError = result.error.message as string;
@@ -289,6 +334,35 @@
             oauthError = String(e);
             oauthPolling = false;
         }
+    }
+
+    async function enterSyncScope(accountId: number) {
+        await accountStore.loadAccounts();
+        accountStore.setActive(accountId);
+        pendingInitialSyncAccountId = accountId;
+        selectedInitialSyncRange = "three_months";
+        step = "sync-scope";
+    }
+
+    async function startSelectedInitialSync() {
+        if (pendingInitialSyncAccountId === null) return;
+        const accountId = pendingInitialSyncAccountId;
+        const range = selectedInitialSyncRange;
+
+        await continueAfterAccountAdded({
+            accountId,
+            loadAccounts: () => accountStore.loadAccounts(),
+            setActive: (id) => accountStore.setActive(id),
+            close,
+            goHome: () => goto("/"),
+        });
+
+        void startInitialSyncAfterAccountAdded({
+            accountId,
+            range,
+            syncAccountWithRange: (id, range) =>
+                syncStore.syncAccountWithRange(id, range),
+        });
     }
 
     /**
@@ -335,24 +409,40 @@
                 }
 
                 // 状态二：授权成功完成
-                if (
-                    typeof pollResult === "object" &&
-                    "Completed" in pollResult
-                ) {
+                const completed =
+                    typeof pollResult === "object"
+                        ? pollResult.Completed
+                        : undefined;
+                const pollError =
+                    typeof pollResult === "object"
+                        ? pollResult.Error
+                        : undefined;
+                if (completed) {
                     clearInterval(interval);
                     oauthPolling = false;
-                    // 后端已自动创建账号，刷新账户列表并跳转到完成页
-                    await accountStore.loadAccounts();
-                    step = "done";
+                    // 后端已自动创建账号，进入同步范围选择步骤
+                    const completedEmail = completed.email;
+                    const accountId = await resolveOAuth2CompletedAccount({
+                        completedEmail,
+                        loadAccounts: () => accountStore.loadAccounts(),
+                        getAccounts: () => accountStore.accounts,
+                    });
+                    if (accountId !== null) {
+                        await enterSyncScope(accountId);
+                    } else {
+                        oauthError = t.account.oauthAccountMissing.replace(
+                            "{email}",
+                            completedEmail,
+                        );
+                        syncError = oauthError;
+                        phase = "idle";
+                    }
                 }
                 // 状态三：授权失败
-                else if (
-                    typeof pollResult === "object" &&
-                    "Error" in pollResult
-                ) {
+                else if (pollError) {
                     clearInterval(interval);
                     oauthPolling = false;
-                    oauthError = pollResult.Error;
+                    oauthError = pollError;
                 }
             } catch {
                 // 轮询命令暂不可用或其他临时错误 - 继续轮询
@@ -370,7 +460,9 @@
     async function handleSubmit(e: Event) {
         e.preventDefault();
         error = "";
+        syncError = "";
         submitting = true;
+        phase = "validating";
         try {
             const result = await commands.createAccount({
                 // 用户名：取邮箱 @ 前的部分
@@ -400,15 +492,16 @@
             });
 
             if (result.status === "ok") {
-                // 创建成功，跳转到完成步骤
-                step = "done";
-                await accountStore.loadAccounts();
+                // 创建成功后进入同步范围选择步骤
+                await enterSyncScope(result.data.id);
             } else {
                 // 创建失败，显示错误信息
                 error = result.error.message as string;
+                phase = "idle";
             }
         } catch (e: unknown) {
             error = String(e);
+            phase = "idle";
         }
         submitting = false;
     }
@@ -457,6 +550,10 @@
         detectedProviderName = "";
         submitting = false;
         error = "";
+        phase = "idle";
+        syncError = "";
+        pendingInitialSyncAccountId = null;
+        selectedInitialSyncRange = "three_months";
         oauthState = "";
         oauthPolling = false;
         oauthError = "";
@@ -481,6 +578,7 @@
     >
         <!-- 模态框主体：固定宽度，圆角卡片样式 -->
         <div
+            data-testid="add-account-modal"
             class="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl"
         >
             <!-- 模态框头部：标题 + 步骤指示器 + 关闭按钮 -->
@@ -509,14 +607,21 @@
                         >
                         <ChevronRight size={12} />
                         <span
+                            class={step === "sync-scope"
+                                ? "font-medium text-primary"
+                                : ""}>3. {t.account.startSync}</span
+                        >
+                        <ChevronRight size={12} />
+                        <span
                             class={step === "done"
                                 ? "font-medium text-primary"
-                                : ""}>3. {t.account.step3}</span
+                                : ""}>4. {t.account.step3}</span
                         >
                     </div>
                 </div>
                 <!-- 关闭按钮 -->
                 <button
+                    data-testid="add-account-close-button"
                     class="rounded-md p-1 text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                     onclick={close}
                     aria-label="Close"
@@ -568,6 +673,7 @@
 
                             <!-- "其他"按钮：进入手动配置模式 -->
                             <button
+                                data-testid="add-account-provider-other-button"
                                 class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border p-4 transition-all hover:border-primary/50 hover:bg-glass-hover"
                                 onclick={selectManual}
                             >
@@ -643,6 +749,7 @@
                                     >{t.account.email}</label
                                 >
                                 <input
+                                    data-testid="add-account-email-input"
                                     type="email"
                                     bind:value={email}
                                     onchange={detectProvider}
@@ -673,6 +780,7 @@
                                     >{t.account.displayName}</label
                                 >
                                 <input
+                                    data-testid="add-account-display-name-input"
                                     type="text"
                                     bind:value={displayName}
                                     class="w-full rounded-md border border-border bg-glass px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -785,7 +893,11 @@
                                                 class="animate-spin"
                                             />
                                         {/if}
-                                        {t.common.confirm}
+                                        {#if phase === "validating"}
+                                            正在验证...
+                                        {:else}
+                                            {t.common.confirm}
+                                        {/if}
                                     </button>
                                 </form>
                             {/if}
@@ -802,6 +914,7 @@
                                     >{t.account.email}</label
                                 >
                                 <input
+                                    data-testid="add-account-email-input"
                                     type="email"
                                     bind:value={email}
                                     onchange={detectProvider}
@@ -831,6 +944,7 @@
                                     >{t.account.displayName}</label
                                 >
                                 <input
+                                    data-testid="add-account-display-name-input"
                                     type="text"
                                     bind:value={displayName}
                                     class="w-full rounded-md border border-border bg-glass px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -846,6 +960,7 @@
                                     >{t.account.password}</label
                                 >
                                 <input
+                                    data-testid="add-account-password-input"
                                     type="password"
                                     bind:value={password}
                                     required
@@ -875,6 +990,7 @@
                                                 {t.account.imapHost}
                                             </label>
                                             <input
+                                                data-testid="add-account-imap-host-input"
                                                 type="text"
                                                 bind:value={imapHost}
                                                 required
@@ -891,6 +1007,7 @@
                                                 {t.account.imapPort}
                                             </label>
                                             <input
+                                                data-testid="add-account-imap-port-input"
                                                 type="number"
                                                 bind:value={imapPort}
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -905,6 +1022,7 @@
                                                 IMAP 加密
                                             </label>
                                             <select
+                                                data-testid="add-account-imap-ssl-select"
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                                                 value={imapSslMode}
                                                 onchange={(e) =>
@@ -932,6 +1050,7 @@
                                                 {t.account.smtpHost}
                                             </label>
                                             <input
+                                                data-testid="add-account-smtp-host-input"
                                                 type="text"
                                                 bind:value={smtpHost}
                                                 required
@@ -948,6 +1067,7 @@
                                                 {t.account.smtpPort}
                                             </label>
                                             <input
+                                                data-testid="add-account-smtp-port-input"
                                                 type="number"
                                                 bind:value={smtpPort}
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -962,6 +1082,7 @@
                                                 SMTP 加密
                                             </label>
                                             <select
+                                                data-testid="add-account-smtp-ssl-select"
                                                 class="w-full rounded-md border border-border bg-glass px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                                                 value={smtpSslMode}
                                                 onchange={(e) =>
@@ -982,18 +1103,26 @@
 
                             <!-- 错误信息提示 -->
                             {#if error}
-                                <p class="text-sm text-destructive">{error}</p>
+                                <p
+                                    data-testid="add-account-error"
+                                    class="text-sm text-destructive"
+                                >
+                                    {error}
+                                </p>
                             {/if}
 
                             <!-- 操作按钮区域 -->
                             <div class="flex justify-between pt-2">
                                 <!-- 返回上一步按钮 -->
                                 <button
+                                    data-testid="add-account-back-button"
                                     type="button"
                                     class="flex items-center gap-1 rounded-md border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-glass-hover"
                                     onclick={() => {
                                         step = "select";
                                         error = "";
+                                        syncError = "";
+                                        phase = "idle";
                                     }}
                                 >
                                     <ChevronLeft size={16} />
@@ -1001,6 +1130,7 @@
                                 </button>
                                 <!-- 确认提交按钮 -->
                                 <button
+                                    data-testid="add-account-submit-button"
                                     type="submit"
                                     disabled={submitting}
                                     class="compose-btn flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
@@ -1011,7 +1141,11 @@
                                             class="animate-spin"
                                         />
                                     {/if}
-                                    {t.common.confirm}
+                                    {#if phase === "validating"}
+                                        正在验证...
+                                    {:else}
+                                        {t.common.confirm}
+                                    {/if}
                                 </button>
                             </div>
                         </form>
@@ -1026,6 +1160,8 @@
                                 onclick={() => {
                                     step = "select";
                                     error = "";
+                                    syncError = "";
+                                    phase = "idle";
                                     oauthError = "";
                                     oauthPolling = false;
                                 }}
@@ -1037,19 +1173,74 @@
                     {/if}
                 </div>
 
+                <!-- ─── 第三步：选择首次同步范围 ─── -->
+            {:else if step === "sync-scope"}
+                <div class="p-6">
+                    <h3 class="text-base font-semibold text-foreground">
+                        {t.account.syncScopeTitle}
+                    </h3>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                        {t.account.syncScopeHint}
+                    </p>
+
+                    <div class="mt-5 space-y-2">
+                        {#each initialSyncRangeOptions as option}
+                            <label
+                                class="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2 transition-colors hover:bg-glass-hover"
+                            >
+                                <input
+                                    type="radio"
+                                    name="initial-sync-range"
+                                    value={option.value}
+                                    bind:group={selectedInitialSyncRange}
+                                    class="mt-1"
+                                />
+                                <span class="min-w-0">
+                                    <span
+                                        class="block text-sm font-medium text-foreground"
+                                        >{option.label}</span
+                                    >
+                                    {#if option.hint}
+                                        <span
+                                            class="block text-xs text-muted-foreground"
+                                            >{option.hint}</span
+                                        >
+                                    {/if}
+                                </span>
+                            </label>
+                        {/each}
+                    </div>
+
+                    <button
+                        class="mt-6 w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                        onclick={startSelectedInitialSync}
+                    >
+                        {t.account.startSync}
+                    </button>
+                </div>
+
                 <!-- ─── 第三步：添加成功 ─── -->
             {:else if step === "done"}
-                <div class="p-8 text-center">
+                <div data-testid="add-account-done" class="p-8 text-center">
                     <!-- 成功图标 -->
                     <CircleCheck size={48} class="mx-auto text-green-500" />
                     <!-- 显示添加的邮箱地址 -->
                     <p class="mt-3 text-sm font-medium text-foreground">
                         {email}
                     </p>
-                    <!-- 成功提示文字 -->
-                    <p class="mt-1 text-xs text-muted-foreground">
-                        {t.account.testSuccess}
-                    </p>
+                    <!-- 完成提示文字：首次同步会在后台启动，不在此处承诺已完成 -->
+                    {#if syncError}
+                        <p class="mt-1 text-xs text-destructive">
+                            {t.account.initialSyncFailed.replace(
+                                "{error}",
+                                syncError,
+                            )}
+                        </p>
+                    {:else}
+                        <p class="mt-1 text-xs text-muted-foreground">
+                            {t.account.initialSyncStarted}
+                        </p>
+                    {/if}
                     <!-- 操作按钮 -->
                     <div class="mt-6 flex items-center justify-center gap-3">
                         <!-- 继续添加另一个账号 -->
@@ -1063,6 +1254,8 @@
                                 selectedProvider = null;
                                 isManual = false;
                                 error = "";
+                                phase = "idle";
+                                syncError = "";
                                 oauthState = "";
                                 oauthPolling = false;
                                 oauthError = "";
@@ -1072,6 +1265,7 @@
                         </button>
                         <!-- 关闭模态框 -->
                         <button
+                            data-testid="add-account-done-close-button"
                             class="compose-btn rounded-md px-4 py-2 text-sm font-medium text-white"
                             onclick={close}
                         >
@@ -1083,15 +1277,3 @@
         </div>
     </div>
 {/if}
-
-<!-- 样式定义 -->
-<style>
-    /* 主操作按钮样式：使用主色到辅色的渐变背景 */
-    .compose-btn {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-secondary) 100%
-        );
-    }
-</style>

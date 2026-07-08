@@ -1,3 +1,19 @@
+/**
+ * Postium Mail - 账号命令测试
+ * account.test.ts
+ *
+ * 本文件测试账号相关的 Tauri 命令调用，确保命令参数
+ * 和返回值正确传递。
+ *
+ * ==================== 测试范围 ====================
+ * 1. listAccounts - 获取账号列表
+ * 2. getAccount - 获取指定账号详情
+ * 3. deleteAccount - 删除账号
+ * 4. createAccount - 创建账号
+ * 5. detectProvider - 检测服务商
+ * 6. 错误响应处理
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createMockResult,

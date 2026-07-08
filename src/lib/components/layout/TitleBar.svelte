@@ -33,6 +33,18 @@
     // 通过此实例可以调用 minimize()、toggleMaximize()、hide() 等窗口控制方法
     const appWindow = getCurrentWindow();
 
+    type CloseBehavior = "hide" | "close";
+
+    let {
+        title = "Postium Mail",
+        closeBehavior = "hide",
+        onCloseError,
+    } = $props<{
+        title?: string;
+        closeBehavior?: CloseBehavior;
+        onCloseError?: () => void | Promise<void>;
+    }>();
+
     // ==================== 响应式状态 ====================
 
     // 窗口是否处于最大化状态
@@ -56,11 +68,17 @@
         await updateState();
     }
 
-    // 关闭窗口（实际为隐藏窗口）
-    // 使用 hide() 而非 close()，使应用继续在系统托盘运行
-    // 用户可以通过系统托盘图标重新显示窗口
+    // 主窗口使用 hide() 保持托盘后台运行，独立窗体使用 close() 释放窗口。
     async function close() {
-        await appWindow.hide();
+        try {
+            if (closeBehavior === "close") {
+                await appWindow.close();
+                return;
+            }
+            await appWindow.hide();
+        } catch {
+            await onCloseError?.();
+        }
     }
 
     // 更新窗口最大化状态
@@ -142,8 +160,9 @@
         <!-- 应用名称文本 -->
         <!-- data-tauri-drag-region：确保文字区域也可拖拽 -->
         <span
+            data-testid="window-title"
             class="text-[13px] font-medium text-foreground"
-            data-tauri-drag-region>Postium Mail</span
+            data-tauri-drag-region>{title}</span
         >
     </div>
 
@@ -188,43 +207,3 @@
         </button>
     </div>
 </div>
-
-<style>
-    /* ==================== 窗口控制按钮基础样式 ==================== */
-
-    /*
-      .control-btn：控制按钮的通用样式
-      - 固定宽度 46px，高度占满标题栏
-      - 透明背景，居中显示图标
-      - 悬停时显示半透明背景
-    */
-    .control-btn {
-        width: 46px;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        background: transparent;
-        cursor: pointer;
-        transition: background 150ms ease;
-        color: var(--color-muted-foreground);
-    }
-
-    /* 控制按钮悬停效果：显示半透明背景，文字变亮 */
-    .control-btn:hover {
-        background: var(--color-glass-hover);
-        color: var(--color-foreground);
-    }
-
-    /*
-      关闭按钮特殊悬停效果
-      悬停时背景变为红色 (#e81123)，文字变白
-      使用 !important 确保覆盖普通控制按钮的悬停样式
-      这是 Windows 窗口标题栏的标准设计语言
-    */
-    .close-btn:hover {
-        background: #e81123 !important;
-        color: white !important;
-    }
-</style>

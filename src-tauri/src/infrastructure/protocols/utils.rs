@@ -1,6 +1,11 @@
 use async_imap::imap_proto::Address;
 use chrono::Datelike;
 
+use crate::error::MailError;
+
+/// 返回三个月前的日期，格式化为 IMAP 搜索所需的日期格式（如 "01-Jan-2025"）
+///
+/// 用于全量同步时通过 IMAP `SINCE` 命令限定查询范围。
 pub fn three_months_ago_imap_format() -> String {
     let now = chrono::Utc::now();
     let three_months_ago = now - chrono::Duration::days(90);
@@ -20,6 +25,14 @@ pub fn three_months_ago_imap_format() -> String {
     );
 
     date_str
+}
+
+/// 将 Unix 秒级时间戳格式化为 IMAP 搜索日期字符串
+pub fn unix_seconds_to_imap_date(timestamp: i64) -> Result<String, MailError> {
+    let date = chrono::DateTime::from_timestamp(timestamp, 0)
+        .ok_or_else(|| MailError::InvalidParam(format!("无效 Unix 时间戳: {timestamp}")))?
+        .date_naive();
+    Ok(date.format("%d-%b-%Y").to_string())
 }
 
 /// 将月份数字转换为英文缩写
@@ -143,4 +156,26 @@ pub fn serialize_addresses(addresses: &str) -> String {
         .collect();
 
     format!("[{}]", emails.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_seconds_to_imap_date_should_format_unix_timestamp() {
+        assert_eq!(
+            unix_seconds_to_imap_date(1_704_067_200).unwrap(),
+            "01-Jan-2024"
+        );
+    }
+
+    #[test]
+    fn unix_seconds_to_imap_date_should_return_error_for_invalid_timestamp() {
+        let result = unix_seconds_to_imap_date(i64::MAX);
+
+        assert!(
+            matches!(result, Err(MailError::InvalidParam(message)) if message.contains("无效 Unix 时间戳"))
+        );
+    }
 }

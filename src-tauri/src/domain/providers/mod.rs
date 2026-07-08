@@ -284,8 +284,7 @@ pub enum SslMode {
 ///
 /// ```rust,ignore
 /// let mapping = provider.folder_mapping();
-/// let folder_type = mapping.find_standard_type("INBOX"); // 返回 "inbox"
-/// let folder_type = mapping.find_standard_type("Junk");  // 返回 "spam"
+/// // 文件夹分类统一使用 FolderRegistry（见 domain::folders 模块）。
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct StandardFolder {
@@ -325,57 +324,6 @@ impl StandardFolder {
             trash: vec!["Trash".into(), "Deleted".into(), "Deleted Messages".into()],
             archive: vec!["Archive".into(), "Archived".into()],
         }
-    }
-
-    /// 从 IMAP 文件夹名称查找对应的标准文件夹类型
-    ///
-    /// 使用两阶段匹配策略：
-    /// 1. 精确匹配：文件夹名称完全匹配
-    /// 2. 包含匹配：忽略大小写的子字符串匹配
-    ///
-    /// # 参数
-    ///
-    /// - `imap_name`: IMAP 服务器返回的文件夹名称
-    ///
-    /// # 返回值
-    ///
-    /// 返回标准文件夹类型字符串：
-    /// - "inbox": 收件箱
-    /// - "sent": 已发送
-    /// - "drafts": 草稿箱
-    /// - "spam": 垃圾邮件
-    /// - "trash": 已删除
-    /// - "archive": 归档
-    /// - "other": 其他文件夹（不匹配任何标准类型）
-    pub fn find_standard_type(&self, imap_name: &str) -> &str {
-        let fields: &[(&str, &[String])] = &[
-            ("inbox", &self.inbox),
-            ("sent", &self.sent),
-            ("drafts", &self.drafts),
-            ("spam", &self.spam),
-            ("trash", &self.trash),
-            ("archive", &self.archive),
-        ];
-
-        // 精确匹配
-        for (name, folders) in fields {
-            if folders.iter().any(|n| n == imap_name) {
-                return name;
-            }
-        }
-
-        // 包含匹配（忽略大小写）
-        let imap_lower = imap_name.to_lowercase();
-        for (name, folders) in fields {
-            if folders.iter().any(|n| {
-                let n_lower = n.to_lowercase();
-                imap_lower.contains(&n_lower) || n_lower.contains(&imap_lower)
-            }) {
-                return name;
-            }
-        }
-
-        "other"
     }
 
     /// 获取所有标准文件夹名称列表
@@ -626,44 +574,11 @@ mod standard_folder_tests {
     }
 
     #[test]
-    fn test_find_inbox() {
-        let folders = default_folders();
-        assert_eq!(folders.find_standard_type("INBOX"), "inbox");
-    }
-
-    #[test]
-    fn test_find_sent() {
-        let folders = default_folders();
-        assert_eq!(folders.find_standard_type("Sent"), "sent");
-        assert_eq!(folders.find_standard_type("Sent Items"), "sent");
-    }
-
-    #[test]
-    fn test_find_spam() {
-        let folders = default_folders();
-        assert_eq!(folders.find_standard_type("Spam"), "spam");
-        assert_eq!(folders.find_standard_type("Junk"), "spam");
-    }
-
-    #[test]
-    fn test_find_unknown_folder() {
-        let folders = default_folders();
-        assert_eq!(folders.find_standard_type("MyCustomFolder"), "other");
-    }
-
-    #[test]
     fn test_list_all_folders() {
         let folders = default_folders();
         let all = folders.list();
         assert!(all.contains(&"INBOX".to_string()));
         assert!(all.contains(&"Sent".to_string()));
         assert!(all.contains(&"Drafts".to_string()));
-    }
-
-    #[test]
-    fn test_case_insensitive_match() {
-        let folders = default_folders();
-        assert_eq!(folders.find_standard_type("trash"), "trash");
-        assert_eq!(folders.find_standard_type("TRASH"), "trash");
     }
 }

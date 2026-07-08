@@ -13,26 +13,26 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "postium_mail_lib"
 
+[[bin]]
+name = "postium-mail"
+path = "src/main.rs"
+
 [dependencies]
 # Tauri
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-keyring = "0.1"
 tauri-plugin-mcp-bridge = "0.11.0"
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 
 # Specta (类型绑定)
 specta = { version = "=2.0.0-rc.24", features = ["chrono"] }
 specta-typescript = "0.0.11"
 tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
 
-postium-mail-migration = { path = "migration" }
 # Database
-sea-orm = { version = "2.0.0-rc.35", features = [
-  "macros",
-  "runtime-tokio-rustls",
-  "sqlx-sqlite"
-] }
-sea-orm-migration = "2.0.0-rc.35"
+rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
+tokio-rusqlite = "0.7"
 
 # Email Protocols
 async-imap = { version = "0.11", default-features = false, features = [
@@ -41,6 +41,8 @@ async-imap = { version = "0.11", default-features = false, features = [
 # async-native-tls = "0.6"
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }
 mail-parser = "0.11"
+quoted_printable = "0.5"
+encoding_rs = "0.8"
 
 # OAuth
 oauth2 = { version = "5", features = ["reqwest"] }

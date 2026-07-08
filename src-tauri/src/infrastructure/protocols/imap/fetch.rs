@@ -1,21 +1,140 @@
+//! IMAP FETCH 命令处理模块
+//!
+//! 本模块实现了通过 IMAP FETCH 命令获取邮件数据的功能，包括：
+//! - 邮件头部的批量获取（用于骨架同步）
+//! - 邮件完整内容的获取（包含正文）
+//! - 邮件特定部分的获取（用于附件下载）
+//! - 邮件标志的获取
+
 use crate::error::MailError;
-use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
+use crate::infrastructure::protocols::types::{EmailHeader, FetchedBodySection, WholeEmailDto};
+use async_imap::imap_proto::types::{MessageSection, SectionPath};
 use futures::{StreamExt, TryStreamExt};
 use mail_parser::MessageParser;
 
-use super::parser::{self, ParsedHeaders, extract_headers_from_message};
+use super::parser::{
+    self, ParsedHeaders, decoded_body_html, decoded_body_text,
+    extract_headers_from_message_with_raw,
+};
 use super::{ImapClient, RawEmailHeader};
 
+/// 解析 MIME section 路径字符串为 SectionPath
+///
+/// # 参数
+/// - `section_path`: MIME section 路径，如 "1"、"2.1" 等
+/// - `message_section`: 可选的消息部分类型（如 Header、Mime）
+///
+/// # 返回
+/// 成功时返回解析后的 SectionPath，失败时返回 None
+///
+/// # 规则
+/// - section 必须为非空数字序列，以点分隔
+/// - 不允许包含 0（IMAP section 编号从 1 开始）
+fn parse_section_path(
+    section_path: &str,
+    message_section: Option<MessageSection>,
+) -> Option<SectionPath> {
+    // 将字符串分割为数字向量
+    let parts = section_path
+        .split('.')
+        .map(|part| part.parse::<u32>())
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+
+    // 空路径无效
+    if parts.is_empty() {
+        return None;
+    }
+    // IMAP section 编号从 1 开始，不允许 0
+    if parts.iter().any(|part| *part == 0) {
+        return None;
+    }
+
+    Some(SectionPath::Part(parts, message_section))
+}
+
+/// 从 MIME 头部解析 Content-Transfer-Encoding 字段
+///
+/// # 参数
+/// - `mime_header`: 原始 MIME 头部字节
+///
+/// # 返回
+/// 成功时返回传输编码的小写字符串（如 "base64"、"quoted-printable"），失败时返回 None
+///
+/// # 功能
+/// - 处理 RFC 822 头部折叠（continuation lines）
+/// - 查找 Content-Transfer-Encoding 字段并返回其值
+fn parse_transfer_encoding(mime_header: &[u8]) -> Option<String> {
+    let header = String::from_utf8_lossy(mime_header);
+    let mut unfolded = String::new();
+    // 展开折叠的头部行（以空格或制表符开头的续行）
+    for line in header.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            unfolded.push(' ');
+            unfolded.push_str(line.trim());
+        } else {
+            if !unfolded.is_empty() {
+                unfolded.push('\n');
+            }
+            unfolded.push_str(line);
+        }
+    }
+
+    // 查找 Content-Transfer-Encoding 字段
+    unfolded.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name
+            .trim()
+            .eq_ignore_ascii_case("Content-Transfer-Encoding")
+        {
+            Some(value.trim().to_ascii_lowercase())
+        } else {
+            None
+        }
+    })
+}
+
+/// 将 UID 列表转换为 IMAP UID SET 字符串
+///
+/// # 参数
+/// - `uids`: UID 列表
+///
+/// # 返回
+/// 成功时返回逗号分隔的 UID 字符串（如 "1,2,3"），空列表时返回 None
+fn build_uid_set(uids: &[u32]) -> Option<String> {
+    if uids.is_empty() {
+        return None;
+    }
+
+    Some(
+        uids.iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+// ─── ImapClient FETCH 实现 ───
+
 impl ImapClient {
-    /// 批量获取邮件头（用于骨架同步，不获取正文）
+    /// 按 UID SET 批量获取邮件头部
     ///
-    /// 使用 `BODY.PEEK[HEADER]` 获取 RFC822 原始头部，再通过 `mail_parser` 解析。
-    /// BODYSTRUCTURE 用于提取附件 section_path。
-    pub async fn batch_fetch_email_headers(
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uid_set`: IMAP UID SET，如 "1:100" 或 "1,2,3"
+    ///
+    /// # 返回
+    /// 成功时返回邮件头部列表
+    ///
+    /// # 功能
+    /// - 使用 BODY.PEEK[HEADER] 获取原始 RFC822 头部
+    /// - 使用 mail_parser 解析邮件头
+    /// - 从 BODYSTRUCTURE 提取附件信息
+    /// - 优先使用 INTERNALDATE 作为邮件日期（服务器端时间，更可靠）
+    async fn fetch_email_headers_by_uid_set(
         &mut self,
         folder: &str,
-        start_uid: u32,
-        end_uid: u32,
+        uid_set: &str,
     ) -> Result<Vec<EmailHeader>, MailError> {
         // SELECT 文件夹
         self.session
@@ -23,14 +142,12 @@ impl ImapClient {
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?;
 
-        let uid_range = format!("{}:{}", start_uid, end_uid);
-
-        tracing::trace!("批量获取邮件头: folder={}, uid_range={}", folder, uid_range);
+        tracing::trace!("批量获取邮件头: folder={}, uid_set={}", folder, uid_set);
 
         let fetches = self
             .session
             .uid_fetch(
-                &uid_range,
+                uid_set,
                 "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER] BODYSTRUCTURE UID)",
             )
             .await
@@ -115,9 +232,67 @@ impl ImapClient {
         Ok(headers)
     }
 
-    /// 按 UID 范围获取邮件头
+    /// 批量获取邮件头（用于骨架同步，不获取正文）
     ///
-    /// 使用 `BODY.PEEK[HEADER]` + `mail_parser` 解析邮件头。
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `start_uid`: 起始 UID
+    /// - `end_uid`: 结束 UID
+    ///
+    /// # 返回
+    /// 成功时返回邮件头部列表
+    ///
+    /// # 功能
+    /// - 使用 `BODY.PEEK[HEADER]` 获取 RFC822 原始头部
+    /// - 通过 `mail_parser` 解析邮件头
+    /// - BODYSTRUCTURE 用于提取附件 section_path
+    pub async fn batch_fetch_email_headers(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<EmailHeader>, MailError> {
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+        self.fetch_email_headers_by_uid_set(folder, &uid_range)
+            .await
+    }
+
+    /// 按精确 UID 集合批量获取邮件头
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uids`: UID 列表
+    ///
+    /// # 返回
+    /// 成功时返回邮件头部列表，空列表时返回空 Vec
+    pub async fn fetch_email_headers_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<EmailHeader>, MailError> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let uid_set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        self.fetch_email_headers_by_uid_set(folder, &uid_set).await
+    }
+
+    /// 按 UID 范围获取邮件头（轻量级版本）
+    ///
+    /// # 参数
+    /// - `start`: 起始序列号（非 UID）
+    /// - `end`: 结束序列号（非 UID），0 表示无限制
+    ///
+    /// # 返回
+    /// 成功时返回原始邮件头部列表
+    ///
+    /// # 功能
+    /// - 使用 `BODY.PEEK[HEADER]` + `mail_parser` 解析邮件头
+    /// - 适用于只需要基本邮件信息的场景
     pub async fn fetch_uids(
         &mut self,
         start: u32,
@@ -186,7 +361,13 @@ impl ImapClient {
         Ok(headers)
     }
 
-    /// 获取邮件完整内容 (RFC822)
+    /// 获取邮件完整内容（RFC822 格式）
+    ///
+    /// # 参数
+    /// - `uid`: 邮件 UID
+    ///
+    /// # 返回
+    /// 成功时返回 (纯文本正文, HTML 正文) 元组
     pub async fn fetch_body(&mut self, uid: u32) -> Result<(String, String), MailError> {
         tracing::debug!(uid, "IMAP: 获取邮件体");
         let mut fetches = self
@@ -204,11 +385,9 @@ impl ImapClient {
             && let Ok(email_message) = MessageParser::default()
                 .parse(fetch_body_raw)
                 .ok_or(|| MailError::ImapError("解析邮件失败".to_string()))
-            && let Ok(body_text) = email_message
-                .body_text(0)
+            && let Ok(body_text) = decoded_body_text(&email_message)
                 .ok_or(|| MailError::ImapError("获取邮件内容失败".to_string()))
-            && let Ok(body_html) = email_message
-                .body_html(0)
+            && let Ok(body_html) = decoded_body_html(&email_message)
                 .ok_or(|| MailError::ImapError("获取邮件内容失败".to_string()))
         {
             (body_text.to_string(), body_html.to_string())
@@ -219,7 +398,90 @@ impl ImapClient {
         Ok(body_result)
     }
 
+    /// 下载指定 MIME section 的原始内容和传输编码
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uid`: 邮件 UID
+    /// - `section_path`: MIME section 路径（如 "1"、"2.1"），空字符串表示整个邮件
+    ///
+    /// # 返回
+    /// 成功时返回包含原始内容和传输编码的 FetchedBodySection，邮件不存在时返回 None
+    ///
+    /// # 功能
+    /// - 同时获取 MIME 头（包含 Content-Transfer-Encoding）和实际内容
+    /// - 用于按需下载附件内容
+    pub async fn fetch_body_section_with_mime(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        section_path: &str,
+    ) -> Result<Option<FetchedBodySection>, MailError> {
+        let section_path = section_path.trim();
+        let (body_section, mime_section, items) = if section_path.is_empty() {
+            (
+                SectionPath::Full(MessageSection::Text),
+                SectionPath::Full(MessageSection::Header),
+                "(BODY.PEEK[HEADER] BODY.PEEK[TEXT] UID)".to_string(),
+            )
+        } else {
+            let body_section = parse_section_path(section_path, None).ok_or_else(|| {
+                MailError::AttachmentUnavailable(format!(
+                    "附件 MIME section path 无效: {section_path}"
+                ))
+            })?;
+            let mime_section = parse_section_path(section_path, Some(MessageSection::Mime))
+                .ok_or_else(|| {
+                    MailError::AttachmentUnavailable(format!(
+                        "附件 MIME section path 无效: {section_path}"
+                    ))
+                })?;
+            (
+                body_section,
+                mime_section,
+                format!("(BODY.PEEK[{section_path}.MIME] BODY.PEEK[{section_path}] UID)"),
+            )
+        };
+
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let mut fetches = self
+            .session
+            .uid_fetch(uid.to_string(), items)
+            .await
+            .map_err(|e| MailError::AttachmentDownloadFailed(e.to_string()))?;
+
+        let Some(fetch_result) = fetches.next().await else {
+            return Ok(None);
+        };
+        let fetch = fetch_result.map_err(|e| MailError::AttachmentDownloadFailed(e.to_string()))?;
+        if fetch.uid != Some(uid) {
+            return Ok(None);
+        }
+
+        let body = fetch.section(&body_section).ok_or_else(|| {
+            MailError::AttachmentDownloadFailed("附件 section 内容为空".to_string())
+        })?;
+        let transfer_encoding = fetch
+            .section(&mime_section)
+            .and_then(parse_transfer_encoding);
+
+        Ok(Some(FetchedBodySection {
+            body: body.to_vec(),
+            transfer_encoding,
+        }))
+    }
+
     /// 获取邮件的 FLAGS 和 UID（用于增量同步）
+    ///
+    /// # 参数
+    /// - `uid_set`: IMAP UID SET 字符串
+    ///
+    /// # 返回
+    /// 成功时返回 (UID, 标志列表) 的向量
     pub async fn fetch_flags(
         &mut self,
         uid_set: &str,
@@ -242,20 +504,24 @@ impl ImapClient {
         Ok(results)
     }
 
-    /// 按 UID 范围批量获取完整邮件（包含正文）
+    /// 按 UID SET 批量获取完整邮件（包含正文）
     ///
-    /// 使用 `mail_parser` 统一解析所有邮件头和正文内容，
-    /// BODYSTRUCTURE 仅用于提取附件 section_path（IMAP 按需下载所需）。
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uid_set`: IMAP UID SET 字符串
     ///
-    /// # 注意
+    /// # 返回
+    /// 成功时返回完整邮件 DTO 列表
     ///
-    /// `id`、`account_id`、`created_at` 为数据库侧字段，此处设为默认值（0 / 当前时间），
-    /// 由调用者在持久化后填充。
-    pub async fn batch_fetch_emails(
+    /// # 功能
+    /// - 使用 BODY.PEEK[] 获取完整 RFC822 内容
+    /// - 使用 mail_parser 统一解析所有邮件头和正文
+    /// - 从 BODYSTRUCTURE 提取附件信息
+    /// - 数据库侧字段（id、account_id）设为默认值，由调用者填充
+    async fn fetch_whole_emails_by_uid_set(
         &mut self,
         folder: &str,
-        start_uid: u32,
-        end_uid: u32,
+        uid_set: &str,
     ) -> Result<Vec<WholeEmailDto>, MailError> {
         // SELECT 文件夹
         self.session
@@ -263,19 +529,14 @@ impl ImapClient {
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?;
 
-        let uid_range = format!("{}:{}", start_uid, end_uid);
-        tracing::trace!(
-            "批量获取完整邮件: folder={}, uid_range={}",
-            folder,
-            uid_range
-        );
+        tracing::trace!("批量获取完整邮件: folder={}, uid_set={}", folder, uid_set);
 
         // 批量 FETCH：FLAGS + BODYSTRUCTURE + BODY.PEEK[] + INTERNALDATE + UID
         // 不再使用 ENVELOPE，所有邮件头通过 mail_parser 从 BODY.PEEK[] 解析
         let fetches = self
             .session
             .uid_fetch(
-                &uid_range,
+                uid_set,
                 "(FLAGS INTERNALDATE BODYSTRUCTURE BODY.PEEK[] UID)",
             )
             .await
@@ -319,10 +580,10 @@ impl ImapClient {
             if let Some(raw) = fetch.body() {
                 // 单次解析，同时提取头部和正文
                 if let Some(msg) = mail_parser::MessageParser::default().parse(raw) {
-                    body_text = msg.body_text(0).map(|t| t.to_string());
-                    body_html = msg.body_html(0).map(|t| t.to_string());
+                    body_text = decoded_body_text(&msg);
+                    body_html = decoded_body_html(&msg);
                     preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
-                    headers = Some(extract_headers_from_message(&msg, now));
+                    headers = Some(extract_headers_from_message_with_raw(&msg, raw, now));
                 }
             }
 
@@ -381,5 +642,206 @@ impl ImapClient {
         );
 
         Ok(emails)
+    }
+
+    /// 按 UID 范围批量获取完整邮件（包含正文）
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `start_uid`: 起始 UID
+    /// - `end_uid`: 结束 UID
+    ///
+    /// # 返回
+    /// 成功时返回完整邮件 DTO 列表
+    ///
+    /// # 功能
+    /// - 使用 `mail_parser` 统一解析所有邮件头和正文内容
+    /// - BODYSTRUCTURE 仅用于提取附件 section_path（IMAP 按需下载所需）
+    ///
+    /// # 注意
+    /// `id`、`account_id`、`created_at` 为数据库侧字段，此处设为默认值（0 / 当前时间），
+    /// 由调用者在持久化后填充。
+    pub async fn batch_fetch_emails(
+        &mut self,
+        folder: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        let uid_range = format!("{}:{}", start_uid, end_uid);
+        self.fetch_whole_emails_by_uid_set(folder, &uid_range).await
+    }
+
+    /// 按精确 UID 集合批量获取完整邮件（包含正文）
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uids`: UID 列表
+    ///
+    /// # 返回
+    /// 成功时返回完整邮件 DTO 列表，空列表时返回空 Vec
+    pub async fn batch_fetch_emails_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        let Some(uid_set) = build_uid_set(uids) else {
+            return Ok(Vec::new());
+        };
+
+        self.fetch_whole_emails_by_uid_set(folder, &uid_set).await
+    }
+
+    /// 按单个 UID 获取完整邮件
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uid`: 邮件 UID
+    ///
+    /// # 返回
+    /// 成功时返回 Some(完整邮件 DTO)，邮件不存在时返回 None
+    ///
+    /// # 功能
+    /// - 获取邮件的所有数据，包括正文和附件信息
+    /// - 使用 mail_parser 解析 RFC822 内容
+    pub async fn fetch_email_by_uid(
+        &mut self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<WholeEmailDto>, MailError> {
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let query = uid.to_string();
+        let mut fetches = self
+            .session
+            .uid_fetch(
+                &query,
+                "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[] BODYSTRUCTURE UID)",
+            )
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let Some(fetch_result) = fetches.next().await else {
+            return Ok(None);
+        };
+
+        let fetch = fetch_result.map_err(|e| MailError::ImapError(e.to_string()))?;
+        let Some(fetch_uid) = fetch.uid else {
+            return Ok(None);
+        };
+        if fetch_uid != uid {
+            return Ok(None);
+        }
+
+        let raw_body = fetch
+            .body()
+            .ok_or_else(|| MailError::ImapError("邮件体为空".to_string()))?;
+        let message = MessageParser::default()
+            .parse(raw_body)
+            .ok_or_else(|| MailError::ImapError("解析邮件失败".to_string()))?;
+        let headers = extract_headers_from_message_with_raw(
+            &message,
+            raw_body,
+            chrono::Utc::now().timestamp(),
+        );
+
+        let seen = fetch.flags().any(|f| f == async_imap::types::Flag::Seen);
+        let flagged = fetch.flags().any(|f| f == async_imap::types::Flag::Flagged);
+        let answered = fetch
+            .flags()
+            .any(|f| f == async_imap::types::Flag::Answered);
+        let deleted = fetch.flags().any(|f| f == async_imap::types::Flag::Deleted);
+        let draft = fetch.flags().any(|f| f == async_imap::types::Flag::Draft);
+
+        let body_text = decoded_body_text(&message);
+        let body_html = decoded_body_html(&message);
+        let preview = body_text
+            .as_ref()
+            .map(|text| text.chars().take(200).collect());
+        let attachments = fetch
+            .bodystructure()
+            .map(|bs| parser::extract_attachments(bs, ""))
+            .unwrap_or_default();
+        let received_at = fetch
+            .internal_date()
+            .map(|date| date.timestamp())
+            .unwrap_or(headers.sent_at);
+
+        Ok(Some(WholeEmailDto {
+            id: 0,
+            account_id: 0,
+            folder: folder.to_string(),
+            uid,
+            message_id: headers.message_id,
+            subject: headers.subject,
+            sender_name: headers.sender_name,
+            sender_email: headers.sender_email,
+            recipient_emails: headers.recipient_emails,
+            cc_emails: headers.cc_emails,
+            bcc_emails: headers.bcc_emails,
+            preview,
+            body_text,
+            body_html,
+            attachments,
+            is_read: seen,
+            is_starred: flagged,
+            is_draft: draft,
+            is_answered: answered,
+            is_deleted: deleted,
+            sent_at: headers.sent_at,
+            received_at,
+            created_at: 0,
+        }))
+    }
+}
+
+// ─── 测试模块 ───
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 测试 Content-Transfer-Encoding 解析结果为小写
+    #[test]
+    fn parse_transfer_encoding_should_return_lowercase_header_value() {
+        let mime_header = b"Content-Type: application/pdf\r\nContent-Transfer-Encoding: BASE64\r\n";
+
+        let transfer_encoding = parse_transfer_encoding(mime_header);
+
+        assert_eq!(transfer_encoding, Some("base64".to_string()));
+    }
+
+    /// 测试头部折叠行的展开
+    #[test]
+    fn parse_transfer_encoding_should_unfold_header_continuations() {
+        let mime_header =
+            b"Content-Type: application/pdf\r\nContent-Transfer-Encoding:\r\n\tBASE64\r\n";
+
+        let transfer_encoding = parse_transfer_encoding(mime_header);
+
+        assert_eq!(transfer_encoding, Some("base64".to_string()));
+    }
+
+    /// 测试 section path 解析拒绝包含 0 的路径
+    #[test]
+    fn parse_section_path_should_reject_zero_parts() {
+        assert_eq!(parse_section_path("0", None), None);
+        assert_eq!(parse_section_path("1.0", None), None);
+        assert!(parse_section_path("2", None).is_some());
+        assert!(parse_section_path("3.1", None).is_some());
+    }
+
+    /// 测试 UID SET 构建函数
+    #[test]
+    fn build_uid_set_should_join_exact_uids() {
+        assert_eq!(build_uid_set(&[9, 3, 7]), Some("9,3,7".to_string()));
+    }
+
+    /// 测试空输入返回 None
+    #[test]
+    fn build_uid_set_should_return_none_for_empty_input() {
+        assert_eq!(build_uid_set(&[]), None);
     }
 }
