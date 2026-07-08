@@ -33,6 +33,7 @@
 pub mod account_connection;
 pub mod account_service;
 pub mod attachment_service;
+pub mod email_address;
 
 /// 邮件服务模块
 ///

@@ -629,6 +629,7 @@ export const commands = {
 	describeLocalAttachments: (paths: string[]) => typedError<LocalAttachmentDraft[], MailError>(__TAURI_INVOKE("describe_local_attachments", { paths })),
 	saveDraft: (request: SaveDraftRequest) => typedError<SaveDraftResponse, MailError>(__TAURI_INVOKE("save_draft", { request })),
 	deleteDraft: (draftId: number) => typedError<null, MailError>(__TAURI_INVOKE("delete_draft", { draftId })),
+	parseEmailAddresses: (input: string) => typedError<ParseEmailAddressesResponse, MailError>(__TAURI_INVOKE("parse_email_addresses", { input })),
 	/**
 	 *  发送邮件
 	 * 
@@ -1743,6 +1744,11 @@ export type CreateLabelRequest = {
 	color: string,
 };
 
+export type DuplicateEmailAddress = {
+	raw: string,
+	email: string,
+};
+
 /**
  *  邮件分类（前端侧边栏导航使用）
  * 
@@ -1797,6 +1803,7 @@ export type EmailCategory =
  *  - `email`: 邮件基本信息（EmailDto 的扁平化版本）
  *  - `recipient_emails`: 收件人邮箱列表（逗号分隔）
  *  - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
+ *  - `bcc_emails`: 密送邮箱列表（可选，逗号分隔）
  *  - `body_text`: 纯文本正文
  *  - `body_html`: HTML 格式正文
  *  - `attachments`: 附件列表
@@ -1806,6 +1813,8 @@ export type EmailDetail = {
 	recipient_emails: string,
 	// 抄送邮箱列表（可选）
 	cc_emails: string | null,
+	// 密送邮箱列表（可选）
+	bcc_emails: string | null,
 	// 纯文本正文
 	body_text: string | null,
 	// HTML 正文
@@ -1952,6 +1961,11 @@ export type InlineAttachmentDto = {
 	url: string,
 };
 
+export type InvalidEmailAddress = {
+	raw: string,
+	reason: string,
+};
+
 /**
  *  标签数据传输对象
  * 
@@ -2021,6 +2035,18 @@ export type OlderSyncResult = {
 	window_end: number,
 	history_exhausted: boolean,
 	folders: string[],
+};
+
+export type ParseEmailAddressesResponse = {
+	addresses: ParsedEmailAddress[],
+	invalid: InvalidEmailAddress[],
+	duplicates: DuplicateEmailAddress[],
+};
+
+export type ParsedEmailAddress = {
+	name: string | null,
+	email: string,
+	raw: string,
 };
 
 /**

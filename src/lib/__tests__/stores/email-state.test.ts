@@ -50,6 +50,7 @@ const emailDetail = {
   ...email,
   recipient_emails: "me@example.com",
   cc_emails: null,
+  bcc_emails: null,
   body_text: "正文",
   body_html: "<p>正文</p>",
   attachments: [],

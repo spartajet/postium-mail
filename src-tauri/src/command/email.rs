@@ -58,8 +58,9 @@ use crate::error::MailError;
 use crate::infrastructure::storage::search::SearchResult;
 use crate::service::attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
 use crate::service::email_service::{
-    EmailCategory, EmailDetail, EmailListResponse, LocalAttachmentDraft, ReloadEmailResult,
-    SaveDraftRequest, SaveDraftResponse, SendEmailRequest, SendEmailResponse,
+    EmailCategory, EmailDetail, EmailListResponse, LocalAttachmentDraft,
+    ParseEmailAddressesResponse, ReloadEmailResult, SaveDraftRequest, SaveDraftResponse,
+    SendEmailRequest, SendEmailResponse,
 };
 
 ///
@@ -720,6 +721,15 @@ pub async fn delete_draft(
     draft_id: i32,
 ) -> Result<(), MailError> {
     service.delete_draft(draft_id).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn parse_email_addresses(
+    service: tauri::State<'_, crate::service::email_service::EmailService>,
+    input: String,
+) -> Result<ParseEmailAddressesResponse, MailError> {
+    service.parse_email_addresses(input).await
 }
 
 ///
