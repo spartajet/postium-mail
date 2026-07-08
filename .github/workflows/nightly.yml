@@ -1,0 +1,137 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-nightly:
+    name: Prepare nightly release
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.nightly.outputs.release_tag }}
+      release_name: ${{ steps.nightly.outputs.release_name }}
+      source_sha: ${{ steps.nightly.outputs.source_sha }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Calculate nightly name
+        id: nightly
+        shell: bash
+        run: |
+          release_date="$(TZ=Asia/Shanghai date +'%Y-%m-%d')"
+          release_tag="nightly-${release_date}"
+          source_sha="$(git rev-parse HEAD)"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release_name=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha=${source_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Remove existing nightly release for today
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.nightly.outputs.release_tag }}
+        shell: bash
+        run: |
+          gh release delete "${RELEASE_TAG}" --cleanup-tag --yes || true
+
+      - name: Create nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.nightly.outputs.release_tag }}
+          RELEASE_NAME: ${{ steps.nightly.outputs.release_name }}
+        shell: bash
+        run: |
+          gh release create "${RELEASE_TAG}" \
+            --target "${{ steps.nightly.outputs.source_sha }}" \
+            --title "${RELEASE_NAME}" \
+            --notes "Automated nightly build from main (${{ steps.nightly.outputs.source_sha }})." \
+            --prerelease
+
+  build-nightly:
+    name: Build nightly (${{ matrix.name }})
+    needs: prepare-nightly
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc
+          - name: windows-arm64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - name: macos-arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            args: --target x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-nightly.outputs.source_sha }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: nightly-${{ matrix.name }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config \
+            rpm \
+            xdg-utils
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and upload nightly bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tagName: ${{ needs.prepare-nightly.outputs.release_tag }}
+          releaseName: ${{ needs.prepare-nightly.outputs.release_name }}
+          releaseBody: Automated nightly build from main.
+          releaseDraft: false
+          prerelease: true
+          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+          args: ${{ matrix.args }}
