@@ -102,6 +102,7 @@ fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             command::email::describe_local_attachments,
             command::email::save_draft,
             command::email::delete_draft,
+            command::email::parse_email_addresses,
             command::email::send_email,
             command::sync::sync_account,
             command::sync::sync_account_with_range,

@@ -24,6 +24,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Arc;
 
+pub use crate::service::email_address::{
+    DuplicateEmailAddress, InvalidEmailAddress, ParseEmailAddressesResponse, ParsedEmailAddress,
+};
 pub use crate::service::mail_draft::{SaveDraftRequest, SaveDraftResponse};
 pub use crate::service::mail_send::{
     ComposeAttachmentInput, LocalAttachmentDraft, SendEmailResponse,
@@ -160,6 +163,7 @@ pub struct EmailDto {
 /// - `email`: 邮件基本信息（EmailDto 的扁平化版本）
 /// - `recipient_emails`: 收件人邮箱列表（逗号分隔）
 /// - `cc_emails`: 抄送邮箱列表（可选，逗号分隔）
+/// - `bcc_emails`: 密送邮箱列表（可选，逗号分隔）
 /// - `body_text`: 纯文本正文
 /// - `body_html`: HTML 格式正文
 /// - `attachments`: 附件列表
@@ -172,6 +176,8 @@ pub struct EmailDetail {
     pub recipient_emails: String,
     /// 抄送邮箱列表（可选）
     pub cc_emails: Option<String>,
+    /// 密送邮箱列表（可选）
+    pub bcc_emails: Option<String>,
     /// 纯文本正文
     pub body_text: Option<String>,
     /// HTML 正文
@@ -363,6 +369,13 @@ impl EmailService {
             sent_archiver,
             draft_writer,
         }
+    }
+
+    pub async fn parse_email_addresses(
+        &self,
+        input: String,
+    ) -> Result<ParseEmailAddressesResponse, MailError> {
+        crate::service::email_address::parse_email_addresses(input)
     }
 
     /// 获取指定文件夹的邮件列表（分页）
@@ -1189,6 +1202,7 @@ fn email_model_to_detail(email: emails::Model, attachments: Vec<AttachmentDto>) 
         email: email_dto,
         recipient_emails: email.recipient_emails,
         cc_emails: email.cc_emails,
+        bcc_emails: email.bcc_emails,
         body_text: email.body_text,
         body_html: email.body_html,
         attachments,

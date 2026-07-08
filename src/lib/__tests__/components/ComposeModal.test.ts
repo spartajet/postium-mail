@@ -70,6 +70,9 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
             email: {
                 to: "收件人",
                 cc: "抄送",
+                bcc: "密送",
+                showCc: "抄送",
+                showBcc: "密送",
                 subject: "主题",
                 attach: "添加附件",
                 removeAttachment: "移除附件",
@@ -80,6 +83,7 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
                 sendRequiresRecipient: "请填写至少一个收件人",
                 sendRequiresSubject: "请填写邮件主题",
                 sendRequiresBody: "请填写邮件正文",
+                invalidRecipients: "请修正或删除无效收件人",
                 send: "发送",
                 loading: "发送中",
             },
@@ -87,6 +91,37 @@ vi.mock("$lib/stores/i18n.svelte", () => ({
         },
     }),
 }));
+
+function defaultInvoke(cmd: string, args?: { input?: unknown }) {
+    if (cmd === "parse_email_addresses") {
+        const input = String(args?.input ?? "");
+        if (input === "bad") {
+            return Promise.resolve({
+                addresses: [],
+                invalid: [{ raw: "bad", reason: "无法解析邮件地址" }],
+                duplicates: [],
+            });
+        }
+        return Promise.resolve({
+            addresses: [{ name: null, email: input, raw: input }],
+            invalid: [],
+            duplicates: [],
+        });
+    }
+
+    return Promise.resolve({
+        message_id: "<message-id@example.com>",
+        local_email_id: 1,
+        remote_archived: true,
+        remote_archive_error: null,
+    });
+}
+
+async function addRecipient(testIdPrefix: string, value: string) {
+    const input = await screen.findByTestId(`${testIdPrefix}-recipient-input`);
+    await fireEvent.input(input, { target: { value } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+}
 
 async function fillBody(value: string) {
     await waitFor(() => {
@@ -100,12 +135,7 @@ async function fillBody(value: string) {
 describe("ComposeModal 发件账号选择", () => {
     beforeEach(() => {
         mockInvoke.mockReset();
-        mockInvoke.mockResolvedValue({
-            message_id: "<message-id@example.com>",
-            local_email_id: 1,
-            remote_archived: true,
-            remote_archive_error: null,
-        });
+        mockInvoke.mockImplementation(defaultInvoke);
         accounts = [...defaultAccounts];
         isAllAccounts = true;
         activeAccountId = null;
@@ -134,9 +164,7 @@ describe("ComposeModal 发件账号选择", () => {
         component.show();
         await fireEvent.click(await screen.findByTestId("compose-account-select"));
         await fireEvent.click(await screen.findByTestId("compose-account-option-1"));
-        await fireEvent.input(screen.getByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -156,11 +184,9 @@ describe("ComposeModal 发件账号选择", () => {
 
         component.show();
 
-        expect(await screen.findByTestId("compose-to-input")).toBeTruthy();
+        expect(await screen.findByTestId("to-recipient-input")).toBeTruthy();
         expect(screen.queryByTestId("compose-account-select")).toBeNull();
-        await fireEvent.input(screen.getByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -210,9 +236,7 @@ describe("ComposeModal 发件账号选择", () => {
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -220,32 +244,34 @@ describe("ComposeModal 发件账号选择", () => {
         const sendButton = screen.getByTestId("compose-send-button");
         expect((sendButton as HTMLButtonElement).disabled).toBe(true);
         await fireEvent.click(sendButton);
-        expect(mockInvoke).not.toHaveBeenCalled();
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+            "send_email",
+            expect.anything(),
+        );
     });
 
     it("主题为空时不发送并显示校验错误", async () => {
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fillBody("Body");
 
         const sendButton = screen.getByTestId("compose-send-button");
         expect((sendButton as HTMLButtonElement).disabled).toBe(false);
         await fireEvent.click(sendButton);
         expect(await screen.findByText("请填写邮件主题")).toBeTruthy();
-        expect(mockInvoke).not.toHaveBeenCalled();
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+            "send_email",
+            expect.anything(),
+        );
     });
 
     it("正文为空时不发送并显示校验错误", async () => {
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -253,7 +279,167 @@ describe("ComposeModal 发件账号选择", () => {
         await fireEvent.click(screen.getByTestId("compose-send-button"));
 
         expect(await screen.findByText("请填写邮件正文")).toBeTruthy();
-        expect(mockInvoke).not.toHaveBeenCalled();
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+            "send_email",
+            expect.anything(),
+        );
+    });
+
+    it("展开 Bcc 后发送请求包含密送地址", async () => {
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await addRecipient("to", "to@example.com");
+        await fireEvent.click(screen.getByTestId("compose-show-bcc-button"));
+        await addRecipient("bcc", "hidden@example.com");
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "Hello" },
+        });
+        await fillBody("Body");
+        await fireEvent.click(screen.getByTestId("compose-send-button"));
+
+        expect(mockInvoke).toHaveBeenCalledWith("send_email", {
+            request: expect.objectContaining({
+                to: ["to@example.com"],
+                bcc: ["hidden@example.com"],
+            }),
+        });
+    });
+
+    it("存在无效收件人 chip 时阻止发送", async () => {
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await addRecipient("to", "bad");
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "Hello" },
+        });
+        await fillBody("Body");
+        await fireEvent.click(screen.getByTestId("compose-send-button"));
+
+        expect(await screen.findByText("请修正或删除无效收件人")).toBeTruthy();
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+            "send_email",
+            expect.anything(),
+        );
+    });
+
+    it("草稿保存包含有效 Bcc 地址", async () => {
+        vi.useFakeTimers();
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await fireEvent.click(await screen.findByTestId("compose-show-bcc-button"));
+        await addRecipient("bcc", "hidden@example.com");
+
+        await vi.runOnlyPendingTimersAsync();
+
+        expect(mockInvoke).toHaveBeenCalledWith("save_draft", {
+            request: expect.objectContaining({
+                bcc: ["hidden@example.com"],
+            }),
+        });
+    });
+
+    it("showForward 不会泄漏旧 Bcc 和 draft_id", async () => {
+        vi.useFakeTimers();
+        mockInvoke.mockImplementation((cmd, args) => {
+            if (cmd === "save_draft") {
+                return Promise.resolve({
+                    draft_id: 42,
+                    message_id: "<draft@example.com>",
+                    folder: "Drafts",
+                    saved_at: 123,
+                    remote_saved: true,
+                    cleanup_error: null,
+                });
+            }
+            return defaultInvoke(cmd, args);
+        });
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await fireEvent.click(await screen.findByTestId("compose-show-bcc-button"));
+        await addRecipient("bcc", "hidden@example.com");
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "Old subject" },
+        });
+        await fillBody("Old body");
+        await vi.advanceTimersByTimeAsync(900);
+        await waitFor(() => expect(screen.getByText("草稿已保存")).toBeTruthy());
+
+        component.showForward("Forwarded", "Forward body", 1);
+        await addRecipient("to", "forward@example.com");
+        await fireEvent.click(screen.getByTestId("compose-send-button"));
+
+        expect(screen.queryByText("hidden@example.com")).toBeNull();
+        expect(mockInvoke).toHaveBeenCalledWith("send_email", {
+            request: expect.objectContaining({
+                to: ["forward@example.com"],
+                bcc: [],
+                draft_id: null,
+            }),
+        });
+    });
+
+    it("show 新建邮件不会泄漏旧 Bcc 和 draft_id", async () => {
+        vi.useFakeTimers();
+        mockInvoke.mockImplementation((cmd, args) => {
+            if (cmd === "save_draft") {
+                return Promise.resolve({
+                    draft_id: 99,
+                    message_id: "<draft@example.com>",
+                    folder: "Drafts",
+                    saved_at: 123,
+                    remote_saved: true,
+                    cleanup_error: null,
+                });
+            }
+            return defaultInvoke(cmd, args);
+        });
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await fireEvent.click(await screen.findByTestId("compose-show-bcc-button"));
+        await addRecipient("bcc", "hidden@example.com");
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "Old subject" },
+        });
+        await fillBody("Old body");
+        await vi.advanceTimersByTimeAsync(900);
+        await waitFor(() => expect(screen.getByText("草稿已保存")).toBeTruthy());
+
+        component.show();
+        await addRecipient("to", "new@example.com");
+        await fireEvent.input(screen.getByTestId("compose-subject-input"), {
+            target: { value: "New subject" },
+        });
+        await fillBody("New body");
+        await fireEvent.click(screen.getByTestId("compose-send-button"));
+
+        expect(screen.queryByText("hidden@example.com")).toBeNull();
+        expect(mockInvoke).toHaveBeenCalledWith("send_email", {
+            request: expect.objectContaining({
+                to: ["new@example.com"],
+                bcc: [],
+                draft_id: null,
+            }),
+        });
+    });
+
+    it("只有无效收件人 chip 时不会自动保存草稿", async () => {
+        vi.useFakeTimers();
+        const { component } = render(ComposeModal);
+
+        component.show();
+        await addRecipient("to", "bad");
+        await vi.advanceTimersByTimeAsync(900);
+
+        expect(screen.getByText("bad")).toBeTruthy();
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+            "save_draft",
+            expect.anything(),
+        );
     });
 
     it("关闭后重开会重新按账号优先级解析", async () => {
@@ -289,7 +475,7 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("选择附件后展示附件并发送时包含附件", async () => {
         vi.mocked(openDialog).mockResolvedValue("/tmp/hello.txt");
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "describe_local_attachments") {
                 return Promise.resolve([
                     {
@@ -300,12 +486,7 @@ describe("ComposeModal 发件账号选择", () => {
                     },
                 ]);
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
@@ -314,9 +495,7 @@ describe("ComposeModal 发件账号选择", () => {
 
         expect(await screen.findByText("hello.txt")).toBeTruthy();
 
-        await fireEvent.input(screen.getByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -342,7 +521,7 @@ describe("ComposeModal 发件账号选择", () => {
             "/tmp/hello.txt",
             "/tmp/hello.txt",
         ]);
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "describe_local_attachments") {
                 return Promise.resolve([
                     {
@@ -359,12 +538,7 @@ describe("ComposeModal 发件账号选择", () => {
                     },
                 ]);
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
@@ -374,9 +548,7 @@ describe("ComposeModal 发件账号选择", () => {
         expect(await screen.findAllByTestId("compose-attachment-row")).toHaveLength(
             1,
         );
-        await fireEvent.input(screen.getByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -396,7 +568,7 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("发送已保存草稿时携带 draft_id", async () => {
         vi.useFakeTimers();
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
                 return Promise.resolve({
                     draft_id: 42,
@@ -407,19 +579,12 @@ describe("ComposeModal 发件账号选择", () => {
                     cleanup_error: null,
                 });
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -436,18 +601,11 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("内容变更后立即发送会取消待触发草稿保存", async () => {
         vi.useFakeTimers();
-        mockInvoke.mockResolvedValue({
-            message_id: "<message-id@example.com>",
-            local_email_id: 1,
-            remote_archived: true,
-            remote_archive_error: null,
-        });
+        mockInvoke.mockImplementation(defaultInvoke);
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -484,23 +642,16 @@ describe("ComposeModal 发件账号选择", () => {
         }>((resolve) => {
             resolveDraft = resolve;
         });
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
                 return draftPromise;
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -526,6 +677,7 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("在途草稿保存后编辑并立即发送会先保存最新内容", async () => {
         vi.useFakeTimers();
+        let saveDraftCalls = 0;
         let resolveFirstDraft!: (value: {
             draft_id: number;
             message_id: string;
@@ -544,11 +696,12 @@ describe("ComposeModal 发件账号选择", () => {
         }>((resolve) => {
             resolveFirstDraft = resolve;
         });
-        mockInvoke.mockImplementation((cmd) => {
-            if (cmd === "save_draft" && mockInvoke.mock.calls.length === 1) {
-                return firstDraftPromise;
-            }
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
+                saveDraftCalls += 1;
+                if (saveDraftCalls === 1) {
+                    return firstDraftPromise;
+                }
                 return Promise.resolve({
                     draft_id: 88,
                     message_id: "<draft-latest@example.com>",
@@ -558,19 +711,12 @@ describe("ComposeModal 发件账号选择", () => {
                     cleanup_error: null,
                 });
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Old subject" },
         });
@@ -624,23 +770,16 @@ describe("ComposeModal 发件账号选择", () => {
         }>((resolve) => {
             resolveDraft = resolve;
         });
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
                 return draftPromise;
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -670,6 +809,7 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("在途草稿保存期间继续编辑会追加一次最新内容保存", async () => {
         vi.useFakeTimers();
+        let saveDraftCalls = 0;
         let resolveFirstDraft!: (value: {
             draft_id: number;
             message_id: string;
@@ -688,11 +828,12 @@ describe("ComposeModal 发件账号选择", () => {
         }>((resolve) => {
             resolveFirstDraft = resolve;
         });
-        mockInvoke.mockImplementation((cmd) => {
-            if (cmd === "save_draft" && mockInvoke.mock.calls.length === 1) {
-                return firstDraftPromise;
-            }
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
+                saveDraftCalls += 1;
+                if (saveDraftCalls === 1) {
+                    return firstDraftPromise;
+                }
                 return Promise.resolve({
                     draft_id: 42,
                     message_id: "<draft@example.com>",
@@ -702,19 +843,12 @@ describe("ComposeModal 发件账号选择", () => {
                     cleanup_error: null,
                 });
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await vi.advanceTimersByTimeAsync(900);
 
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
@@ -742,7 +876,7 @@ describe("ComposeModal 发件账号选择", () => {
 
     it("切换发件账号后不会携带旧账号保存的 draft_id", async () => {
         vi.useFakeTimers();
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
                 return Promise.resolve({
                     draft_id: 42,
@@ -753,19 +887,12 @@ describe("ComposeModal 发件账号选择", () => {
                     cleanup_error: null,
                 });
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "to@example.com" },
-        });
+        await addRecipient("to", "to@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });
@@ -805,23 +932,16 @@ describe("ComposeModal 发件账号选择", () => {
         }>((resolve) => {
             resolveDraft = resolve;
         });
-        mockInvoke.mockImplementation((cmd) => {
+        mockInvoke.mockImplementation((cmd, args) => {
             if (cmd === "save_draft") {
                 return draftPromise;
             }
-            return Promise.resolve({
-                message_id: "<message-id@example.com>",
-                local_email_id: 1,
-                remote_archived: true,
-                remote_archive_error: null,
-            });
+            return defaultInvoke(cmd, args);
         });
         const { component } = render(ComposeModal);
 
         component.show();
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "old@example.com" },
-        });
+        await addRecipient("to", "old@example.com");
         await vi.advanceTimersByTimeAsync(900);
         await fireEvent.click(screen.getByTestId("compose-close-button"));
 
@@ -834,9 +954,7 @@ describe("ComposeModal 发件账号选择", () => {
             remote_saved: true,
             cleanup_error: null,
         });
-        await fireEvent.input(await screen.findByTestId("compose-to-input"), {
-            target: { value: "new@example.com" },
-        });
+        await addRecipient("to", "new@example.com");
         await fireEvent.input(screen.getByTestId("compose-subject-input"), {
             target: { value: "Hello" },
         });

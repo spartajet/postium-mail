@@ -52,6 +52,13 @@
     import { ChevronDown, Paperclip, Trash2, X } from "lucide-svelte";
     // 导入富文本编辑器子组件
     import RichTextEditor from "./RichTextEditor.svelte";
+    import RecipientField from "./RecipientField.svelte";
+    import {
+        createRecipientChipId,
+        hasInvalidRecipients,
+        validEmails,
+        type RecipientChip,
+    } from "./recipient";
 
     // ==================== 状态初始化 ====================
 
@@ -66,10 +73,11 @@
 
     // 模态框是否打开（visible 状态）
     let open = $state(false);
-    // 收件人邮箱地址（多个用逗号分隔）
-    let to = $state("");
-    // 抄送邮箱地址（多个用逗号分隔，可选）
-    let cc = $state("");
+    let toRecipients = $state<RecipientChip[]>([]);
+    let ccRecipients = $state<RecipientChip[]>([]);
+    let bccRecipients = $state<RecipientChip[]>([]);
+    let showCcField = $state(false);
+    let showBccField = $state(false);
     // 邮件主题
     let subject = $state("");
     // 发送中状态标志（防止重复提交）
@@ -138,11 +146,29 @@
         scheduleDraftSave();
     }
 
-    function parseRecipients(value: string) {
-        return value
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
+    function validRecipientChip(email: string): RecipientChip {
+        return {
+            id: createRecipientChipId(),
+            email,
+            raw: email,
+            valid: true,
+        };
+    }
+
+    function hasRecipientErrors() {
+        return (
+            hasInvalidRecipients(toRecipients) ||
+            hasInvalidRecipients(ccRecipients) ||
+            hasInvalidRecipients(bccRecipients)
+        );
+    }
+
+    function recipientRequestParts() {
+        return {
+            to: validEmails(toRecipients),
+            cc: validEmails(ccRecipients),
+            bcc: validEmails(bccRecipients),
+        };
     }
 
     function formatBytes(size: number) {
@@ -158,9 +184,11 @@
     }
 
     function hasDraftContent() {
+        const recipients = recipientRequestParts();
         return Boolean(
-            to.trim() ||
-                cc.trim() ||
+            recipients.to.length > 0 ||
+                recipients.cc.length > 0 ||
+                recipients.bcc.length > 0 ||
                 subject.trim() ||
                 (richEditor?.getText() || "").trim() ||
                 attachments.length > 0,
@@ -226,14 +254,15 @@
         const saveDraftId = draftId;
         const saveSubject = subject;
         const saveAttachments = attachments;
+        const recipients = recipientRequestParts();
         let result: Awaited<ReturnType<typeof commands.saveDraft>>;
         try {
             result = await commands.saveDraft({
                 draft_id: saveDraftId,
                 account_id: sendAccountId,
-                to: parseRecipients(to),
-                cc: parseRecipients(cc),
-                bcc: [],
+                to: recipients.to,
+                cc: recipients.cc,
+                bcc: recipients.bcc,
                 subject: saveSubject,
                 body_html:
                     richEditor?.getHtml() ||
@@ -317,15 +346,14 @@
      * 验证并发送当前编辑的邮件。流程如下：
      * 1. 检查是否有活跃账户
      * 2. 设置发送中状态（禁用按钮）
-     * 3. 解析收件人列表（逗号分隔 → 数组）
+     * 3. 从收件人 chip 派生有效地址列表
      * 4. 调用后端 sendEmail 命令发送邮件
      * 5. 成功：关闭模态框并清空表单
      * 6. 失败：显示错误信息
      *
      * 注意：
-     * - to 字段按逗号分隔并去除空白，生成收件人数组
-     * - cc 字段如果非空，同样按逗号分隔生成抄送数组
-     * - bcc（密送）当前为空数组，预留扩展
+     * - To/Cc/Bcc 字段只发送有效 chip 中的邮箱地址
+     * - 存在无效 chip 时阻止发送并提示用户修正
      * - 正文优先使用 HTML 格式，如果编辑器无法提供 HTML 则用 pre 标签包裹纯文本
      */
     async function handleSend() {
@@ -333,12 +361,19 @@
         const sendAccountId = currentSendAccountId();
         // 没有可用发送账户，无法发送
         if (!sendAccountId) return;
-        const toRecipients = parseRecipients(to);
-        const ccRecipients = parseRecipients(cc);
+        const recipients = recipientRequestParts();
         const trimmedSubject = subject.trim();
         const bodyText = richEditor?.getText() || "";
         const trimmedBodyText = bodyText.trim();
-        if (toRecipients.length === 0) {
+        if (hasRecipientErrors()) {
+            error = t.email.invalidRecipients;
+            return;
+        }
+        if (
+            recipients.to.length === 0 &&
+            recipients.cc.length === 0 &&
+            recipients.bcc.length === 0
+        ) {
             error = t.email.sendRequiresRecipient;
             return;
         }
@@ -362,12 +397,12 @@
             const result = await commands.sendEmail({
                 // 实际发送账户 ID：所有账号视图下来自发件账号选择器，否则来自当前活跃账号
                 account_id: sendAccountId,
-                // 收件人列表：将逗号分隔的字符串转为数组
-                to: toRecipients,
-                // 抄送列表：如果 cc 非空则解析，否则为空数组
-                cc: ccRecipients,
-                // 密送列表：当前预留为空
-                bcc: [],
+                // 收件人列表：来自有效收件人 chip
+                to: recipients.to,
+                // 抄送列表：来自有效抄送 chip
+                cc: recipients.cc,
+                // 密送列表：来自有效密送 chip
+                bcc: recipients.bcc,
                 // 邮件主题
                 subject: trimmedSubject,
                 // HTML 格式正文：优先使用编辑器的 HTML 输出
@@ -404,8 +439,19 @@
      */
     function close() {
         open = false;
-        to = "";
-        cc = "";
+        resetComposeState();
+        selectedAccountId = null;
+        accountDropdownOpen = false;
+        // 清空富文本编辑器内容
+        richEditor?.clear();
+    }
+
+    function resetComposeState() {
+        toRecipients = [];
+        ccRecipients = [];
+        bccRecipients = [];
+        showCcField = false;
+        showBccField = false;
         subject = "";
         error = "";
         attachments = [];
@@ -416,10 +462,7 @@
         draftRevision += 1;
         composeSessionId += 1;
         clearDraftTimer();
-        selectedAccountId = null;
         accountDropdownOpen = false;
-        // 清空富文本编辑器内容
-        richEditor?.clear();
     }
 
     // ==================== 公开方法（供外部调用） ====================
@@ -435,6 +478,8 @@
      * 通过 bind:this 暴露给父组件使用
      */
     export function show(options: { accountId?: number } = {}) {
+        resetComposeState();
+        richEditor?.clear();
         openWithAccount(options.accountId);
     }
 
@@ -458,9 +503,10 @@
         replyBody: string,
         accountId?: number,
     ) {
+        resetComposeState();
         openWithAccount(accountId);
         // 设置收件人为原始发件人
-        to = replyTo;
+        toRecipients = [validRecipientChip(replyTo)];
         // 设置主题为 "Re: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
         subject = `Re: ${replySubject.replace(/^(Re|Fwd):\s*/i, "")}`;
         // 在编辑器中预填充原始正文作为引用
@@ -485,6 +531,7 @@
         fwdBody: string,
         accountId?: number,
     ) {
+        resetComposeState();
         openWithAccount(accountId);
         // 设置主题为 "Fwd: " + 原始主题（去除已有的 Re:/Fwd: 前缀）
         subject = `Fwd: ${fwdSubject.replace(/^(Re|Fwd):\s*/i, "")}`;
@@ -630,38 +677,64 @@
                         </div>
                     </div>
                 {/if}
-                <!-- 收件人输入行 -->
-                <div class="flex items-center border-b border-border px-4">
-                    <!-- 字段标签：固定宽度 3.5rem -->
-                    <span class="w-14 shrink-0 text-sm text-muted-foreground"
-                        >{t.email.to}</span
-                    >
-                    <!-- 收件人输入框 -->
-                    <input
-                        data-testid="compose-to-input"
-                        type="text"
-                        bind:value={to}
-                        class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
+                <div class="relative">
+                    <RecipientField
+                        label={t.email.to}
+                        chips={toRecipients}
                         placeholder="email@example.com"
-                        oninput={scheduleDraftSave}
+                        testIdPrefix="to"
+                        onChange={(chips) => {
+                            toRecipients = chips;
+                            scheduleDraftSave();
+                        }}
                     />
+                    <div class="absolute right-4 top-2 flex gap-2">
+                        {#if !showCcField && ccRecipients.length === 0}
+                            <button
+                                type="button"
+                                data-testid="compose-show-cc-button"
+                                class="text-xs text-muted-foreground hover:text-foreground"
+                                onclick={() => (showCcField = true)}
+                            >
+                                {t.email.showCc}
+                            </button>
+                        {/if}
+                        {#if !showBccField && bccRecipients.length === 0}
+                            <button
+                                type="button"
+                                data-testid="compose-show-bcc-button"
+                                class="text-xs text-muted-foreground hover:text-foreground"
+                                onclick={() => (showBccField = true)}
+                            >
+                                {t.email.showBcc}
+                            </button>
+                        {/if}
+                    </div>
                 </div>
 
-                <!-- 抄送输入行 -->
-                <div class="flex items-center border-b border-border px-4">
-                    <!-- 字段标签 -->
-                    <span class="w-14 shrink-0 text-sm text-muted-foreground"
-                        >{t.email.cc}</span
-                    >
-                    <!-- 抄送输入框 -->
-                    <input
-                        data-testid="compose-cc-input"
-                        type="text"
-                        bind:value={cc}
-                        class="flex-1 bg-transparent py-2 text-sm text-foreground outline-none"
-                        oninput={scheduleDraftSave}
+                {#if showCcField || ccRecipients.length > 0}
+                    <RecipientField
+                        label={t.email.cc}
+                        chips={ccRecipients}
+                        testIdPrefix="cc"
+                        onChange={(chips) => {
+                            ccRecipients = chips;
+                            scheduleDraftSave();
+                        }}
                     />
-                </div>
+                {/if}
+
+                {#if showBccField || bccRecipients.length > 0}
+                    <RecipientField
+                        label={t.email.bcc}
+                        chips={bccRecipients}
+                        testIdPrefix="bcc"
+                        onChange={(chips) => {
+                            bccRecipients = chips;
+                            scheduleDraftSave();
+                        }}
+                    />
+                {/if}
 
                 <!-- 主题输入行 -->
                 <div class="flex items-center px-4">

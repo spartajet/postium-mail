@@ -31,6 +31,76 @@ use std::sync::{Arc, Mutex};
 
 static ACCOUNT_COUNTER: AtomicU32 = AtomicU32::new(1);
 
+#[tokio::test]
+async fn parse_email_addresses_accepts_common_address_forms() {
+    let services = TestServices::new().await;
+
+    let result = services
+        .email_service
+        .parse_email_addresses(
+            r#"alice@example.com, Bob <bob@example.com>, "Alice, Inc." <team@example.com>"#
+                .to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result
+            .addresses
+            .iter()
+            .map(|address| (address.name.as_deref(), address.email.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (None, "alice@example.com"),
+            (Some("Bob"), "bob@example.com"),
+            (Some("Alice, Inc."), "team@example.com"),
+        ]
+    );
+    assert!(result.invalid.is_empty());
+    assert!(result.duplicates.is_empty());
+}
+
+#[tokio::test]
+async fn parse_email_addresses_reports_invalid_and_duplicates() {
+    let services = TestServices::new().await;
+
+    let result = services
+        .email_service
+        .parse_email_addresses(
+            "alice@example.com, not-an-address, Alice <ALICE@example.com>".to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.addresses.len(), 1);
+    assert_eq!(result.addresses[0].email, "alice@example.com");
+    assert_eq!(result.invalid.len(), 1);
+    assert_eq!(result.invalid[0].raw, "not-an-address");
+    assert_eq!(result.duplicates.len(), 1);
+    assert_eq!(result.duplicates[0].email, "ALICE@example.com");
+}
+
+#[tokio::test]
+async fn parse_email_addresses_extracts_group_members() {
+    let services = TestServices::new().await;
+
+    let result = services
+        .email_service
+        .parse_email_addresses("Friends: Alice <alice@example.com>, bob@example.com;".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result
+            .addresses
+            .iter()
+            .map(|address| address.email.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alice@example.com", "bob@example.com"]
+    );
+    assert!(result.invalid.is_empty());
+}
+
 fn account_model_with_smtp(
     provider: &str,
     smtp_host: Option<&str>,
@@ -2121,6 +2191,35 @@ async fn test_get_email_returns_detail_fields() {
     assert_eq!(detail.body_text.as_deref(), Some("详情正文"));
     assert!(detail.email.is_read);
     assert!(detail.email.is_starred);
+}
+
+#[tokio::test]
+async fn get_email_returns_bcc_emails_in_detail() {
+    let svc = TestServices::new().await;
+    let account_id = create_test_account(&svc).await;
+    let email_id = insert_test_email(
+        &svc,
+        account_id,
+        TestEmail::new(618, "密送详情").body_text("详情正文"),
+    )
+    .await;
+    svc.db
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE emails SET bcc_emails = ?1 WHERE id = ?2",
+                rusqlite::params!["hidden@example.com,other@example.com", email_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("更新测试邮件密送失败");
+
+    let detail = svc.email_service.get(email_id).await.unwrap();
+
+    assert_eq!(
+        detail.bcc_emails.as_deref(),
+        Some("hidden@example.com,other@example.com")
+    );
 }
 
 #[tokio::test]
