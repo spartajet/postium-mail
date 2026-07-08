@@ -4,6 +4,8 @@ import { byTestId } from '../helpers/selectors.js';
 class SettingsPage {
   get page() { return byTestId('settings-page'); }
   get settingsNavButton() { return byTestId('settings-nav'); }
+  get appearanceNavButton() { return byTestId('settings-nav-appearance'); }
+  get appearancePanel() { return byTestId('settings-panel-appearance'); }
   get lightThemeButton() { return byTestId('theme-light'); }
   get darkThemeButton() { return byTestId('theme-dark'); }
   get systemThemeButton() { return byTestId('theme-system'); }
@@ -35,6 +37,14 @@ class SettingsPage {
       window.location.href = '/settings';
     });
     await this.waitForReady();
+  }
+
+  async openAppearanceInCurrentWindow() {
+    await this.openInCurrentWindow();
+    await this.appearanceNavButton.waitForDisplayed({ timeout: 10000 });
+    await this.appearanceNavButton.click();
+    await this.appearancePanel.waitForDisplayed({ timeout: 10000 });
+    await this.systemThemeButton.waitForDisplayed({ timeout: 10000 });
   }
 
   async navigateToSettings() {

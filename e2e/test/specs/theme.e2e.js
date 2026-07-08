@@ -2,7 +2,7 @@ import settingsPage from '../../pageobjects/settings.page.js';
 
 describe('Theme Switching', () => {
   beforeEach(async () => {
-    await settingsPage.openInCurrentWindow();
+    await settingsPage.openAppearanceInCurrentWindow();
   });
 
   it('切换到深色主题', async () => {
