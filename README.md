@@ -48,3 +48,15 @@ bun run test:e2e
 E2E 测试默认不连接真实 IMAP、SMTP、OAuth 或远程邮件服务。测试运行时会设置 `POSTIUM_E2E=1`，并在隔离目录中 seed 两个账号和固定邮件数据，从而覆盖账号切换、邮件列表滚动、搜索、导航、写邮件弹窗和主题切换等流程。
 
 更多说明见 [测试现状总览](docs/testing/overview.md) 和 [E2E 测试指南](docs/testing/e2e.md)。
+
+## GPUI 迁移（进行中）
+
+本仓库正迁移到 GPUI 原生 UI。Cargo workspace 位于根目录：
+
+- `crates/postium-core`：后端（domain/service/infrastructure + `CoreApi` 进程内门面，无 UI 依赖）
+- `crates/postium-editor`：原生邮件编辑器组件（WYSIWYG，md⇄HTML）
+
+常用命令：`cargo test --workspace`（新架构测试，~250 用例）。
+
+`src-tauri/` 与 `src/`（Svelte）在迁移期间保留双轨，验收后移除。
+设计文档：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`

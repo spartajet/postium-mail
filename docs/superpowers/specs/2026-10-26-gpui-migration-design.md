@@ -1,7 +1,7 @@
 # Postium Mail GPUI 迁移设计
 
 - 日期：2026-10-26
-- 状态：已批准（基于 spike 验证报告）
+- 状态：已批准（基于 spike 验证报告）；计划 1（core + editor 地基）已完成
 - 分支：`gpui-migration`
 
 ## 目标
