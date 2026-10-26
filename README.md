@@ -60,3 +60,5 @@ E2E 测试默认不连接真实 IMAP、SMTP、OAuth 或远程邮件服务。测�
 
 `src-tauri/` 与 `src/`（Svelte）在迁移期间保留双轨，验收后移除。
 设计文档：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`
+
+GPUI 版运行：`cargo run -p postium-ui`（数据与 Tauri 版共用 `~/.postium`）
