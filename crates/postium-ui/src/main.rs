@@ -1,6 +1,7 @@
 //! Postium Mail 应用入口：数据目录 → 核心服务装配 → GPUI 主窗口。
 
 mod app;
+mod i18n;
 mod runtime;
 
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             postium_editor::init(cx);
+            cx.set_global(i18n::I18nGlobal { lang: i18n::Lang::Zh });
             app::open_main_window(api, sync_rx, cx);
         });
 }
