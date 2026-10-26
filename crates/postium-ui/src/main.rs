@@ -36,7 +36,7 @@ fn main() {
         .expect("核心服务初始化失败");
 
     gpui_kit::application()
-        .with_assets(gpui_kit_assets::native_assets::AllAssets)
+        .with_assets(gpui_kit_assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             postium_editor::init(cx);

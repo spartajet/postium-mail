@@ -60,6 +60,8 @@ pub struct AppShell {
     pub nav: NavTarget,
     /// 托盘句柄（保持存活）
     _tray: Option<tray_icon::TrayIcon>,
+    calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
+    workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
 }
 
 impl AppShell {
@@ -178,6 +180,8 @@ impl AppShell {
             search_input,
             nav: NavTarget::AllInbox,
             _tray,
+            calendar_view: None,
+            workflow_view: None,
         }
     }
 
@@ -225,8 +229,20 @@ impl Render for AppShell {
 
         // 主区域：日历/工作流/设置占位，其余渲染邮件列表
         let main: AnyElement = match &self.nav {
-            NavTarget::Calendar => placeholder_pane(&i18n::t("sidebar.calendar"), cx).into_any_element(),
-            NavTarget::Workflow => placeholder_pane(&i18n::t("sidebar.workflow"), cx).into_any_element(),
+            NavTarget::Calendar => {
+                if self.calendar_view.is_none() {
+                    let api = self.api.clone();
+                    self.calendar_view = Some(cx.new(|cx| crate::views::calendar::CalendarView::new(api, cx)));
+                }
+                self.calendar_view.clone().unwrap().into_any_element()
+            }
+            NavTarget::Workflow => {
+                if self.workflow_view.is_none() {
+                    let api = self.api.clone();
+                    self.workflow_view = Some(cx.new(|cx| crate::views::workflow::WorkflowView::new(api, cx)));
+                }
+                self.workflow_view.clone().unwrap().into_any_element()
+            }
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
             _ => h_flex()
                 .flex_1()
