@@ -56,7 +56,10 @@ E2E 测试默认不连接真实 IMAP、SMTP、OAuth 或远程邮件服务。测�
 - `crates/postium-core`：后端（domain/service/infrastructure + `CoreApi` 进程内门面，无 UI 依赖）
 - `crates/postium-editor`：原生邮件编辑器组件（WYSIWYG，md⇄HTML）
 
-常用命令：`cargo test --workspace`（新架构测试，~250 用例）。
+常用命令：
+
+- `cargo test --workspace`——全部测试（core 240+ / editor 6 / **UI 单元 6 + E2E 8**）
+- `cargo test -p postium-ui e2e_tests`——GPUI 版 E2E（headless 全栈：seed 数据 → 导航/搜索/账号切换/写信/草稿/星标删除/主题，迁移自 WebdriverIO 套件，交互以 handler + 键盘事件驱动）
 
 `src-tauri/` 与 `src/`（Svelte）在迁移期间保留双轨，验收后移除。
 设计文档：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`
