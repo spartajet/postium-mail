@@ -17,7 +17,7 @@ use postium_core::service::account_service::{CreateAccountRequest, UpdateAccount
 
 use crate::i18n::t;
 use crate::runtime::spawn_tokio;
-use crate::stores::accounts::{AccountsEvent, AccountsStore};
+use crate::stores::accounts::AccountsStore;
 
 /// 打开设置窗口（居中 960×720，参照旧 open_settings_window）。
 pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>, cx: &mut App) {

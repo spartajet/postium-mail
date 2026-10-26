@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{AppContext as _, Context, Entity, EventEmitter};
+use gpui_kit::{Context, EventEmitter};
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::EmailDetail;
 
@@ -50,6 +50,10 @@ impl DetailStore {
         cx.spawn(async move |this, cx| {
             if let Ok((detail, inline)) = rx.recv().await {
                 this.update(cx, |store, cx| {
+                    // 竞态防护：返回时用户已切换到其他邮件则丢弃过期结果
+                    if store.email_id != Some(email_id) {
+                        return;
+                    }
                     if let Ok(detail) = detail {
                         let injected = match &detail.body_html {
                             Some(html) => inject_images(html, &inline, RemoteImagePolicy::Block),

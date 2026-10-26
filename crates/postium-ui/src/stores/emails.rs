@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{AppContext as _, Context, Entity, EventEmitter};
+use gpui_kit::{Context, EventEmitter};
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::{EmailCategory, EmailDto};
 

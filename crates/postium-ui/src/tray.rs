@@ -3,14 +3,16 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{App, AppContext as _};
+use gpui_kit::App;
 use postium_core::api::CoreApi;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 
 use crate::stores::sync::SyncStore;
 
+#[allow(dead_code)]
 struct TrayActions {
+    #[allow(dead_code)]
     show: u32,
     compose: u32,
     sync: u32,
@@ -25,7 +27,8 @@ pub fn setup_tray(
     sync_store: gpui_kit::Entity<SyncStore>,
     cx: &mut App,
 ) -> Option<TrayIcon> {
-    let icon_path = std::path::Path::new("src-tauri/icons/icon.ico");
+    // 编译期定位 crate 内图标（不依赖 CWD，也不依赖待移除的旧轨目录）
+    let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.ico");
     let icon = match tray_icon::Icon::from_path(icon_path, None) {
         Ok(icon) => icon,
         Err(e) => {
@@ -98,7 +101,14 @@ pub fn setup_tray(
                         });
                     }
                     "quit" => {
-                        cx.update(|cx| cx.quit());
+                        cx.update(|cx| {
+                            if let Some(handle) = cx.active_window() {
+                                let _ = handle.update(cx, |_, window, _| {
+                                    crate::window_state::save(window);
+                                });
+                            }
+                            cx.quit();
+                        });
                     }
                     _ => {}
                 }

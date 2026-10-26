@@ -64,6 +64,7 @@ pub struct AppShell {
     _tray: Option<tray_icon::TrayIcon>,
     calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
+    status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
 
 impl AppShell {
@@ -86,14 +87,15 @@ impl AppShell {
 
         // Toast 总线 + 关闭主窗口 → 隐藏到托盘（退出走托盘菜单）
         crate::notify::setup(window, cx);
-        // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 最小化（退出走托盘菜单）
+        // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 保存状态后最小化（退出走托盘菜单）
         window.on_window_should_close(cx, |window, _| {
+            crate::window_state::save(window);
             window.minimize_window();
             false
         });
 
         let accounts = init_accounts_store(&api, cx);
-        let sidebar = cx.new(|cx| Sidebar {
+        let sidebar = cx.new(|_cx| Sidebar {
             accounts: accounts.clone(),
             current: NavTarget::AllInbox,
         });
@@ -136,9 +138,6 @@ impl AppShell {
                     });
                     this.email_list = None; // 等 Reloaded 重建
                     cx.notify();
-                }
-                SidebarEvent::Navigate(NavTarget::Settings) => {
-                    // 已在 Navigate 分支处理导航；设置改开独立窗口在下方兜底
                 }
                 SidebarEvent::Settings => {
                     let api = this.api.clone();
@@ -209,6 +208,7 @@ impl AppShell {
             _tray,
             calendar_view: None,
             workflow_view: None,
+            status_bar: None,
         }
     }
 
@@ -288,11 +288,16 @@ impl Render for AppShell {
                 .child(
                     match self.detail_view.clone() {
                         Some(view) => view.into_any_element(),
-                        None => cx.new(|_| EmailDetailView {
-                            store: self.detail.clone(),
-                            api: self.api.clone(),
-                            recipients_expanded: false,
-                        }).into_any_element(),
+                        None => {
+                            // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
+                            let view = cx.new(|_| EmailDetailView {
+                                store: self.detail.clone(),
+                                api: self.api.clone(),
+                                recipients_expanded: false,
+                            });
+                            self.detail_view = Some(view.clone());
+                            view.into_any_element()
+                        }
                     },
                 )
                 .into_any_element(),
@@ -342,11 +347,18 @@ impl Render for AppShell {
                             ),
                     )
                     .child(div().flex_1().overflow_hidden().child(main))
-                    .child(cx.new(|_| StatusBar {
-                        sync: self.sync_store.clone(),
-                        api: self.api.clone(),
-                        accounts: self.accounts.clone(),
-                    }).into_any_element()),
+                    .child(match self.status_bar.clone() {
+                        Some(bar) => bar.into_any_element(),
+                        None => {
+                            let bar = cx.new(|_| StatusBar {
+                                sync: self.sync_store.clone(),
+                                api: self.api.clone(),
+                                accounts: self.accounts.clone(),
+                            });
+                            self.status_bar = Some(bar.clone());
+                            bar.into_any_element()
+                        }
+                    }),
             )
     }
 }

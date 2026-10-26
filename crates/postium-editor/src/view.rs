@@ -9,7 +9,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 use markdown_editor::{BlockEditor, BlockKind, EditorCommand, MarkKind};
 
-use crate::state::{EmailEditorState, EmailEditorEvent};
+use crate::state::EmailEditorState;
 
 /// 邮件编辑器视图：一行工具栏 + `BlockEditor` 编辑区。
 ///

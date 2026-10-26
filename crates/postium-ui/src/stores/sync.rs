@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gpui_kit::{AppContext as _, Context, Entity, EventEmitter};
+use gpui_kit::{Context, EventEmitter};
 use postium_core::api::CoreApi;
 use postium_core::domain::sync::{SyncEventTx, SyncProgressEvent};
 
@@ -16,6 +16,7 @@ pub struct SyncStore {
 }
 
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub enum SyncEvent {
     Started,
     Idle,
@@ -29,7 +30,7 @@ impl SyncStore {
     }
 
     /// 启动事件消费循环（AppShell 装配时挂一次）。
-    pub fn spawn_consumer(this: gpui_kit::WeakEntity<Self>, mut rx: postium_core::api::SyncEventRx, cx: &mut Context<Self>) {
+    pub fn spawn_consumer(this: gpui_kit::WeakEntity<Self>, rx: postium_core::api::SyncEventRx, cx: &mut Context<Self>) {
         cx.spawn(async move |_, cx| {
             while let Ok(event) = rx.recv().await {
                 this.update(cx, |store, cx| {

@@ -9,6 +9,7 @@ pub enum RemoteImagePolicy {
     /// 删除远程 img（显示 alt 文本占位）
     Block,
     /// 保留远程 URL（渲染器不会自动加载，占位；后续版本走后端下载转 data URI）
+    #[allow(dead_code)]
     Keep,
 }
 

@@ -14,6 +14,7 @@ pub enum NavTarget {
     Label(i32),
     Calendar,
     Workflow,
+    #[allow(dead_code)]
     Settings,
 }
 

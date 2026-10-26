@@ -70,6 +70,7 @@ impl AccountsStore {
     }
 
     /// 全部账号收件箱未读总数。
+    #[allow(dead_code)] // sidebar 用免借用版本
     pub fn total_unread(&self) -> usize {
         self.groups
             .iter()

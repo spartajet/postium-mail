@@ -10,7 +10,7 @@ static TX: OnceLock<smol::channel::Sender<SharedString>> = OnceLock::new();
 /// 记录主窗口句柄并启动消费循环（AppShell 装配时调用一次）。
 pub fn setup(window: &gpui_kit::Window, cx: &mut App) {
     let _ = MAIN_WINDOW.set(window.window_handle());
-    let (tx, mut rx) = smol::channel::bounded::<SharedString>(64);
+    let (tx, rx) = smol::channel::bounded::<SharedString>(64);
     let _ = TX.set(tx);
     cx.spawn(async move |cx| {
         while let Ok(msg) = rx.recv().await {

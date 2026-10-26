@@ -13,6 +13,7 @@ use crate::i18n::t;
 use crate::runtime::spawn_tokio;
 
 pub struct WorkflowView {
+    #[allow(dead_code)]
     pub api: Arc<CoreApi>,
     starred: Vec<EmailDto>,
     loaded: bool,

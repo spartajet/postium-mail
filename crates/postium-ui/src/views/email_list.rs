@@ -49,7 +49,7 @@ impl RenderOnce for EmailRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let time = chrono::DateTime::from_timestamp(self.email.sent_at, 0)
             .map(|dt| {
-                use chrono::Datelike;
+                
                 let now = chrono::Utc::now();
                 if dt.date_naive() == now.date_naive() {
                     dt.format("%H:%M").to_string()
@@ -178,7 +178,7 @@ impl ListDelegate for EmailListDelegate {
             });
 
             // 异步标记已读
-            if let Some((id, unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
+            if let Some((id, _unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
                 let api = self.api.clone();
                 let _ = spawn_tokio(async move { api.mark_as_read(id, true).await });
                 let _ = window;

@@ -16,7 +16,6 @@ use postium_core::api::CoreApi;
 use postium_core::service::email_service::{
     ComposeAttachmentInput,
     SendEmailRequest,
-    SendEmailResponse,
 };
 use postium_editor::{EmailEditor, EmailEditorState};
 
@@ -37,9 +36,9 @@ fn strip_prefixes(subject: &str) -> String {
     let mut s = subject.trim().to_string();
     loop {
         let lower = s.to_ascii_lowercase();
-        if let Some(rest) = lower.strip_prefix("re:") {
+        if let Some(_rest) = lower.strip_prefix("re:") {
             s = s[3..].trim_start().to_string();
-        } else if let Some(rest) = lower.strip_prefix("fwd:") {
+        } else if let Some(_rest) = lower.strip_prefix("fwd:") {
             s = s[4..].trim_start().to_string();
         } else {
             return s;
@@ -125,7 +124,7 @@ impl ComposeView {
             })
         };
 
-        let mut this = Self {
+        let this = Self {
             api: api.clone(),
             to: make_input(&to_init, cx),
             cc: make_input("", cx),
@@ -151,7 +150,7 @@ impl ComposeView {
         let rx = spawn_tokio(async move { api.list_accounts().await.unwrap_or_default() });
         cx.spawn(async move |this, cx| {
             if let Ok(accounts) = rx.recv().await {
-                this.update(cx, |view, cx| {
+                let _ = this.update(cx, |view, cx| {
                     if let Some(acc) = accounts.first() {
                         view.selected_account = Some((acc.id, acc.name.clone()));
                     }

@@ -79,6 +79,7 @@ pub fn set_lang(lang: Lang, cx: &mut App) {
 }
 
 /// 供测试直接查表。
+#[allow(dead_code)]
 pub fn translate(lang: Lang, key: &str) -> Option<SharedString> {
     lookup(lang, key)
 }

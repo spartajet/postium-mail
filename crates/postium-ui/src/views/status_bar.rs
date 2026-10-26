@@ -86,7 +86,7 @@ fn last_sync_text(store: &crate::stores::accounts::AccountsStore) -> SharedStrin
         .max();
     match latest {
         Some(ts) => {
-            use chrono::Datelike;
+            
             let dt = chrono::DateTime::from_timestamp(ts, 0).unwrap_or_default();
             let now = chrono::Utc::now();
             let date = if dt.date_naive() == now.date_naive() {

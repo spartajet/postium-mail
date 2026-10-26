@@ -18,6 +18,7 @@ use crate::i18n::t;
 use crate::runtime::spawn_tokio;
 
 pub struct CalendarView {
+    #[allow(dead_code)]
     pub api: Arc<CoreApi>,
     emails: Vec<EmailDto>,
     loaded: bool,
