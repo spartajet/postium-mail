@@ -2,13 +2,57 @@ name: Test
 
 on:
   push:
-    branches: [main, feature/*]
+    branches: [main, feature/*, gpui-migration]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  rust-tests:
-    name: Rust Tests
+  workspace-tests:
+    name: Workspace Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # gpui Linux 后端（X11/Wayland + wgpu/blade）需要的系统库；
+      # Windows 无需额外依赖（WebView2 随系统提供）
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config libssl-dev \
+            libx11-dev libxkbcommon-dev libxcb1-dev \
+            libwayland-dev libgtk-3-dev \
+            libvulkan-dev mesa-vulkan-drivers vulkan-tools \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace
+        run: cargo build --workspace
+
+      # 单独跑应用二进制构建产物检查（可选发布前置）
+      - name: Run all tests
+        run: cargo test --workspace
+
+      # GPUI E2E（headless，无需显示服务器）
+      - name: Run GPUI E2E tests
+        run: cargo test -p postium-ui e2e_tests
+
+  legacy-tauri:
+    name: Legacy Tauri Track (optional)
+    # 旧轨道（src-tauri + Svelte）迁移期保留；main 分支默认跳过，
+    # 通过 workflow_dispatch 或 legacy 标签手动触发
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,12 +74,6 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
-  frontend-tests:
-    name: Frontend Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -44,57 +82,3 @@ jobs:
 
       - name: Run frontend tests
         run: bun run test
-
-  e2e-tests:
-    name: E2E Tests (Linux)
-    runs-on: ubuntu-latest
-    needs: [rust-tests, frontend-tests]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config webkit2gtk-driver xvfb
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install root dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install E2E dependencies
-        working-directory: e2e
-        run: bun install --frozen-lockfile
-
-      - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
-
-      - name: Run E2E tests
-        working-directory: e2e
-        run: xvfb-run bun run test
-
-      - name: Upload E2E artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-artifacts
-          path: e2e/artifacts/**
-          if-no-files-found: ignore
-
-      - name: Upload failed E2E data
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-data
-          path: .e2e-data/**
-          if-no-files-found: ignore
