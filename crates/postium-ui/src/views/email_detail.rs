@@ -286,31 +286,7 @@ impl Render for EmailDetailView {
                                             .unwrap_or_else(|| "（无主题）".into()),
                                     ),
                             )
-                            .child(
-                                Button::new("star")
-                                    .ghost()
-                                    .xsmall()
-                                    .icon(if detail.email.is_starred {
-                                        IconName::Star
-                                    } else {
-                                        IconName::Star
-                                    })
-                                    .on_click(cx.listener(Self::toggle_star)),
-                            )
-                            .child(
-                                Button::new("archive")
-                                    .ghost()
-                                    .xsmall()
-                                    .label(t("email.archive"))
-                                    .on_click(cx.listener(Self::archive)),
-                            )
-                            .child(
-                                Button::new("delete")
-                                    .ghost()
-                                    .xsmall()
-                                    .label(t("email.delete"))
-                                    .on_click(cx.listener(Self::delete)),
-                            )
+                            // 操作分组：主操作（回复/全部回复/转发）｜邮件态（星标/已读/重载）｜归置（归档/删除）｜浏览器
                             .child(
                                 Button::new("reply")
                                     .primary()
@@ -332,11 +308,25 @@ impl Render for EmailDetailView {
                                     .label(t("email.forward"))
                                     .on_click(cx.listener(Self::forward)),
                             )
+                            .child(separator(cx))
+                            .child(
+                                Button::new("star")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Star)
+                                    .when(detail.email.is_starred, |b| {
+                                        b.label("★").tooltip(t("email.unstar"))
+                                    })
+                                    .when(!detail.email.is_starred, |b| {
+                                        b.tooltip(t("email.star"))
+                                    })
+                                    .on_click(cx.listener(Self::toggle_star)),
+                            )
                             .child(
                                 Button::new("mark-unread")
                                     .ghost()
                                     .xsmall()
-                                    .label(t("email.markUnread"))
+                                    .label(if detail.email.is_read { t("email.markUnread") } else { t("email.markRead") })
                                     .on_click(cx.listener(Self::mark_unread)),
                             )
                             .child(
@@ -347,6 +337,22 @@ impl Render for EmailDetailView {
                                     .tooltip(t("email.reload"))
                                     .on_click(cx.listener(Self::reload)),
                             )
+                            .child(separator(cx))
+                            .child(
+                                Button::new("archive")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.archive"))
+                                    .on_click(cx.listener(Self::archive)),
+                            )
+                            .child(
+                                Button::new("delete")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.delete"))
+                                    .on_click(cx.listener(Self::delete)),
+                            )
+                            .child(separator(cx))
                             .child(
                                 Button::new("browser")
                                     .ghost()
@@ -358,6 +364,7 @@ impl Render for EmailDetailView {
                     .child(
                         h_flex()
                             .gap_2()
+                            .flex_wrap()
                             .text_size(px(12.5))
                             .text_color(cx.theme().muted_foreground)
                             .child(sender)
@@ -480,4 +487,11 @@ fn cc_display(detail: &postium_core::service::email_service::EmailDetail) -> Opt
         .map(|cc| cc.trim())
         .filter(|cc| !cc.is_empty())
         .map(|cc| cc.into())
+}
+
+
+/// 工具条分组竖分隔线。
+fn separator(cx: &gpui_kit::App) -> impl IntoElement {
+    let _ = cx;
+    div().w(px(1.)).h(px(14.)).mx_1().bg(gpui_kit::black().opacity(0.15))
 }

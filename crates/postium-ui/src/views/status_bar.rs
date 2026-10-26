@@ -55,17 +55,13 @@ impl Render for StatusBar {
                 .size_3(),
             )
             .child(status_text)
-            .child(
-                div()
-                    .ml_auto()
-                    .child(last_sync_text(self.accounts.read(cx))),
-            )
+            // 手动同步：仅图标按钮（状态文字已表达"同步完成"，避免文案重复）
             .child(
                 Button::new("sync-now")
                     .ghost()
                     .xsmall()
                     .icon(IconName::RefreshCw)
-                    .label(t("sync.completed"))
+                    .tooltip("立即同步全部账号")
                     .on_click({
                         let api = self.api.clone();
                         let sync = self.sync.clone();
@@ -76,6 +72,8 @@ impl Render for StatusBar {
                         }
                     }),
             )
+            // 右侧：上次同步时间
+            .child(div().ml_auto().child(last_sync_text(self.accounts.read(cx))))
     }
 }
 

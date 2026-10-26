@@ -78,6 +78,9 @@ pub struct ComposeView {
     sending: bool,
     pub(crate) draft_email_id: Option<i32>,
     pub(crate) draft_status: SharedString,
+    /// 抄送/密送渐进显示（对齐旧版 showCcField/showBccField，默认收起）
+    cc_visible: bool,
+    bcc_visible: bool,
     /// 发件账号 ID（点击工具条账号按钮循环切换）
     pub(crate) selected_account: Option<(i32, String)>,
     close_handle: Option<gpui_kit::AnyWindowHandle>,
@@ -134,6 +137,8 @@ impl ComposeView {
             sending: false,
             draft_email_id: None,
             draft_status: " ".into(),
+            cc_visible: false,
+            bcc_visible: false,
             selected_account: None,
             close_handle: None,
         };
@@ -497,9 +502,36 @@ impl Render for ComposeView {
                     ),
             )
             // 字段区
-            .child(field(&t("email.to"), &self.to))
-            .child(field(&t("email.cc"), &self.cc))
-            .child(field(&t("email.bcc"), &self.bcc))
+            .child(h_flex().gap_2().items_center()
+                .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(t("email.to").to_string()))
+                .child(div().flex_1().child(Input::new(&self.to)))
+                // 收起的抄送/密送以小按钮渐进展开（对齐旧版）
+                .when(!self.cc_visible, |this| {
+                    this.child(
+                        Button::new("show-cc")
+                            .ghost()
+                            .xsmall()
+                            .label(t("email.showCc").to_string())
+                            .on_click(cx.listener(|this: &mut Self, _, _, cx| {
+                                this.cc_visible = true;
+                                cx.notify();
+                            })),
+                    )
+                })
+                .when(!self.bcc_visible, |this| {
+                    this.child(
+                        Button::new("show-bcc")
+                            .ghost()
+                            .xsmall()
+                            .label(t("email.showBcc").to_string())
+                            .on_click(cx.listener(|this: &mut Self, _, _, cx| {
+                                this.bcc_visible = true;
+                                cx.notify();
+                            })),
+                    )
+                }))
+            .when(self.cc_visible, |this| this.child(field(&t("email.cc"), &self.cc)))
+            .when(self.bcc_visible, |this| this.child(field(&t("email.bcc"), &self.bcc)))
             .child(field(&t("email.subject"), &self.subject))
             .child(
                 h_flex()

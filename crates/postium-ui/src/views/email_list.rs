@@ -63,7 +63,7 @@ impl RenderOnce for EmailRow {
             v_flex()
                 .flex_1()
                 .overflow_hidden()
-                .gap_0p5()
+                .gap_1()
                 .child(
                     h_flex()
                         .gap_2()

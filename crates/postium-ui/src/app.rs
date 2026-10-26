@@ -314,7 +314,7 @@ impl Render for AppShell {
                             .items_center()
                             .child(
                                 div()
-                                    .w(px(360.))
+                                    .w(px(420.))
                                     .child(Input::new(&self.search_input)),
                             )
                             .child(

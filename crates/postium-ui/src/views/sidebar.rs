@@ -1,11 +1,13 @@
 //! 侧栏（移植自 src/lib/components/layout/Sidebar.svelte）：
 //! 快捷入口 / 全部收件箱 / 分类 / 各账号文件夹 / 标签 / 设置入口。
+//! 导航行为自定义行（未读数右对齐徽标），设置固定底部。
 
 use gpui_kit::component::{
     ActiveTheme as _,
     button::{Button, ButtonVariants as _},
-    v_flex,
+    h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use gpui_kit_assets::IconName;
 use postium_core::service::email_service::EmailCategory;
@@ -31,24 +33,29 @@ pub struct Sidebar {
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
 
-impl Render for Sidebar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let store = self.accounts.read(cx);
-
-        let nav = |target: NavTarget, icon: IconName, label: SharedString, unread: Option<usize>, this: &Self| {
-            let selected = this.current == target;
-            let display = match unread {
-                Some(n) if n > 0 => format!("{label}  {n}").into(),
-                _ => label,
-            };
-            let btn = Button::new(format!("nav-{}", display))
-                .ghost()
-                .w_full()
-                .justify_start()
-                .icon(icon)
-                .label(display);
-            let btn = if selected { btn.primary() } else { btn };
-            btn.on_click({
+impl Sidebar {
+    fn nav_row(
+        &self,
+        id: SharedString,
+        icon: IconName,
+        label: SharedString,
+        unread: Option<usize>,
+        target: NavTarget,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let selected = self.current == target;
+        let row_id = id.to_string();
+        let mut row = div()
+            .h(px(30.))
+            .px_2()
+            .rounded(cx.theme().radius)
+            .when(selected, |d| d.bg(cx.theme().accent))
+            .when(!selected, |d| {
+                d.hover(|s| s.bg(cx.theme().accent.opacity(0.12)))
+            })
+            .id(row_id)
+            .cursor_pointer()
+            .on_click({
                 let target = target.clone();
                 cx.listener(move |this: &mut Self, _, _, cx| {
                     this.current = target.clone();
@@ -56,87 +63,123 @@ impl Render for Sidebar {
                     cx.notify();
                 })
             })
-        };
+            .child(
+                h_flex()
+                    .size_full()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        gpui_kit::component::Icon::new(icon)
+                            .size_4()
+                            .map(|i| {
+                                if selected {
+                                    i.text_color(cx.theme().accent_foreground)
+                                } else {
+                                    i.text_color(cx.theme().muted_foreground)
+                                }
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .when(selected, |d| {
+                                d.text_color(cx.theme().accent_foreground)
+                            })
+                            .line_clamp(1)
+                            .child(label),
+                    ),
+            );
 
-        let mut content = v_flex()
-            .w(px(220.))
-            .flex_none()
-            .h_full()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .p_2()
-            .gap_1()
+        // 未读徽标：右对齐，选中态反色
+        if let Some(n) = unread.filter(|n| *n > 0) {
+            row = row.child(
+                div()
+                    .ml_auto()
+                    .px(px(6.))
+                    .py(px(1.))
+                    .rounded(px(8.))
+                    .text_size(px(10.5))
+                    .when(selected, |d| {
+                        d.bg(gpui_kit::white().opacity(0.25))
+                            .text_color(cx.theme().accent_foreground)
+                    })
+                    .when(!selected, |d| {
+                        d.bg(cx.theme().accent).text_color(cx.theme().accent_foreground)
+                    })
+                    .child(n.to_string()),
+            );
+        }
+        row
+    }
+}
+
+impl Render for Sidebar {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let groups = self.accounts.read(cx).groups.clone();
+        let theme = cx.theme().clone();
+        let store_groups = &groups;
+
+        // nav_row 以宏形式内联（避免闭包双可变借用）
+        macro_rules! nav {
+            ($id:expr, $icon:expr, $label:expr, $unread:expr, $target:expr) => {
+                self.nav_row($id.into(), $icon, $label, $unread, $target, cx)
+            };
+        }
+
+        let mut scroll = v_flex()
+            .gap_0p5()
+            .flex_1()
+            .min_h_0()
             .id("sidebar-scroll")
             .overflow_y_scroll()
-            .child(
-                div()
-                    .px_2()
-                    .py_2()
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(t("app.name")),
-            )
-            // 快信入口
-            .child(
-                Button::new("compose")
-                    .primary()
-                    .w_full()
-                    .icon(IconName::MailPlus)
-                    .label(t("sidebar.compose"))
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        cx.emit(SidebarEvent::Compose);
-                    })),
-            )
             // 快捷入口
-            .child(nav(NavTarget::Calendar, IconName::Calendar, t("sidebar.calendar"), None, self))
-            .child(nav(NavTarget::Workflow, IconName::Workflow, t("sidebar.workflow"), None, self))
+            .child(nav!("nav-calendar", IconName::Calendar, t("sidebar.calendar"), None, NavTarget::Calendar))
+            .child(nav!("nav-workflow", IconName::ListTodo, t("sidebar.workflow"), None, NavTarget::Workflow))
             // 全部收件箱
-            .child(nav(
-                NavTarget::AllInbox,
-                IconName::Inbox,
-                t("sidebar.inbox"),
-                Some(store.total_unread()),
-                self,
-            ));
+            .child(nav!("nav-allinbox", IconName::Inbox, t("sidebar.inbox"), Some(total_unread_of(&groups)), NavTarget::AllInbox));
 
         // 虚拟分类
-        for (category, icon) in [
+        for (idx, (category, icon)) in [
             (EmailCategory::Starred, IconName::Star),
             (EmailCategory::Sent, IconName::Send),
             (EmailCategory::Drafts, IconName::FileText),
             (EmailCategory::Spam, IconName::Ban),
             (EmailCategory::Trash, IconName::Trash),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let category = &category;
-            let unread: usize = store
-                .groups
+            let unread: usize = store_groups
                 .iter()
                 .flat_map(|g| g.stats.iter())
                 .filter(|s| category_matches_stat(category.clone(), s))
                 .map(|s| s.unread)
                 .sum();
-            content = content.child(nav(
-                NavTarget::Category(category.clone()),
+            let label = t(category_label_key(category));
+            scroll = scroll.child(nav!(
+                &format!("nav-cat-{idx}"),
                 icon,
-                t(category_label_key(category)),
+                label,
                 if unread > 0 { Some(unread) } else { None },
-                self,
+                NavTarget::Category(category.clone())
             ));
         }
 
         // 各账号：账号名标题 + 文件夹行 + 标签行
-        for group in &store.groups {
-            content = content.child(
+        for (gi, group) in store_groups.iter().enumerate() {
+            scroll = scroll.child(
                 div()
                     .px_2()
                     .pt_3()
                     .pb_1()
-                    .text_size(px(12.))
+                    .text_size(px(11.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(cx.theme().muted_foreground)
-                    .child(group.account.name.clone()),
+                    .text_color(theme.muted_foreground)
+                    .line_clamp(1)
+                    .child(group.account.email.clone()),
             );
-            for stat in &group.stats {
+            for (fi, stat) in group.stats.iter().enumerate() {
                 let label = match folder_label_key(&stat.folder) {
                     Some(key) => t(key),
                     None => stat.folder.clone().into(),
@@ -149,44 +192,70 @@ impl Render for Sidebar {
                     f if f.contains("TRASH") || f.contains("DELETED") => IconName::Trash,
                     _ => IconName::Folder,
                 };
-                content = content.child(nav(
-                    NavTarget::AccountFolder {
-                        account_id: group.account.id,
-                        folder: stat.folder.clone(),
-                    },
+                scroll = scroll.child(nav!(
+                    &format!("nav-acc-{gi}-{fi}"),
                     icon,
                     label,
                     Some(stat.unread),
-                    self,
+                    NavTarget::AccountFolder {
+                        account_id: group.account.id,
+                        folder: stat.folder.clone(),
+                    }
                 ));
             }
-            for label_dto in &group.labels {
-                content = content.child(nav(
-                    NavTarget::Label(label_dto.id),
+            for (li, label_dto) in group.labels.iter().enumerate() {
+                scroll = scroll.child(nav!(
+                    &format!("nav-lbl-{gi}-{li}"),
                     IconName::Tag,
                     label_dto.name.clone().into(),
                     None,
-                    self,
+                    NavTarget::Label(label_dto.id)
                 ));
             }
         }
 
-        // 底部：设置（Task 8 实装窗口，先导航占位）
-        content = content.child(
-            div().pt_2().child(
-                Button::new("settings")
-                    .ghost()
+        // 侧栏骨架：标题 + 写信按钮 + 滚动导航 + 固定底部设置
+        v_flex()
+            .w(px(220.))
+            .flex_none()
+            .h_full()
+            .border_r_1()
+            .border_color(theme.border)
+            .p_2()
+            .gap_1()
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_size(px(15.))
+                    .font_weight(FontWeight::BOLD)
+                    .child(t("app.name")),
+            )
+            .child(
+                Button::new("compose")
+                    .primary()
                     .w_full()
-                    .justify_start()
-                    .icon(IconName::Settings2)
-                    .label(t("settings.title"))
+                    .icon(IconName::MailPlus)
+                    .label(t("sidebar.compose"))
                     .on_click(cx.listener(|_, _, _, cx| {
-                        cx.emit(SidebarEvent::Settings);
+                        cx.emit(SidebarEvent::Compose);
                     })),
-            ),
-        );
-
-        content
+            )
+            .child(scroll)
+            // 固定底部：设置
+            .child(
+                div().pt_1().mt_1().border_t_1().border_color(theme.border).child(
+                    Button::new("settings")
+                        .ghost()
+                        .w_full()
+                        .justify_start()
+                        .icon(IconName::Settings2)
+                        .label(t("settings.title"))
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(SidebarEvent::Settings);
+                        })),
+                ),
+            )
     }
 }
 
@@ -200,4 +269,15 @@ fn category_matches_stat(category: EmailCategory, stat: &postium_core::domain::s
         EmailCategory::Trash => folder.contains("TRASH") || folder.contains("DELETED"),
         _ => false,
     }
+}
+
+
+/// 全部账号收件箱未读总数（render 内免借用计算）。
+fn total_unread_of(groups: &[crate::stores::accounts::AccountNode]) -> usize {
+    groups
+        .iter()
+        .flat_map(|g| g.stats.iter())
+        .filter(|s| s.folder.eq_ignore_ascii_case("INBOX"))
+        .map(|s| s.unread)
+        .sum()
 }
