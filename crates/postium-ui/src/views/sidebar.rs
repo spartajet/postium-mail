@@ -20,6 +20,8 @@ pub enum SidebarEvent {
     Navigate(NavTarget),
     /// 请求打开独立写信窗口
     Compose,
+    /// 请求打开设置窗口
+    Settings,
 }
 
 pub struct Sidebar {
@@ -178,10 +180,8 @@ impl Render for Sidebar {
                     .justify_start()
                     .icon(IconName::Settings2)
                     .label(t("settings.title"))
-                    .on_click(cx.listener(|this: &mut Self, _, _, cx| {
-                        this.current = NavTarget::Settings;
-                        cx.emit(SidebarEvent::Navigate(NavTarget::Settings));
-                        cx.notify();
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(SidebarEvent::Settings);
                     })),
             ),
         );

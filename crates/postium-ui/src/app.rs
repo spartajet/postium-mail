@@ -108,6 +108,16 @@ impl AppShell {
                     this.email_list = None; // 等 Reloaded 重建
                     cx.notify();
                 }
+                SidebarEvent::Navigate(NavTarget::Settings) => {
+                    // 已在 Navigate 分支处理导航；设置改开独立窗口在下方兜底
+                }
+                SidebarEvent::Settings => {
+                    let api = this.api.clone();
+                    let accounts = this.accounts.clone();
+                    cx.defer(move |cx| {
+                        crate::views::settings::open_settings_window(&accounts, &api, cx);
+                    });
+                }
                 SidebarEvent::Compose => {
                     let api = this.api.clone();
                     cx.defer(move |cx| {
