@@ -67,24 +67,24 @@ pub fn open_compose_window(mode: ComposeMode, api: &Arc<CoreApi>, cx: &mut App) 
 }
 
 pub struct ComposeView {
-    api: Arc<CoreApi>,
-    to: Entity<InputState>,
-    cc: Entity<InputState>,
-    bcc: Entity<InputState>,
-    subject: Entity<InputState>,
-    editor: Entity<EmailEditorState>,
+    pub(crate) api: Arc<CoreApi>,
+    pub(crate) to: Entity<InputState>,
+    pub(crate) cc: Entity<InputState>,
+    pub(crate) bcc: Entity<InputState>,
+    pub(crate) subject: Entity<InputState>,
+    pub(crate) editor: Entity<EmailEditorState>,
     attachments: Vec<(std::path::PathBuf, String, u64)>, // (路径, 文件名, 大小)
-    status: SharedString,
+    pub(crate) status: SharedString,
     sending: bool,
-    draft_email_id: Option<i32>,
-    draft_status: SharedString,
+    pub(crate) draft_email_id: Option<i32>,
+    pub(crate) draft_status: SharedString,
     /// 发件账号 ID（点击工具条账号按钮循环切换）
-    selected_account: Option<(i32, String)>,
+    pub(crate) selected_account: Option<(i32, String)>,
     close_handle: Option<gpui_kit::AnyWindowHandle>,
 }
 
 impl ComposeView {
-    fn new(mode: ComposeMode, api: Arc<CoreApi>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(mode: ComposeMode, api: Arc<CoreApi>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 初始内容：回复/转发引入原文（对齐旧版 showReply/showForward 语义）
         let (to_init, subject_init, editor_html) = match &mode {
             ComposeMode::New => (String::new(), String::new(), String::new()),
@@ -152,8 +152,7 @@ impl ComposeView {
                     }
                     let _ = preferred_account;
                     cx.notify();
-                })
-                .ok();
+                });
             }
         })
         .detach();
@@ -213,7 +212,7 @@ impl ComposeView {
     }
 
     /// 丢弃草稿（删除服务器草稿并关窗）。
-    fn discard_draft(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn discard_draft(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.draft_email_id else {
             self.close_window(cx);
             return;
@@ -237,7 +236,7 @@ impl ComposeView {
         }
     }
 
-    fn persist_draft(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn persist_draft(&mut self, cx: &mut Context<Self>) {
         if self.sending {
             return;
         }
@@ -289,7 +288,7 @@ impl ComposeView {
         .detach();
     }
 
-    fn send(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn send(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         if self.sending {
             return;
         }

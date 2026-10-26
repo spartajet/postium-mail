@@ -297,6 +297,7 @@ pub struct EmailService {
     sent_archiver: Arc<dyn SentArchiveWriter>,
     /// 草稿远端写入器
     draft_writer: Arc<dyn DraftRemoteWriter>,
+    e2e_local: bool,
 }
 
 impl EmailService {
@@ -327,19 +328,29 @@ impl EmailService {
         e2e_enabled: bool,
         e2e_truth_enabled: bool,
     ) -> Self {
-        let remote: Arc<dyn MailRemoteOperator> = if e2e_enabled && !e2e_truth_enabled {
+        let e2e_local = e2e_enabled && !e2e_truth_enabled;
+        let remote: Arc<dyn MailRemoteOperator> = if e2e_local {
             Arc::new(LocalOnlyMailRemoteOperator)
         } else {
             Arc::new(RealMailRemoteOperator::new(auth.clone()))
         };
+        // E2E 模式下草稿远端同样本地化（真 IMAP 写入在隔离测试中必然失败）
+        let draft_writer: Arc<dyn crate::service::mail_draft::DraftRemoteWriter> = if e2e_local {
+            Arc::new(crate::service::mail_draft::LocalOnlyDraftRemoteWriter)
+        } else {
+            Arc::new(crate::service::mail_draft::RealDraftRemoteWriter)
+        };
 
-        Self::new_with_dependencies(
+        let mut s = Self::new_with_full_dependencies(
             auth,
             db,
             remote,
             Arc::new(RealSmtpEmailSender),
             Arc::new(RealSentArchiveWriter),
-        )
+            draft_writer,
+        );
+        s.e2e_local = e2e_local;
+        s
     }
 
     pub fn new_with_mail_remote(
@@ -363,14 +374,16 @@ impl EmailService {
         smtp_sender: Arc<dyn SmtpEmailSender>,
         sent_archiver: Arc<dyn SentArchiveWriter>,
     ) -> Self {
-        Self::new_with_full_dependencies(
+        let mut s = Self::new_with_full_dependencies(
             auth,
             db,
             remote,
             smtp_sender,
             sent_archiver,
             Arc::new(RealDraftRemoteWriter),
-        )
+        );
+        s.e2e_local = false;
+        s
     }
 
     pub fn new_with_full_dependencies(
@@ -389,7 +402,13 @@ impl EmailService {
             smtp_sender,
             sent_archiver,
             draft_writer,
+            e2e_local: false,
         }
+    }
+
+    /// 是否处于 E2E 本地隔离模式（凭证缺失时回退占位）。
+    pub(crate) fn is_e2e_local(&self) -> bool {
+        self.e2e_local
     }
 
     pub async fn parse_email_addresses(

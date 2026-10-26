@@ -12,6 +12,9 @@ mod tray;
 mod views;
 mod window_state;
 
+#[cfg(test)]
+mod e2e_tests;
+
 use std::path::PathBuf;
 
 /// 解析应用数据目录（对齐 Tauri 版逻辑，见 src-tauri/src/lib.rs:resolve_data_dir）。

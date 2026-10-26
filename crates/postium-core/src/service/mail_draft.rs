@@ -63,6 +63,25 @@ pub trait DraftRemoteWriter: Send + Sync {
 
 pub struct RealDraftRemoteWriter;
 
+/// E2E 模式的草稿远端：不连 IMAP，返回确定性假 UID。
+pub struct LocalOnlyDraftRemoteWriter;
+
+#[async_trait]
+impl DraftRemoteWriter for LocalOnlyDraftRemoteWriter {
+    async fn append_draft(&self, _req: DraftAppendRequest) -> Result<u32, MailError> {
+        Ok(999_999)
+    }
+    async fn delete_draft(
+        &self,
+        _account: &accounts::Model,
+        _credentials: &Credentials,
+        _folder: &str,
+        _uid: u32,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl DraftRemoteWriter for RealDraftRemoteWriter {
     async fn append_draft(&self, req: DraftAppendRequest) -> Result<u32, MailError> {
@@ -303,10 +322,19 @@ async fn resolve_credentials(
         .as_deref()
         .and_then(parse_account_auth_type)
         .unwrap_or_else(|| provider_auth_type.clone());
-    service
+    match service
         .auth_manager()
         .get_credentials(&account.email, &account_auth_type, Some(&account.provider))
         .await
+    {
+        Ok(creds) => Ok(creds),
+        // E2E 隔离环境无真实 keyring 条目：回退占位凭证（仅测试进程生效）
+        Err(err) if service.is_e2e_local() => {
+            tracing::debug!("E2E 模式：凭证缺失（{err}），使用占位凭证");
+            Ok(Credentials::Password("e2e-placeholder".to_string()))
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn parse_account_auth_type(value: &str) -> Option<AuthType> {

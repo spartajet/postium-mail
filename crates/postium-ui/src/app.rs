@@ -67,7 +67,7 @@ pub struct AppShell {
 }
 
 impl AppShell {
-    fn new(
+    pub(crate) fn new(
         api: Arc<CoreApi>,
         sync_rx: SyncEventRx,
         window: &mut Window,
@@ -221,7 +221,7 @@ impl AppShell {
         crate::ui_state::save(&ui);
     }
 
-    fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
         let mode = if dark {
             gpui_kit::component::ThemeMode::Light
