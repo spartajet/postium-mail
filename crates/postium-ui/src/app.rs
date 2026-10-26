@@ -17,8 +17,10 @@ use crate::i18n::{self, Lang};
 use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
 use crate::stores::detail::DetailStore;
+use crate::stores::sync::SyncStore;
 use crate::stores::emails::{EmailsEvent, EmailsStore};
 use crate::views::email_detail::EmailDetailView;
+use crate::views::status_bar::StatusBar;
 use crate::views::email_list::{EmailListView, rebuild_list_state};
 use crate::views::sidebar::{Sidebar, SidebarEvent};
 
@@ -42,6 +44,7 @@ pub struct AppShell {
     pub sidebar: gpui_kit::Entity<Sidebar>,
     pub emails: gpui_kit::Entity<EmailsStore>,
     pub detail: gpui_kit::Entity<DetailStore>,
+    pub sync_store: gpui_kit::Entity<SyncStore>,
     /// 列表视图（render 时按 list_version 重建）
     email_list: Option<gpui_kit::Entity<EmailListView>>,
     list_build_version: u64,
@@ -72,6 +75,24 @@ impl AppShell {
             store
         });
         let detail = cx.new(|cx| DetailStore::new(cx));
+
+        // 同步事件消费（core 返回的接收端）+ 后台调度器
+        let (sched_tx, sched_rx) = crate::stores::sync::sync_event_channel();
+        let sync_store = cx.new(|cx| {
+            let mut store = SyncStore::new(cx);
+            let weak = cx.entity().downgrade();
+            SyncStore::spawn_consumer(weak, sched_rx, cx);
+            store.progress.clear();
+            store
+        });
+        {
+            let db = api.db.clone();
+            let auth = api.auth.clone();
+            let mut scheduler = postium_core::domain::sync::SyncScheduler::new(db, auth, Some(sched_tx));
+            scheduler = scheduler.with_interval(5);
+            scheduler.start();
+            std::mem::forget(scheduler); // 调度器随进程存活（Drop 会停止）
+        }
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(i18n::t("email.search"))
         });
@@ -130,6 +151,7 @@ impl AppShell {
             sidebar,
             emails,
             detail,
+            sync_store,
             email_list: None,
             list_build_version: 0,
             search_input,
@@ -245,7 +267,11 @@ impl Render for AppShell {
                                     ),
                             ),
                     )
-                    .child(main),
+                    .child(div().flex_1().overflow_hidden().child(main))
+                    .child(cx.new(|_| StatusBar {
+                        sync: self.sync_store.clone(),
+                        api: self.api.clone(),
+                    }).into_any_element()),
             )
     }
 }

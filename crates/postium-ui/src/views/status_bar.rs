@@ -1,0 +1,74 @@
+//! 底部状态栏（移植自 src/lib/components/layout/StatusBar.svelte）。
+
+use std::sync::Arc;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+};
+use gpui_kit::*;
+use gpui_kit_assets::IconName;
+use postium_core::api::CoreApi;
+
+use crate::i18n::t;
+use crate::stores::sync::SyncStore;
+
+pub struct StatusBar {
+    pub sync: Entity<SyncStore>,
+    pub api: Arc<CoreApi>,
+}
+
+impl Render for StatusBar {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.sync.read(cx);
+        let status_text: SharedString = if store.syncing {
+            let detail = store
+                .progress
+                .values()
+                .next()
+                .cloned()
+                .unwrap_or_default();
+            format!("{} {detail}", t("sync.syncing")).into()
+        } else {
+            t("sync.completed")
+        };
+
+        h_flex()
+            .flex_none()
+            .h(px(26.))
+            .px_2()
+            .gap_2()
+            .items_center()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .text_size(px(11.5))
+            .text_color(cx.theme().muted_foreground)
+            .child(
+                gpui_kit::component::Icon::new(if store.syncing {
+                    IconName::LoaderCircle
+                } else {
+                    IconName::CircleCheck
+                })
+                .size_3(),
+            )
+            .child(status_text)
+            .child(
+                Button::new("sync-now")
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::RefreshCw)
+                    .label(t("sync.completed"))
+                    .on_click({
+                        let api = self.api.clone();
+                        let sync = self.sync.clone();
+                        move |_, _, cx| {
+                            sync.update(cx, |store, cx| {
+                                store.sync_all(&api, cx);
+                            });
+                        }
+                    }),
+            )
+    }
+}
