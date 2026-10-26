@@ -23,6 +23,8 @@ pub struct EmailsStore {
     pub selected_version: u32,
     /// 列表数据版本（每次重载 +1，宿主 render 据此重建列表）
     pub list_version: u64,
+    /// 未读过滤
+    pub unread_only: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -47,6 +49,7 @@ impl EmailsStore {
             selected: None,
             selected_version: 0,
             list_version: 0,
+            unread_only: false,
         }
     }
 
@@ -66,6 +69,12 @@ impl EmailsStore {
             return;
         }
         self.load_page(self.page + 1, api, cx);
+    }
+
+    /// 按当前导航与过滤设置重载第一页（操作后刷新）。
+    pub fn refresh_now(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        let nav = self.nav.clone();
+        self.navigate(nav, api, cx);
     }
 
     /// FTS 搜索（跨当前范围）。
@@ -128,6 +137,7 @@ impl EmailsStore {
         cx.notify();
 
         let nav = self.nav.clone();
+        let unread_only = self.unread_only;
         let api = api.clone();
         let rx = spawn_tokio(async move {
             match &nav {
@@ -136,7 +146,7 @@ impl EmailsStore {
                         EmailCategory::Inbox,
                         page,
                         PAGE_LIMIT,
-                        false,
+                        unread_only,
                     )
                     .await
                 }
@@ -146,7 +156,7 @@ impl EmailsStore {
                         category.clone(),
                         page,
                         PAGE_LIMIT,
-                        false,
+                        unread_only,
                     )
                     .await
                 }

@@ -211,9 +211,12 @@ impl Render for AppShell {
         let current_version = self.emails.read(cx).list_version;
         if self.list_build_version != current_version {
             let state = rebuild_list_state(&self.emails, &self.api, window, cx);
+            let api = self.api.clone();
             self.email_list = Some(cx.new(|_| EmailListView {
                 state,
                 store: self.emails.clone(),
+                api,
+                older_syncing: false,
             }));
             self.list_build_version = current_version;
         }
