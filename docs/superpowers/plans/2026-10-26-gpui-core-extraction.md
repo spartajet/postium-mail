@@ -4,6 +4,8 @@
 
 **Goal:** 把 postium-mail 后端抽成无 UI 依赖的 `postium-core` workspace crate（含 CoreApi 门面），并建立 `postium-editor`（原生邮件编辑器组件），两者测试全绿，为 UI 层（计划 2）供地基。
 
+> **状态：已完成（2026-10-26）**——全部 6 个任务交付，core 240+ 测试、editor 6 测试全绿。
+
 **Architecture:** 仓库根部建 Cargo workspace（`src-tauri` 排除在外原样保留）；`crates/postium-core` 迁入 service/domain/infrastructure/error 并清除全部 tauri 依赖（事件改 smol channel，异步改 tokio）；新增 `api.rs` 提供 `CoreApi` 门面（44 个原 tauri command 的进程内等价物）；`crates/postium-editor` 迁入 spike 验证过的 EmailEditor 组件并产品化转换器（pulldown-cmark + scraper）。
 
 **Tech Stack:** Rust 2024、tokio、tokio-rusqlite、smol(channel)、gpui-kit 0.8、gpui-kit-markdown-editor(git)、pulldown-cmark、scraper

@@ -1,187 +1,65 @@
-# E2E 测试说明
+# E2E 测试说明（GPUI）
 
-本文档说明 Postium Mail 桌面端 E2E 测试的运行方式、测试数据和排障入口。
+本文档说明 Postium Mail GPUI 版 E2E 测试的运行方式、实现模式、场景清单与已知差异。
+
+> 旧 WebdriverIO/tauri-driver 版 E2E（`e2e/`）已废弃，随 Tauri 轨道保留为遗留；本文档仅描述新套件。
 
 ## 运行方式
 
-首次运行前安装依赖：
-
 ```bash
-bun install
-cd e2e && bun install
-cargo install tauri-driver --locked
+cargo test -p postium-ui e2e_tests              # 全部 E2E（约 0.2s）
+cargo test -p postium-ui e2e_tests::boots_with_inbox_seed   # 单个场景
+cargo test -p postium-ui e2e_tests -- --nocapture           # 显示日志
 ```
 
-运行完整 E2E：
+无需构建应用、无需 WebDriver、无需显示服务器（headless）——Windows/Linux/macOS 直接运行。
 
-```bash
-bun run test:e2e
-```
+## 实现模式
 
-单独运行某个规格：
+测试位于 `crates/postium-ui/src/e2e_tests.rs`（`#[cfg(test)]` 模块，可访问 crate 内部构造）：
 
-```bash
-cd e2e
-bunx wdio run wdio.conf.js --spec ./test/specs/smoke.e2e.js
-```
+1. **真实全栈装配**：`boot(tempdir)` → `CoreApi::init(dir, e2e=true, false)`（SQLite + e2e seed + 全部服务），与生产启动同一条路径；
+2. **headless 窗口**：`cx.add_window_view(...)` 构造 `AppShell` / `ComposeView` 根视图（真实渲染管线）；
+3. **用户操作**：
+   - 按钮类操作 = 调用与 `on_click` 完全相同的 handler（如 `store.navigate`、`toggle_theme`、`persist_draft`）；
+   - 文本输入 = `window.focus(handle)` + `cx.simulate_keystrokes(...)`（真实键盘事件链路）；
+4. **异步 settle**：`wait_for(cx, ...)` = `run_until_parked` + 15ms 轮询（tokio 后台线程完成 DB 查询需要真实时间），200 轮超时 3s。
 
-## 数据隔离
+### E2E 模式的 core 行为（与旧版 seed 完全一致的数据）
 
-E2E 运行由 `e2e/wdio.conf.js` 负责准备环境：
+- seed 固定两账号：`primary.e2e@postium.test` / `secondary.e2e@postium.test`；
+- 固定主题锚点：`Primary Inbox Message NN`、`Quarterly Planning Alpha/Beta/Archive`、`Sent Confirmation Message`、`Starred Reference Message` 等；
+- 远程操作 / 草稿写入均为 LocalOnly 实现，凭证回退占位（见 overview.md）。
 
-- 设置 `POSTIUM_E2E=1`
-- 创建 `.e2e-data/run-<timestamp>-<pid>` 作为本次运行的数据目录
-- 设置 `POSTIUM_DATA_DIR` 指向该目录
-- 构建 Tauri debug 应用
-- 启动 `tauri-driver`
-- 失败时保存截图、日志和 JUnit 报告
+## 场景清单（与旧 WebdriverIO 用例一一对应）
 
-测试通过时，本次 `.e2e-data/run-*` 会自动清理。测试失败时会保留数据目录，便于检查 SQLite 数据和复现问题。
+| 测试函数 | 旧用例（e2e/test/specs/） | 断言要点 |
+|---|---|---|
+| `boots_with_inbox_seed` | smoke.e2e.js | 两账号 seed、inbox 装载 `Primary Inbox Message` 系列 |
+| `switches_between_accounts` | account-switching.e2e.js | 次账号 INBOX 列表全为该账号邮件；切回全部收件箱 |
+| `navigates_sent_starred_inbox` | navigation.e2e.js | Sent→`Sent Confirmation`、Starred→`Starred Reference`、Inbox→`Primary Inbox` |
+| `searches_quarterly_planning` | email-list.e2e.js（搜索） | FTS 命中 ≥2 且全部匹配 `Quarterly Planning` |
+| `stars_and_deletes_selected` | email-list.e2e.js（星标/删除） | 星标置位（DB 级）、删除后列表刷新不含该邮件 |
+| `compose_fills_fields_and_draft` | compose.e2e.js | 账号自动选中、收件人键入生效、空主题拦截、草稿保存返回 draft_id |
+| `compose_reopens_empty` | compose.e2e.js（重开清空） | 新写信窗口字段为空 |
+| `toggles_theme_and_persists` | theme.e2e.js | 深浅双向切换 + `ui-state.json` 落盘 |
 
-## Seed 数据
+## 与旧版（WebdriverIO）的差异
 
-E2E 模式下，应用启动时由 Rust seed 固定测试数据。数据不来自前端 mock，也不连接真实邮件服务。
+| 维度 | 旧 | 新 |
+|---|---|---|
+| 驱动 | 构建 debug app + tauri-driver + WebKit WebDriver + xvfb | 同进程 `TestAppContext`，无外部进程 |
+| 元素定位 | CSS 选择器 / `data-testid` | 视图与状态实体直接断言 |
+| 交互 | 鼠标/键盘事件坐标点击 | on_click handler 直调 + 键盘事件模拟 |
+| 速度 | 分钟级 | ~0.2 秒 |
 
-固定账号：
+已知取舍：
 
-- `primary.e2e@postium.test`
-- `secondary.e2e@postium.test`
+- 无元素坐标定位 API，纯指针类交互（如列表滚动到底）不做像素级模拟——滚动加载等功能由 `load_more`/`sync_older` handler 级验证覆盖；
+- `real-accounts.e2e.js`（真实账号 UI 联测）未迁移：其 core 层真实验证已保留（`real_mail_accounts` 测试），UI 层待真实邮箱验收 GPUI 版后按新模式重建。
 
-固定邮件数量至少 48 封：
+## 排障
 
-- 主账号 36 封，其中 Inbox 至少 24 封
-- 次账号 12 封
-
-关键主题：
-
-- `Primary Inbox Message 01`
-- `Primary Inbox Message 24`
-- `Secondary Inbox Message 01`
-- `Quarterly Planning Alpha`
-- `Quarterly Planning Beta`
-- `Quarterly Planning Archive`
-- `Starred Reference Message`
-- `Sent Confirmation Message`
-
-这些主题用于搜索、滚动、账号切换和分类导航断言。
-
-## Truth E2E
-
-默认 E2E 使用 seed 数据，不连接真实邮箱。真实账号交互测试使用独立命令：
-
-```bash
-bun run test:e2e:truth
-```
-
-Truth E2E 使用 `.e2e-truth-data/run-*` 数据目录，设置 `POSTIUM_E2E_TRUTH=1`，跳过 seed，从空数据库通过 UI 添加真实账号。当前 truth E2E 不发送真实邮件。
-
-详细说明见 [Truth 真实邮箱测试说明](./truth.md)。
-
-## 覆盖范围
-
-当前 E2E 规格位于 `e2e/test/specs`：
-
-- `smoke.e2e.js`：应用启动和主账号 Inbox seed 可见性
-- `account-switching.e2e.js`：主账号和次账号切换
-- `email-list.e2e.js`：搜索和滚动到列表底部邮件
-- `navigation.e2e.js`：Inbox、Sent、Starred 分类导航
-- `compose.e2e.js`：写邮件弹窗打开、填写和重置
-- `theme.e2e.js`：浅色、深色、系统主题按钮
-
-## 选择器约定
-
-E2E 交互优先使用 `data-testid`，不依赖 Tailwind class、DOM 顺序或翻译文案。可见文本只用于断言 seed 内容是否出现。
-
-新增或修改 UI 时，如果该元素会被 E2E 使用，应添加稳定的 `data-testid`，并同步更新 page object。
-
-## 产物位置
-
-运行产物默认写入：
-
-- `e2e/artifacts/screenshots`
-- `e2e/artifacts/reports`
-- `e2e/artifacts/logs`
-- `.e2e-data`
-
-这些目录已加入 `.gitignore`，不要提交。
-
-## CI 产物和故障排查
-
-Linux CI 会在 E2E job 结束后上传 `e2e-artifacts`。如果 E2E 失败，应优先下载并查看：
-
-- `e2e/artifacts/logs/environment-*.json`
-- `e2e/artifacts/logs/tauri-driver-*.log`
-- `e2e/artifacts/reports/*.xml`
-- `e2e/artifacts/screenshots/*.png`
-
-如果 E2E job 失败，CI 还会上传 `.e2e-data`，其中包含本次运行保留下来的 SQLite 数据库，可用于检查 seed 数据、迁移状态和搜索索引。
-
-### 环境快照
-
-`environment-*.json` 记录本次运行的关键环境：
-
-- `runId`：本次运行 ID，和数据目录、driver 日志文件名对应
-- `appPath`：Tauri debug 应用路径
-- `driverPath`：`tauri-driver` 路径
-- `runDataDir`：本次独立数据目录
-- `wdioPort`：WebDriver 端口
-- `bun`：Bun 版本探测结果
-- `tauriDriver`：`tauri-driver` 探测结果
-- `webkitWebDriver`：Linux WebKit WebDriver 探测结果
-- `env.DISPLAY`、`env.WAYLAND_DISPLAY`、`env.XDG_SESSION_TYPE`：显示环境
-
-如果 CI 或本地出现 WebKit/WebDriver 相关失败，先确认：
-
-- `webkitWebDriver.status` 是否为 `0` 或是否能输出帮助信息
-- `DISPLAY` 是否为空
-- CI 是否通过 `xvfb-run bun run test` 启动
-- `wdioPort` 是否被其他进程占用
-
-### tauri-driver 日志
-
-`tauri-driver-*.log` 记录 driver 生命周期和应用 stderr/stdout。正常结束时应能看到：
-
-```json
-{"event":"close-request", ...}
-{"event":"exit","code":0,"signal":null,"expected":true, ...}
-{"event":"close-complete","exitCode":0,"signalCode":null, ...}
-```
-
-判断方式：
-
-- `expected: true`：测试框架主动关闭 driver，通常是正常结束。
-- `expected: false`：driver 在测试框架关闭前退出，属于异常退出，应检查同一日志中前面的 WebKit、Tauri 或系统错误。
-- `signal` 或 `signalCode` 非空：进程被信号结束，应结合 CI runner 日志判断是否超时、资源不足或被外部终止。
-- 出现 `close-timeout`：测试框架请求关闭后 driver 没有及时退出，优先检查 WebKitWebDriver 是否卡死。
-
-如果出现 `tauri-driver exited unexpectedly`，说明 driver 的 `exit` 事件发生在测试框架预期关闭之前。这种情况下 `.e2e-data/run-*` 会保留，便于复现。
-
-### JUnit 和截图
-
-`reports/*.xml` 用于定位失败的 spec 和测试名称。`screenshots/*.png` 只在测试失败时保存，文件名来自失败测试标题。
-
-排查顺序建议：
-
-1. 先看 GitHub Actions 中失败的 job 和 step。
-2. 再看 `reports/*.xml` 确认失败用例。
-3. 查看截图，判断是页面未加载、元素不可见还是断言内容不对。
-4. 查看 `tauri-driver-*.log`，判断 driver 是否提前退出。
-5. 查看 `environment-*.json`，确认显示环境、driver 路径和端口。
-6. 如有 `.e2e-data`，打开 SQLite 数据库检查 seed 数据和迁移结果。
-
-## 常见问题
-
-如果 `tauri-driver` 端口被占用，可以指定新端口：
-
-```bash
-WDIO_PORT=4445 bun run test:e2e
-```
-
-如果 Linux 无显示环境，需要通过 `xvfb-run` 运行：
-
-```bash
-cd e2e
-xvfb-run bun run test
-```
-
-如果测试失败但截图显示页面内容存在，优先检查 helper 是否使用了 WebView 可见文本读取方式。当前 helper 使用 `document.body.textContent`，比 `$('body').getText()` 更适合 Wry WebView。
+- 超时（`等待条件超时`）：多为异步链路未完成——检查 handler 是否真的触发 spawn、`wait_for` 条件是否正确；
+- 环境变量污染：`toggles_theme_and_persists` 会临时设置 `POSTIUM_E2E`/`POSTIUM_DATA_DIR`（结束时移除），并行测试如遇数据目录异常先怀疑此处；
+- 每个测试使用独立 `tempdir`，无跨测试状态。

@@ -1,8 +1,17 @@
 # Postium Mail GPUI 迁移设计
 
 - 日期：2026-10-26
-- 状态：已批准（基于 spike 验证报告）；计划 1（core + editor 地基）已完成
+- 状态：**已完成**——计划 1（core/editor 地基）、计划 2（postium-ui 全功能）、功能对齐 review（6 批次 21 项差距补齐）、E2E 迁移（gpui TestAppContext，8 场景）均已交付；遗留双轨（src-tauri/src/e2e）待验收后移除
 - 分支：`gpui-migration`
+
+## 实施后修订（与原设计的差异）
+
+以下决策在实施过程中依实测修订：
+
+1. **E2E 已迁移**（原列为非目标）：gpui `TestAppContext` 提供了 headless 全栈测试能力，WebdriverIO 8 场景全部迁移（`crates/postium-ui/src/e2e_tests.rs`）；仅真实账号 UI 联测待重建。
+2. **E2E 模式 core 修复**：`LocalOnlyDraftRemoteWriter` 注入与 `e2e_local` 凭证回退（Tauri 版既有缺陷，见 docs/testing/overview.md）。
+3. **交互形式差异**：右键菜单 → 选中行操作工具条（动作全覆盖）；关闭主窗口 → 最小化（gpui-pre 0.3.9 无窗口 hide API）；旧版 AI 面板为模拟假数据，未迁移。
+4. **共享 tokio runtime 单例**（postium-core `rt` 模块）：后台调度器在 gpui 线程 spawn 的崩溃修复。
 
 ## 目标
 

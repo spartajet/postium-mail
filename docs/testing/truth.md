@@ -1,21 +1,33 @@
 # Truth 真实邮箱测试说明
 
-Truth 测试是 Postium Mail 的手动真实账号测试。当前必过范围是连接真实 IMAP 服务、验证真实账号添加和基础读取交互。SMTP 发送暂未纳入 truth 断言。
+Truth 测试是 Postium Mail 的手动真实账号测试，用于验证真实 IMAP 服务连接、真实账号添加和基础读取交互。SMTP 发送暂未纳入 truth 断言。
 
-## 适用范围
+> GPUI 迁移后，Rust/core 层 truth 测试保留并随 workspace 运行；旧 WebdriverIO 版 UI 联测（`e2e/` 的 `real-accounts.e2e.js`）为遗留，UI 层真实联测待按 GPUI 模式重建。
 
-- `bun run test:rust:truth`：验证真实 IMAP 登录和基础读取。
-- `bun run test:e2e:truth`：启动真实 Tauri 应用，从空数据目录通过 UI 添加真实账号、首次同步、切换账号、查看列表/详情或空状态。
+## 适用范围与命令
 
-默认 `bun run test:rust`、`bun run test:e2e` 和 `bun run test:ci` 不运行 truth 测试。
+core 层（真实 IMAP 登录、文件夹读取/选择）：
+
+```bash
+cargo test -p postium-core --test real_mail_accounts -- --ignored --nocapture
+```
+
+默认 `cargo test --workspace` 不运行 truth（`--ignored` 显式触发）。
+
+旧轨命令（遗留，随 Tauri 轨道移除）：
+
+```bash
+bun run test:rust:truth    # 等价于上方 core 层命令（走 src-tauri）
+bun run test:e2e:truth     # WebdriverIO UI 联测（遗留）
+```
 
 ## 配置文件
 
-默认读取仓库根目录 `.test_mail_accounts.json`。也可以指定路径：
+默认读取仓库根目录 `.test_mail_accounts.json`（已被 `.gitignore` 忽略，不要提交真实凭据）。可用环境变量指定路径：
 
 ```bash
-POSTIUM_REAL_MAIL_CONFIG=/path/to/accounts.json bun run test:rust:truth
-POSTIUM_REAL_MAIL_CONFIG=/path/to/accounts.json bun run test:e2e:truth
+POSTIUM_REAL_MAIL=1 POSTIUM_REAL_MAIL_CONFIG=/path/to/accounts.json \
+  cargo test -p postium-core --test real_mail_accounts -- --ignored --nocapture
 ```
 
 配置格式：
@@ -26,57 +38,37 @@ POSTIUM_REAL_MAIL_CONFIG=/path/to/accounts.json bun run test:e2e:truth
     "gmail": {
       "email": "your_email@gmail.com",
       "password": "your_app_password",
-      "imap": {
-        "host": "imap.gmail.com",
-        "port": 993,
-        "ssl": true
-      },
-      "smtp": {
-        "host": "smtp.gmail.com",
-        "port": 465,
-        "ssl": true
-      }
+      "imap": { "host": "imap.gmail.com", "port": 993, "ssl": true },
+      "smtp": { "host": "smtp.gmail.com", "port": 465, "ssl": true }
     }
   }
 }
 ```
 
-`.test_mail_accounts.json` 已被 `.gitignore` 忽略，不要提交真实凭据。
+## 运行行为
 
-## 运行 Rust Truth
+core 层 truth 遍历所有配置账号，对每个账号执行 IMAP 登录、文件夹列表读取和文件夹选择。不写入、不删除、不发送。
 
-```bash
-bun run test:rust:truth
-```
-
-该命令会遍历所有配置账号。每个账号会执行 IMAP 登录、文件夹读取和文件夹选择。
-
-## 运行 E2E Truth
+## GPUI 应用手动真实验收（替代旧 e2e truth）
 
 ```bash
-bun run test:e2e:truth
+cargo run -p postium-ui
 ```
 
-该命令使用 `.e2e-truth-data/run-*` 作为独立数据目录，不使用默认 seed 数据。测试成功会清理本次数据目录；失败会保留数据目录和 artifacts。
+配合设置窗口走真实账号添加（密码型或 OAuth2），覆盖：账号添加 → 首次同步范围选择 → 列表/详情 → 写信。数据目录与生产相同（`~/.postium`），如需隔离请用 `POSTIUM_E2E=1` + `POSTIUM_DATA_DIR` 指向临时目录。
 
 ## SMTP 行为
 
-当前 truth 测试不会发送真实邮件。SMTP 配置仍保留在 `.test_mail_accounts.json` 中，供后续发信功能实现后扩展 truth 覆盖。
+当前 truth 不发送真实邮件。SMTP 配置保留在配置文件中，供发信功能后续扩展 truth 覆盖。
 
 ## 失败排查
 
-优先查看：
-
-- Rust truth 输出中的 account key 和协议阶段。
-- `e2e/artifacts/screenshots`
-- `e2e/artifacts/reports`
-- `e2e/artifacts/logs`
-- `.e2e-truth-data/run-*`
-
-日志不应输出密码。如果发现密码出现在日志或 artifacts 中，应先修复脱敏问题，再继续运行 truth。
+- core truth 输出中的 account key 与协议阶段；
+- 应用日志（tracing 输出，`RUST_LOG=debug` 提升级别）；
+- 日志不应出现密码；如发现先修复脱敏再继续。
 
 ## 常见问题
 
-- Gmail、QQ、163、iCloud 等服务商通常需要应用专用密码或授权码。
-- 需要在邮箱设置中开启 IMAP。SMTP 后续纳入 truth 发送断言时，再要求开启 SMTP。
-- 服务商可能因为风控、限流或异地登录阻止测试。
+- Gmail、QQ、163、iCloud 等服务商通常需要应用专用密码或授权码；
+- 需要在邮箱设置中开启 IMAP（SMTP 纳入断言后再要求开启）；
+- 服务商可能因风控、限流或异地登录阻止测试。

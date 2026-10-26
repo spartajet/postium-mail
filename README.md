@@ -1,67 +1,61 @@
 # Postium Mail
 
-Postium Mail 是一个基于 Tauri 2、SvelteKit、TypeScript 和 Rust 的桌面邮件客户端。
+Postium Mail 是一个基于 **Rust + GPUI**（gpui-kit）的桌面邮件客户端，后端与前端同进程、纯原生实现，无 WebView。
+
+> 架构沿革：本项目最初基于 Tauri 2 + SvelteKit，已于 2026-10 完成向 GPUI 的整体迁移（`gpui-migration` 分支）。`src-tauri/`、`src/`（Svelte）与 `e2e/`（WebdriverIO）在验收期间保留为遗留双轨，验收后移除。
+
+## 架构
+
+Cargo workspace（根目录）：
+
+| Crate | 职责 |
+|---|---|
+| `crates/postium-core` | 后端核心：domain / service / infrastructure + `CoreApi` 进程内门面（44 个 API，无 UI 依赖），SQLite/IMAP/SMTP/OAuth |
+| `crates/postium-editor` | 原生邮件编辑器组件（WYSIWYG，基于 gpui-kit-markdown-editor，md ⇄ HTML） |
+| `crates/postium-ui` | GPUI 应用（bin `postium-mail`）：主窗口/写信/设置窗口、托盘、i18n、主题 |
+
+关键设计：
+
+- 无 IPC——UI 直接进程内调用 `CoreApi`（异步经共享 tokio runtime 桥接 gpui 的 smol 执行器）；
+- 邮件正文用原生 HTML 渲染器；内联图片（cid:）由后端转 data URI 注入，远程图片默认屏蔽（防已读追踪），复杂布局可"浏览器打开"兜底；
+- 数据目录 `~/.postium` 与旧 Tauri 版双向兼容。
 
 ## 开发环境
 
-需要安装：
-
-- Bun 1.2.x
-- Rust stable
-- Tauri 2 需要的系统依赖
-- `tauri-driver`，用于运行桌面端 E2E 测试
-
-安装依赖：
-
-```bash
-bun install
-cd e2e && bun install
-```
-
-安装 `tauri-driver`：
-
-```bash
-cargo install tauri-driver --locked
-```
+- Rust stable（1.98+）
+- WebView2 Runtime（Windows 自带；仅附件"浏览器打开"等场景需要，应用本身不依赖）
 
 ## 常用命令
 
 ```bash
-bun run dev
-bun run build
-bun run check
-bun run test:rust
-bun run test:frontend
-bun run test:e2e
+cargo run -p postium-ui          # 运行应用（数据与旧版共用 ~/.postium）
+cargo test --workspace           # 全部测试（见下）
+cargo test -p postium-ui e2e_tests   # 仅 E2E
 ```
-
-`bun run test:e2e` 会构建 Tauri debug 应用，启动 `tauri-driver`，并使用独立的 E2E 数据目录运行 WebdriverIO 测试。
 
 ## 测试
 
-当前测试分三层：
+| 层 | 命令 | 覆盖 |
+|---|---|---|
+| core 集成/单元（240+） | `cargo test -p postium-core` | 账号/邮件/标签/同步/seed/迁移、协议解析、错误转换 |
+| editor 组件（6） | `cargo test -p postium-editor` | md⇄HTML 转换往返、嵌套列表、脚本剔除 |
+| UI 单元（6） | `cargo test -p postium-ui` | i18n 词条一致性、图片注入策略 |
+| **UI E2E（8）** | `cargo test -p postium-ui e2e_tests` | headless 全栈：seed 数据 → 启动/账号切换/导航/搜索/写信/草稿/星标删除/主题 |
+| Truth 真实邮箱（手动） | `cargo test -p postium-core --test real_mail_accounts -- --ignored` | 真实 IMAP 登录与读取（需 `.test_mail_accounts.json`） |
 
-- Rust 测试：`bun run test:rust`
-- 前端单元测试：`bun run test:frontend`
-- 桌面端 E2E 测试：`bun run test:e2e`
+E2E 使用 gpui `TestAppContext` headless 运行真实全栈（CoreApi + SQLite + e2e seed 固定数据），不连接真实邮件服务；用户交互以 on_click 同款 handler 与键盘事件驱动。约 0.15 秒跑完全部场景（对比旧 WebdriverIO 分钟级）。
 
-E2E 测试默认不连接真实 IMAP、SMTP、OAuth 或远程邮件服务。测试运行时会设置 `POSTIUM_E2E=1`，并在隔离目录中 seed 两个账号和固定邮件数据，从而覆盖账号切换、邮件列表滚动、搜索、导航、写邮件弹窗和主题切换等流程。
+更多说明见 [测试现状总览](docs/testing/overview.md)、[E2E 测试指南](docs/testing/e2e.md)、[Truth 真实邮箱测试](docs/testing/truth.md)。
 
-更多说明见 [测试现状总览](docs/testing/overview.md) 和 [E2E 测试指南](docs/testing/e2e.md)。
+## 遗留双轨（验收后移除）
 
-## GPUI 迁移（进行中）
+以下为 Tauri/Svelte 旧轨，仅迁移期保留：
 
-本仓库正迁移到 GPUI 原生 UI。Cargo workspace 位于根目录：
+- `src-tauri/`、`src/`：旧应用，`bun install && bun run dev` 可运行；
+- `e2e/`：WebdriverIO E2E（已被 GPUI E2E 取代；`real-accounts.e2e.js` 真实账号 UI 联测待按新模式重建）；
+- `docs/plans/`：迁移前的分阶段计划（历史存档）。
 
-- `crates/postium-core`：后端（domain/service/infrastructure + `CoreApi` 进程内门面，无 UI 依赖）
-- `crates/postium-editor`：原生邮件编辑器组件（WYSIWYG，md⇄HTML）
+## 设计与计划文档
 
-常用命令：
-
-- `cargo test --workspace`——全部测试（core 240+ / editor 6 / **UI 单元 6 + E2E 8**）
-- `cargo test -p postium-ui e2e_tests`——GPUI 版 E2E（headless 全栈：seed 数据 → 导航/搜索/账号切换/写信/草稿/星标删除/主题，迁移自 WebdriverIO 套件，交互以 handler + 键盘事件驱动）
-
-`src-tauri/` 与 `src/`（Svelte）在迁移期间保留双轨，验收后移除。
-设计文档：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`
-
-GPUI 版运行：`cargo run -p postium-ui`（数据与 Tauri 版共用 `~/.postium`）
+- 迁移设计与结论：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`
+- 实施计划：`docs/superpowers/plans/`（计划 1：core/editor 地基；计划 2：postium-ui 应用）
