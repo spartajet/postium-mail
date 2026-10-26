@@ -5351,6 +5351,7 @@ dependencies = [
 name = "postium-editor"
 version = "0.3.0"
 dependencies = [
+ "ego-tree",
  "gpui-kit",
  "gpui-kit-markdown-editor",
  "pulldown-cmark",
