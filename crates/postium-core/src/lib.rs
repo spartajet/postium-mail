@@ -1,1 +1,2 @@
-//! 占位：Task 2/5 填充。
+pub mod domain;
+pub mod error;

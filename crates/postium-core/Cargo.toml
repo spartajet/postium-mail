@@ -17,6 +17,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 async-trait.workspace = true
+specta = { version = "=2.0.0-rc.24", features = ["chrono"] }
 
 # 邮件协议与工具（版本照抄 src-tauri/Cargo.toml）
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
