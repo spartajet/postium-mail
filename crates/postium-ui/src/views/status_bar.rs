@@ -18,6 +18,7 @@ use crate::stores::sync::SyncStore;
 pub struct StatusBar {
     pub sync: Entity<SyncStore>,
     pub api: Arc<CoreApi>,
+    pub accounts: Entity<crate::stores::accounts::AccountsStore>,
 }
 
 impl Render for StatusBar {
@@ -55,6 +56,11 @@ impl Render for StatusBar {
             )
             .child(status_text)
             .child(
+                div()
+                    .ml_auto()
+                    .child(last_sync_text(self.accounts.read(cx))),
+            )
+            .child(
                 Button::new("sync-now")
                     .ghost()
                     .xsmall()
@@ -70,5 +76,28 @@ impl Render for StatusBar {
                         }
                     }),
             )
+    }
+}
+
+
+fn last_sync_text(store: &crate::stores::accounts::AccountsStore) -> SharedString {
+    let latest = store
+        .groups
+        .iter()
+        .filter_map(|g| g.account.last_sync_at)
+        .max();
+    match latest {
+        Some(ts) => {
+            use chrono::Datelike;
+            let dt = chrono::DateTime::from_timestamp(ts, 0).unwrap_or_default();
+            let now = chrono::Utc::now();
+            let date = if dt.date_naive() == now.date_naive() {
+                dt.format("%H:%M").to_string()
+            } else {
+                dt.format("%m-%d %H:%M").to_string()
+            };
+            format!("{} {}", t("sync.lastSync"), date).into()
+        }
+        None => format!("{} {}", t("sync.lastSync"), t("sync.never")).into(),
     }
 }

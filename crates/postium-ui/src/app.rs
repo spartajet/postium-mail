@@ -73,8 +73,24 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // 默认暗色主题（与旧版默认一致）
-        gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
+        // 恢复持久化偏好（默认暗色，与旧版一致）
+        let ui = crate::ui_state::load();
+        let theme_mode = match ui.theme.as_deref() {
+            Some("light") => gpui_kit::component::ThemeMode::Light,
+            _ => gpui_kit::component::ThemeMode::Dark,
+        };
+        gpui_kit::component::Theme::change(theme_mode, None, cx);
+        if ui.lang.as_deref() == Some("en") {
+            crate::i18n::set_lang(crate::i18n::Lang::En, cx);
+        }
+
+        // Toast 总线 + 关闭主窗口 → 隐藏到托盘（退出走托盘菜单）
+        crate::notify::setup(window, cx);
+        // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 最小化（退出走托盘菜单）
+        window.on_window_should_close(cx, |window, _| {
+            window.minimize_window();
+            false
+        });
 
         let accounts = init_accounts_store(&api, cx);
         let sidebar = cx.new(|cx| Sidebar {
@@ -200,19 +216,22 @@ impl AppShell {
         let current = cx.global::<i18n::I18nGlobal>().lang;
         let next = if current == Lang::Zh { Lang::En } else { Lang::Zh };
         i18n::set_lang(next, cx);
+        let mut ui = crate::ui_state::load();
+        ui.lang = Some(match next { Lang::Zh => "zh".into(), Lang::En => "en".into() });
+        crate::ui_state::save(&ui);
     }
 
     fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
-        gpui_kit::component::Theme::change(
-            if dark {
-                gpui_kit::component::ThemeMode::Light
-            } else {
-                gpui_kit::component::ThemeMode::Dark
-            },
-            None,
-            cx,
-        );
+        let mode = if dark {
+            gpui_kit::component::ThemeMode::Light
+        } else {
+            gpui_kit::component::ThemeMode::Dark
+        };
+        gpui_kit::component::Theme::change(mode, None, cx);
+        let mut ui = crate::ui_state::load();
+        ui.theme = Some(if dark { "light".into() } else { "dark".into() });
+        crate::ui_state::save(&ui);
     }
 }
 
@@ -267,10 +286,14 @@ impl Render for AppShell {
                     None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
                 })
                 .child(
-                    self.detail_view
-                        .clone()
-                        .unwrap_or_else(|| panic!("detail view 未初始化"))
-                        .into_any_element(),
+                    match self.detail_view.clone() {
+                        Some(view) => view.into_any_element(),
+                        None => cx.new(|_| EmailDetailView {
+                            store: self.detail.clone(),
+                            api: self.api.clone(),
+                            recipients_expanded: false,
+                        }).into_any_element(),
+                    },
                 )
                 .into_any_element(),
         };
@@ -322,6 +345,7 @@ impl Render for AppShell {
                     .child(cx.new(|_| StatusBar {
                         sync: self.sync_store.clone(),
                         api: self.api.clone(),
+                        accounts: self.accounts.clone(),
                     }).into_any_element()),
             )
     }

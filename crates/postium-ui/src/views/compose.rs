@@ -375,6 +375,7 @@ impl ComposeView {
         cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(_resp)) => {
+                    crate::notify::toast("邮件已发送 ✓");
                     this.update(cx, |view, cx| {
                         view.status = "已发送 ✓".into();
                         view.close_window(cx);
