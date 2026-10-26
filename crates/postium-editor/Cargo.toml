@@ -1,0 +1,12 @@
+[package]
+name = "postium-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Postium Mail 原生邮件编辑器组件（GPUI/WYSIWYG，md⇄HTML）"
+
+[dependencies]
+gpui-kit = "0.8"
+gpui-kit-markdown-editor = { git = "https://github.com/wabzqem/gpui-kit-markdown-editor" }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+scraper = "0.23"

@@ -1,0 +1,44 @@
+[package]
+name = "postium-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Postium Mail 后端核心：domain/service/infrastructure + CoreApi（无 UI 依赖）"
+
+[dependencies]
+tokio.workspace = true
+tokio-rusqlite.workspace = true
+rusqlite.workspace = true
+smol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+
+# 邮件协议与工具（版本照抄 src-tauri/Cargo.toml）
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+lettre = { version = "0.11", features = ["tokio1-native-tls"] }
+mail-parser = "0.11"
+quoted_printable = "0.5"
+encoding_rs = "0.8"
+oauth2 = { version = "5", features = ["reqwest"] }
+tokio-native-tls = "0.3"
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+base64 = "0.22"
+dirs = "6"
+keyring = "3"
+regex = "1"
+reqwest = { version = "0.12", features = ["json"] }
+rfc2047-decoder = "1"
+url = "2"
+utf7-imap = "0.3"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
+mockall = "0.13"
