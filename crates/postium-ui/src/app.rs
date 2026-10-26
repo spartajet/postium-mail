@@ -55,6 +55,8 @@ pub struct AppShell {
     /// 列表视图（render 时按 list_version 重建）
     email_list: Option<gpui_kit::Entity<EmailListView>>,
     list_build_version: u64,
+    detail_view: Option<gpui_kit::Entity<EmailDetailView>>,
+    detail_build_version: u32,
     /// 顶栏搜索
     search_input: gpui_kit::Entity<InputState>,
     pub nav: NavTarget,
@@ -143,12 +145,19 @@ impl AppShell {
         })
         .detach();
 
-        // 选中邮件 → 装载详情
+        // 选中邮件 → 装载详情（视图按选中版本重建，保住展开态/滚动）
         cx.subscribe(&emails, |this: &mut Self, _, event: &EmailsEvent, cx| {
             if let EmailsEvent::SelectionChanged(id) = event {
                 this.detail.update(cx, |store, cx| {
                     store.load(*id, &this.api, cx);
                 });
+                this.detail_view = Some(cx.new(|_| EmailDetailView {
+                    store: this.detail.clone(),
+                    api: this.api.clone(),
+                    recipients_expanded: false,
+                }));
+                this.detail_build_version = this.emails.read(cx).selected_version;
+                cx.notify();
             }
         })
         .detach();
@@ -177,6 +186,8 @@ impl AppShell {
             sync_store,
             email_list: None,
             list_build_version: 0,
+            detail_view: None,
+            detail_build_version: 0,
             search_input,
             nav: NavTarget::AllInbox,
             _tray,
@@ -256,11 +267,10 @@ impl Render for AppShell {
                     None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
                 })
                 .child(
-                    cx.new(|_| EmailDetailView {
-                        store: self.detail.clone(),
-                        api: self.api.clone(),
-                    })
-                    .into_any_element(),
+                    self.detail_view
+                        .clone()
+                        .unwrap_or_else(|| panic!("detail view 未初始化"))
+                        .into_any_element(),
                 )
                 .into_any_element(),
         };

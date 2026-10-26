@@ -14,13 +14,14 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
 
-use crate::i18n::t;
+use crate::i18n::{t, t_format};
 use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
 
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
+    pub recipients_expanded: bool,
 }
 
 impl EmailDetailView {
@@ -69,6 +70,64 @@ impl EmailDetailView {
                     s.detail = None;
                     s.html = None;
                     cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn reply_all(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        // 收件人 = 发件人 + 原收件人（去重）
+        let mut to = vec![detail.email.sender_email.clone()];
+        for r in detail.recipient_emails.split([',', ';']) {
+            let r = r.trim();
+            if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
+                to.push(r.to_string());
+            }
+        }
+        let to = to.join(", ");
+        let subject = detail.email.subject.clone().unwrap_or_default();
+        let original_html = detail.body_html.clone().unwrap_or_default();
+        let api = self.api.clone();
+        cx.defer(move |cx| {
+            crate::views::compose::open_compose_window(
+                crate::views::compose::ComposeMode::ReplyAll { email_id: detail.email.id, to, subject, original_html },
+                &api,
+                cx,
+            );
+        });
+    }
+
+    fn mark_unread(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let id = detail.email.id;
+        let api = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokio(async move { api.mark_as_read(id, false).await });
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(())) = rx.recv().await {
+                store.update(cx, |s, cx| {
+                    s.detail = None;
+                    s.html = None;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn reload(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let id = detail.email.id;
+        let api = self.api.clone();
+        let api_keep = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokio(async move { api.reload_email(id).await });
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(_)) = rx.recv().await {
+                store.update(cx, |s, cx| {
+                    s.load(id, &api_keep, cx);
                 });
             }
         })
@@ -260,11 +319,33 @@ impl Render for EmailDetailView {
                                     .on_click(cx.listener(Self::reply)),
                             )
                             .child(
+                                Button::new("reply-all")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.replyAll"))
+                                    .on_click(cx.listener(Self::reply_all)),
+                            )
+                            .child(
                                 Button::new("forward")
                                     .ghost()
                                     .xsmall()
                                     .label(t("email.forward"))
                                     .on_click(cx.listener(Self::forward)),
+                            )
+                            .child(
+                                Button::new("mark-unread")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.markUnread"))
+                                    .on_click(cx.listener(Self::mark_unread)),
+                            )
+                            .child(
+                                Button::new("reload")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(gpui_kit_assets::IconName::RotateCw)
+                                    .tooltip(t("email.reload"))
+                                    .on_click(cx.listener(Self::reload)),
                             )
                             .child(
                                 Button::new("browser")
@@ -284,7 +365,29 @@ impl Render for EmailDetailView {
                             .child(sent_time)
                             .child("·")
                             .child(t("email.to"))
-                            .child(detail.recipient_emails.clone()),
+                            .child(recipients_display(detail, self.recipients_expanded, cx))
+                            .when_some(cc_display(detail), |this, cc| {
+                                this.child("·").child(t("email.cc")).child(cc)
+                            })
+                            .when(
+                                recipient_count(detail) > 2,
+                                |this| {
+                                    this.child(
+                                        Button::new("expand-recipients")
+                                            .ghost()
+                                            .xsmall()
+                                            .label(if self.recipients_expanded {
+                                                t("email.collapseRecipients").to_string()
+                                            } else {
+                                                t_format("email.otherRecipients", &[("count", &(recipient_count(detail) - 2).to_string())]).to_string()
+                                            })
+                                            .on_click(cx.listener(|this: &mut Self, _, _, cx| {
+                                                this.recipients_expanded = !this.recipients_expanded;
+                                                cx.notify();
+                                            })),
+                                    )
+                                },
+                            ),
                     ),
             )
             // 附件条
@@ -344,4 +447,37 @@ impl Render for EmailDetailView {
             .child(body)
             .into_any_element()
     }
+}
+
+
+fn recipient_count(detail: &postium_core::service::email_service::EmailDetail) -> usize {
+    detail.recipient_emails.split([',', ';']).filter(|s| !s.trim().is_empty()).count()
+}
+
+fn recipients_display(
+    detail: &postium_core::service::email_service::EmailDetail,
+    expanded: bool,
+    cx: &gpui_kit::App,
+) -> SharedString {
+    let list: Vec<&str> = detail
+        .recipient_emails
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let _ = cx;
+    if expanded || list.len() <= 2 {
+        list.join(", ").into()
+    } else {
+        format!("{}, {}", list[0], list[1]).into()
+    }
+}
+
+fn cc_display(detail: &postium_core::service::email_service::EmailDetail) -> Option<SharedString> {
+    detail
+        .cc_emails
+        .as_ref()
+        .map(|cc| cc.trim())
+        .filter(|cc| !cc.is_empty())
+        .map(|cc| cc.into())
 }
