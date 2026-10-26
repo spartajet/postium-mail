@@ -75,6 +75,35 @@ impl EmailDetailView {
         .detach();
     }
 
+    fn reply(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let to = detail.email.sender_email.clone();
+        let subject = detail.email.subject.clone().unwrap_or_default();
+        let original_html = detail.body_html.clone().unwrap_or_default();
+        let api = self.api.clone();
+        cx.defer(move |cx| {
+            crate::views::compose::open_compose_window(
+                crate::views::compose::ComposeMode::Reply { email_id: detail.email.id, to, subject, original_html },
+                &api,
+                cx,
+            );
+        });
+    }
+
+    fn forward(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let subject = detail.email.subject.clone().unwrap_or_default();
+        let original_html = detail.body_html.clone().unwrap_or_default();
+        let api = self.api.clone();
+        cx.defer(move |cx| {
+            crate::views::compose::open_compose_window(
+                crate::views::compose::ComposeMode::Forward { email_id: detail.email.id, subject, original_html },
+                &api,
+                cx,
+            );
+        });
+    }
+
     fn open_attachment(&mut self, att_id: i32, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let api = self.api.clone();
         let _ = spawn_tokio(async move { api.open_attachment(att_id).await });
@@ -222,6 +251,20 @@ impl Render for EmailDetailView {
                                     .xsmall()
                                     .label(t("email.delete"))
                                     .on_click(cx.listener(Self::delete)),
+                            )
+                            .child(
+                                Button::new("reply")
+                                    .primary()
+                                    .xsmall()
+                                    .label(t("email.reply"))
+                                    .on_click(cx.listener(Self::reply)),
+                            )
+                            .child(
+                                Button::new("forward")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.forward"))
+                                    .on_click(cx.listener(Self::forward)),
                             )
                             .child(
                                 Button::new("browser")

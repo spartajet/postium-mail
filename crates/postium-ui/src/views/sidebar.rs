@@ -18,6 +18,8 @@ use crate::stores::accounts::AccountsStore;
 #[derive(Clone, Debug)]
 pub enum SidebarEvent {
     Navigate(NavTarget),
+    /// 请求打开独立写信窗口
+    Compose,
 }
 
 pub struct Sidebar {
@@ -71,6 +73,17 @@ impl Render for Sidebar {
                     .text_size(px(15.))
                     .font_weight(FontWeight::BOLD)
                     .child(t("app.name")),
+            )
+            // 快信入口
+            .child(
+                Button::new("compose")
+                    .primary()
+                    .w_full()
+                    .icon(IconName::MailPlus)
+                    .label(t("sidebar.compose"))
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(SidebarEvent::Compose);
+                    })),
             )
             // 快捷入口
             .child(nav(NavTarget::Calendar, IconName::Calendar, t("sidebar.calendar"), None, self))

@@ -78,13 +78,25 @@ impl AppShell {
 
         // 侧栏导航 → 更新壳 + 装载邮件列表
         cx.subscribe(&sidebar, |this: &mut Self, _, event: &SidebarEvent, cx| {
-            if let SidebarEvent::Navigate(target) = event {
-                this.nav = target.clone();
-                this.emails.update(cx, |store, cx| {
-                    store.navigate(target.clone(), &this.api, cx);
-                });
-                this.email_list = None; // 等 Reloaded 重建
-                cx.notify();
+            match event {
+                SidebarEvent::Navigate(target) => {
+                    this.nav = target.clone();
+                    this.emails.update(cx, |store, cx| {
+                        store.navigate(target.clone(), &this.api, cx);
+                    });
+                    this.email_list = None; // 等 Reloaded 重建
+                    cx.notify();
+                }
+                SidebarEvent::Compose => {
+                    let api = this.api.clone();
+                    cx.defer(move |cx| {
+                        crate::views::compose::open_compose_window(
+                            crate::views::compose::ComposeMode::New,
+                            &api,
+                            cx,
+                        );
+                    });
+                }
             }
         })
         .detach();
