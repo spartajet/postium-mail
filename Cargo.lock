@@ -5739,6 +5739,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 6.0.0",
  "gpui-kit",
+ "gpui-kit-assets",
  "open",
  "postium-core",
  "postium-editor",

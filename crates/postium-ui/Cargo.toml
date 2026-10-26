@@ -13,6 +13,7 @@ path = "src/main.rs"
 postium-core = { path = "../postium-core" }
 postium-editor = { path = "../postium-editor" }
 gpui-kit = "0.8"
+gpui-kit-assets = "0.8"
 tokio.workspace = true
 smol.workspace = true
 serde.workspace = true

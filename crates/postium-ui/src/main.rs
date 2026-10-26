@@ -2,7 +2,10 @@
 
 mod app;
 mod i18n;
+mod nav;
 mod runtime;
+mod stores;
+mod views;
 
 use std::path::PathBuf;
 
