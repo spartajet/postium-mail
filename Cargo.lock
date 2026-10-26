@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "Inflector"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+
+[[package]]
 name = "accesskit"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5317,6 +5323,7 @@ dependencies = [
  "mail-parser",
  "mockall",
  "oauth2",
+ "open",
  "quoted_printable",
  "regex",
  "reqwest",
@@ -5325,6 +5332,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smol",
+ "specta",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -6769,6 +6777,29 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "specta"
+version = "2.0.0-rc.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f320c7dd82008b6958f43f6257c95319c407d1c17ade43686e50ea520c28bb26"
+dependencies = [
+ "chrono",
+ "rustc_version",
+ "specta-macros",
+]
+
+[[package]]
+name = "specta-macros"
+version = "2.0.0-rc.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "153f185d0051a64d81977bab5012809d5c9d9db8792406a0997352e05494f711"
+dependencies = [
+ "Inflector",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
