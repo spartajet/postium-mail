@@ -16,7 +16,9 @@ use postium_core::api::{CoreApi, SyncEventRx};
 use crate::i18n::{self, Lang};
 use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
-use crate::stores::emails::EmailsStore;
+use crate::stores::detail::DetailStore;
+use crate::stores::emails::{EmailsEvent, EmailsStore};
+use crate::views::email_detail::EmailDetailView;
 use crate::views::email_list::{EmailListView, rebuild_list_state};
 use crate::views::sidebar::{Sidebar, SidebarEvent};
 
@@ -39,6 +41,7 @@ pub struct AppShell {
     pub accounts: gpui_kit::Entity<crate::stores::accounts::AccountsStore>,
     pub sidebar: gpui_kit::Entity<Sidebar>,
     pub emails: gpui_kit::Entity<EmailsStore>,
+    pub detail: gpui_kit::Entity<DetailStore>,
     /// 列表视图（render 时按 list_version 重建）
     email_list: Option<gpui_kit::Entity<EmailListView>>,
     list_build_version: u64,
@@ -68,6 +71,7 @@ impl AppShell {
             store.navigate(NavTarget::AllInbox, &api, cx);
             store
         });
+        let detail = cx.new(|cx| DetailStore::new(cx));
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(i18n::t("email.search"))
         });
@@ -81,6 +85,16 @@ impl AppShell {
                 });
                 this.email_list = None; // 等 Reloaded 重建
                 cx.notify();
+            }
+        })
+        .detach();
+
+        // 选中邮件 → 装载详情
+        cx.subscribe(&emails, |this: &mut Self, _, event: &EmailsEvent, cx| {
+            if let EmailsEvent::SelectionChanged(id) = event {
+                this.detail.update(cx, |store, cx| {
+                    store.load(*id, &this.api, cx);
+                });
             }
         })
         .detach();
@@ -103,6 +117,7 @@ impl AppShell {
             accounts,
             sidebar,
             emails,
+            detail,
             email_list: None,
             list_build_version: 0,
             search_input,
@@ -157,10 +172,22 @@ impl Render for AppShell {
             NavTarget::Calendar => placeholder_pane(&i18n::t("sidebar.calendar"), cx).into_any_element(),
             NavTarget::Workflow => placeholder_pane(&i18n::t("sidebar.workflow"), cx).into_any_element(),
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
-            _ => match &self.email_list {
-                Some(list) => list.clone().into_any_element(),
-                None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
-            },
+            _ => h_flex()
+                .flex_1()
+                .size_full()
+                .overflow_hidden()
+                .child(match &self.email_list {
+                    Some(list) => div().flex_1().size_full().child(list.clone()).into_any_element(),
+                    None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
+                })
+                .child(
+                    cx.new(|_| EmailDetailView {
+                        store: self.detail.clone(),
+                        api: self.api.clone(),
+                    })
+                    .into_any_element(),
+                )
+                .into_any_element(),
         };
 
         h_flex()

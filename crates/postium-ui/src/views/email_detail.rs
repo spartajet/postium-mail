@@ -1,0 +1,304 @@
+//! 邮件详情视图（移植自 src/lib/components/email/EmailDetail.svelte）。
+
+use std::sync::Arc;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    text::html,
+    v_flex,
+};
+use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit_assets::IconName;
+use postium_core::api::CoreApi;
+
+use crate::i18n::t;
+use crate::runtime::spawn_tokio;
+use crate::stores::detail::DetailStore;
+
+pub struct EmailDetailView {
+    pub store: gpui_kit::Entity<DetailStore>,
+    pub api: Arc<CoreApi>,
+}
+
+impl EmailDetailView {
+    fn toggle_star(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let id = detail.email.id;
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move { api.toggle_star(id).await });
+        let store = self.store.clone();
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(starred)) = rx.recv().await {
+                store.update(cx, |s, cx| {
+                    s.apply_star(starred);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn archive(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let api = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokio(async move { api.archive_email(detail.email.id).await });
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(())) = rx.recv().await {
+                store.update(cx, |s, cx| {
+                    s.detail = None;
+                    s.html = None;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn delete(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let api = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokok_delete(api, detail.email.id);
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(_)) = rx.recv().await {
+                store.update(cx, |s, cx| {
+                    s.detail = None;
+                    s.html = None;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn open_attachment(&mut self, att_id: i32, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        let _ = spawn_tokio(async move { api.open_attachment(att_id).await });
+        let _ = cx;
+    }
+
+    fn save_attachment_as(&mut self, att_id: i32, filename: String, _: &ClickEvent, _: &mut Window, _: &mut Context<Self>) {
+        // 文件对话框在后台线程（rfd async）
+        let api = self.api.clone();
+        std::thread::spawn(move || {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name(&filename)
+                .save_file()
+            {
+                let target = path.to_string_lossy().to_string();
+                let _ = crate::runtime::runtime()
+                    .spawn(async move { api.save_attachment_as(att_id, target).await });
+            }
+        });
+    }
+
+    /// 浏览器精确查看（table 布局保真兜底）。
+    fn open_in_browser(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        if let Some(body) = detail.body_html.clone() {
+            // 写临时 HTML 并用系统默认浏览器打开
+            let dir = std::env::temp_dir().join("postium-view");
+            let _ = std::fs::create_dir_all(&dir);
+            let file = dir.join(format!("email-{}.html", detail.email.id));
+            let page = format!(
+                "<!doctype html><meta charset=\"utf-8\"><body style=\"font-family:sans-serif\">{body}</body>"
+            );
+            if std::fs::write(&file, page).is_ok() {
+                let _ = open::that(&file);
+            }
+        }
+    }
+}
+
+fn spawn_tokok_delete(api: Arc<CoreApi>, id: i32) -> smol::channel::Receiver<Result<usize, postium_core::error::MailError>> {
+    spawn_tokio(async move { api.delete_emails(vec![id]).await })
+}
+
+impl Render for EmailDetailView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.store.read(cx);
+
+        let Some(detail) = &store.detail else {
+            return v_flex()
+                .flex_1()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(t("email.noEmailSelected")),
+                )
+                .into_any_element();
+        };
+
+        let sent_time = chrono::DateTime::from_timestamp(detail.email.sent_at, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        let sender = detail
+            .email
+            .sender_name
+            .clone()
+            .unwrap_or_else(|| detail.email.sender_email.clone());
+
+        let body_html_str = store.html.clone().unwrap_or_default();
+        let body: AnyElement = if !body_html_str.is_empty() {
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .child(html(body_html_str).p_4().scrollable(true).selectable(true))
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .p_4()
+                .child(
+                    div()
+                        .text_size(px(13.5))
+                        .line_height(relative(1.8))
+                        .child(detail.body_text.clone().unwrap_or_default()),
+                )
+                .into_any_element()
+        };
+
+        v_flex()
+            .flex_1()
+            .size_full()
+            .min_w(px(380.))
+            .border_l_1()
+            .border_color(cx.theme().border)
+            // 头部：主题 + 操作
+            .child(
+                v_flex()
+                    .p_3()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .flex_none()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_size(px(14.5))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .flex_1()
+                                    .child(
+                                        detail
+                                            .email
+                                            .subject
+                                            .clone()
+                                            .unwrap_or_else(|| "（无主题）".into()),
+                                    ),
+                            )
+                            .child(
+                                Button::new("star")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(if detail.email.is_starred {
+                                        IconName::Star
+                                    } else {
+                                        IconName::Star
+                                    })
+                                    .on_click(cx.listener(Self::toggle_star)),
+                            )
+                            .child(
+                                Button::new("archive")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.archive"))
+                                    .on_click(cx.listener(Self::archive)),
+                            )
+                            .child(
+                                Button::new("delete")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(t("email.delete"))
+                                    .on_click(cx.listener(Self::delete)),
+                            )
+                            .child(
+                                Button::new("browser")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("浏览器打开")
+                                    .on_click(cx.listener(Self::open_in_browser)),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_size(px(12.5))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(sender)
+                            .child("·")
+                            .child(sent_time)
+                            .child("·")
+                            .child(t("email.to"))
+                            .child(detail.recipient_emails.clone()),
+                    ),
+            )
+            // 附件条
+            .when(!detail.attachments.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_none()
+                        .flex_wrap()
+                        .gap_2()
+                        .p_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .children(detail.attachments.iter().map(|att| {
+                            let att_id = att.id;
+                            let filename = att.filename.clone();
+                            let api = self.api.clone();
+                            let _ = api;
+                            h_flex()
+                                .gap_1()
+                                .px_2()
+                                .py_1()
+                                .rounded(cx.theme().radius)
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .child(gpui_kit::component::Icon::new(IconName::Paperclip).size_3())
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .child(format!("{}", att.filename)),
+                                )
+                                .child(
+                                    Button::new(format!("open-att-{att_id}"))
+                                        .ghost()
+                                        .xsmall()
+                                        .label(t("email.attachmentOpen"))
+                                        .on_click(cx.listener(move |this: &mut Self, e, w, cx| {
+                                            this.open_attachment(att_id, e, w, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new(format!("save-att-{att_id}"))
+                                        .ghost()
+                                        .xsmall()
+                                        .label(t("email.attachmentSaveAs"))
+                                        .on_click(
+                                            cx.listener(
+                                                move |this: &mut Self, e, w, cx| {
+                                                    this.save_attachment_as(att_id, filename.clone(), e, w, cx)
+                                                },
+                                            ),
+                                        ),
+                                )
+                        })),
+                )
+            })
+            // 正文
+            .child(body)
+            .into_any_element()
+    }
+}

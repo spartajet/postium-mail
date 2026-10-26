@@ -159,10 +159,17 @@ impl ListDelegate for EmailListDelegate {
 
         // 选中即打开：写回 store，宿主据此渲染详情
         if let Some(store) = self.store.upgrade() {
+            let selected = self.selected_email;
             store.update(cx, |store, cx| {
-                store.selected = self.selected_email;
+                let changed = store.selected != selected;
+                store.selected = selected;
                 store.selected_version += 1;
                 cx.notify();
+                if changed
+                    && let Some(id) = selected
+                {
+                    cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(id));
+                }
             });
 
             // 异步标记已读

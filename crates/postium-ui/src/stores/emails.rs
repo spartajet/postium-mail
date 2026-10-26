@@ -28,6 +28,8 @@ pub struct EmailsStore {
 #[derive(Clone, Copy)]
 pub enum EmailsEvent {
     Reloaded,
+    /// 选中邮件变化（详情据此装载）
+    SelectionChanged(i32),
 }
 
 impl EventEmitter<EmailsEvent> for EmailsStore {}
