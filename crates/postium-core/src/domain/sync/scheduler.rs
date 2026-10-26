@@ -45,7 +45,7 @@ impl SyncScheduler {
         let interval = self.interval_minutes;
         let running = self.running.clone();
 
-        tokio::spawn(async move {
+        crate::rt::runtime().spawn(async move {
             let sleep_duration = tokio::time::Duration::from_secs(interval * 60);
             loop {
                 tokio::time::sleep(sleep_duration).await;

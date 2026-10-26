@@ -6,7 +6,9 @@ mod image_injector;
 mod nav;
 mod runtime;
 mod stores;
+mod tray;
 mod views;
+mod window_state;
 
 use std::path::PathBuf;
 
@@ -34,7 +36,7 @@ fn main() {
         .expect("核心服务初始化失败");
 
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(gpui_kit_assets::native_assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             postium_editor::init(cx);

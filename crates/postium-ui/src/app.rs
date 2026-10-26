@@ -26,8 +26,15 @@ use crate::views::sidebar::{Sidebar, SidebarEvent};
 
 /// 打开主窗口（应用启动时调用一次）。
 pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
+    let options = match crate::window_state::saved_bounds() {
+        Some(bounds) => WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        },
+        None => WindowOptions::default(),
+    };
     gpui_kit::open_window(
-        WindowOptions::default(),
+        options,
         cx,
         |window, cx| cx.new(|cx| AppShell::new(api, sync_rx, window, cx)),
     )
@@ -51,6 +58,8 @@ pub struct AppShell {
     /// 顶栏搜索
     search_input: gpui_kit::Entity<InputState>,
     pub nav: NavTarget,
+    /// 托盘句柄（保持存活）
+    _tray: Option<tray_icon::TrayIcon>,
 }
 
 impl AppShell {
@@ -154,6 +163,8 @@ impl AppShell {
         })
         .detach();
 
+        let _tray = crate::tray::setup_tray(api.clone(), sync_store.clone(), cx);
+
         Self {
             api,
             sync_rx,
@@ -166,6 +177,7 @@ impl AppShell {
             list_build_version: 0,
             search_input,
             nav: NavTarget::AllInbox,
+            _tray,
         }
     }
 
