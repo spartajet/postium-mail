@@ -221,7 +221,17 @@ impl AddFlow {
 // 设置视图
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// 设置分区（对齐旧版 settingsSections：通用/外观/账户）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SettingsSection {
+    General,
+    Appearance,
+    Accounts,
+}
+
 pub struct SettingsView {
+    /// 当前分区
+    pub(crate) active_section: SettingsSection,
     pub(crate) accounts: Entity<AccountsStore>,
     api: Arc<CoreApi>,
     /// 主题偏好（dark | light | system）
@@ -271,6 +281,7 @@ impl SettingsView {
             }
         });
         Self {
+            active_section: SettingsSection::General,
             accounts,
             api,
             theme_pref: crate::ui_state::load().theme.unwrap_or_else(|| "dark".into()),
@@ -764,32 +775,174 @@ impl Render for SettingsView {
             account_cards.push(render_account_card(g, cx).into_any_element());
         }
 
-        v_flex()
-            .relative()
-            .size_full()
-            .p_4()
-            .gap_3()
-            .id("settings-scroll")
-            .overflow_y_scroll()
+        // 左侧分区导航（对齐旧版侧栏：设置图标+标题，三导航项）
+        let mut nav = v_flex()
+            .w(px(180.))
+            .flex_none()
+            .h_full()
+            .border_r_1()
+            .border_color(theme.border)
+            .p_3()
+            .gap_1()
             .child(
                 h_flex()
-                    .child(div().text_size(px(16.)).font_weight(FontWeight::BOLD).child(t("settings.accounts")))
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_2()
                     .child(
-                        Button::new("add")
-                            .primary()
-                            .xsmall()
-                            .ml_auto()
-                            .label(t("account.add"))
-                            .on_click(cx.listener(Self::open_add)),
+                        gpui_kit::component::Icon::new(IconName::Settings)
+                            .size_4()
+                            .text_color(theme.accent),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t("settings.title")),
                     ),
+            );
+        for (key, section, icon, label) in [
+            ("nav-general", SettingsSection::General, IconName::SlidersHorizontal, t("settings.general")),
+            ("nav-appearance", SettingsSection::Appearance, IconName::Palette, t("settings.appearance")),
+            ("nav-accounts", SettingsSection::Accounts, IconName::UserRound, t("settings.accounts")),
+        ] {
+            let sel = self.active_section == section;
+            let sec = section;
+            nav = nav.child(
+                div()
+                    .id(key)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py(px(7.))
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .text_size(px(13.))
+                    .when(sel, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                    .when(!sel, |d| {
+                        d.text_color(theme.muted_foreground)
+                            .hover(|s| s.bg(theme.accent.opacity(0.10)).text_color(theme.foreground))
+                    })
+                    .child(gpui_kit::component::Icon::new(icon).size_4())
+                    .child(label)
+                    .on_click(cx.listener(move |v: &mut SettingsView, _, _, cx| {
+                        v.active_section = sec;
+                        cx.notify();
+                    })),
+            );
+        }
+
+        // 右侧面板：按分区渲染（旧版 max-w-3xl 卡片风格）
+        let panel: AnyElement = match self.active_section {
+            SettingsSection::General => v_flex()
+                .p_5()
+                .gap_2()
+                .w(px(640.))
+                .border_1()
+                .border_color(theme.border)
+                .rounded(theme.radius)
+                .child(
+                    h_flex().items_center().gap_2().child(
+                        gpui_kit::component::Icon::new(IconName::SlidersHorizontal)
+                            .size_4()
+                            .text_color(theme.accent),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t("settings.generalTitle")),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .text_color(theme.muted_foreground)
+                        .child(t("settings.generalDescription")),
+                )
+                .into_any_element(),
+            SettingsSection::Appearance => v_flex()
+                .p_5()
+                .gap_3()
+                .w(px(640.))
+                .border_1()
+                .border_color(theme.border)
+                .rounded(theme.radius)
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            gpui_kit::component::Icon::new(IconName::Palette)
+                                .size_4()
+                                .text_color(theme.accent),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(13.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(t("settings.appearance")),
+                        ),
+                )
+                .child(render_theme_row(self, cx))
+                .child(render_language_row(cx))
+                .into_any_element(),
+            SettingsSection::Accounts => v_flex()
+                .p_5()
+                .gap_3()
+                .w(px(640.))
+                .border_1()
+                .border_color(theme.border)
+                .rounded(theme.radius)
+                .child(
+                    h_flex()
+                        .items_center()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .flex_1()
+                                .child(
+                                    gpui_kit::component::Icon::new(IconName::UserRound)
+                                        .size_4()
+                                        .text_color(theme.accent),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(13.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(t("settings.accounts")),
+                                ),
+                        )
+                        .child(
+                            Button::new("add")
+                                .primary()
+                                .xsmall()
+                                .label(t("account.add"))
+                                .on_click(cx.listener(Self::open_add)),
+                        ),
+                )
+                .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(self.status.clone()))
+                .children(account_cards)
+                .into_any_element(),
+        };
+
+        h_flex()
+            .relative()
+            .size_full()
+            .child(nav)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .p_5()
+                    .id("settings-scroll")
+                    .overflow_y_scroll()
+                    .child(panel),
             )
-            .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(self.status.clone()))
-            // ── 外观：浅色 / 深色 / 跟随系统（对齐旧版设置页三段） ──
-            .child(render_appearance_section(self, cx))
-            // ── 语言：中文 / English ──
-            .child(render_language_section(cx))
-            // 账号卡片
-            .children(account_cards)
             // 编辑表单
             .when_some(self.editing, |this, _| {
                 this.child(
@@ -842,6 +995,13 @@ fn render_account_card(g: &crate::stores::accounts::AccountNode, cx: &mut Contex
     let acc = &g.account;
     let id = acc.id;
     let theme = cx.theme().clone();
+    // 首字圆形头像（对齐旧版 account.email.charAt(0) 大写）
+    let initial = acc
+        .email
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default();
     h_flex()
         .p_3()
         .gap_2()
@@ -849,12 +1009,37 @@ fn render_account_card(g: &crate::stores::accounts::AccountNode, cx: &mut Contex
         .border_1()
         .border_color(theme.border)
         .rounded(theme.radius)
-        .child(div().w(px(10.)).h(px(10.)).rounded_full().bg(gpui_kit::rgb(0x3b82f6)))
+        .child(
+            div()
+                .w(px(30.))
+                .h(px(30.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(theme.accent.opacity(0.15))
+                .text_color(theme.accent)
+                .text_size(px(12.))
+                .font_weight(FontWeight::BOLD)
+                .child(initial),
+        )
         .child(
             v_flex()
                 .flex_1()
-                .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(acc.name.clone()))
-                .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(acc.email.clone())),
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_clamp(1)
+                        .child(acc.email.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .text_color(theme.muted_foreground)
+                        .child(acc.provider.clone()),
+                ),
         )
         .child(
             Button::new(format!("sync-toggle-{id}"))
@@ -1529,19 +1714,22 @@ fn refresh_all_windows(cx: &mut Context<SettingsView>) {
     }
 }
 
-/// 外观设置区（主题三段选择）。
-fn render_appearance_section(view: &SettingsView, cx: &mut Context<SettingsView>) -> impl IntoElement {
+/// 主题行：Monitor 图标 + "主题" + 三段（浅色/深色/跟随系统）。
+fn render_theme_row(view: &SettingsView, cx: &mut Context<SettingsView>) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let mut row = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
-    for (key, pref, label) in [
-        ("pref-light", "light", t("settings.light")),
-        ("pref-dark", "dark", t("settings.dark")),
-        ("pref-system", "system", t("settings.system")),
+    let mut seg = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
+    for (key, pref, label, icon) in [
+        ("pref-light", "light", t("settings.light"), IconName::Sun),
+        ("pref-dark", "dark", t("settings.dark"), IconName::Moon),
+        ("pref-system", "system", t("settings.system"), IconName::Monitor),
     ] {
         let sel = view.theme_pref == pref;
-        row = row.child(
+        seg = seg.child(
             div()
                 .id(key)
+                .flex()
+                .items_center()
+                .gap_1()
                 .px(px(10.))
                 .py(px(4.))
                 .rounded(px(6.))
@@ -1552,33 +1740,37 @@ fn render_appearance_section(view: &SettingsView, cx: &mut Context<SettingsView>
                     d.text_color(theme.muted_foreground)
                         .hover(|s| s.bg(theme.accent.opacity(0.12)))
                 })
+                .child(gpui_kit::component::Icon::new(icon).size_3())
                 .child(label)
                 .on_click(cx.listener(move |v: &mut SettingsView, e, w, cx| {
                     v.set_theme_pref(pref, e, w, cx);
                 })),
         );
     }
-    v_flex()
-        .gap_2()
-        .p_3()
-        .border_1()
-        .border_color(theme.border)
-        .rounded(theme.radius)
-        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(t("settings.theme")))
-        .child(row)
+    h_flex()
+        .items_center()
+        .child(
+            h_flex()
+                .items_center()
+                .gap_2()
+                .flex_1()
+                .child(gpui_kit::component::Icon::new(IconName::Monitor).size_4().text_color(theme.muted_foreground))
+                .child(div().text_size(px(13.)).child(t("settings.theme"))),
+        )
+        .child(seg)
 }
 
-/// 语言设置区（中/英两段）。
-fn render_language_section(cx: &mut Context<SettingsView>) -> impl IntoElement {
+/// 语言行：Globe 图标 + "语言" + 两段（中文/English）。
+fn render_language_row(cx: &mut Context<SettingsView>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let current = crate::i18n::current_lang();
-    let mut row = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
+    let mut seg = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
     for (key, lang, label) in [
         ("lang-zh", crate::i18n::Lang::Zh, "中文"),
         ("lang-en", crate::i18n::Lang::En, "English"),
     ] {
         let sel = current == lang;
-        row = row.child(
+        seg = seg.child(
             div()
                 .id(key)
                 .px(px(10.))
@@ -1597,12 +1789,15 @@ fn render_language_section(cx: &mut Context<SettingsView>) -> impl IntoElement {
                 })),
         );
     }
-    v_flex()
-        .gap_2()
-        .p_3()
-        .border_1()
-        .border_color(theme.border)
-        .rounded(theme.radius)
-        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(t("settings.language")))
-        .child(row)
+    h_flex()
+        .items_center()
+        .child(
+            h_flex()
+                .items_center()
+                .gap_2()
+                .flex_1()
+                .child(gpui_kit::component::Icon::new(IconName::Globe).size_4().text_color(theme.muted_foreground))
+                .child(div().text_size(px(13.)).child(t("settings.language"))),
+        )
+        .child(seg)
 }

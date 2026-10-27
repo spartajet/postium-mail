@@ -988,3 +988,44 @@ fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
     }
     assert!(!unread, "右键菜单标未读应落库");
 }
+
+// ---------------------------------------------------------------------------
+// settings.e2e → 左侧三区导航（通用/外观/账户）切换
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn settings_sections_navigate(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let api_for_view = api.clone();
+    let (settings, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
+        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+    });
+
+    // 默认落在"通用"分区（对齐旧版 activeSection 初始值）
+    let sec = with_app(cx, |app| settings.read(app).active_section);
+    assert_eq!(sec, crate::views::settings::SettingsSection::General);
+
+    // 切换到外观 → 账户 → 通用
+    for want in [
+        crate::views::settings::SettingsSection::Appearance,
+        crate::views::settings::SettingsSection::Accounts,
+        crate::views::settings::SettingsSection::General,
+    ] {
+        with_app_mut(cx, |app| {
+            settings.update(app, |view, cx| {
+                view.active_section = want;
+                cx.notify();
+            });
+        });
+        assert_eq!(
+            with_app(cx, |app| settings.read(app).active_section),
+            want
+        );
+    }
+    cx.run_until_parked();
+}
