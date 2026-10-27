@@ -21,10 +21,9 @@ jobs:
       release_name: ${{ steps.nightly.outputs.release_name }}
       source_sha: ${{ steps.nightly.outputs.source_sha }}
     steps:
-      - name: Checkout main
+      # 定时触发在默认分支（=main）；手动触发可指定任意分支验证构建
+      - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Calculate nightly name
         id: nightly
