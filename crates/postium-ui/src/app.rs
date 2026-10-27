@@ -189,9 +189,6 @@ impl AppShell {
                     store: this.detail.clone(),
                     api: this.api.clone(),
                     recipients_expanded: false,
-                    ai_summary: None,
-                    ai_loading: true,
-                    ai_spawned: false,
                 }));
                 this.detail_build_version = this.emails.read(cx).selected_version;
                 cx.notify();
@@ -356,9 +353,6 @@ impl Render for AppShell {
                                 store: self.detail.clone(),
                                 api: self.api.clone(),
                                 recipients_expanded: false,
-                                ai_summary: None,
-                                ai_loading: true,
-                                ai_spawned: false,
                             });
                             self.detail_view = Some(view.clone());
                             view.into_any_element()
