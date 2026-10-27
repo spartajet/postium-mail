@@ -124,13 +124,13 @@ jobs:
       # ── 打包为原生安装包（版本号取自 workspace Cargo.toml）──
       - name: Resolve version
         shell: bash
-        run: echo "APP_VER=$(grep -m1 '^version' Cargo.toml | cut -d'\"' -f2)" >> "$GITHUB_ENV"
+        run: echo "APP_VER=$(grep -m1 '^version' Cargo.toml | sed 's/[^0-9.]*//g')" >> "$GITHUB_ENV"
 
       - name: Package installer (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          curl -L -sSf -o /tmp/is.exe https://jrsoftware.org/download.php/is.exe
+          curl -L -sSf -o /tmp/is.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
           /tmp/is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART | true
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           [[ -f "$ISCC" ]] || ISCC="/c/Program Files/Inno Setup 6/ISCC.exe"
