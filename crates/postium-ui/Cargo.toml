@@ -25,6 +25,7 @@ dirs = "6"
 open = "5"
 rfd = "0.17"
 tray-icon = "0.26"
+png = "0.17"
 base64 = "0.22"
 
 [dev-dependencies]

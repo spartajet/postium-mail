@@ -5854,6 +5854,7 @@ dependencies = [
  "gpui-kit-assets",
  "gpui-pre",
  "open",
+ "png 0.17.16",
  "postium-core",
  "postium-editor",
  "rfd",

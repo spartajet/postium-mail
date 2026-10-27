@@ -29,13 +29,7 @@ pub fn setup_tray(
 ) -> Option<TrayIcon> {
     // 编译期定位 crate 内图标（不依赖 CWD，也不依赖待移除的旧轨目录）
     let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.ico");
-    let icon = match tray_icon::Icon::from_path(icon_path, None) {
-        Ok(icon) => icon,
-        Err(e) => {
-            tracing::warn!("托盘图标加载失败（{e}），托盘不可用");
-            return None;
-        }
-    };
+    let icon = load_tray_icon(&icon_path);
 
     let show = MenuItem::with_id("show", "显示窗口", true, None);
     let compose = MenuItem::with_id("compose", "写邮件", true, None);
@@ -121,4 +115,56 @@ pub fn setup_tray(
     let _ = ACTIONS_ID;
     tracing::info!("系统托盘已就绪");
     tray.ok()
+}
+
+/// 加载托盘图标：Windows 用 ICO 多尺寸路径；其他平台解码内嵌 PNG 为 RGBA。
+/// （tray-icon 的 `Icon::from_path` 仅 Windows 存在，跨平台需 from_rgba。）
+fn load_tray_icon(icon_path: &std::path::Path) -> tray_icon::Icon {
+    #[cfg(windows)]
+    {
+        match tray_icon::Icon::from_path(icon_path, None) {
+            Ok(icon) => icon,
+            Err(e) => {
+                tracing::warn!("托盘图标加载失败（{e}），使用内嵌 PNG 兜底");
+                embedded_png_icon()
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = icon_path;
+        embedded_png_icon()
+    }
+}
+
+/// 解码内嵌的 128×128 PNG 并转为 RGBA 图标。
+fn embedded_png_icon() -> tray_icon::Icon {
+    const ICON_PNG: &[u8] = include_bytes!("../icons/icon.png");
+    let decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
+    match decoder.read_info() {
+        Ok(mut reader) => {
+            let mut buf = vec![0u8; reader.output_buffer_size()];
+            match reader.next_frame(&mut buf) {
+                Ok(info) => tray_icon::Icon::from_rgba(buf, info.width, info.height)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("托盘图标 RGBA 转换失败（{e}）");
+                        fallback_icon()
+                    }),
+                Err(e) => {
+                    tracing::warn!("内嵌托盘图标解码失败（{e}）");
+                    fallback_icon()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("内嵌托盘图标读取失败（{e}）");
+            fallback_icon()
+        }
+    }
+}
+
+/// 1×1 透明兜底图标（保证托盘可用）。
+fn fallback_icon() -> tray_icon::Icon {
+    tray_icon::Icon::from_rgba(vec![0, 0, 0, 0], 1, 1)
+        .expect("1x1 RGBA 常量必然合法")
 }

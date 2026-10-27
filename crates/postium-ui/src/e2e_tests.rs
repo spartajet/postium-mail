@@ -56,6 +56,8 @@ fn setup(cx: &mut gpui_pre::App) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn boots_with_inbox_seed(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -95,6 +97,8 @@ fn boots_with_inbox_seed(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn switches_between_accounts(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -167,6 +171,8 @@ fn switches_between_accounts(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn navigates_sent_starred_inbox(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -234,6 +240,8 @@ fn navigates_sent_starred_inbox(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn searches_quarterly_planning(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -275,6 +283,8 @@ fn searches_quarterly_planning(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn stars_and_deletes_selected(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -338,6 +348,8 @@ fn stars_and_deletes_selected(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
     let _ = sync_rx;
@@ -390,6 +402,8 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
 
 #[gpui_pre::test]
 fn compose_reopens_empty(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
     let _ = sync_rx;
@@ -435,6 +449,8 @@ fn compose_reopens_empty(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
 fn toggles_theme_and_persists(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     // ui-state 持久化路径走 resolve_data_dir：测试内强制 E2E 目录
     unsafe {
@@ -507,6 +523,8 @@ fn open_calendar(
 
 #[gpui_pre::test]
 fn calendar_shows_today_and_pick_day(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
@@ -568,6 +586,8 @@ fn calendar_shows_today_and_pick_day(cx: &mut TestAppContext) {
 
 #[gpui_pre::test]
 fn calendar_navigates_months_and_today(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     let (api, sync_rx) = boot(dir.path());
 
