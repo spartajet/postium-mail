@@ -231,16 +231,12 @@ impl Render for Sidebar {
                     .font_weight(FontWeight::BOLD)
                     .child(t("app.name")),
             )
-            .child(
-                Button::new("compose")
-                    .primary()
-                    .w_full()
-                    .icon(IconName::MailPlus)
-                    .label(t("sidebar.compose"))
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        cx.emit(SidebarEvent::Compose);
-                    })),
-            )
+            .child({
+                let on_compose = cx.listener(|_: &mut Self, _, _, cx| {
+                    cx.emit(SidebarEvent::Compose);
+                });
+                crate::theme::compose_button(t("sidebar.compose"), on_compose)
+            })
             .child(scroll)
             // 固定底部：设置
             .child(

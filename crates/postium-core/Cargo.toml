@@ -15,7 +15,7 @@ serde_json.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["registry", "env-filter", "fmt", "ansi"] }
 async-trait.workspace = true
 specta = { version = "=2.0.0-rc.24", features = ["chrono", "derive"] }
 

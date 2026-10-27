@@ -236,7 +236,10 @@ impl ComposeView {
 
     fn close_window(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.close_handle {
-            let _ = handle.update(cx, |_, window, _| window.remove_window());
+            let alive = cx.windows().iter().any(|w| w.window_id() == handle.window_id());
+            if alive {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            }
         }
     }
 

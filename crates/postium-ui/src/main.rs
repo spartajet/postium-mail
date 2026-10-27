@@ -8,6 +8,7 @@ mod notify;
 mod runtime;
 mod ui_state;
 mod stores;
+mod theme;
 mod tray;
 mod views;
 mod window_state;

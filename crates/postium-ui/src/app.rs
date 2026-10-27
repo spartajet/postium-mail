@@ -81,6 +81,7 @@ impl AppShell {
             _ => gpui_kit::component::ThemeMode::Dark,
         };
         gpui_kit::component::Theme::change(theme_mode, None, cx);
+        crate::theme::apply_brand(cx);
         if ui.lang.as_deref() == Some("en") {
             crate::i18n::set_lang(crate::i18n::Lang::En, cx);
         }
@@ -229,6 +230,7 @@ impl AppShell {
             gpui_kit::component::ThemeMode::Dark
         };
         gpui_kit::component::Theme::change(mode, None, cx);
+        crate::theme::apply_brand(cx);
         let mut ui = crate::ui_state::load();
         ui.theme = Some(if dark { "light".into() } else { "dark".into() });
         crate::ui_state::save(&ui);
@@ -308,6 +310,16 @@ impl Render for AppShell {
             .child(self.sidebar.clone())
             .child(
                 v_flex()
+                    .relative()
+                    .flex_1()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(crate::theme::brand_gradient(cx))
+                    // 品牌光球装饰层（最底，内容覆盖其上）
+                    .child(crate::theme::orbs(cx))
+                    .child(
+                v_flex()
+                    .relative()
                     .flex_1()
                     .size_full()
                     .p_2()
@@ -347,6 +359,7 @@ impl Render for AppShell {
                             ),
                     )
                     .child(div().flex_1().overflow_hidden().child(main))
+                    )
                     .child(match self.status_bar.clone() {
                         Some(bar) => bar.into_any_element(),
                         None => {
