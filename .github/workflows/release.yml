@@ -61,16 +61,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # GPUI 轨道已验证的平台；其余平台（win-arm64/macOS）待实测后再加
+        # 平台矩阵对齐 clash-verge-rev（剔除 32 位 armhf：gpui GPU 后端不支持 32 位）；
+        # 全部使用 GitHub 原生 runner（公共仓库免费），无需交叉编译
         include:
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: postium-mail-windows-x86_64.zip
+          - name: windows-arm64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: postium-mail-windows-arm64.zip
+          - name: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: postium-mail-macos-x86_64.tar.gz
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: postium-mail-macos-arm64.tar.gz
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: postium-mail-linux-x86_64.tar.gz
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: postium-mail-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout release tag
@@ -111,6 +128,12 @@ jobs:
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          tar czf "${{ github.workspace }}/${{ matrix.artifact }}" postium-mail
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
         run: |
           cd "target/${{ matrix.target }}/release"
           tar czf "${{ github.workspace }}/${{ matrix.artifact }}" postium-mail
