@@ -140,7 +140,7 @@ jobs:
           ARCH_ALLOWED=x64compatible
           ARCH_OUT=x64
           [[ "${{ matrix.target }}" == aarch64* ]] && { ARCH_ALLOWED=arm64; ARCH_OUT=arm64; }
-          "$ISCC" /DAppVer="$APP_VER" /DArchAllowed="$ARCH_ALLOWED"             /DSourceExe="target/${{ matrix.target }}/release/postium-mail.exe"             /F"postium-mail_${APP_VER}_${ARCH_OUT}_setup"             .github/packaging/windows/postium.iss
+          "$ISCC" /DAppVer="$APP_VER" /DArchAllowed="$ARCH_ALLOWED"             /DSourceExe="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/postium-mail.exe"             /F"postium-mail_${APP_VER}_${ARCH_OUT}_setup"             .github/packaging/windows/postium.iss
           mv ".github/packaging/windows/postium-mail_${APP_VER}_${ARCH_OUT}_setup.exe" .
 
       - name: Package .deb (Linux)
