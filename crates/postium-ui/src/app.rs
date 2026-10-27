@@ -62,7 +62,7 @@ pub struct AppShell {
     pub nav: NavTarget,
     /// 托盘句柄（保持存活）
     _tray: Option<tray_icon::TrayIcon>,
-    calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
+    pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }

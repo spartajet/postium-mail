@@ -17,7 +17,8 @@ async fn test_seed_e2e_data_is_deterministic_and_idempotent() {
     let email_count = count_all(&svc, "emails").await;
 
     assert_eq!(account_count, 2);
-    assert_eq!(email_count, 48);
+    // 48 固定夹具 + 5 封“今天锚定”日历夹具（UID 501–505）
+    assert_eq!(email_count, 53);
 
     let primary = account_by_email(&svc, "primary.e2e@postium.test").await;
     let secondary = account_by_email(&svc, "secondary.e2e@postium.test").await;
@@ -42,14 +43,16 @@ async fn test_seed_data_supports_category_queries_and_search() {
         .list_by_category(primary.id, EmailCategory::Inbox, 1, 30, false)
         .await
         .unwrap();
-    assert_eq!(inbox.total, 24);
-    assert_eq!(inbox.emails.len(), 24);
+    // 24 固定 INBOX + 5 封今日锚定日历夹具
+    assert_eq!(inbox.total, 29);
+    assert_eq!(inbox.emails.len(), 29);
+    // 按时间倒序：最新一封是“后天”的日历夹具
     assert_eq!(
         inbox
             .emails
             .first()
             .and_then(|email| email.subject.as_deref()),
-        Some("Primary Inbox Message 01")
+        Some("Calendar Future Delta")
     );
     assert!(
         inbox
@@ -75,12 +78,19 @@ async fn test_seed_data_supports_category_queries_and_search() {
         .list_by_category(primary.id, EmailCategory::Starred, 1, 20, false)
         .await
         .unwrap();
-    assert_eq!(starred.total, 8);
+    // 固定星标 8 封（INBOX 4 + Archive 4）+ 日历夹具 Beta 1 封
+    assert_eq!(starred.total, 9);
     assert!(
         starred
             .emails
             .iter()
             .any(|email| email.subject.as_deref() == Some("Starred Reference Message"))
+    );
+    assert!(
+        starred
+            .emails
+            .iter()
+            .any(|email| email.subject.as_deref() == Some("Calendar Today Beta Starred"))
     );
 
     let account_id = primary.id;

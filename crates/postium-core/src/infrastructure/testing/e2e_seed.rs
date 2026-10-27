@@ -30,6 +30,19 @@
 //! UID 5 → `Quarterly Planning Alpha`、UID 8 → `Quarterly Planning Beta`、
 //! UID 16 → `Quarterly Planning Archive`、UID 24 → `Primary Inbox Message 24`。
 //!
+//! ## 主账号日历夹具（[`calendar_anchored_emails`]），UID 501–505
+//!
+//! 时间戳**锚定播种时刻的“今天”**（而非固定 `BASE_TS`），供日历等
+//! 按当前月份聚合的视图做确定性断言（任何日期运行测试均稳定）：
+//!
+//! | UID | subject | sent_at | 已读 | 星标 |
+//! |-----|---------|---------|------|------|
+//! | 501 | `Calendar Today Alpha` | 今天 10:00 | 否 | 否 |
+//! | 502 | `Calendar Today Beta Starred` | 今天 11:00 | 是 | 是 |
+//! | 503 | `Calendar Yesterday Gamma` | 昨天 09:00 | 是 | 否 |
+//! | 504 | `Calendar Future Delta` | 后天（+2 天）15:00 | 是 | 否 |
+//! | 505 | `Calendar Midmonth Epsilon` | 本月 15 日 12:00 | 是 | 否 |
+//!
 //! ## 副账号邮件（[`secondary_emails`]），UID 偏移 1000
 //!
 //! | 文件夹 | UID 区间 | 数量 | 已读 | 星标 | sent_at |
@@ -137,6 +150,7 @@ pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
 
         let mut fixtures = Vec::new();
         fixtures.extend(primary_emails(primary_id));
+        fixtures.extend(calendar_anchored_emails(primary_id));
         fixtures.extend(secondary_emails(secondary_id));
 
         let mut stmt = tx.prepare(
@@ -420,6 +434,53 @@ fn primary_emails(account_id: i32) -> Vec<EmailWrite> {
     ));
 
     items
+}
+
+/// 生成锚定“今天”的日历夹具邮件（共 5 封，UID 501–505，主账号 INBOX）。
+///
+/// 与 [`primary_emails`] 的固定 `BASE_TS` 不同，这组邮件的时间戳以播种
+/// 时刻为基准动态计算（今天/昨天/后天/本月 15 日），使日历视图按当前
+/// 月份聚合时始终有可断言的数据：
+///
+/// - 今天 2 封（`Calendar Today Alpha` 未读、`Calendar Today Beta Starred`
+///   已读星标）——验证当日卡片与格内条目；
+/// - 昨天 1 封、后天 1 封——验证相邻日期归属；
+/// - 本月 15 日 1 封——月初/月末运行测试时保证本月至少 3 封
+///   （今天 2 封 + 15 日 1 封；昨天/后天可能落入相邻月份）。
+///
+/// 时分秒固定（09:00–15:00），同日内排序确定。
+fn calendar_anchored_emails(account_id: i32) -> Vec<EmailWrite> {
+    use chrono::{Datelike, Duration, Local, TimeZone};
+
+    let today = Local::now().date_naive();
+    // 各夹具的 (日期偏移或固定日, 时, 分, subject, 已读, 星标)
+    let specs: [(i32, u32, u32, &str, bool, bool); 5] = [
+        (0, 10, 0, "Calendar Today Alpha", false, false),
+        (0, 11, 0, "Calendar Today Beta Starred", true, true),
+        (-1, 9, 0, "Calendar Yesterday Gamma", true, false),
+        (2, 15, 0, "Calendar Future Delta", true, false),
+        (15, 12, 0, "Calendar Midmonth Epsilon", true, false),
+    ];
+
+    specs
+        .into_iter()
+        .enumerate()
+        .map(|(i, (day_or_midmonth, hour, minute, subject, is_read, is_starred))| {
+            // 第 5 项（day_or_midmonth == 15 且 i == 4）固定取本月 15 日，
+            // 其余按相对天数偏移。
+            let date = if i == 4 {
+                today.with_day(15).expect("构造本月 15 日失败")
+            } else {
+                today + Duration::days(i64::from(day_or_midmonth))
+            };
+            let ts = Local
+                .with_ymd_and_hms(date.year(), date.month(), date.day(), hour, minute, 0)
+                .single()
+                .expect("构造夹具时间戳失败")
+                .timestamp();
+            email_model(account_id, "INBOX", 501 + i as u32, subject, is_read, is_starred, ts)
+        })
+        .collect()
 }
 
 /// 生成副账号的全部夹具邮件（共 12 封）。

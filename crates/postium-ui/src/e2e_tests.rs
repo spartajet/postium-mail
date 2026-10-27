@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use chrono::Datelike as _;
 use gpui_pre::{Focusable as _, TestAppContext, VisualTestContext};
 use postium_core::api::CoreApi;
 
@@ -475,4 +476,168 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
         std::env::remove_var("POSTIUM_E2E");
         std::env::remove_var("POSTIUM_DATA_DIR");
     }
+}
+
+// ---------------------------------------------------------------------------
+// calendar.e2e → 今日锚定夹具：当日条目、选日/取消、翻月、今天
+// ---------------------------------------------------------------------------
+/// 导航到日历视图并等待视图创建 + 今日夹具装载完成，返回日历实体。
+fn open_calendar(
+    shell: &gpui_kit::Entity<AppShell>,
+    cx: &mut VisualTestContext,
+) -> gpui_kit::Entity<crate::views::calendar::CalendarView> {
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Calendar;
+            cx.notify();
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell.read(app).calendar_view.clone().filter(|view| {
+                let v = view.read(app);
+                v.loaded
+                    && v.emails.iter().any(|e| {
+                        e.subject.as_deref().unwrap_or("").contains("Calendar Today Alpha")
+                    })
+            })
+        })
+    })
+}
+
+#[gpui_pre::test]
+fn calendar_shows_today_and_pick_day(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    let calendar = open_calendar(&shell, cx);
+    let today = chrono::Local::now().date_naive();
+
+    // 今天应有 2 封夹具（Alpha 未读 + Beta 星标已读）
+    let subjects = with_app(cx, |app| {
+        calendar
+            .read(app)
+            .emails_of(today.day())
+            .iter()
+            .map(|e| e.subject.clone().unwrap_or_default())
+            .collect::<Vec<_>>()
+    });
+    assert!(
+        subjects.iter().any(|s| s.contains("Calendar Today Alpha"))
+            && subjects.iter().any(|s| s.contains("Calendar Today Beta Starred")),
+        "今天应含 2 封日历夹具，实际: {subjects:?}"
+    );
+    let unread = with_app(cx, |app| {
+        calendar
+            .read(app)
+            .emails_of(today.day())
+            .iter()
+            .filter(|e| !e.is_read)
+            .count()
+    });
+    assert_eq!(unread, 1, "今天夹具应恰有 1 封未读（Alpha）");
+
+    // 选中今天 → 取消选择（toggle）
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.pick_day(today.day(), cx));
+    });
+    assert_eq!(
+        with_app(cx, |app| calendar.read(app).selected_day),
+        Some(today.day()),
+        "pick_day 应选中今天"
+    );
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.pick_day(today.day(), cx));
+    });
+    assert_eq!(
+        with_app(cx, |app| calendar.read(app).selected_day),
+        None,
+        "再次点击已选日期应取消选择"
+    );
+}
+
+#[gpui_pre::test]
+fn calendar_navigates_months_and_today(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    let calendar = open_calendar(&shell, cx);
+    let today = chrono::Local::now().date_naive();
+    let next_ym = |y: i32, m: u32| if m == 12 { (y + 1, 1u32) } else { (y, m + 1) };
+    let prev_ym = |y: i32, m: u32| if m == 1 { (y - 1, 12u32) } else { (y, m - 1) };
+
+    let (y0, m0) = with_app(cx, |app| {
+        let v = calendar.read(app);
+        (v.year, v.month)
+    });
+    assert_eq!((y0, m0), (today.year(), today.month()), "初始应停在当月");
+
+    // 先选一天，翻月后应清空选中
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.pick_day(15, cx));
+    });
+
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.shift_month(1, cx));
+    });
+    assert_eq!(
+        with_app(cx, |app| {
+            let v = calendar.read(app);
+            (v.year, v.month)
+        }),
+        next_ym(y0, m0),
+        "下月切换应正确跨年"
+    );
+    assert_eq!(
+        with_app(cx, |app| calendar.read(app).selected_day),
+        None,
+        "翻月应清空选中日"
+    );
+
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.shift_month(-1, cx));
+    });
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.shift_month(-1, cx));
+    });
+    assert_eq!(
+        with_app(cx, |app| {
+            let v = calendar.read(app);
+            (v.year, v.month)
+        }),
+        prev_ym(y0, m0),
+        "连翻两个月应回到上月"
+    );
+
+    with_app_mut(cx, |app| {
+        calendar.update(app, |view, cx| view.jump_to_today(cx));
+    });
+    assert_eq!(
+        with_app(cx, |app| {
+            let v = calendar.read(app);
+            (v.year, v.month, v.selected_day)
+        }),
+        (today.year(), today.month(), Some(today.day())),
+        "今天按钮应回到当月并选中今天"
+    );
 }

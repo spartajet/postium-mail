@@ -26,11 +26,11 @@ const WEEK_LABELS: [&str; 7] = ["日", "一", "二", "三", "四", "五", "六"]
 pub struct CalendarView {
     #[allow(dead_code)]
     pub api: Arc<CoreApi>,
-    emails: Vec<EmailDto>,
-    loaded: bool,
-    year: i32,
-    month: u32, // 1-12
-    selected_day: Option<u32>,
+    pub(crate) emails: Vec<EmailDto>,
+    pub(crate) loaded: bool,
+    pub(crate) year: i32,
+    pub(crate) month: u32, // 1-12
+    pub(crate) selected_day: Option<u32>,
 }
 
 impl CalendarView {
@@ -67,15 +67,21 @@ impl CalendarView {
     }
 
     fn prev_month(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let (y, m) = if self.month == 1 { (self.year - 1, 12) } else { (self.year, self.month - 1) };
-        self.year = y;
-        self.month = m;
-        self.selected_day = None;
-        cx.notify();
+        self.shift_month(-1, cx);
     }
 
     fn next_month(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let (y, m) = if self.month == 12 { (self.year + 1, 1) } else { (self.year, self.month + 1) };
+        self.shift_month(1, cx);
+    }
+
+    /// 月切换核心逻辑（delta = ±1 个月），切换后清空选中日。
+    pub(crate) fn shift_month(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let (y, m) = match (self.month, delta.is_negative()) {
+            (1, true) => (self.year - 1, 12),
+            (12, false) => (self.year + 1, 1),
+            (_, true) => (self.year, self.month - 1),
+            (_, false) => (self.year, self.month + 1),
+        };
         self.year = y;
         self.month = m;
         self.selected_day = None;
@@ -83,6 +89,11 @@ impl CalendarView {
     }
 
     fn go_today(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.jump_to_today(cx);
+    }
+
+    /// 回到今天所在月份并选中今天。
+    pub(crate) fn jump_to_today(&mut self, cx: &mut Context<Self>) {
         let today = Local::now().date_naive();
         self.year = today.year();
         self.month = today.month();
@@ -96,7 +107,7 @@ impl CalendarView {
     }
 
     /// 点击日期：再次点击已选日期则取消选择。
-    fn pick_day(&mut self, day: u32, cx: &mut Context<Self>) {
+    pub(crate) fn pick_day(&mut self, day: u32, cx: &mut Context<Self>) {
         self.selected_day = if self.selected_day == Some(day) { None } else { Some(day) };
         cx.notify();
     }
@@ -106,7 +117,7 @@ impl CalendarView {
     }
 
     /// 指定日期的邮件（时间升序）。
-    fn emails_of(&self, day: u32) -> Vec<&EmailDto> {
+    pub(crate) fn emails_of(&self, day: u32) -> Vec<&EmailDto> {
         let mut list: Vec<&EmailDto> = self
             .emails
             .iter()
