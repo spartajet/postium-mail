@@ -22,7 +22,28 @@ struct TrayActions {
 static ACTIONS_ID: u32 = 1;
 
 /// 装配托盘并启动事件消费循环。
+///
+/// 托盘是可选能力：Linux 无 appindicator/无会话总线等环境下
+/// tray-icon 内部会 panic（毒化其全局 Lazy），此处兜底捕获，
+/// 失败降级为无托盘运行——保证 headless CI 与无托盘桌面可用。
 pub fn setup_tray(
+    api: Arc<CoreApi>,
+    sync_store: gpui_kit::Entity<SyncStore>,
+    cx: &mut App,
+) -> Option<TrayIcon> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        setup_tray_inner(api, sync_store, cx)
+    }));
+    match result {
+        Ok(tray) => tray,
+        Err(payload) => {
+            tracing::warn!("托盘初始化失败（无托盘环境属预期）：{payload:?}");
+            None
+        }
+    }
+}
+
+fn setup_tray_inner(
     api: Arc<CoreApi>,
     sync_store: gpui_kit::Entity<SyncStore>,
     cx: &mut App,
