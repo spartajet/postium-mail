@@ -378,7 +378,7 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
         window.focus(&handle, app);
     });
     cx.simulate_keystrokes("E2E Draft Subject");
-    with_window_mut(cx, |window, app| {
+    with_window_mut(cx, |_window, app| {
         compose.update(app, |view, cx| {
             view.persist_draft(cx);
         });
