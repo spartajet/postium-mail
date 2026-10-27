@@ -641,3 +641,142 @@ fn calendar_navigates_months_and_today(cx: &mut TestAppContext) {
         "今天按钮应回到当月并选中今天"
     );
 }
+
+// ---------------------------------------------------------------------------
+// add-account.e2e → 四步向导：服务商/手动 → 凭据 → 同步范围
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
+    // 向导全程真实 I/O（keyring/DB 多轮往返），允许混合非确定性异步
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let api_for_view = api.clone();
+    let (settings, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
+        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+    });
+
+
+    // 等初始账号列表装载完成（settle 后台任务，保证确定性）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (settings.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 打开向导 → 服务商列表装载
+    with_window_mut(cx, |window, app| {
+        settings.update(app, |view, cx| {
+            view.open_add(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    let provider_count = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            settings
+                .read(app)
+                .add
+                .as_ref()
+                .filter(|a| !a.loading_providers && !a.providers.is_empty())
+                .map(|a| a.providers.len())
+        })
+    });
+    assert!(provider_count >= 2, "服务商列表应非空，实际 {provider_count}");
+
+    // 手动配置路径（对齐旧版"其他"卡片）
+    with_app_mut(cx, |app| {
+        settings.update(app, |view, cx| {
+            view.select_manual(cx);
+        });
+    });
+
+    // 填表单：邮箱 / 显示名 / 密码 / IMAP / SMTP
+    let type_into = |cx: &mut VisualTestContext, which: usize, text: &str| {
+        with_window_mut(cx, |window, app| {
+            let handle = settings.read(app).add.as_ref().map(|a| match which {
+                0 => a.email.clone(),
+                1 => a.display_name.clone(),
+                2 => a.password.clone(),
+                3 => a.imap_host.clone(),
+                4 => a.smtp_host.clone(),
+                _ => a.email.clone(),
+            });
+            if let Some(h) = handle {
+                let fh = h.read(app).focus_handle(app);
+                window.focus(&fh, app);
+            }
+        });
+        cx.simulate_keystrokes(text);
+    };
+    // 键入内容避免空格被解析为分隔：simulate_keystrokes 按空格分键，用连续字符串
+    type_into(cx, 0, "wizard@local.test");
+    type_into(cx, 1, "Wizard");
+    type_into(cx, 2, "secretpassword");
+    type_into(cx, 3, "imap.local.test");
+    type_into(cx, 4, "smtp.local.test");
+
+
+        // 提交 → 进入同步范围步骤
+    with_window_mut(cx, |window, app| {
+        settings.update(app, |view, cx| {
+            view.submit_credentials(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    let pending = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            settings
+                .read(app)
+                .add
+                .as_ref()
+                .and_then(|a| a.pending_sync)
+        })
+    });
+    assert!(pending > 0, "创建账号应返回正 id");
+    let step = with_app(cx, |app| {
+        settings.read(app).add.as_ref().map(|a| a.step)
+    });
+    assert_eq!(step, Some(crate::views::settings::AddStep::SyncScope), "提交后应进入同步范围步骤");
+
+    // 账号确实入库（按邮箱定位）
+    let created = crate::runtime::runtime()
+        .block_on(async { api.list_accounts().await.unwrap_or_default() })
+        .into_iter()
+        .find(|a| a.email == "wizard@local.test");
+    assert!(created.is_some(), "账号应已写入数据库");
+
+    // 选择范围并开始同步（begin_sync 不关窗；关窗路径由实机验证覆盖）
+    with_app_mut(cx, |app| {
+        settings.update(app, |view, cx| {
+            view.set_sync_range(postium_core::domain::sync::InitialSyncRange::Week, cx);
+        });
+    });
+    with_app_mut(cx, |app| {
+        settings.update(app, |view, cx| {
+            view.begin_sync(cx);
+        });
+    });
+    // 等同步触发的账号列表 reload 收尾（含新账号），保证无未决通道
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            settings
+                .read(app)
+                .accounts
+                .read(app)
+                .groups
+                .iter()
+                .any(|g| g.account.email == "wizard@local.test")
+                .then_some(())
+        })
+    });
+    // 关闭向导（窗口仍在，可安全走 window 上下文）
+    with_window_mut(cx, |window, app| {
+        settings.update(app, |view, cx| {
+            view.close_add(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    let wizard_open = with_app(cx, |app| settings.read(app).add.is_some());
+    assert!(!wizard_open, "close_add 后向导应关闭");
+    cx.run_until_parked();
+}

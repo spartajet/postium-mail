@@ -51,6 +51,8 @@ pub struct CoreApi {
     pub attachments: AttachmentService,
     pub oauth2: Arc<OAuth2Manager>,
     pub data_dir: std::path::PathBuf,
+    /// e2e 离线模式（e2e=true 且非真连库）：同步入口短路，保证测试确定性。
+    e2e_offline: bool,
 }
 
 impl CoreApi {
@@ -76,7 +78,16 @@ impl CoreApi {
             .clone();
 
         let auth = Arc::new(AuthManager::default());
-        let accounts = AccountService::new(db.clone(), auth.clone());
+        // e2e（非真连库）模式跳过 IMAP 真连验证，允许离线创建测试账号
+        let accounts = if e2e && !e2e_truth {
+            AccountService::new_with_imap_verifier(
+                db.clone(),
+                auth.clone(),
+                Arc::new(crate::service::account_connection::NoopImapConnectionVerifier),
+            )
+        } else {
+            AccountService::new(db.clone(), auth.clone())
+        };
         let emails = EmailService::new_for_runtime(auth.clone(), db.clone(), e2e, e2e_truth);
         let sync = SyncService::new(db.clone(), auth.clone());
         let labels = LabelService::new(db.clone());
@@ -98,6 +109,7 @@ impl CoreApi {
                 attachments,
                 oauth2,
                 data_dir: data_dir.to_path_buf(),
+                e2e_offline: e2e && !e2e_truth,
             }),
             rx,
         ))
@@ -268,6 +280,9 @@ impl CoreApi {
         account_id: i32,
         range: InitialSyncRange,
     ) -> Result<(), MailError> {
+        if self.e2e_offline {
+            return Ok(());
+        }
         self.sync.sync_account_with_range(event_tx, account_id, range).await
     }
 
