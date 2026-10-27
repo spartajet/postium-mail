@@ -22,6 +22,10 @@ pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
     pub recipients_expanded: bool,
+    /// AI 摘要卡（对齐旧版：800ms 模拟延迟 + 固定文案；后端就绪后接真实 LLM）
+    pub(crate) ai_summary: Option<SharedString>,
+    pub(crate) ai_loading: bool,
+    pub(crate) ai_spawned: bool,
 }
 
 impl EmailDetailView {
@@ -233,6 +237,93 @@ impl Render for EmailDetailView {
             .sender_name
             .clone()
             .unwrap_or_else(|| detail.email.sender_email.clone());
+
+        // AI 摘要（旧版为 mock：800ms 模拟延迟 + 固定文案；TODO 接真实 LLM）
+        if !self.ai_spawned {
+            self.ai_spawned = true;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(800))
+                    .await;
+                this.update(cx, |view, cx| {
+                    view.ai_loading = false;
+                    view.ai_summary =
+                        Some("• 邮件主要内容摘要
+• 需要关注的关键点
+• 建议的后续行动".into());
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
+        let ai_panel = {
+            let theme = cx.theme().clone();
+            let mut actions = h_flex().gap_1();
+            for (key, label) in [
+                ("ai-reply", t("ai.smartReply")),
+                ("ai-summary", t("ai.summary")),
+                ("ai-translate", t("ai.translate")),
+                ("ai-tasks", t("ai.tasks")),
+            ] {
+                // 与旧版一致：按钮未接逻辑（旧版 TODO 未绑定处理）
+                actions = actions.child(
+                    Button::new(key)
+                        .ghost()
+                        .xsmall()
+                        .label(label)
+                        .tooltip("TODO: 接入 AI 后端"),
+                );
+            }
+            v_flex()
+                .gap_2()
+                .p_3()
+                .mb_1()
+                .rounded(theme.radius)
+                .bg(theme.muted.opacity(0.4))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            gpui_kit::component::Icon::new(IconName::Sparkles)
+                                .size_4()
+                                .text_color(theme.accent),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(format!("AI {}", t("ai.provider"))),
+                        )
+                        .child(div().flex_1())
+                        .child(actions),
+                )
+                .child(if self.ai_loading {
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            gpui_kit::component::Icon::new(IconName::LoaderCircle)
+                                .size_3()
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child(t("ai.generating")),
+                        )
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.muted_foreground)
+                        .line_clamp(4)
+                        .child(self.ai_summary.clone().unwrap_or_else(|| t("ai.noSummary")))
+                        .into_any_element()
+                })
+        };
 
         let body_html_str = store.html.clone().unwrap_or_default();
         let body: AnyElement = if !body_html_str.is_empty() {
@@ -451,6 +542,7 @@ impl Render for EmailDetailView {
                 )
             })
             // 正文
+            .child(ai_panel)
             .child(body)
             .into_any_element()
     }

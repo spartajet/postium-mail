@@ -369,11 +369,11 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
 
     // 键入收件人（焦点 + 键盘事件）
     with_window_mut(cx, |window, app| {
-        let handle = compose.read(app).to.read(app).focus_handle(app);
+        let handle = compose.read(app).to_field.input.read(app).focus_handle(app);
         window.focus(&handle, app);
     });
     cx.simulate_keystrokes("peer@example.com");
-    let to_value = with_app(cx, |app| compose.read(app).to.read(app).value().to_string());
+    let to_value = with_app(cx, |app| compose.read(app).to_field.input.read(app).value().to_string());
     assert_eq!(to_value, "peer@example.com", "收件人键入应生效");
 
     // 空主题 → 发送被拦截
@@ -418,7 +418,7 @@ fn compose_reopens_empty(cx: &mut TestAppContext) {
         )
     });
     with_window_mut(cx, |window, app| {
-        let handle = first.read(app).to.read(app).focus_handle(app);
+        let handle = first.read(app).to_field.input.read(app).focus_handle(app);
         window.focus(&handle, app);
     });
     cx.simulate_keystrokes("someone@x.test");
@@ -436,7 +436,7 @@ fn compose_reopens_empty(cx: &mut TestAppContext) {
     });
     let (to, subject) = with_app(cx, |app| {
         (
-            second.read(app).to.read(app).value().to_string(),
+            second.read(app).to_field.input.read(app).value().to_string(),
             second.read(app).subject.read(app).value().to_string(),
         )
     });
@@ -799,4 +799,192 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
     let wizard_open = with_app(cx, |app| settings.read(app).add.is_some());
     assert!(!wizard_open, "close_add 后向导应关闭");
     cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// gap-list.e2e → 差距清单补齐：右键菜单行为 / 主题跟随系统 / 搜索防抖 /
+// 收件人 Chips / ESC 关闭向导
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn theme_follows_system_when_pref_is_system(cx: &mut TestAppContext) {
+    // 纯映射断言（持久化往返由 toggles_theme_and_persists 覆盖；
+    // 并行测试共享进程 env，这里不触碰 ui-state 路径）
+    let _ = cx;
+    assert_eq!(
+        crate::theme::resolve_mode("system", gpui_kit::WindowAppearance::Light),
+        gpui_kit::component::ThemeMode::Light
+    );
+    assert_eq!(
+        crate::theme::resolve_mode("system", gpui_kit::WindowAppearance::Dark),
+        gpui_kit::component::ThemeMode::Dark
+    );
+    assert_eq!(
+        crate::theme::resolve_mode("light", gpui_kit::WindowAppearance::Dark),
+        gpui_kit::component::ThemeMode::Light
+    );
+    assert_eq!(
+        crate::theme::resolve_mode("dark", gpui_kit::WindowAppearance::Light),
+        gpui_kit::component::ThemeMode::Dark
+    );
+    // 未知值回落暗色（与旧默认一致）
+    assert_eq!(
+        crate::theme::resolve_mode("bogus", gpui_kit::WindowAppearance::Light),
+        gpui_kit::component::ThemeMode::Dark
+    );
+}
+
+#[gpui_pre::test]
+fn compose_recipient_field_chips_commit_and_remove(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let (compose, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        crate::views::compose::ComposeView::new(
+            crate::views::compose::ComposeMode::New,
+            api.clone(),
+            window,
+            cx,
+        )
+    });
+
+    // 输入两个地址（空格分隔）→ 回车提交 chips
+    with_window_mut(cx, |window, app| {
+        let h = compose.read(app).to_field.input.read(app).focus_handle(app);
+        window.focus(&h, app);
+    });
+    cx.simulate_input("a@postium.test, b@postium.test");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
+    assert_eq!(
+        emails,
+        vec!["a@postium.test".to_string(), "b@postium.test".to_string()],
+        "回车应把输入解析为 chips: {emails:?}"
+    );
+    // chips 化后输入框清空
+    let remaining = with_app(cx, |app| {
+        compose.read(app).to_field.input.read(app).value().to_string()
+    });
+    assert!(remaining.is_empty(), "提交后输入框应清空: {remaining}");
+
+    // 重复地址合并（再次输入同一地址回车）
+    with_window_mut(cx, |window, app| {
+        let h = compose.read(app).to_field.input.read(app).focus_handle(app);
+        window.focus(&h, app);
+    });
+    cx.simulate_keystrokes("a@postium.test");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
+    assert_eq!(emails.len(), 2, "重复地址应合并去重: {emails:?}");
+
+    // chip 删除
+    with_app_mut(cx, |app| {
+        compose.update(app, |view, cx| {
+            view.to_field.remove_by_email("a@postium.test");
+            cx.notify();
+        });
+    });
+    let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
+    assert_eq!(emails, vec!["b@postium.test".to_string()], "删除 chip 应生效");
+    cx.run_until_parked();
+}
+
+#[gpui_pre::test]
+fn add_account_modal_closes_on_escape(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let api_for_view = api.clone();
+    let (settings, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
+        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+    });
+
+    // 打开向导并等服务商装载（焦点已落在弹窗）
+    with_window_mut(cx, |window, app| {
+        settings.update(app, |view, cx| {
+            view.open_add(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            settings
+                .read(app)
+                .add
+                .as_ref()
+                .filter(|a| !a.loading_providers && !a.providers.is_empty())
+                .map(|_| ())
+        })
+    });
+
+    // ESC → 向导关闭
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    let open = with_app(cx, |app| settings.read(app).add.is_some());
+    assert!(!open, "ESC 应关闭添加账号向导");
+    cx.run_until_parked();
+}
+
+#[gpui_pre::test]
+fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    // 等账号装载 settle 后再等列表（对齐 boots 测试次序）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
+    let api2 = with_app(cx, |app| shell.read(app).api.clone());
+
+    // 直接调右键菜单的行级动作路径（PopupMenu 弹出本身属渲染层，
+    // 动作执行链路 act_on_email 为核心逻辑）
+    let id = {
+        let email = with_app(cx, |app| {
+            shell.read(app).emails.read(app).emails.first().unwrap().clone()
+        });
+        email.id
+    };
+
+    // 标未读 → 已读翻转验证（种子首封已读 → 标未读 → DB 应为未读）
+    with_app_mut(cx, |app| {
+        crate::views::email_list::test_hooks::act_on_email_for_test(
+            api2.clone(),
+            id,
+            crate::views::email_list::test_hooks::RowActionForTest::MarkRead(false),
+            app,
+        );
+    });
+    // 后台任务为真实异步：轮询直至落库（最多 ~3s）
+    let mut unread = true;
+    for _ in 0..30 {
+        cx.run_until_parked();
+        unread = crate::runtime::runtime()
+            .block_on(async { api2.get_email(id).await.unwrap().email.is_read });
+        if !unread {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(!unread, "右键菜单标未读应落库");
 }

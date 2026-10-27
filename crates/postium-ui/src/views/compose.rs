@@ -8,7 +8,7 @@ use gpui_kit::component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -67,9 +67,11 @@ pub fn open_compose_window(mode: ComposeMode, api: &Arc<CoreApi>, cx: &mut App) 
 
 pub struct ComposeView {
     pub(crate) api: Arc<CoreApi>,
-    pub(crate) to: Entity<InputState>,
-    pub(crate) cc: Entity<InputState>,
-    pub(crate) bcc: Entity<InputState>,
+    /// 所属窗口句柄（Enter 提交 chips 需要 &mut Window）
+    window_ref: gpui_kit::AnyWindowHandle,
+    pub(crate) to_field: crate::views::recipient_field::RecipientField,
+    pub(crate) cc_field: crate::views::recipient_field::RecipientField,
+    pub(crate) bcc_field: crate::views::recipient_field::RecipientField,
     pub(crate) subject: Entity<InputState>,
     pub(crate) editor: Entity<EmailEditorState>,
     attachments: Vec<(std::path::PathBuf, String, u64)>, // (路径, 文件名, 大小)
@@ -113,23 +115,25 @@ impl ComposeView {
             EmailEditorState::from_html(&quoted, window, cx)
         };
 
-        let mut make_input = |v: &str, cx: &mut Context<Self>| {
-            let v = v.to_string();
-            cx.new(|cx| {
-                if v.is_empty() {
-                    InputState::new(window, cx)
-                } else {
-                    InputState::new(window, cx).default_value(v.clone())
-                }
-            })
+        let mk_field = |ph: &str, initial: &str, window: &mut Window, cx: &mut Context<Self>| {
+            crate::views::recipient_field::RecipientField::new(ph, initial, window, cx)
         };
+        let subject = cx.new(|cx| {
+            if subject_init.is_empty() {
+                InputState::new(window, cx)
+            } else {
+                InputState::new(window, cx).default_value(subject_init.clone())
+            }
+        });
 
+        let window_ref = window.window_handle();
         let this = Self {
             api: api.clone(),
-            to: make_input(&to_init, cx),
-            cc: make_input("", cx),
-            bcc: make_input("", cx),
-            subject: make_input(&subject_init, cx),
+            window_ref,
+            to_field: mk_field("you@example.com", &to_init, window, cx),
+            cc_field: mk_field("you@example.com", "", window, cx),
+            bcc_field: mk_field("you@example.com", "", window, cx),
+            subject,
             editor,
             attachments: Vec::new(),
             status: "就绪".into(),
@@ -141,6 +145,28 @@ impl ComposeView {
             selected_account: None,
             close_handle: None,
         };
+
+        // 收件人字段：回车提交 chips（对齐旧版 RecipientField）
+        for which in [0usize, 1, 2] {
+            let input = match which {
+                0 => this.to_field.input.clone(),
+                1 => this.cc_field.input.clone(),
+                _ => this.bcc_field.input.clone(),
+            };
+            cx.subscribe(&input, move |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    let handle = this.window_ref;
+                    let _ = handle.update(cx, |_, window, cx| {
+                        match which {
+                            0 => this.to_field.commit(window, cx),
+                            1 => this.cc_field.commit(window, cx),
+                            _ => this.bcc_field.commit(window, cx),
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
 
         // 装载账号列表（默认选中第一个；回复/转发优先原邮件账号）
         let preferred_account = match &mode {
@@ -177,13 +203,26 @@ impl ComposeView {
         input.read(cx).value().to_string()
     }
 
+    /// chips 删除路由：which 0/1/2 → to/cc/bcc 字段。
+    fn make_chip_remover(
+        which: usize,
+        cx: &mut Context<Self>,
+    ) -> std::rc::Rc<dyn Fn(String, &ClickEvent, &mut Window, &mut App)> {
+        let weak = cx.entity().downgrade();
+        std::rc::Rc::new(move |email: String, _, _, cx: &mut App| {
+            let _ = weak.update(cx, |view: &mut Self, cx| {
+                match which {
+                    0 => view.to_field.remove_by_email(&email),
+                    1 => view.cc_field.remove_by_email(&email),
+                    _ => view.bcc_field.remove_by_email(&email),
+                }
+                cx.notify();
+            });
+        })
+    }
+
     fn collect_recipients(&self, cx: &App) -> Vec<String> {
-        let raw = Self::value_of(&self.to, cx);
-        raw.split([',', ';', ' '])
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect()
+        self.to_field.emails(cx)
     }
 
     /// 循环切换发件账号。
@@ -234,7 +273,7 @@ impl ComposeView {
         .detach();
     }
 
-    fn close_window(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn close_window(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.close_handle {
             let alive = cx.windows().iter().any(|w| w.window_id() == handle.window_id());
             if alive {
@@ -252,8 +291,8 @@ impl ComposeView {
             Some(a) => a,
             None => return,
         };
-        let to = Self::value_of(&self.to, cx);
-        let cc = Self::value_of(&self.cc, cx);
+        let to = self.to_field.text(cx);
+        let cc = self.cc_field.text(cx);
         let subject = Self::value_of(&self.subject, cx);
         let body_html = self.editor.read(cx).html(cx);
         let draft_id = self.draft_email_id;
@@ -321,12 +360,7 @@ impl ComposeView {
         // 发件账号（未选择时回落第一个）
         let api = self.api.clone();
         let draft_id = self.draft_email_id;
-        let cc: Vec<String> = Self::value_of(&self.cc, cx)
-            .split([',', ';', ' '])
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
+        let cc: Vec<String> = self.cc_field.emails(cx);
         let attachments: Vec<ComposeAttachmentInput> = self
             .attachments
             .iter()
@@ -417,6 +451,7 @@ static ATTACHMENT_QUEUE: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::
 
 impl Render for ComposeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
         if self.close_handle.is_none() {
             self.close_handle = Some(window.window_handle());
         }
@@ -433,7 +468,8 @@ impl Render for ComposeView {
             }
         }
 
-        let field = |label: &str, input: &Entity<InputState>| {
+        let muted_fg = cx.theme().muted_foreground;
+        let field = move |label: &str, input: &Entity<InputState>| {
             h_flex()
                 .gap_2()
                 .items_center()
@@ -442,7 +478,7 @@ impl Render for ComposeView {
                         .w(px(48.))
                         .flex_none()
                         .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(muted_fg)
                         .child(label.to_string()),
                 )
                 .child(div().flex_1().child(Input::new(input)))
@@ -506,7 +542,7 @@ impl Render for ComposeView {
             // 字段区
             .child(h_flex().gap_2().items_center()
                 .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(t("email.to").to_string()))
-                .child(div().flex_1().child(Input::new(&self.to)))
+                .child(div().flex_1().child(self.to_field.render(Self::make_chip_remover(0, cx), &theme)))
                 // 收起的抄送/密送以小按钮渐进展开（对齐旧版）
                 .when(!self.cc_visible, |this| {
                     this.child(
@@ -532,8 +568,16 @@ impl Render for ComposeView {
                             })),
                     )
                 }))
-            .when(self.cc_visible, |this| this.child(field(&t("email.cc"), &self.cc)))
-            .when(self.bcc_visible, |this| this.child(field(&t("email.bcc"), &self.bcc)))
+            .when(self.cc_visible, |this| this.child(
+                h_flex().gap_2().items_center()
+                    .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(muted_fg).child(t("email.cc").to_string()))
+                    .child(div().flex_1().child(self.cc_field.render(Self::make_chip_remover(1, cx), &theme)))
+            ))
+            .when(self.bcc_visible, |this| this.child(
+                h_flex().gap_2().items_center()
+                    .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(muted_fg).child(t("email.bcc").to_string()))
+                    .child(div().flex_1().child(self.bcc_field.render(Self::make_chip_remover(2, cx), &theme)))
+            ))
             .child(field(&t("email.subject"), &self.subject))
             .child(
                 h_flex()

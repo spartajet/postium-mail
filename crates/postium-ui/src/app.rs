@@ -59,7 +59,13 @@ pub struct AppShell {
     detail_build_version: u32,
     /// 顶栏搜索
     search_input: gpui_kit::Entity<InputState>,
+    /// 搜索防抖代数（每次变更 +1，超时后比对决定是否执行）
+    search_gen: u64,
     pub nav: NavTarget,
+    /// 主题偏好（dark | light | system），system 跟随系统外观
+    pub(crate) theme_pref: String,
+    /// 系统外观观察订阅（保持存活）
+    _appearance_sub: Option<gpui_kit::Subscription>,
     /// 托盘句柄（保持存活）
     _tray: Option<tray_icon::TrayIcon>,
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
@@ -74,14 +80,26 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        // 恢复持久化偏好（默认暗色，与旧版一致）
+        // 恢复持久化偏好（默认暗色，与旧版一致；system 跟随系统外观）
         let ui = crate::ui_state::load();
-        let theme_mode = match ui.theme.as_deref() {
-            Some("light") => gpui_kit::component::ThemeMode::Light,
-            _ => gpui_kit::component::ThemeMode::Dark,
-        };
+        let theme_pref = ui.theme.clone().unwrap_or_else(|| "dark".into());
+        let theme_mode = crate::theme::resolve_mode(&theme_pref, window.appearance());
         gpui_kit::component::Theme::change(theme_mode, None, cx);
         crate::theme::apply_brand(cx);
+        // 系统外观变化时，"跟随系统"偏好自动重解析
+        let appearance_sub = {
+            let weak = cx.entity().downgrade();
+            let sub = window.observe_window_appearance(move |window, cx| {
+                let _ = weak.update(cx, |shell: &mut Self, cx| {
+                    if shell.theme_pref == "system" {
+                        let mode = crate::theme::resolve_mode("system", window.appearance());
+                        crate::theme::apply_mode(mode, cx);
+                        cx.notify();
+                    }
+                });
+            });
+            Some(sub)
+        };
         if ui.lang.as_deref() == Some("en") {
             crate::i18n::set_lang(crate::i18n::Lang::En, cx);
         }
@@ -171,6 +189,9 @@ impl AppShell {
                     store: this.detail.clone(),
                     api: this.api.clone(),
                     recipients_expanded: false,
+                    ai_summary: None,
+                    ai_loading: true,
+                    ai_spawned: false,
                 }));
                 this.detail_build_version = this.emails.read(cx).selected_version;
                 cx.notify();
@@ -178,14 +199,49 @@ impl AppShell {
         })
         .detach();
 
-        // 顶栏搜索
+        // 顶栏搜索：回车立即搜；输入变更 300ms 防抖自动搜（对齐旧版）
         cx.subscribe(&search_input, |this: &mut Self, input, event: &InputEvent, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                let q = input.read(cx).value().to_string();
-                this.emails.update(cx, |store, cx| {
-                    store.search(&q, &this.api, cx);
-                });
-                this.email_list = None;
+            match event {
+                InputEvent::PressEnter { .. } => {
+                    this.search_gen += 1;
+                    let q = input.read(cx).value().to_string();
+                    let api = this.api.clone();
+                    this.emails.update(cx, |store, cx| {
+                        store.search(&q, &api, cx);
+                    });
+                    this.email_list = None;
+                }
+                InputEvent::Change => {
+                    this.search_gen += 1;
+                    let debounce_gen = this.search_gen;
+                    let input = input.clone();
+                    let api = this.api.clone();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(300))
+                            .await;
+                        this.update(cx, |shell, cx| {
+                            if shell.search_gen != debounce_gen {
+                                return; // 后续输入已接管
+                            }
+                            let q = input.read(cx).value().to_string();
+                            let api = api;
+                            shell.emails.update(cx, |store, cx| {
+                                if q.trim().is_empty() {
+                                    // 清空搜索 → 恢复当前导航视图
+                                    store.navigate(shell.nav.clone(), &api, cx);
+                                } else {
+                                    store.search(&q, &api, cx);
+                                }
+                            });
+                            shell.email_list = None;
+                            cx.notify();
+                        })
+                        .ok();
+                    })
+                    .detach();
+                }
+                _ => {}
             }
         })
         .detach();
@@ -205,7 +261,10 @@ impl AppShell {
             detail_view: None,
             detail_build_version: 0,
             search_input,
+            search_gen: 0,
             nav: NavTarget::AllInbox,
+            theme_pref,
+            _appearance_sub: appearance_sub,
             _tray,
             calendar_view: None,
             workflow_view: None,
@@ -224,17 +283,18 @@ impl AppShell {
 
     pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
-        let mode = if dark {
-            gpui_kit::component::ThemeMode::Light
+        let (mode, pref) = if dark {
+            (gpui_kit::component::ThemeMode::Light, "light")
         } else {
-            gpui_kit::component::ThemeMode::Dark
+            (gpui_kit::component::ThemeMode::Dark, "dark")
         };
-        gpui_kit::component::Theme::change(mode, None, cx);
-        crate::theme::apply_brand(cx);
+        crate::theme::apply_mode(mode, cx);
+        self.theme_pref = pref.to_string();
         let mut ui = crate::ui_state::load();
-        ui.theme = Some(if dark { "light".into() } else { "dark".into() });
+        ui.theme = Some(pref.to_string());
         crate::ui_state::save(&ui);
     }
+
 }
 
 impl Render for AppShell {
@@ -296,6 +356,9 @@ impl Render for AppShell {
                                 store: self.detail.clone(),
                                 api: self.api.clone(),
                                 recipients_expanded: false,
+                                ai_summary: None,
+                                ai_loading: true,
+                                ai_spawned: false,
                             });
                             self.detail_view = Some(view.clone());
                             view.into_any_element()

@@ -15,6 +15,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     list::{List, ListDelegate, ListItem, ListState},
+    menu::{ContextMenuExt as _, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -32,6 +33,9 @@ pub struct EmailRow {
     base: ListItem,
     email: Rc<EmailDto>,
     selected: bool,
+    /// 右键菜单所需：核心 API 与列表 store（弱引用）
+    api: Option<Arc<CoreApi>>,
+    store: Option<gpui_kit::WeakEntity<EmailsStore>>,
 }
 
 impl Selectable for EmailRow {
@@ -47,6 +51,8 @@ impl Selectable for EmailRow {
 
 impl RenderOnce for EmailRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let menu_ctx = (self.api.clone(), self.store.clone());
+        let email_rc = self.email.clone();
         let time = chrono::DateTime::from_timestamp(self.email.sent_at, 0)
             .map(|dt| {
                 
@@ -59,7 +65,7 @@ impl RenderOnce for EmailRow {
             })
             .unwrap_or_default();
 
-        self.base.py_2().px_3().child(
+        let row = self.base.py_2().px_3().child(
             v_flex()
                 .flex_1()
                 .overflow_hidden()
@@ -122,8 +128,165 @@ impl RenderOnce for EmailRow {
                         .line_clamp(1)
                         .child(self.email.preview.clone().unwrap_or_default()),
                 ),
-        )
+        );
+
+        // 右键菜单（对齐旧版 EmailContextMenu；旧版"更多操作"为占位未复刻）
+        match menu_ctx {
+            (Some(api), Some(store)) => div()
+                .child(row)
+                .context_menu(move |menu, _, _| {
+                    build_row_menu(menu, email_rc.clone(), api.clone(), store.clone())
+                })
+                .into_any_element(),
+            _ => row.into_any_element(),
+        }
     }
+}
+
+/// 行级操作类型。
+enum RowAction {
+    ToggleStar,
+    MarkRead(bool),
+    Delete,
+}
+
+/// 对指定邮件执行异步操作，完成后刷新列表 store。
+fn act_on_email(
+    api: Arc<CoreApi>,
+    store: gpui_kit::WeakEntity<EmailsStore>,
+    id: i32,
+    action: RowAction,
+    cx: &mut App,
+) {
+    let api_keep = api.clone();
+    let rx = spawn_tokio(async move {
+        match action {
+            RowAction::ToggleStar => api.toggle_star(id).await.map(|_| ()),
+            RowAction::MarkRead(read) => api.mark_as_read(id, read).await,
+            RowAction::Delete => api.delete_emails(vec![id]).await.map(|_| ()),
+        }
+    });
+    cx.spawn(async move |cx| {
+        if let Ok(Ok(())) = rx.recv().await
+            && let Some(store) = store.upgrade()
+        {
+            let _ = cx.update(|cx: &mut App| {
+                store.update(cx, |s, cx| s.refresh_now(&api_keep, cx));
+            });
+        }
+    })
+    .detach();
+}
+
+/// 回复种类：取详情后打开对应模式的写信窗口。
+enum ReplyKind {
+    Reply,
+    ReplyAll,
+    Forward,
+}
+
+/// 异步取邮件详情（正文引用/收件人），再打开写信窗口。
+fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut App) {
+    let api_keep = api.clone();
+    let rx = spawn_tokio(async move { api.get_email(id).await });
+    cx.spawn(async move |cx| {
+        if let Ok(Ok(detail)) = rx.recv().await {
+            let mode = match kind {
+                ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
+                    email_id: detail.email.id,
+                    to: detail.email.sender_email.clone(),
+                    subject: detail.email.subject.clone().unwrap_or_default(),
+                    original_html: detail.body_html.clone().unwrap_or_default(),
+                },
+                ReplyKind::ReplyAll => {
+                    let mut to = vec![detail.email.sender_email.clone()];
+                    for r in detail.recipient_emails.split([',', ';']) {
+                        let r = r.trim();
+                        if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
+                            to.push(r.to_string());
+                        }
+                    }
+                    crate::views::compose::ComposeMode::ReplyAll {
+                        email_id: detail.email.id,
+                        to: to.join(", "),
+                        subject: detail.email.subject.clone().unwrap_or_default(),
+                        original_html: detail.body_html.clone().unwrap_or_default(),
+                    }
+                }
+                ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
+                    email_id: detail.email.id,
+                    subject: detail.email.subject.clone().unwrap_or_default(),
+                    original_html: detail.body_html.clone().unwrap_or_default(),
+                },
+            };
+            let _ = cx.update(|cx: &mut App| {
+                crate::views::compose::open_compose_window(mode, &api_keep, cx);
+            });
+        }
+    })
+    .detach();
+}
+
+/// 构造邮件行右键菜单：回复/全部回复/转发 ─ 星标/已读 ─ 删除。
+fn build_row_menu(
+    menu: gpui_kit::component::menu::PopupMenu,
+    email: Rc<EmailDto>,
+    api: Arc<CoreApi>,
+    store: gpui_kit::WeakEntity<EmailsStore>,
+) -> gpui_kit::component::menu::PopupMenu {
+    let id = email.id;
+    let starred = email.is_starred;
+    let unread = !email.is_read;
+
+    let reply_item = {
+        let api = api.clone();
+        PopupMenuItem::new(t("email.reply").to_string()).icon(IconName::Reply).on_click(move |_, _, cx| {
+            fetch_and_open_compose(api.clone(), id, ReplyKind::Reply, cx);
+        })
+    };
+    let reply_all_item = {
+        let api = api.clone();
+        PopupMenuItem::new(t("email.replyAll").to_string()).icon(IconName::Reply).on_click(move |_, _, cx| {
+            fetch_and_open_compose(api.clone(), id, ReplyKind::ReplyAll, cx);
+        })
+    };
+    let forward_item = {
+        let api = api.clone();
+        PopupMenuItem::new(t("email.forward").to_string()).icon(IconName::Forward).on_click(move |_, _, cx| {
+            fetch_and_open_compose(api.clone(), id, ReplyKind::Forward, cx);
+        })
+    };
+    let star_item = {
+        let (api, store) = (api.clone(), store.clone());
+        PopupMenuItem::new(if starred { "取消星标".to_string() } else { "设为星标".to_string() })
+            .icon(IconName::Star)
+            .on_click(move |_, _, cx| {
+                act_on_email(api.clone(), store.clone(), id, RowAction::ToggleStar, cx);
+            })
+    };
+    let read_item = {
+        let (api, store) = (api.clone(), store.clone());
+        PopupMenuItem::new(if unread { "标为已读".to_string() } else { "标为未读".to_string() })
+            .icon(IconName::MailOpen)
+            .on_click(move |_, _, cx| {
+                act_on_email(api.clone(), store.clone(), id, RowAction::MarkRead(!unread), cx);
+            })
+    };
+    let delete_item = {
+        PopupMenuItem::new(t("email.delete").to_string()).icon(IconName::Trash).on_click(move |_, _, cx| {
+            act_on_email(api.clone(), store.clone(), id, RowAction::Delete, cx);
+        })
+    };
+
+    menu
+        .item(reply_item)
+        .item(reply_all_item)
+        .item(forward_item)
+        .separator()
+        .item(star_item)
+        .item(read_item)
+        .separator()
+        .item(delete_item)
 }
 
 pub struct EmailListDelegate {
@@ -198,6 +361,8 @@ impl ListDelegate for EmailListDelegate {
             base: ListItem::new(ix).selected(Some(email.id) == self.selected_email),
             email: email.clone(),
             selected: Some(email.id) == self.selected_email,
+            api: Some(self.api.clone()),
+            store: Some(self.store.clone()),
         })
     }
 }
@@ -483,4 +648,31 @@ pub fn rebuild_list_state(
             cx,
         )
     })
+}
+
+/// 供 e2e 驱动右键菜单动作的测试钩子（不经选中态，直连行级动作链路）。
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use super::*;
+
+    pub(crate) enum RowActionForTest {
+        ToggleStar,
+        MarkRead(bool),
+        Delete,
+    }
+
+    pub(crate) fn act_on_email_for_test(
+        api: Arc<CoreApi>,
+        id: i32,
+        action: RowActionForTest,
+        cx: &mut App,
+    ) {
+        let mapped = match action {
+            RowActionForTest::ToggleStar => RowAction::ToggleStar,
+            RowActionForTest::MarkRead(read) => RowAction::MarkRead(read),
+            RowActionForTest::Delete => RowAction::Delete,
+        };
+        // 悬空 store：DB 动作仍执行，仅跳过列表刷新
+        act_on_email(api, gpui_kit::WeakEntity::new_invalid(), id, mapped, cx);
+    }
 }

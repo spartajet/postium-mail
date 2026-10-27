@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct UiState {
-    pub theme: Option<String>, // "dark" | "light"
+    pub theme: Option<String>, // "dark" | "light" | "system"
     pub lang: Option<String>,  // "zh" | "en"
 }
 

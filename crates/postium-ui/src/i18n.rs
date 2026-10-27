@@ -78,6 +78,11 @@ pub fn set_lang(lang: Lang, cx: &mut App) {
     cx.set_global(I18nGlobal { lang });
 }
 
+/// 当前语言（无上下文读取，供渲染层分段控件等使用）。
+pub fn current_lang() -> Lang {
+    Lang::from_u8(CURRENT.load(Ordering::Relaxed))
+}
+
 /// 供测试直接查表。
 #[allow(dead_code)]
 pub fn translate(lang: Lang, key: &str) -> Option<SharedString> {

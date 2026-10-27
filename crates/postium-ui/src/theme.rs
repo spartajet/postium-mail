@@ -135,3 +135,21 @@ pub fn compose_button(
 }
 
 use gpui_kit::{px, ParentElement as _, InteractiveElement as _, IntoElement, StatefulInteractiveElement as _, Styled};
+
+/// 应用指定主题模式（Theme::change + 品牌覆盖），供壳/设置页共用。
+pub fn apply_mode(mode: gpui_kit::component::ThemeMode, cx: &mut App) {
+    gpui_kit::component::Theme::change(mode, None, cx);
+    apply_brand(cx);
+}
+
+/// 由偏好与系统外观解析实际主题模式（"system" 跟随系统）。
+pub fn resolve_mode(pref: &str, appearance: gpui_kit::WindowAppearance) -> gpui_kit::component::ThemeMode {
+    match pref {
+        "light" => gpui_kit::component::ThemeMode::Light,
+        "system" => match appearance {
+            gpui_kit::WindowAppearance::Light => gpui_kit::component::ThemeMode::Light,
+            _ => gpui_kit::component::ThemeMode::Dark,
+        },
+        _ => gpui_kit::component::ThemeMode::Dark,
+    }
+}

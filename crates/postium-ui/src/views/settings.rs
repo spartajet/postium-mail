@@ -224,6 +224,12 @@ impl AddFlow {
 pub struct SettingsView {
     pub(crate) accounts: Entity<AccountsStore>,
     api: Arc<CoreApi>,
+    /// 主题偏好（dark | light | system）
+    pub(crate) theme_pref: String,
+    /// 系统外观观察订阅（保持存活）
+    _appearance_sub: gpui_kit::Subscription,
+    /// 添加账号弹窗的焦点句柄（ESC 关闭 / 焦点圈定）
+    modal_focus: gpui_kit::FocusHandle,
     // 添加账号向导（Some = 弹窗打开）
     pub(crate) add: Option<AddFlow>,
     status: SharedString,
@@ -243,16 +249,40 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut input = |cx: &mut Context<Self>| cx.new(|cx| InputState::new(window, cx));
+        // ESC 关闭添加账号弹窗（对齐旧版模态行为）
+        let modal_focus = cx.focus_handle();
+        cx.bind_keys([gpui_kit::KeyBinding::new(
+            "escape",
+            gpui_kit::base::actions::Cancel,
+            Some("AddAccountModal"),
+        )]);
+        let edit_name = input(cx);
+        let edit_display = input(cx);
+        let edit_password = input(cx);
+        // 设置窗口同样跟随系统外观（偏好为 system 时）
+        let weak = cx.entity().downgrade();
+        let appearance_sub = window.observe_window_appearance(move |window, cx| {
+            let pref = crate::ui_state::load().theme.unwrap_or_else(|| "dark".into());
+            if pref == "system" {
+                let _ = weak.update(cx, |_, cx| {
+                    crate::theme::apply_mode(crate::theme::resolve_mode("system", window.appearance()), cx);
+                    cx.notify();
+                });
+            }
+        });
         Self {
             accounts,
             api,
+            theme_pref: crate::ui_state::load().theme.unwrap_or_else(|| "dark".into()),
+            _appearance_sub: appearance_sub,
+            modal_focus,
             add: None,
             status: " ".into(),
             editing: None,
-            edit_name: input(cx),
-            edit_display: input(cx),
+            edit_name,
+            edit_display,
             edit_password_for: None,
-            edit_password: input(cx),
+            edit_password,
         }
     }
 
@@ -260,11 +290,34 @@ impl SettingsView {
         input.read(cx).value().to_string()
     }
 
+    /// 设置主题偏好（浅色/深色/跟随系统）并持久化。
+    pub(crate) fn set_theme_pref(&mut self, pref: &str, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        crate::theme::apply_mode(crate::theme::resolve_mode(pref, window.appearance()), cx);
+        self.theme_pref = pref.to_string();
+        let mut ui = crate::ui_state::load();
+        ui.theme = Some(pref.to_string());
+        crate::ui_state::save(&ui);
+        refresh_all_windows(cx);
+        cx.notify();
+    }
+
+    /// 切换语言并持久化（全部窗口刷新以重渲染文案）。
+    pub(crate) fn set_lang(&mut self, lang: crate::i18n::Lang, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        crate::i18n::set_lang(lang, cx);
+        let mut ui = crate::ui_state::load();
+        ui.lang = Some(match lang { crate::i18n::Lang::Zh => "zh".into(), crate::i18n::Lang::En => "en".into() });
+        crate::ui_state::save(&ui);
+        refresh_all_windows(cx);
+        cx.notify();
+    }
+
     // ── 向导控制（pub(crate) 供 e2e 驱动） ──
 
     /// 打开向导并加载服务商列表。
     pub(crate) fn open_add(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.add = Some(AddFlow::new(window, cx));
+        let focus = self.modal_focus.clone();
+        window.focus(&focus, cx);
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.list_providers() });
         cx.spawn(async move |this, cx| {
@@ -731,6 +784,10 @@ impl Render for SettingsView {
                     ),
             )
             .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(self.status.clone()))
+            // ── 外观：浅色 / 深色 / 跟随系统（对齐旧版设置页三段） ──
+            .child(render_appearance_section(self, cx))
+            // ── 语言：中文 / English ──
+            .child(render_language_section(cx))
             // 账号卡片
             .children(account_cards)
             // 编辑表单
@@ -928,20 +985,32 @@ fn render_add_modal(view: &mut SettingsView, _window: &mut Window, cx: &mut Cont
         .child(header)
         .child(body);
 
-    div()
-        .id("add-account-backdrop")
-        .absolute()
-        .size_full()
-        .top_0()
-        .left_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(gpui_kit::black().opacity(0.5))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-            cx.stop_propagation();
-        })
-        .child(card)
+    let modal_focus = view.modal_focus.clone();
+    gpui_kit::base::FocusTrapElement::focus_trap(
+        div()
+            .id("add-account-backdrop")
+            .absolute()
+            .size_full()
+            .top_0()
+            .left_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui_kit::black().opacity(0.5))
+            .track_focus(&modal_focus)
+            .key_context("AddAccountModal")
+            .on_action(cx.listener(|v: &mut SettingsView, _: &gpui_kit::base::actions::Cancel, w, cx| {
+                if v.add.is_some() {
+                    v.close_add(&gpui_kit::ClickEvent::default(), w, cx);
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .child(card),
+        "add-account-modal-trap",
+        &modal_focus,
+    )
 }
 
 fn chevron(theme: &gpui_kit::component::Theme) -> impl IntoElement {
@@ -1451,4 +1520,89 @@ fn render_step_sync_scope(view: &mut SettingsView, cx: &mut Context<SettingsView
                 view.start_initial_sync(e, w, cx);
             })
         }))
+}
+
+/// 通知所有存活窗口重渲染（全局主题/语言变更后跨窗口生效）。
+fn refresh_all_windows(cx: &mut Context<SettingsView>) {
+    for handle in cx.windows() {
+        let _ = handle.update(cx, |_, window, _| window.refresh());
+    }
+}
+
+/// 外观设置区（主题三段选择）。
+fn render_appearance_section(view: &SettingsView, cx: &mut Context<SettingsView>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let mut row = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
+    for (key, pref, label) in [
+        ("pref-light", "light", t("settings.light")),
+        ("pref-dark", "dark", t("settings.dark")),
+        ("pref-system", "system", t("settings.system")),
+    ] {
+        let sel = view.theme_pref == pref;
+        row = row.child(
+            div()
+                .id(key)
+                .px(px(10.))
+                .py(px(4.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .when(sel, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                .when(!sel, |d| {
+                    d.text_color(theme.muted_foreground)
+                        .hover(|s| s.bg(theme.accent.opacity(0.12)))
+                })
+                .child(label)
+                .on_click(cx.listener(move |v: &mut SettingsView, e, w, cx| {
+                    v.set_theme_pref(pref, e, w, cx);
+                })),
+        );
+    }
+    v_flex()
+        .gap_2()
+        .p_3()
+        .border_1()
+        .border_color(theme.border)
+        .rounded(theme.radius)
+        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(t("settings.theme")))
+        .child(row)
+}
+
+/// 语言设置区（中/英两段）。
+fn render_language_section(cx: &mut Context<SettingsView>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let current = crate::i18n::current_lang();
+    let mut row = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
+    for (key, lang, label) in [
+        ("lang-zh", crate::i18n::Lang::Zh, "中文"),
+        ("lang-en", crate::i18n::Lang::En, "English"),
+    ] {
+        let sel = current == lang;
+        row = row.child(
+            div()
+                .id(key)
+                .px(px(10.))
+                .py(px(4.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .when(sel, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                .when(!sel, |d| {
+                    d.text_color(theme.muted_foreground)
+                        .hover(|s| s.bg(theme.accent.opacity(0.12)))
+                })
+                .child(label)
+                .on_click(cx.listener(move |v: &mut SettingsView, e, w, cx| {
+                    v.set_lang(lang, e, w, cx);
+                })),
+        );
+    }
+    v_flex()
+        .gap_2()
+        .p_3()
+        .border_1()
+        .border_color(theme.border)
+        .rounded(theme.radius)
+        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(t("settings.language")))
+        .child(row)
 }
