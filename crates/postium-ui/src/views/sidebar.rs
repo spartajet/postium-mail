@@ -1,6 +1,7 @@
 //! 侧栏（移植自 src/lib/components/layout/Sidebar.svelte）：
-//! 快捷入口 / 全部收件箱 / 分类 / 各账号文件夹 / 标签 / 设置入口。
-//! 导航行为自定义行（未读数右对齐徽标），设置固定底部。
+//! 邮件分类（收件箱~垃圾邮件）/ 日历、工作流快捷入口 / 各账号文件夹、标签 /
+//! 底部停靠回收站与设置入口。
+//! 导航行为自定义行（未读数右对齐徽标），回收站与设置固定底部。
 
 use gpui_kit::component::{
     ActiveTheme as _,
@@ -132,19 +133,15 @@ impl Render for Sidebar {
             .min_h_0()
             .id("sidebar-scroll")
             .overflow_y_scroll()
-            // 快捷入口
-            .child(nav!("nav-calendar", IconName::Calendar, t("sidebar.calendar"), None, NavTarget::Calendar))
-            .child(nav!("nav-workflow", IconName::ListTodo, t("sidebar.workflow"), None, NavTarget::Workflow))
-            // 全部收件箱
+            // 邮件分类：收件箱 ~ 垃圾邮件（回收站移至底部停靠）
             .child(nav!("nav-allinbox", IconName::Inbox, t("sidebar.inbox"), Some(total_unread_of(&groups)), NavTarget::AllInbox));
 
-        // 虚拟分类
+        // 虚拟分类（不含回收站）
         for (idx, (category, icon)) in [
             (EmailCategory::Starred, IconName::Star),
             (EmailCategory::Sent, IconName::Send),
             (EmailCategory::Drafts, IconName::FileText),
             (EmailCategory::Spam, IconName::Ban),
-            (EmailCategory::Trash, IconName::Trash),
         ]
         .into_iter()
         .enumerate()
@@ -166,7 +163,22 @@ impl Render for Sidebar {
             ));
         }
 
+        // 分隔线 → 快捷入口：日历 / 工作流
+        scroll = scroll
+            .child(divider(&theme))
+            .child(nav!("nav-calendar", IconName::Calendar, t("sidebar.calendar"), None, NavTarget::Calendar))
+            .child(nav!("nav-workflow", IconName::ListTodo, t("sidebar.workflow"), None, NavTarget::Workflow))
+            .child(divider(&theme));
+
         // 各账号：账号名标题 + 文件夹行 + 标签行
+        // 底部回收站未读数（TRASH/DELETED 文件夹合计）
+        let trash_unread: usize = store_groups
+            .iter()
+            .flat_map(|g| g.stats.iter())
+            .filter(|s| category_matches_stat(EmailCategory::Trash, s))
+            .map(|s| s.unread)
+            .sum();
+        let trash_unread = if trash_unread > 0 { Some(trash_unread) } else { None };
         for (gi, group) in store_groups.iter().enumerate() {
             scroll = scroll.child(
                 div()
@@ -238,9 +250,12 @@ impl Render for Sidebar {
                 crate::theme::compose_button(t("sidebar.compose"), on_compose)
             })
             .child(scroll)
-            // 固定底部：设置
+            // 固定底部：回收站（停靠） + 设置
             .child(
                 div().pt_1().mt_1().border_t_1().border_color(theme.border).child(
+                    nav!("nav-trash", IconName::Trash, t(category_label_key(&EmailCategory::Trash)), trash_unread, NavTarget::Category(EmailCategory::Trash)),
+                )
+                .child(
                     Button::new("settings")
                         .ghost()
                         .w_full()
@@ -253,6 +268,11 @@ impl Render for Sidebar {
                 ),
             )
     }
+}
+
+/// 侧栏分隔线。
+fn divider(theme: &gpui_kit::component::Theme) -> gpui_kit::Div {
+    div().flex_none().mx_1().my_1().h(px(1.)).bg(theme.border.opacity(0.7))
 }
 
 fn category_matches_stat(category: EmailCategory, stat: &postium_core::domain::sync::FolderStat) -> bool {
