@@ -128,8 +128,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          curl -L -sSf -o /tmp/is.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
-          /tmp/is.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART | true
+          curl -L -sSf -o is-installer.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          # 经 PowerShell Start-Process -Wait 静默安装（bash 直跑 GUI 安装器会因
+          # 提升进程持有管道句柄而永久挂起）
+          powershell -NoProfile -Command "Start-Process -FilePath './is-installer.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait"
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           [[ -f "$ISCC" ]] || ISCC="/c/Program Files/Inno Setup 6/ISCC.exe"
           ARCH_ALLOWED=x64compatible
