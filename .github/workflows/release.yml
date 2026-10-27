@@ -67,27 +67,27 @@ jobs:
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            pattern: postium-mail-*_x64_setup.exe
+            pattern: postium-mail_*_x64_setup.exe
           - name: windows-arm64
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
-            pattern: postium-mail-*_arm64_setup.exe
+            pattern: postium-mail_*_arm64_setup.exe
           - name: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
-            pattern: postium-mail-*_x64.dmg
+            pattern: postium-mail_*_x64.dmg
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            pattern: postium-mail-*_arm64.dmg
+            pattern: postium-mail_*_arm64.dmg
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            pattern: postium-mail-*_amd64.deb
+            pattern: postium-mail_*_amd64.deb
           - name: linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            pattern: postium-mail-*_arm64.deb
+            pattern: postium-mail_*_arm64.deb
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout release tag
@@ -142,9 +142,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cargo install cargo-deb --locked
-          cargo deb -p postium-ui --target ${{ matrix.target }} --no-build
-          DEB=$(ls target/${{ matrix.target }}/debian/*.deb | head -1)
-          cp "$DEB" "postium-mail_${APP_VER}-1_$(dpkg --print-architecture).deb"
+          cargo deb -p postium-ui --target ${{ matrix.target }} --no-build             --output "postium-mail_${APP_VER}-1_$(dpkg --print-architecture).deb"
 
       - name: Package .dmg (macOS)
         if: runner.os == 'macOS'
