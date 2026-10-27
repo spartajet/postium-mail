@@ -30,8 +30,26 @@ impl DetailStore {
     }
 
     /// 装载一封邮件并预处理正文（远程图默认屏蔽）。
+    /// 装载详情（同 id 已装载则跳过，除非 force——服务器重载路径用）。
     pub fn load(&mut self, email_id: i32, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
-        if self.email_id == Some(email_id) && self.detail.is_some() {
+        self.load_impl(email_id, false, api, cx)
+    }
+
+    pub fn force_load(&mut self, email_id: i32, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.load_impl(email_id, true, api, cx)
+    }
+
+    /// 导航切换时清空详情（右侧不再显示旧文件夹邮件）。
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.email_id = None;
+        self.detail = None;
+        self.html = None;
+        self.loading = false;
+        cx.notify();
+    }
+
+    fn load_impl(&mut self, email_id: i32, force: bool, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        if self.email_id == Some(email_id) && self.detail.is_some() && !force {
             return;
         }
         self.email_id = Some(email_id);

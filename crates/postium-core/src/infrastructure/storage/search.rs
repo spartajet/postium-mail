@@ -23,6 +23,8 @@ pub struct SearchResult {
     pub sender_email: String,
     pub sent_at: i64,
     pub preview: Option<String>,
+    pub is_read: bool,
+    pub is_starred: bool,
     pub rank: f64,
 }
 
@@ -38,6 +40,8 @@ fn map_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> 
         sender_email: row.get("sender_email")?,
         sent_at: row.get("sent_at")?,
         preview: row.get("preview")?,
+        is_read: row.get::<_, i64>("is_read")? != 0,
+        is_starred: row.get::<_, i64>("is_starred")? != 0,
         rank: row.get("rank")?,
     })
 }
@@ -70,7 +74,8 @@ pub async fn search_fts(
             let mut stmt = conn.prepare(
                 "SELECT e.id, e.account_id, a.email AS account_email,
                         a.display_name AS account_display_name, e.folder, e.subject,
-                        e.sender_email, e.sent_at, e.preview, f.rank
+                        e.sender_email, e.sent_at, e.preview,
+                        e.is_read, e.is_starred, f.rank
                  FROM emails_fts f
                  JOIN emails e ON f.rowid = e.id
                  LEFT JOIN accounts a ON a.id = e.account_id
@@ -88,7 +93,8 @@ pub async fn search_fts(
             let mut stmt = conn.prepare(
                 "SELECT e.id, e.account_id, a.email AS account_email,
                         a.display_name AS account_display_name, e.folder, e.subject,
-                        e.sender_email, e.sent_at, e.preview, f.rank
+                        e.sender_email, e.sent_at, e.preview,
+                        e.is_read, e.is_starred, f.rank
                  FROM emails_fts f
                  JOIN emails e ON f.rowid = e.id
                  LEFT JOIN accounts a ON a.id = e.account_id

@@ -21,6 +21,8 @@ use crate::stores::detail::DetailStore;
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
+    /// 邮件列表弱引用：归档/删除/标未读后刷新列表（已删邮件不再留在列表）
+    pub emails: gpui_kit::WeakEntity<crate::stores::emails::EmailsStore>,
     pub recipients_expanded: bool,
 }
 
@@ -47,6 +49,8 @@ impl EmailDetailView {
         let api = self.api.clone();
         let store = self.store.clone();
         let rx = spawn_tokio(async move { api.archive_email(detail.email.id).await });
+        let emails = self.emails.clone();
+        let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
             if let Ok(Ok(())) = rx.recv().await {
                 store.update(cx, |s, cx| {
@@ -54,6 +58,11 @@ impl EmailDetailView {
                     s.html = None;
                     cx.notify();
                 });
+                if let Some(list) = emails.upgrade() {
+                    list.update(cx, |s, cx| {
+                        s.refresh_now(&api_keep, cx);
+                    });
+                }
             }
         })
         .detach();
@@ -64,6 +73,8 @@ impl EmailDetailView {
         let api = self.api.clone();
         let store = self.store.clone();
         let rx = spawn_tokok_delete(api, detail.email.id);
+        let emails = self.emails.clone();
+        let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
             if let Ok(Ok(_)) = rx.recv().await {
                 store.update(cx, |s, cx| {
@@ -71,6 +82,11 @@ impl EmailDetailView {
                     s.html = None;
                     cx.notify();
                 });
+                if let Some(list) = emails.upgrade() {
+                    list.update(cx, |s, cx| {
+                        s.refresh_now(&api_keep, cx);
+                    });
+                }
             }
         })
         .detach();
@@ -92,7 +108,7 @@ impl EmailDetailView {
         let api = self.api.clone();
         cx.defer(move |cx| {
             crate::views::compose::open_compose_window(
-                crate::views::compose::ComposeMode::ReplyAll { email_id: detail.email.id, to, subject, original_html },
+                crate::views::compose::ComposeMode::ReplyAll { email_id: detail.email.id, account_id: detail.email.account_id, to, subject, original_html },
                 &api,
                 cx,
             );
@@ -105,6 +121,8 @@ impl EmailDetailView {
         let api = self.api.clone();
         let store = self.store.clone();
         let rx = spawn_tokio(async move { api.mark_as_read(id, false).await });
+        let emails = self.emails.clone();
+        let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
             if let Ok(Ok(())) = rx.recv().await {
                 store.update(cx, |s, cx| {
@@ -112,6 +130,11 @@ impl EmailDetailView {
                     s.html = None;
                     cx.notify();
                 });
+                if let Some(list) = emails.upgrade() {
+                    list.update(cx, |s, cx| {
+                        s.refresh_now(&api_keep, cx);
+                    });
+                }
             }
         })
         .detach();
@@ -127,7 +150,7 @@ impl EmailDetailView {
         cx.spawn(async move |_, cx| {
             if let Ok(Ok(_)) = rx.recv().await {
                 store.update(cx, |s, cx| {
-                    s.load(id, &api_keep, cx);
+                    s.force_load(id, &api_keep, cx);
                 });
             }
         })
@@ -142,7 +165,7 @@ impl EmailDetailView {
         let api = self.api.clone();
         cx.defer(move |cx| {
             crate::views::compose::open_compose_window(
-                crate::views::compose::ComposeMode::Reply { email_id: detail.email.id, to, subject, original_html },
+                crate::views::compose::ComposeMode::Reply { email_id: detail.email.id, account_id: detail.email.account_id, to, subject, original_html },
                 &api,
                 cx,
             );
@@ -156,7 +179,7 @@ impl EmailDetailView {
         let api = self.api.clone();
         cx.defer(move |cx| {
             crate::views::compose::open_compose_window(
-                crate::views::compose::ComposeMode::Forward { email_id: detail.email.id, subject, original_html },
+                crate::views::compose::ComposeMode::Forward { email_id: detail.email.id, account_id: detail.email.account_id, subject, original_html },
                 &api,
                 cx,
             );

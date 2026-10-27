@@ -21,6 +21,8 @@ pub struct AccountNode {
 pub struct AccountsStore {
     pub groups: Vec<AccountNode>,
     pub loading: bool,
+    /// 在途 reload 期间又有 reload 请求：完成后补跑一次
+    pending_reload: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -32,18 +34,20 @@ impl EventEmitter<AccountsEvent> for AccountsStore {}
 
 impl AccountsStore {
     pub fn new(_cx: &mut Context<Self>) -> Self {
-        Self { groups: Vec::new(), loading: false }
+        Self { groups: Vec::new(), loading: false, pending_reload: false }
     }
 
     /// 异步刷新：账号列表 → 逐账号文件夹统计与标签。
     pub fn reload(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         if self.loading {
+            self.pending_reload = true; // 在途期间的新请求：完成后补跑
             return;
         }
         self.loading = true;
         cx.notify();
 
         let api = api.clone();
+        let api_keep = api.clone();
         let rx = spawn_tokio(async move {
             let accounts = api.list_accounts().await.unwrap_or_default();
             let mut groups = Vec::with_capacity(accounts.len());
@@ -56,15 +60,23 @@ impl AccountsStore {
         });
 
         cx.spawn(async move |this, cx| {
-            if let Ok(groups) = rx.recv().await {
-                this.update(cx, |store, cx| {
+            let result = rx.recv().await.ok();
+            this.update(cx, |store, cx| {
+                if let Some(groups) = result {
                     store.groups = groups;
-                    store.loading = false;
-                    cx.emit(AccountsEvent::Reloaded);
-                    cx.notify();
-                })
-                .ok();
-            }
+                }
+                store.loading = false;
+                cx.emit(AccountsEvent::Reloaded);
+                cx.notify();
+            })
+            .ok();
+            // 补跑挂起的 reload（若有）
+            let _ = this.update(cx, |store, cx| {
+                if store.pending_reload {
+                    store.pending_reload = false;
+                    store.reload(&api_keep, cx);
+                }
+            });
         })
         .detach();
     }

@@ -72,16 +72,18 @@ impl SyncStore {
             api.sync_all_accounts(tx).await
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(result) = rx.recv().await {
-                this.update(cx, |store, cx| {
-                    if let Err(e) = result {
-                        tracing::warn!("同步失败: {e}");
-                    }
-                    store.syncing = false;
-                    cx.notify();
-                })
-                .ok();
-            }
+            // recv Err（任务失败/通道关闭）也要复位 syncing
+            let result = rx.recv().await.ok();
+            this.update(cx, |store, cx| {
+                match result {
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => tracing::warn!("同步失败: {e}"),
+                    None => tracing::warn!("同步任务异常终止"),
+                }
+                store.syncing = false;
+                cx.notify();
+            })
+            .ok();
         })
         .detach();
     }

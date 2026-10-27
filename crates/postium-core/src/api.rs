@@ -271,6 +271,9 @@ impl CoreApi {
         event_tx: SyncEventTx,
         account_id: i32,
     ) -> Result<(), MailError> {
+        if self.e2e_offline {
+            return Ok(());
+        }
         self.sync.sync_account_with_progress(event_tx, account_id).await
     }
 
@@ -286,10 +289,18 @@ impl CoreApi {
         self.sync.sync_account_with_range(event_tx, account_id, range).await
     }
 
+    /// e2e 离线模式（测试确定性）：UI 据此跳过后台同步调度。
+    pub fn is_e2e_offline(&self) -> bool {
+        self.e2e_offline
+    }
+
     pub async fn sync_all_accounts(
         &self,
         event_tx: SyncEventTx,
     ) -> Result<SyncAllAccountsResult, MailError> {
+        if self.e2e_offline {
+            return Ok(SyncAllAccountsResult { total: 0, succeeded: Vec::new(), failed: Vec::new() });
+        }
         self.sync.sync_all_accounts_with_progress(event_tx).await
     }
 
@@ -306,6 +317,9 @@ impl CoreApi {
         account_id: i32,
         category: EmailCategory,
     ) -> Result<OlderSyncResult, MailError> {
+        if self.e2e_offline {
+            return Ok(OlderSyncResult { new_emails: 0, updated_emails: 0, window_start: 0, window_end: 0, history_exhausted: true, folders: Vec::new() });
+        }
         self.sync.sync_older_emails(account_id, category).await
     }
 

@@ -272,7 +272,7 @@ impl SettingsView {
         // 设置窗口同样跟随系统外观（偏好为 system 时）
         let weak = cx.entity().downgrade();
         let appearance_sub = window.observe_window_appearance(move |window, cx| {
-            let pref = crate::ui_state::load().theme.unwrap_or_else(|| "dark".into());
+            let pref = crate::app::current_theme_pref(cx);
             if pref == "system" {
                 let _ = weak.update(cx, |_, cx| {
                     crate::theme::apply_mode(crate::theme::resolve_mode("system", window.appearance()), cx);
@@ -301,13 +301,11 @@ impl SettingsView {
         input.read(cx).value().to_string()
     }
 
-    /// 设置主题偏好（浅色/深色/跟随系统）并持久化。
+    /// 设置主题偏好（浅色/深色/跟随系统）：全局单源 + 持久化 + 跨窗口刷新。
     pub(crate) fn set_theme_pref(&mut self, pref: &str, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         crate::theme::apply_mode(crate::theme::resolve_mode(pref, window.appearance()), cx);
         self.theme_pref = pref.to_string();
-        let mut ui = crate::ui_state::load();
-        ui.theme = Some(pref.to_string());
-        crate::ui_state::save(&ui);
+        crate::app::set_theme_pref(pref, cx);
         refresh_all_windows(cx);
         cx.notify();
     }
@@ -648,18 +646,28 @@ impl SettingsView {
     }
 
     /// 触发后台首次同步并刷新账号列表（不关窗；供向导与测试复用）。
+    /// 消费进度事件至完成（保活通道）；完成后刷新账号列表与主窗口邮件列表。
     pub(crate) fn begin_sync(&mut self, cx: &mut Context<Self>) {
         let Some(add) = self.add.as_ref() else { return };
         let Some(id) = add.pending_sync else { return };
         let range = add.sync_range;
         let api = self.api.clone();
         let api_sync = self.api.clone();
+        let api_keep = self.api.clone();
         let accounts_store = self.accounts.clone();
-        // 后台首次同步（事件通道丢弃，进度经主窗口 SyncStore 状态栏感知）
-        let (tx, _rx) = smol::channel::bounded(256);
+        let accounts_store_late = self.accounts.clone();
+        let (tx, rx) = smol::channel::bounded(256);
         let _ = spawn_tokio(async move {
             let _ = api_sync.sync_account_with_range(tx, id, range).await;
         });
+        cx.spawn(async move |_, cx| {
+            while rx.recv().await.is_ok() {}
+            let _ = accounts_store_late.update(cx, |store, cx| {
+                store.reload(&api_keep, cx);
+            });
+            refresh_main_email_lists(&api_keep, cx);
+        })
+        .detach();
         accounts_store.update(cx, |store, cx| store.reload(&api, cx));
     }
 
@@ -1067,7 +1075,15 @@ fn render_account_card(g: &crate::stores::accounts::AccountNode, cx: &mut Contex
                                 .await
                             });
                             if let Ok(Ok(_)) = rx.recv().await {
-                                this.update(cx, |_, cx| cx.notify()).ok();
+                                // 刷新账号列表使"同步：开/关"标签立即更新
+                                this.update(cx, |view, cx| {
+                                    let api3 = api_keep.clone();
+                                    view.accounts.update(cx, |store, cx| {
+                                        store.reload(&api3, cx);
+                                    });
+                                    cx.notify();
+                                })
+                                .ok();
                             }
                         }
                     })
@@ -1800,4 +1816,18 @@ fn render_language_row(cx: &mut Context<SettingsView>) -> impl IntoElement {
                 .child(div().text_size(px(13.)).child(t("settings.language"))),
         )
         .child(seg)
+}
+/// 同步完成后刷新主窗口的邮件列表（经全局主壳注册表；设置窗口触发）。
+fn refresh_main_email_lists(api: &Arc<CoreApi>, cx: &mut gpui_kit::AsyncApp) {
+    let _ = cx.update(|app: &mut App| {
+        if let Some(global) = app.try_global::<crate::app::MainShell>()
+            && let Some(shell) = global.0.upgrade()
+        {
+            shell.update(app, |shell, cx| {
+                shell.emails.update(cx, |store, cx| {
+                    store.refresh_now(api, cx);
+                });
+            });
+        }
+    });
 }

@@ -1,4 +1,8 @@
 //! 邮件列表状态（移植自 src/lib/stores/email.svelte.ts 的列表装载部分）。
+//!
+//! 竞态防护：所有异步装载携带代数（`load_gen`），完成回调先比对代数，
+//! 过期结果（导航/搜索已切换）直接丢弃——避免旧数据落入新视图。
+//! `loading` 在任何分支（含 Err/通道关闭）都会复位，不会卡死。
 
 use std::sync::Arc;
 
@@ -21,10 +25,17 @@ pub struct EmailsStore {
     pub selected: Option<i32>,
     /// 选中变化计数（宿主据此触发详情加载）
     pub selected_version: u32,
-    /// 列表数据版本（每次重载 +1，宿主 render 据此重建列表）
+    /// 列表数据版本（每次数据变化 +1；宿主据此原位更新行数据）
     pub list_version: u64,
+    /// 视图上下文版本（仅在导航/搜索切换时 +1；宿主据此重建整个列表，
+    /// 与 list_version 分离使翻页/刷新不重置滚动与选中）
+    pub nav_version: u64,
     /// 未读过滤
     pub unread_only: bool,
+    /// 当前 FTS 搜索词（None = 普通导航视图）；refresh_now 保持在搜索上下文内
+    pub search_query: Option<String>,
+    /// 装载代数：每次 navigate/search/refresh 递增，完成回调据此丢弃过期结果
+    load_gen: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -49,18 +60,18 @@ impl EmailsStore {
             selected: None,
             selected_version: 0,
             list_version: 0,
+            nav_version: 0,
             unread_only: false,
+            search_query: None,
+            load_gen: 0,
         }
     }
 
-    /// 导航变化时重置并装载第一页。
+    /// 导航变化时重置并装载第一页（退出搜索上下文）。
     pub fn navigate(&mut self, nav: NavTarget, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
-        self.nav = nav.clone();
-        self.emails.clear();
-        self.total = 0;
-        self.page = 0;
-        self.selected = None;
-        self.load_page(0, api, cx);
+        self.nav = nav;
+        self.search_query = None;
+        self.reset_and_load(api, cx);
     }
 
     /// 追加下一页。
@@ -68,13 +79,27 @@ impl EmailsStore {
         if self.loading || (self.emails.len() as u64) >= self.total {
             return;
         }
-        self.load_page(self.page + 1, api, cx);
+        let page = self.page + 1;
+        self.load(page, api, cx);
     }
 
-    /// 按当前导航与过滤设置重载第一页（操作后刷新）。
+    /// 按当前上下文（导航或搜索）重载第一页（操作后刷新）。
     pub fn refresh_now(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
-        let nav = self.nav.clone();
-        self.navigate(nav, api, cx);
+        if let Some(q) = self.search_query.clone() {
+            self.search(&q, api, cx);
+        } else {
+            self.reset_and_load(api, cx);
+        }
+    }
+
+    fn reset_and_load(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.nav_version += 1; // 上下文切换：宿主需重建列表
+        self.emails.clear();
+        self.total = 0;
+        self.page = 0;
+        self.selected = None;
+        self.selected_version += 1;
+        self.load(0, api, cx);
     }
 
     /// FTS 搜索（跨当前范围）。
@@ -84,18 +109,27 @@ impl EmailsStore {
             self.navigate(self.nav.clone(), api, cx);
             return;
         }
-        if self.loading {
-            return;
-        }
+        self.load_gen += 1;
+        let load_g = self.load_gen;
+        self.search_query = Some(q.clone());
+        self.nav_version += 1; // 搜索 = 新上下文：重建列表
         self.loading = true;
+        // 搜索切换上下文：清选中（旧选中在结果中不可见）
+        self.selected = None;
+        self.selected_version += 1;
+        self.page = 0;
         cx.notify();
         let api = api.clone();
         let rx = spawn_tokio(async move { api.search_emails(&q, None, Some(100)).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(result) = rx.recv().await {
-                this.update(cx, |store, cx| {
-                    if let Ok(rows) = result {
-                        // SearchResult 与 EmailDto 字段相近，转换为展示模型
+            // recv Err（任务 panic/通道关闭）也走到统一收尾，loading 必复位
+            let result = rx.recv().await.ok().and_then(|r| r.ok());
+            this.update(cx, |store, cx| {
+                if store.load_gen != load_g {
+                    return; // 过期结果：用户已导航/再次搜索
+                }
+                match result {
+                    Some(rows) => {
                         store.emails = rows
                             .into_iter()
                             .map(|r| EmailDto {
@@ -109,30 +143,36 @@ impl EmailsStore {
                                 account_email: r.account_email.clone(),
                                 account_display_name: r.account_display_name.clone(),
                                 preview: r.preview.clone(),
-                                is_read: true,      // FTS 结果无已读字段，按已读显示
-                                is_starred: false,  // 同上
+                                is_read: r.is_read,
+                                is_starred: r.is_starred,
                                 sent_at: r.sent_at,
                                 has_attachments: false,
                             })
                             .collect();
                         store.total = store.emails.len() as u64;
                         store.page = 0;
-                        store.loading = false;
                         store.list_version += 1;
-                        cx.emit(EmailsEvent::Reloaded);
-                        cx.notify();
                     }
-                })
-                .ok();
-            }
+                    None => {
+                        // 查询失败：回到空列表并退出搜索态，避免工具条操作不可见选中
+                        store.emails.clear();
+                        store.total = 0;
+                        store.search_query = None;
+                        store.list_version += 1;
+                    }
+                }
+                store.loading = false;
+                cx.emit(EmailsEvent::Reloaded);
+                cx.notify();
+            })
+            .ok();
         })
         .detach();
     }
 
-    fn load_page(&mut self, page: usize, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
+    fn load(&mut self, page: usize, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.load_gen += 1;
+        let load_g = self.load_gen;
         self.loading = true;
         cx.notify();
 
@@ -164,10 +204,11 @@ impl EmailsStore {
                     api.list_emails(*account_id, folder, page, PAGE_LIMIT).await
                 }
                 NavTarget::Label(label_id) => {
-                    // 标签视图：取标签下的邮件 id，再取详情摘要（简化：直接按 id 拉取前 100 封）
+                    // 标签视图：取标签下全部 id，按页切片取详情摘要
                     let ids = api.list_emails_by_label(*label_id).await.unwrap_or_default();
-                    let mut out = Vec::with_capacity(ids.len());
-                    for id in ids.iter().take(100) {
+                    let start = page * PAGE_LIMIT;
+                    let mut out = Vec::new();
+                    for id in ids.iter().skip(start).take(PAGE_LIMIT) {
                         if let Ok(detail) = api.get_email(*id).await {
                             out.push(detail_to_dto(&detail));
                         }
@@ -189,9 +230,13 @@ impl EmailsStore {
         });
 
         cx.spawn(async move |this, cx| {
-            if let Ok(result) = rx.recv().await {
-                this.update(cx, |store, cx| {
-                    if let Ok(resp) = result {
+            let result = rx.recv().await.ok().and_then(|r| r.ok());
+            this.update(cx, |store, cx| {
+                if store.load_gen != load_g {
+                    return; // 过期结果：导航/搜索已切换
+                }
+                match result {
+                    Some(resp) => {
                         if page == 0 {
                             store.emails = resp.emails;
                         } else {
@@ -201,12 +246,18 @@ impl EmailsStore {
                         store.page = page;
                         store.list_version += 1;
                     }
-                    store.loading = false;
-                    cx.emit(EmailsEvent::Reloaded);
-                    cx.notify();
-                })
-                .ok();
-            }
+                    None => {
+                        // 失败：保持现有数据，仅复位 loading（下次可重试）
+                        if page == 0 && store.emails.is_empty() {
+                            store.list_version += 1;
+                        }
+                    }
+                }
+                store.loading = false;
+                cx.emit(EmailsEvent::Reloaded);
+                cx.notify();
+            })
+            .ok();
         })
         .detach();
     }

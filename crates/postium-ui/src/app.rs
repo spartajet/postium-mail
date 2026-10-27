@@ -24,6 +24,38 @@ use crate::views::status_bar::StatusBar;
 use crate::views::email_list::{EmailListView, rebuild_list_state};
 use crate::views::sidebar::{Sidebar, SidebarEvent};
 
+/// 主窗口壳的全局注册（弱引用）：跨窗口（如设置页同步完成后）刷新邮件列表用。
+pub struct MainShell(pub gpui_kit::WeakEntity<AppShell>);
+impl gpui_kit::Global for MainShell {}
+
+/// 托盘是否存活（setup_tray 成功时置 true）——关闭行为据此决定最小化还是退出。
+pub static TRAY_ALIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 主题偏好的全局单源（dark | light | system）：主窗口与设置窗口共用，
+/// 避免各自持内存副本导致"跟随系统"覆盖显式选择。
+#[derive(Clone)]
+pub struct ThemePref(pub std::sync::Arc<std::sync::Mutex<String>>);
+impl gpui_kit::Global for ThemePref {}
+
+/// 读当前主题偏好（全局单源；未初始化时回落 dark）。
+pub fn current_theme_pref(cx: &App) -> String {
+    cx.try_global::<ThemePref>()
+        .map(|g| g.0.lock().map(|s| s.clone()).unwrap_or_else(|_| "dark".into()))
+        .unwrap_or_else(|| "dark".into())
+}
+
+/// 写主题偏好（全局单源 + 持久化）。
+pub fn set_theme_pref(pref: &str, cx: &mut App) {
+    if let Some(g) = cx.try_global::<ThemePref>() {
+        if let Ok(mut s) = g.0.lock() {
+            *s = pref.to_string();
+        }
+    }
+    let mut ui = crate::ui_state::load();
+    ui.theme = Some(pref.to_string());
+    crate::ui_state::save(&ui);
+}
+
 /// 打开主窗口（应用启动时调用一次）。
 pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
     let options = match crate::window_state::saved_bounds() {
@@ -33,12 +65,14 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
         },
         None => WindowOptions::default(),
     };
-    gpui_kit::open_window(
+    let (_handle, shell_view) = gpui_kit::open_window(
         options,
         cx,
         |window, cx| cx.new(|cx| AppShell::new(api, sync_rx, window, cx)),
     )
     .expect("打开主窗口失败");
+    // 注册全局弱引用（窗口关闭后自动失效）
+    cx.set_global(MainShell(shell_view.downgrade()));
     cx.activate(true);
 }
 
@@ -52,9 +86,12 @@ pub struct AppShell {
     pub emails: gpui_kit::Entity<EmailsStore>,
     pub detail: gpui_kit::Entity<DetailStore>,
     pub sync_store: gpui_kit::Entity<SyncStore>,
-    /// 列表视图（render 时按 list_version 重建）
+    /// 列表视图（导航/搜索上下文切换时整体重建）
     email_list: Option<gpui_kit::Entity<EmailListView>>,
-    list_build_version: u64,
+    /// 已重建到的上下文版本（nav_version）
+    list_nav_version: u64,
+    /// 已同步到的数据版本（list_version；原位更新行，不重置滚动）
+    list_data_version: u64,
     detail_view: Option<gpui_kit::Entity<EmailDetailView>>,
     detail_build_version: u32,
     /// 顶栏搜索
@@ -83,6 +120,12 @@ impl AppShell {
         // 恢复持久化偏好（默认暗色，与旧版一致；system 跟随系统外观）
         let ui = crate::ui_state::load();
         let theme_pref = ui.theme.clone().unwrap_or_else(|| "dark".into());
+        // 主题偏好全局单源（仅首个主窗口初始化；设置窗口复用）
+        if cx.try_global::<ThemePref>().is_none() {
+            cx.set_global(ThemePref(std::sync::Arc::new(std::sync::Mutex::new(
+                theme_pref.clone(),
+            ))));
+        }
         let theme_mode = crate::theme::resolve_mode(&theme_pref, window.appearance());
         gpui_kit::component::Theme::change(theme_mode, None, cx);
         crate::theme::apply_brand(cx);
@@ -90,8 +133,9 @@ impl AppShell {
         let appearance_sub = {
             let weak = cx.entity().downgrade();
             let sub = window.observe_window_appearance(move |window, cx| {
-                let _ = weak.update(cx, |shell: &mut Self, cx| {
-                    if shell.theme_pref == "system" {
+                let pref = current_theme_pref(cx);
+                let _ = weak.update(cx, |_shell: &mut Self, cx| {
+                    if pref == "system" {
                         let mode = crate::theme::resolve_mode("system", window.appearance());
                         crate::theme::apply_mode(mode, cx);
                         cx.notify();
@@ -107,10 +151,17 @@ impl AppShell {
         // Toast 总线 + 关闭主窗口 → 隐藏到托盘（退出走托盘菜单）
         crate::notify::setup(window, cx);
         // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 保存状态后最小化（退出走托盘菜单）
+        // 关闭行为：托盘可用 → 保存状态并最小化（退出走托盘菜单）；
+        // 托盘不可用（如无 appindicator 的环境）→ 真关闭，否则应用无法退出
         window.on_window_should_close(cx, |window, _| {
             crate::window_state::save(window);
-            window.minimize_window();
-            false
+            let tray_alive = TRAY_ALIVE.load(std::sync::atomic::Ordering::Relaxed);
+            if tray_alive {
+                window.minimize_window();
+                false
+            } else {
+                true
+            }
         });
 
         let accounts = init_accounts_store(&api, cx);
@@ -135,7 +186,8 @@ impl AppShell {
             store.progress.clear();
             store
         });
-        {
+        // e2e 离线模式跳过后台调度（避免真实网络连接破坏测试确定性）
+        if !api.is_e2e_offline() {
             let db = api.db.clone();
             let auth = api.auth.clone();
             let mut scheduler = postium_core::domain::sync::SyncScheduler::new(db, auth, Some(sched_tx));
@@ -155,6 +207,11 @@ impl AppShell {
                     this.emails.update(cx, |store, cx| {
                         store.navigate(target.clone(), &this.api, cx);
                     });
+                    // 新视图无选中：详情面板清空，避免显示旧文件夹邮件
+                    this.detail.update(cx, |store, cx| {
+                        store.clear(cx);
+                    });
+                    this.detail_view = None;
                     this.email_list = None; // 等 Reloaded 重建
                     cx.notify();
                 }
@@ -188,6 +245,7 @@ impl AppShell {
                 this.detail_view = Some(cx.new(|_| EmailDetailView {
                     store: this.detail.clone(),
                     api: this.api.clone(),
+                    emails: this.emails.downgrade(),
                     recipients_expanded: false,
                 }));
                 this.detail_build_version = this.emails.read(cx).selected_version;
@@ -244,6 +302,9 @@ impl AppShell {
         .detach();
 
         let _tray = crate::tray::setup_tray(api.clone(), sync_store.clone(), cx);
+        if _tray.is_some() {
+            TRAY_ALIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
 
         Self {
             api,
@@ -254,7 +315,8 @@ impl AppShell {
             detail,
             sync_store,
             email_list: None,
-            list_build_version: 0,
+            list_nav_version: 0,
+            list_data_version: 0,
             detail_view: None,
             detail_build_version: 0,
             search_input,
@@ -296,9 +358,13 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 列表数据版本变化 → 重建虚拟化列表（render 内建 entity，版本守卫确保只建一次）
-        let current_version = self.emails.read(cx).list_version;
-        if self.list_build_version != current_version {
+        // 上下文切换（导航/搜索）→ 重建虚拟化列表；
+        // 仅数据变化（翻页/操作后刷新）→ 原位更新行，保持滚动与选中
+        let (data_v, nav_v) = {
+            let store = self.emails.read(cx);
+            (store.list_version, store.nav_version)
+        };
+        if self.list_nav_version != nav_v {
             let state = rebuild_list_state(&self.emails, &self.api, window, cx);
             let api = self.api.clone();
             self.email_list = Some(cx.new(|_| EmailListView {
@@ -307,7 +373,23 @@ impl Render for AppShell {
                 api,
                 older_syncing: false,
             }));
-            self.list_build_version = current_version;
+            self.list_nav_version = nav_v;
+            self.list_data_version = data_v;
+        } else if self.list_data_version != data_v {
+            if let Some(view) = self.email_list.clone() {
+                let rows: Vec<std::rc::Rc<postium_core::service::email_service::EmailDto>> =
+                    self.emails.read(cx).emails.iter().cloned().map(std::rc::Rc::new).collect();
+                view.update(cx, |_, cx| {
+                    cx.notify();
+                });
+                let state = view.read(cx).state.clone();
+                state.update(cx, |st, cx| {
+                    let delegate = st.delegate_mut();
+                    delegate.set_rows(rows);
+                    cx.notify();
+                });
+            }
+            self.list_data_version = data_v;
         }
         let nav_label: SharedString = match &self.nav {
             NavTarget::AllInbox => i18n::t("sidebar.inbox"),
@@ -352,6 +434,7 @@ impl Render for AppShell {
                             let view = cx.new(|_| EmailDetailView {
                                 store: self.detail.clone(),
                                 api: self.api.clone(),
+                                emails: self.emails.downgrade(),
                                 recipients_expanded: false,
                             });
                             self.detail_view = Some(view.clone());

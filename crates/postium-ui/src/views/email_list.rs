@@ -194,6 +194,7 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
             let mode = match kind {
                 ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
                     email_id: detail.email.id,
+                    account_id: detail.email.account_id,
                     to: detail.email.sender_email.clone(),
                     subject: detail.email.subject.clone().unwrap_or_default(),
                     original_html: detail.body_html.clone().unwrap_or_default(),
@@ -208,6 +209,7 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
                     }
                     crate::views::compose::ComposeMode::ReplyAll {
                         email_id: detail.email.id,
+                        account_id: detail.email.account_id,
                         to: to.join(", "),
                         subject: detail.email.subject.clone().unwrap_or_default(),
                         original_html: detail.body_html.clone().unwrap_or_default(),
@@ -215,6 +217,7 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
                 }
                 ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
                     email_id: detail.email.id,
+                    account_id: detail.email.account_id,
                     subject: detail.email.subject.clone().unwrap_or_default(),
                     original_html: detail.body_html.clone().unwrap_or_default(),
                 },
@@ -296,6 +299,19 @@ pub struct EmailListDelegate {
     api: Arc<postium_core::api::CoreApi>,
 }
 
+impl EmailListDelegate {
+    /// 原位替换行数据（翻页/刷新路径，保持滚动与选中）。
+    /// 选中 id 不在新行集合中时清除选中。
+    pub fn set_rows(&mut self, rows: Vec<Rc<EmailDto>>) {
+        if let Some(sel) = self.selected_email
+            && !rows.iter().any(|r| r.id == sel)
+        {
+            self.selected_email = None;
+        }
+        self.rows = rows;
+    }
+}
+
 impl ListDelegate for EmailListDelegate {
     type Item = EmailRow;
 
@@ -320,7 +336,7 @@ impl ListDelegate for EmailListDelegate {
     fn set_selected_index(
         &mut self,
         ix: Option<IndexPath>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) {
         self.selected_email = ix.and_then(|i| self.rows.get(i.row)).map(|r| r.id);
@@ -340,11 +356,28 @@ impl ListDelegate for EmailListDelegate {
                 }
             });
 
-            // 异步标记已读
+            // 异步标记已读：完成后原位更新行内 is_read 标记
             if let Some((id, _unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
                 let api = self.api.clone();
-                let _ = spawn_tokio(async move { api.mark_as_read(id, true).await });
-                let _ = window;
+                let rx = spawn_tokio(async move { api.mark_as_read(id, true).await });
+                let row_ix = ix.map(|i| i.row);
+                cx.spawn(async move |this, cx| {
+                    if rx.recv().await.is_ok() {
+                        this.update(cx, |state, cx| {
+                            let delegate = state.delegate_mut();
+                            if let Some(row) = row_ix.and_then(|ri| delegate.rows.get_mut(ri))
+                                && row.id == id
+                            {
+                                let mut updated = (**row).clone();
+                                updated.is_read = true;
+                                *row = std::rc::Rc::new(updated);
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                })
+                .detach();
             }
         }
         cx.notify();
@@ -439,6 +472,14 @@ impl EmailListView {
                     }
                     Ok(())
                 }
+                // 全部收件箱：对全部账号同步收件箱更早邮件
+                NavTarget::AllInbox => {
+                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    for a in accounts {
+                        let _ = api.sync_older_emails(a.id, EmailCategory::Inbox).await;
+                    }
+                    Ok(())
+                }
                 _ => Ok(()),
             }
         });
@@ -478,10 +519,12 @@ impl EmailListView {
                 let subject = detail.email.subject.clone().unwrap_or_default();
                 let original_html = detail.body_html.clone().unwrap_or_default();
                 let email_id = detail.email.id;
+                let account_id = detail.email.account_id;
                 cx.update(|cx| {
                     crate::views::compose::open_compose_window(
                         crate::views::compose::ComposeMode::Forward {
                             email_id,
+                            account_id,
                             subject,
                             original_html,
                         },

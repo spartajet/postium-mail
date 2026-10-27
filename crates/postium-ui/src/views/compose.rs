@@ -26,9 +26,29 @@ use crate::runtime::spawn_tokio;
 #[derive(Clone, Debug)]
 pub enum ComposeMode {
     New,
-    Reply { email_id: i32, to: String, subject: String, original_html: String },
-    ReplyAll { email_id: i32, to: String, subject: String, original_html: String },
-    Forward { email_id: i32, subject: String, original_html: String },
+    Reply {
+        #[allow(dead_code)] // 保留：草稿关联原邮件用
+        email_id: i32,
+        account_id: i32,
+        to: String,
+        subject: String,
+        original_html: String,
+    },
+    ReplyAll {
+        #[allow(dead_code)]
+        email_id: i32,
+        account_id: i32,
+        to: String,
+        subject: String,
+        original_html: String,
+    },
+    Forward {
+        #[allow(dead_code)]
+        email_id: i32,
+        account_id: i32,
+        subject: String,
+        original_html: String,
+    },
 }
 
 /// 去除主题的 Re:/Fwd: 前缀（对齐旧版 /^(Re|Fwd):\s*/i）。
@@ -168,19 +188,23 @@ impl ComposeView {
             .detach();
         }
 
-        // 装载账号列表（默认选中第一个；回复/转发优先原邮件账号）
+        // 装载账号列表：回复/转发优先原邮件所属账号，否则第一个
         let preferred_account = match &mode {
-            ComposeMode::Reply { email_id, .. } | ComposeMode::ReplyAll { email_id, .. } | ComposeMode::Forward { email_id, .. } => Some(*email_id),
+            ComposeMode::Reply { account_id, .. }
+            | ComposeMode::ReplyAll { account_id, .. }
+            | ComposeMode::Forward { account_id, .. } => Some(*account_id),
             ComposeMode::New => None,
         };
         let rx = spawn_tokio(async move { api.list_accounts().await.unwrap_or_default() });
         cx.spawn(async move |this, cx| {
             if let Ok(accounts) = rx.recv().await {
                 let _ = this.update(cx, |view, cx| {
-                    if let Some(acc) = accounts.first() {
+                    let chosen = preferred_account
+                        .and_then(|id| accounts.iter().find(|a| a.id == id))
+                        .or_else(|| accounts.first());
+                    if let Some(acc) = chosen {
                         view.selected_account = Some((acc.id, acc.name.clone()));
                     }
-                    let _ = preferred_account;
                     cx.notify();
                 });
             }
@@ -189,14 +213,31 @@ impl ComposeView {
         this
     }
 
-    fn add_attachment(&mut self, _: &ClickEvent, _: &mut Window, _cx: &mut Context<Self>) {
-        // rfd 同步对话框放后台线程
+    fn add_attachment(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // rfd 同步对话框放后台线程；结果经实体回调回本窗口（替代全局队列，
+        // 多写信窗口不再互相串件），大小在选择时读取一次（不在 render 中做 IO）
         let (tx, rx) = smol::channel::bounded(1);
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new().pick_files();
             let _ = tx.try_send(picked);
         });
-        cx_spawn_attachments(rx);
+        cx.spawn(async move |this, cx| {
+            if let Ok(Some(files)) = rx.recv().await {
+                this.update(cx, |view, cx| {
+                    for path in files {
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        view.attachments.push((path, name, size));
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     fn value_of(input: &Entity<InputState>, cx: &App) -> String {
@@ -438,36 +479,12 @@ impl ComposeView {
     }
 }
 
-// 附件选择的线程桥（线程 → 队列消费由全局任务处理，spike 简化：直接全局 spawn）
-fn cx_spawn_attachments(rx: smol::channel::Receiver<Option<Vec<std::path::PathBuf>>>) {
-    std::thread::spawn(move || {
-        if let Ok(Some(files)) = rx.recv_blocking() {
-            ATTACHMENT_QUEUE.lock().unwrap().extend(files);
-        }
-    });
-}
-
-static ATTACHMENT_QUEUE: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
-
 impl Render for ComposeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         if self.close_handle.is_none() {
             self.close_handle = Some(window.window_handle());
         }
-        // 拾取后台线程选到的附件
-        {
-            let mut q = ATTACHMENT_QUEUE.lock().unwrap();
-            for path in q.drain(..) {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                self.attachments.push((path, name, size));
-            }
-        }
-
         let muted_fg = cx.theme().muted_foreground;
         let field = move |label: &str, input: &Entity<InputState>| {
             h_flex()
