@@ -92,6 +92,8 @@ fn is_conditional_open(s: &str) -> bool {
 ///
 /// - 标签白名单 = 邮件常见结构集（spec §4.2 逐项列出）；
 /// - `class/id/style` 对所有白名单标签放行（css-inline 选择器匹配依赖）；
+/// - `align` 放行：遗留呈现属性（T5：p/div/h1–h6/table 对齐兜底，style 优先），
+///   无 URL/脚本向量；
 /// - `href`（a）/ `src`（img）沿用 ammonia 默认属性表；
 /// - URL 相对路径原样透传（后续渲染按原始文档上下文处理，不做改写）；
 /// - clean_content_tags 在 ammonia 默认（script/style）之上追加 title/noscript/template：
@@ -137,7 +139,7 @@ pub fn sanitize_lenient(html: &str) -> String {
     ]);
     ammonia::Builder::default()
         .tags(tags)
-        .generic_attributes(HashSet::from(["class", "id", "style"]))
+        .generic_attributes(HashSet::from(["class", "id", "style", "align"]))
         .clean_content_tags(HashSet::from([
             "script", "style", "title", "noscript", "template",
         ]))
@@ -164,5 +166,13 @@ mod tests {
         let out = sanitize_lenient(html);
         assert!(out.contains(r#"class="a""#) && out.contains("color:red"));
         assert!(!out.contains("script") && !out.contains("onclick"));
+    }
+
+    #[test]
+    fn sanitize_keeps_align_attribute() {
+        // T5：align 属性放行（builder 的对齐属性兜底依赖它到达树构建）
+        let out = sanitize_lenient(r#"<p align="center" valign="middle">x</p>"#);
+        assert!(out.contains(r#"align="center""#));
+        assert!(!out.contains("valign"), "白名单外属性仍应剔除");
     }
 }

@@ -377,7 +377,10 @@ fn parse_font_weight(s: &str) -> Option<bool> {
 }
 
 /// 水平对齐关键词（spec §3：left/center/right/justify）。
-fn parse_align(s: &str) -> Option<Align> {
+///
+/// `pub(crate)`：`text-align` 样式值与 `align` 属性值同一关键词集，builder 的
+/// align 属性解析（T5）复用本表，避免双源。
+pub(crate) fn parse_align(s: &str) -> Option<Align> {
     match s.trim().to_ascii_lowercase().as_str() {
         "left" => Some(Align::Left),
         "center" => Some(Align::Center),

@@ -145,6 +145,9 @@ pub enum Block {
     Heading {
         /// 级别 1–6。
         level: u8,
+        /// 对齐方式（`text-align` 样式优先、`align` 属性兜底；T5 增补——
+        /// T4 评审圈定的类型认领空洞，`<h2 align="center">` 不再丢对齐）。
+        align: Align,
         /// 行内 run 序列。
         runs: Vec<InlineRun>,
     },

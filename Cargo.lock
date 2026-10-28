@@ -6053,10 +6053,12 @@ name = "postium-html"
 version = "0.3.0"
 dependencies = [
  "ammonia",
+ "base64 0.22.1",
  "css-inline",
  "html5ever 0.39.0",
  "markup5ever_rcdom 0.39.0+unofficial",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
