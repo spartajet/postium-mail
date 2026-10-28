@@ -6,6 +6,9 @@
 //! - 查询：分页列表（关键词/分组/星标过滤）、按 ID / 邮箱查询单条
 //! - 写入：创建（同邮箱大小写不敏感去重）、更新
 //! - 状态管理：星标切换
+//! - 分组管理：[`group_insert`] / [`group_rename`] / [`group_delete`] /
+//!   [`group_list`]（含 LEFT JOIN 成员计数）、[`group_set_members`]
+//!   （事务内全量替换联系人的分组成员关系）
 //! - 自动收集：[`upsert_from_emails`] 批量并入往来联系人、
 //!   [`backfill_from_emails`] 存量邮件聚合回填（均幂等，用户手工 /
 //!   CardDAV 同步数据优先于自动收集）
@@ -55,6 +58,18 @@ pub struct ContactListResponse {
     pub total: u64,
     pub page: usize,
     pub limit: usize,
+}
+
+/// 分组列表项（含成员计数）
+///
+/// `count` 由 [`group_list`] 通过 LEFT JOIN `contact_group_members` 聚合，
+/// 无成员的分组计数为 0（LEFT JOIN 保证分组本身仍出现在结果中）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ContactGroupWithCount {
+    pub id: i32,
+    pub name: String,
+    pub color: Option<String>,
+    pub count: u64,
 }
 
 /// 用于创建或更新联系人的写入数据结构
@@ -397,6 +412,127 @@ pub async fn set_starred(db: &DbConn, id: i32, starred: bool) -> Result<(), Mail
                 id,
             ],
         )?;
+        Ok(())
+    })
+    .await
+}
+
+/// 创建联系人分组，返回自增 ID。
+///
+/// 名称首尾空白去除；与现有分组重名（`UNIQUE(name)` 冲突）被映射为
+/// `MailError::DatabaseError("分组已存在: ...")`（与 [`insert`] 的重复映射风格一致）。
+pub async fn group_insert(db: &DbConn, name: &str) -> Result<i32, MailError> {
+    let name = name.trim().to_string();
+    let duplicate_message = format!("分组已存在: {name}");
+
+    let inserted = db
+        .call(move |conn| {
+            match conn.execute("INSERT INTO contact_groups (name) VALUES (?1)", [&name]) {
+                Ok(_) => Ok(Some(conn.last_insert_rowid() as i32)),
+                Err(err) if is_unique_violation(&err) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
+        .await?;
+
+    inserted.ok_or_else(|| MailError::DatabaseError(duplicate_message))
+}
+
+/// 重命名分组。
+///
+/// 名称首尾空白去除；改为已有分组名称时 `UNIQUE(name)` 冲突同样映射为
+/// `MailError::DatabaseError("分组已存在: ...")`。ID 不存在时不报错（影响 0 行）。
+pub async fn group_rename(db: &DbConn, id: i32, name: &str) -> Result<(), MailError> {
+    let name = name.trim().to_string();
+    let duplicate_message = format!("分组已存在: {name}");
+
+    let outcome = db
+        .call(move |conn| {
+            match conn.execute(
+                "UPDATE contact_groups SET name = ?2 WHERE id = ?1",
+                rusqlite::params![id, name],
+            ) {
+                Ok(_) => Ok(None),
+                Err(err) if is_unique_violation(&err) => Ok(Some(duplicate_message)),
+                Err(err) => Err(err),
+            }
+        })
+        .await?;
+
+    match outcome {
+        Some(message) => Err(MailError::DatabaseError(message)),
+        None => Ok(()),
+    }
+}
+
+/// 删除分组。
+///
+/// 分组成员关系由外键 `ON DELETE CASCADE` 自动清理，成员联系人本身不受影响。
+pub async fn group_delete(db: &DbConn, id: i32) -> Result<(), MailError> {
+    db.call(move |conn| {
+        conn.execute("DELETE FROM contact_groups WHERE id = ?1", [id])?;
+        Ok(())
+    })
+    .await
+}
+
+/// 查询全部分组（按 `id` 升序），含各分组成员计数。
+///
+/// 计数通过 LEFT JOIN `contact_group_members` 聚合（`COUNT(m.contact_id)`），
+/// 无成员的分组返回 `count = 0` 而非被过滤掉。
+pub async fn group_list(db: &DbConn) -> Result<Vec<ContactGroupWithCount>, MailError> {
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT g.id, g.name, g.color, COUNT(m.contact_id) AS member_count
+             FROM contact_groups g
+             LEFT JOIN contact_group_members m ON m.group_id = g.id
+             GROUP BY g.id, g.name, g.color
+             ORDER BY g.id ASC",
+        )?;
+        let groups = stmt
+            .query_map([], |row| {
+                Ok(ContactGroupWithCount {
+                    id: row.get("id")?,
+                    name: row.get("name")?,
+                    color: row.get("color")?,
+                    count: row.get::<_, i64>("member_count")? as u64,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(groups)
+    })
+    .await
+}
+
+/// 全量替换联系人的分组成员关系。
+///
+/// 单事务内执行：先 `DELETE` 该联系人的**全部**成员关系，再按 `group_ids`
+/// 去重（排序 + dedup）后以 `INSERT OR IGNORE` 批量插入（主键
+/// `(contact_id, group_id)` 兜底防重）。任一步失败整体回滚；
+/// 传空切片等效于把联系人移出所有分组。
+pub async fn group_set_members(
+    db: &DbConn,
+    contact_id: i32,
+    group_ids: &[i32],
+) -> Result<(), MailError> {
+    let mut group_ids = group_ids.to_vec();
+    group_ids.sort_unstable();
+    group_ids.dedup();
+
+    db.transaction(move |tx| {
+        tx.execute(
+            "DELETE FROM contact_group_members WHERE contact_id = ?1",
+            [contact_id],
+        )?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO contact_group_members (contact_id, group_id)
+                 VALUES (?1, ?2)",
+            )?;
+            for group_id in &group_ids {
+                stmt.execute(rusqlite::params![contact_id, group_id])?;
+            }
+        }
         Ok(())
     })
     .await
@@ -754,6 +890,110 @@ mod tests {
         assert_eq!(alice.frequency, 2, "覆盖式回填，frequency 不因重跑而累加");
         let bob = get_by_email(&db, "b@x").await.unwrap().unwrap();
         assert_eq!(bob.frequency, 1);
+    }
+
+    #[tokio::test]
+    async fn group_crud_duplicate_rename_and_count() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let family_id = group_insert(&db, "家人").await.unwrap();
+        let work_id = group_insert(&db, "工作").await.unwrap();
+
+        // 重名（UNIQUE(name)）→ DatabaseError("分组已存在: ...")
+        let err = group_insert(&db, "家人").await.unwrap_err();
+        assert!(
+            matches!(err, MailError::DatabaseError(ref msg) if msg.contains("分组已存在")),
+            "重名建组应报分组已存在，实际: {err:?}"
+        );
+
+        // LEFT JOIN 计数：无成员的分组也出现且 count=0
+        let groups = group_list(&db).await.unwrap();
+        assert_eq!(groups.len(), 2, "应有 2 个分组");
+        assert_eq!(groups[0].id, family_id, "按 id 升序");
+        assert!(groups.iter().all(|group| group.count == 0), "初始计数均为 0");
+        assert_eq!(groups[0].name, "家人");
+        assert_eq!(groups[0].color, None);
+
+        // 成员计入对应分组
+        let cid = insert(
+            &db,
+            ContactWrite { email: "group-crud@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        group_set_members(&db, cid, &[family_id]).await.unwrap();
+        let groups = group_list(&db).await.unwrap();
+        assert_eq!(
+            groups.iter().find(|group| group.id == family_id).unwrap().count,
+            1,
+            "成员应计入家人分组"
+        );
+        assert_eq!(
+            groups.iter().find(|group| group.id == work_id).unwrap().count,
+            0,
+            "工作分组无成员"
+        );
+
+        // 改名
+        group_rename(&db, work_id, "同事").await.unwrap();
+        let groups = group_list(&db).await.unwrap();
+        let work = groups.iter().find(|group| group.id == work_id).unwrap();
+        assert_eq!(work.name, "同事", "改名应生效");
+
+        // 改成已存在的名字 → 同样的重名错误
+        let err = group_rename(&db, work_id, "家人").await.unwrap_err();
+        assert!(
+            matches!(err, MailError::DatabaseError(ref msg) if msg.contains("分组已存在")),
+            "重名改组应报分组已存在，实际: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn group_set_members_replaces_membership_and_delete_cascades() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let family_id = group_insert(&db, "家人").await.unwrap();
+        let work_id = group_insert(&db, "工作").await.unwrap();
+        let friend_id = group_insert(&db, "朋友").await.unwrap();
+
+        let cid = insert(
+            &db,
+            ContactWrite { email: "member@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        // 初始无分组
+        assert_eq!(get(&db, cid).await.unwrap().unwrap().groups.len(), 0);
+
+        // 重复 group_id 去重；get() 的 dto.groups 按 g.id 升序填充
+        group_set_members(&db, cid, &[work_id, family_id, work_id]).await.unwrap();
+        let dto = get(&db, cid).await.unwrap().unwrap();
+        let ids: Vec<i32> = dto.groups.iter().map(|group| group.id).collect();
+        assert_eq!(ids, vec![family_id, work_id], "去重后按分组 id 升序");
+        assert_eq!(dto.groups[0].name, "家人");
+
+        // 全量替换：只剩朋友分组
+        group_set_members(&db, cid, &[friend_id]).await.unwrap();
+        let dto = get(&db, cid).await.unwrap().unwrap();
+        let ids: Vec<i32> = dto.groups.iter().map(|group| group.id).collect();
+        assert_eq!(ids, vec![friend_id], "set_members 为全量替换语义");
+
+        // 空数组清空成员关系
+        group_set_members(&db, cid, &[]).await.unwrap();
+        assert_eq!(get(&db, cid).await.unwrap().unwrap().groups.len(), 0, "空数组应清空");
+
+        // 删组后 FK 级联清理成员关系，dto.groups 中该组消失
+        group_set_members(&db, cid, &[family_id, friend_id]).await.unwrap();
+        group_delete(&db, family_id).await.unwrap();
+        let dto = get(&db, cid).await.unwrap().unwrap();
+        let ids: Vec<i32> = dto.groups.iter().map(|group| group.id).collect();
+        assert_eq!(ids, vec![friend_id], "删组后成员关系应级联消失");
+
+        // group_list 不再包含被删分组，且计数正确
+        let groups = group_list(&db).await.unwrap();
+        assert_eq!(groups.len(), 2, "删除后应剩 2 个分组");
+        assert!(groups.iter().all(|group| group.id != family_id));
+        assert_eq!(groups.iter().find(|group| group.id == friend_id).unwrap().count, 1);
+        assert_eq!(groups.iter().find(|group| group.id == work_id).unwrap().count, 0);
     }
 
     #[tokio::test]
