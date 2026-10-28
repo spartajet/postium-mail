@@ -111,6 +111,7 @@ pub mod testing;
 /// 提供 `VcardData` 传输结构与 `parse`/`emit`/`merge_into_raw` 三个纯文本
 /// 进出接口，供联系人模块做 vCard 导入导出与 CardDAV 推送合并。
 pub mod vcard;
+pub mod carddav;
 
 /// 联系人 CSV 读取/写出（自研轻量实现，不引第三方 crate）。
 ///
