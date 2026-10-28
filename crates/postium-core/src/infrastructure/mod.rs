@@ -105,3 +105,9 @@ pub mod storage;
 
 /// 测试和 E2E 运行时辅助模块。
 pub mod testing;
+
+/// vCard 解析/生成/属性级合并（自研轻量实现）。
+///
+/// 提供 `VcardData` 传输结构与 `parse`/`emit`/`merge_into_raw` 三个纯文本
+/// 进出接口，供联系人模块做 vCard 导入导出与 CardDAV 推送合并。
+pub mod vcard;
