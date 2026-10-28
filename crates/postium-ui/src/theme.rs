@@ -26,14 +26,16 @@ pub fn apply_brand(cx: &mut App) {
                 c.background = gpui_kit::rgb(0x161632).into();
                 c.sidebar = gpui_kit::rgb(0x181832).into();
                 c.title_bar = gpui_kit::rgb(0x15152c).into();
-                c.border = gpui_kit::rgb(0x32325c).into();
+                // 分隔线加深一档：32325c 在深背景上几乎不可见
+                c.border = gpui_kit::rgb(0x404070).into();
                 c.muted = gpui_kit::rgb(0x22224a).into();
             }
             ThemeMode::Light => {
                 c.background = gpui_kit::rgb(0xf7f5fc).into();
                 c.sidebar = gpui_kit::rgb(0xf1eefc).into();
                 c.title_bar = gpui_kit::rgb(0xedeaf9).into();
-                c.border = gpui_kit::rgb(0xe4e1f0).into();
+                // 分隔线加深一档：e4e1f0 在浅背景上几乎不可见
+                c.border = gpui_kit::rgb(0xd4d0e6).into();
                 c.muted = gpui_kit::rgb(0xece9f8).into();
             }
         }

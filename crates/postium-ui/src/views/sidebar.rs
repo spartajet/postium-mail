@@ -265,7 +265,7 @@ impl Render for Sidebar {
 
 /// 侧栏分隔线。
 fn divider(theme: &gpui_kit::component::Theme) -> gpui_kit::Div {
-    div().flex_none().mx_1().my_1().h(px(1.)).bg(theme.border.opacity(0.7))
+    div().flex_none().mx_1().my_1().h(px(1.)).bg(theme.border)
 }
 
 fn category_matches_stat(category: EmailCategory, stat: &postium_core::domain::sync::FolderStat) -> bool {

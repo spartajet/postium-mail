@@ -164,9 +164,9 @@ impl RenderOnce for EmailRow {
             .base
             .px(px(20.))
             .py(px(12.))
-            // 行间分隔线（最后一行也带，视觉上与”加载更多”区隔开）
+            // 行间分隔线（全强度主题分隔色；最后一行也带，与“加载更多”区隔开）
             .border_b_1()
-            .border_color(cx.theme().border.opacity(0.6))
+            .border_color(cx.theme().border)
             .child(line(18.).child(row1))
             .child(line(18.).mt(px(2.)).child(row2))
             .child(row3);
