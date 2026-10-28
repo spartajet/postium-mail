@@ -95,6 +95,10 @@ fn is_conditional_open(s: &str) -> bool {
 /// - `class/id/style` 对所有白名单标签放行（css-inline 选择器匹配依赖）；
 /// - `align` 放行：遗留呈现属性（T5：p/div/h1–h6/table 对齐兜底，style 优先），
 ///   无 URL/脚本向量；
+/// - `width` 放行（td/th，T6）：遗留呈现属性 `<td width="300">` 是单元格宽度的
+///   主流来源（builder 的 Width 解析依赖它到达树构建）；纯数值/百分比取值，
+///   无 URL/脚本向量；
+/// - `colspan` 在 ammonia 默认属性表（td/th），照常放行；
 /// - `href`（a）/ `src`（img）沿用 ammonia 默认属性表；
 /// - 本地/内容 scheme 精细放行（[`local_content_scheme_filter`]，T5 评审裁定）：
 ///   `cid:`（内嵌附件引用）与 `data:image/*` 的 **img src** 穿透净化到达树构建
@@ -145,6 +149,10 @@ pub fn sanitize_lenient(html: &str) -> String {
     ammonia::Builder::default()
         .tags(tags)
         .generic_attributes(HashSet::from(["class", "id", "style", "align"]))
+        // td/th 的 width 属性放行（T6）：单元格宽度属性的主流来源，builder 依赖
+        // 它到达树构建；colspan 本就在 ammonia 默认表
+        .add_tag_attributes("td", &["width"])
+        .add_tag_attributes("th", &["width"])
         // cid:/data: 先过 ammonia 的 scheme 校验（其 url_schemes 是全局白名单、
         // 无 per-tag 配置）；attribute_filter 在其后执行、只能收紧——不合规形态
         // （a href="data:…"、img 的 data:text 等）在净化期即被剥除
@@ -211,6 +219,16 @@ mod tests {
         let out = sanitize_lenient(r#"<p align="center" valign="middle">x</p>"#);
         assert!(out.contains(r#"align="center""#));
         assert!(!out.contains("valign"), "白名单外属性仍应剔除");
+    }
+
+    #[test]
+    fn sanitize_keeps_td_width_and_colspan() {
+        // T6：td/th 的 width 放行（单元格宽度属性主流来源）；colspan 在默认表
+        let out = sanitize_lenient(r#"<table><tr><td colspan="3" width="300">x</td></tr></table>"#);
+        assert!(out.contains(r#"colspan="3""#) && out.contains(r#"width="300""#));
+        // th 同通道；非单元格元素的 width 不放行（如 p 的 width 仍剔除）
+        let out = sanitize_lenient(r#"<p width="300">x</p>"#);
+        assert!(!out.contains("width"));
     }
 
     #[test]

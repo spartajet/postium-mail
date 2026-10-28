@@ -178,4 +178,30 @@ mod tests {
         let dump = serde_json::to_string(&doc).unwrap();
         assert!(!dump.contains("data:"), "data: 协议不得出现在任何字段");
     }
+
+    #[test]
+    fn pipeline_builds_table_with_cell_attributes() {
+        // T6：表格在完整管线可达——ammonia 白名单保留 table 一族，td 的
+        // colspan/width/style 穿透净化到达树构建（宽度属性为 T6 新放行）
+        use crate::types::{Block, Width};
+        let doc = render_pipeline(
+            r#"<table><tr><td colspan="2" width="300" style="font-size:13px">单元</td></tr></table>"#,
+        )
+        .unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("表格应构建为 Table")
+        };
+        assert_eq!(rows.len(), 1);
+        let cell = &rows[0].cells[0];
+        assert_eq!(cell.colspan, 2);
+        assert_eq!(cell.width, Some(Width::Px(300.0)));
+        let crate::types::Block::Paragraph { runs, .. } = &cell.blocks[0] else {
+            panic!("cell 内容应为 Paragraph")
+        };
+        let crate::types::InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.font_size, Some(13.0));
+    }
 }

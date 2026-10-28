@@ -24,7 +24,10 @@
 //!    | pre | [`Block::Container`]（内容空白原样保留，不折叠） |
 //!    | hr | [`Block::Hr`] |
 //!    | br | [`InlineRun::Br`]（并入所在段落） |
-//!    | table / tr / td 一族 | Task 6 前按未知标签降级为 Container |
+//!    | table 一族 | [`Block::Table`]：tbody/thead/tfoot 透明容器、tr→TableRow、
+//!      td/th→TableCell（colspan/宽度/自身样式解析，字体属性族进 runs base）、
+//!      cell 内递归既有块级构建（嵌套表格自然成立）；rowspan 忽略（各自行内平铺）；
+//!      caption/colgroup/col 跳过 |
 //!    | script / style / head / title 等元数据 | 连同子树整体跳过 |
 //!
 //! 4. 行内扁平化（Task 5）：行内元素样式经 [`parse_inline_style`] 解析、
@@ -37,7 +40,9 @@
 //!    为单空格，段首/段尾与强制换行边界的空白删除；`pre` 例外（内容原样保留）；
 //!    `&nbsp;`（U+00A0）属内容空白，不折叠不删除；
 //! 6. 继承与对齐：块级 style 的 color 作为后代文本的 base [`InlineStyle`]（行内
-//!    样式经 merge 叠加）；对齐 `text-align` 样式优先、`align` 属性兜底；
+//!    样式经 merge 叠加）；td/th 的字体属性族（color/font-size/font-weight/
+//!    font-style/text-decoration）同样作为其内容 runs 的 base（表格单元格文字
+//!    样式的主流来源，T5 评审②）；对齐 `text-align` 样式优先、`align` 属性兜底；
 //! 7. `display:none` 子树剪枝（style 属性先经 [`parse_block_style`] 解析）；
 //!    树遍历深度超 [`MAX_TREE_DEPTH`] 的子树静默剪枝；
 //! 8. body 的 background-color（style / bgcolor 属性）应用到顶层首个无自身背景
@@ -45,10 +50,6 @@
 //!    仅对 `build_document` 直接调用成立）；
 //! 9. 节点计数超过 [`Limits::max_nodes`] → [`HtmlError::TooManyNodes`]；
 //!    无有效块 → [`HtmlError::Empty`]。
-//!
-//! ## Task 6 扩展点
-//!
-//! table 一族暂按未知标签降级为 Container，Task 6 接管为 [`Block::Table`]。
 
 use html5ever::tendril::TendrilSink;
 use html5ever::{Attribute, ParseOpts, parse_document};
@@ -63,7 +64,7 @@ use crate::error::HtmlError;
 use crate::style::{merge_inline, parse_align, parse_block_style, parse_color, parse_inline_style};
 use crate::types::{
     Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Limits,
-    Rgba, SafeUrl, Width,
+    Rgba, SafeUrl, TableCell, TableRow, Width,
 };
 
 /// 树遍历深度上限（含块/行内递归）。
@@ -144,6 +145,8 @@ enum BlockKind {
     Pre,
     /// hr。
     Hr,
+    /// table：tbody/thead/tfoot 透明、tr→TableRow、td/th→TableCell。
+    Table,
 }
 
 /// 标签分类（见模块文档的白名单表）。
@@ -180,13 +183,14 @@ fn classify(local: &str) -> Kind {
         "blockquote" => Kind::Block(BlockKind::Quote),
         "pre" => Kind::Block(BlockKind::Pre),
         "hr" => Kind::Block(BlockKind::Hr),
+        "table" => Kind::Block(BlockKind::Table),
         "div" => Kind::Block(BlockKind::Container { center: false }),
         "center" => Kind::Block(BlockKind::Container { center: true }),
         // 常见行内元素（img 在行内收集期分类为图片：段级提升为块级、链接内保留行内）
         "span" | "a" | "b" | "strong" | "i" | "em" | "u" | "s" | "strike" | "del" | "ins"
         | "small" | "big" | "sub" | "sup" | "font" | "code" | "tt" | "q" | "cite" | "abbr"
         | "acronym" | "label" | "mark" | "img" => Kind::Inline,
-        // 其余（table 一族 / mjml-* 等模板标签）→ 未知标签宽容降级
+        // 其余（tbody/tr/td/th 由表格构建器按层级取用；mjml-* 等模板标签）→ 未知标签宽容降级
         _ => Kind::Block(BlockKind::Container { center: false }),
     }
 }
@@ -287,9 +291,6 @@ impl<'a> TreeBuilder<'a> {
 
     /// 构建单个块级元素为块序列；`display:none` 子树返回空序列剪枝。
     /// 段落含行内图片时切分为多块（见 [`split_image_blocks`]）。
-    /// 构建单个块级元素为块序列；`display:none` 子树返回空序列剪枝。
-    /// 段落含行内图片时切分为多块（见 [`split_image_blocks`]）。
-    ///
     fn build_element_blocks(
         &mut self,
         node: &Handle,
@@ -373,6 +374,10 @@ impl<'a> TreeBuilder<'a> {
             }],
             BlockKind::Quote => vec![Block::Quote {
                 children: self.child_blocks(node, depth + 1, own_align, &child_base, Ws::Fold)?,
+            }],
+            BlockKind::Table => vec![Block::Table {
+                style,
+                rows: self.build_table_rows(node, depth + 1, own_align, &child_base)?,
             }],
             BlockKind::Hr => vec![Block::Hr],
         };
@@ -476,6 +481,127 @@ impl<'a> TreeBuilder<'a> {
             items.push(flushed);
         }
         Ok(items)
+    }
+
+    // ---- 表格构建（T6）----
+
+    /// table 子层级遍历：tbody/thead/tfoot 透明容器递归（行按文档顺序平铺）、
+    /// tr → 行；其余子元素（caption/colgroup/col 及意外元素）与文本节点跳过——
+    /// html5ever 的 foster parenting 已把表格内的非空白游离内容移出表格外，
+    /// 此处只剩空白文本节点（无块语义）。
+    fn build_table_rows(
+        &mut self,
+        node: &Handle,
+        depth: usize,
+        inherited: Align,
+        text_base: &InlineStyle,
+    ) -> Result<Vec<TableRow>, HtmlError> {
+        if depth > MAX_TREE_DEPTH {
+            return Ok(Vec::new());
+        }
+        let mut rows = Vec::new();
+        for child in node.children.borrow().iter() {
+            self.check_node()?;
+            if let NodeData::Element { name, attrs, .. } = &child.data {
+                match name.local.as_ref() {
+                    "tbody" | "thead" | "tfoot" => rows.extend(self.build_table_rows(
+                        child,
+                        depth + 1,
+                        inherited,
+                        text_base,
+                    )?),
+                    "tr" => {
+                        let attrs = attrs.borrow();
+                        // display:none 行剪枝（types.rs 约定：树构建期完成）
+                        if parse_block_style(attr_str(attrs.as_slice(), "style").unwrap_or(""))
+                            .hidden
+                        {
+                            continue;
+                        }
+                        rows.push(self.build_table_row(child, depth + 1, inherited, text_base)?)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(rows)
+    }
+
+    /// tr → TableRow：td/th → 单元格，其余子元素忽略（html5ever 已滤）。
+    fn build_table_row(
+        &mut self,
+        node: &Handle,
+        depth: usize,
+        inherited: Align,
+        text_base: &InlineStyle,
+    ) -> Result<TableRow, HtmlError> {
+        if depth > MAX_TREE_DEPTH {
+            return Ok(TableRow { cells: Vec::new() });
+        }
+        let mut cells = Vec::new();
+        for child in node.children.borrow().iter() {
+            self.check_node()?;
+            if let NodeData::Element { name, attrs, .. } = &child.data {
+                let local = name.local.as_ref();
+                if local == "td" || local == "th" {
+                    let attrs = attrs.borrow();
+                    if let Some(cell) = self.build_table_cell(
+                        child,
+                        attrs.as_slice(),
+                        depth + 1,
+                        inherited,
+                        text_base,
+                    )? {
+                        cells.push(cell);
+                    }
+                }
+            }
+        }
+        Ok(TableRow { cells })
+    }
+
+    /// td/th → [`TableCell`]：
+    ///
+    /// - colspan：默认 1，数值钳制 1–16（types.rs 契约；0/负/非数字回退默认）；
+    /// - 宽度：style `width` 优先、`width` 属性兜底（与 img 尺寸同序）；
+    /// - 自身样式：style 属性 → BlockStyle；对齐 text-align 样式优先、align 属性兜底；
+    /// - 字体属性族进 runs base（T5 评审捎带②）：style 声明中的 color/font-size/
+    ///   font-weight/font-style/text-decoration 经 [`parse_inline_style`] 映射、
+    ///   [`merge_inline`] 叠加为内容 runs 的 base——表格单元格文字样式的主流来源
+    ///   （行内声明可覆盖，cell 内嵌套块经 text_base 透传继承）；
+    /// - `display:none` 单元格整体剪枝；rowspan 不读（各自行内平铺，裁定）。
+    fn build_table_cell(
+        &mut self,
+        node: &Handle,
+        attrs: &[Attribute],
+        depth: usize,
+        inherited: Align,
+        text_base: &InlineStyle,
+    ) -> Result<Option<TableCell>, HtmlError> {
+        let style_text = attr_str(attrs, "style").unwrap_or("");
+        let style = parse_block_style(style_text);
+        if style.hidden {
+            return Ok(None);
+        }
+        let colspan = attr_str(attrs, "colspan")
+            .and_then(parse_colspan)
+            .unwrap_or(1);
+        let mut width = style.width;
+        if width.is_none() {
+            width = attr_str(attrs, "width").and_then(parse_dim_attr);
+        }
+        let own_align = style
+            .text_align
+            .or_else(|| attr_str(attrs, "align").and_then(parse_align))
+            .unwrap_or(inherited);
+        let cell_base = merge_inline(text_base, &parse_inline_style(style_text));
+        let blocks = self.child_blocks(node, depth + 1, own_align, &cell_base, Ws::Fold)?;
+        Ok(Some(TableCell {
+            blocks,
+            colspan,
+            width,
+            style,
+        }))
     }
 
     /// 收集块级元素（p/h1–h6）内容为行内 run 序列并做段落级规整。
@@ -708,14 +834,35 @@ fn image_style(attrs: &[Attribute]) -> ImageStyle {
     style
 }
 
-/// img 的 width/height 属性值：无单位数值 / px / `%`。
+/// img/td 的 width/height 属性值：无单位数值 / px / `%`；非有限/负值拒绝
+/// （T5 评审备案：`f32::parse` 接受 "NaN"/"inf"，不得进入 IR）。
 fn parse_dim_attr(value: &str) -> Option<Width> {
+    let finite_nonneg = |v: &f32| v.is_finite() && *v >= 0.0;
     let value = value.trim();
     if let Some(percent) = value.strip_suffix('%') {
-        return percent.trim().parse::<f32>().ok().map(Width::Percent);
+        return percent
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(finite_nonneg)
+            .map(Width::Percent);
     }
     let value = value.strip_suffix("px").unwrap_or(value).trim();
-    value.parse::<f32>().ok().map(Width::Px)
+    value
+        .parse::<f32>()
+        .ok()
+        .filter(finite_nonneg)
+        .map(Width::Px)
+}
+
+/// colspan 属性：数值钳制到 1–16（types.rs 契约：默认 1、上限 16，防病理宽表）；
+/// 0/负数/非数字 → None（调用方回退默认 1）。
+fn parse_colspan(value: &str) -> Option<u8> {
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|n| n.clamp(1, 16) as u8)
 }
 
 /// 用聚合的行内 run 物化段落（聚合段落无自身样式，对齐继承父容器）。
@@ -767,7 +914,8 @@ fn trim_html_ws(s: &str) -> &str {
 /// - 文本内部连续空白折叠为单空格；
 /// - 段首、段尾、强制换行边界的空白删除（行首/行尾空白不渲染）；
 /// - 行中独立空白文本节点（如 `<b>x</b> <i>y</i>` 之间的空格）先挂起不发射：
-///   与后续文本合并为单空格（归属空白处的样式），或在链接/图片前物化——
+///   与后续文本合并为单空格（归属空白处的样式；上一 run 已以可折叠空白结尾时
+///   并入其尾随空白，不产双空格——T5 评审 Minor-1），或在链接/图片前物化——
 ///   否则跨不同样式 run 的空格会丢失；
 /// - `Ws::Preserve`（pre）下所有文本原样直入，不触碰状态。
 struct InlineBuffer {
@@ -777,7 +925,8 @@ struct InlineBuffer {
     line_start: bool,
     /// 已发射文本以可折叠空白结尾（后续文本的前导空白与之合并）。
     trailing_ws: bool,
-    /// 已见未发射的行中空白（遇到非文本 run 前挂起，物化为单空格；段尾消失）。
+    /// 已见未发射的行中空白（遇到非文本 run 前挂起，物化为单空格——上一 run
+    /// 已以空白结尾时并入之；段尾消失）。
     pending: Option<InlineStyle>,
 }
 
@@ -820,9 +969,12 @@ impl InlineBuffer {
             self.trailing_ws = true;
             return;
         }
-        // 行中文本：挂起空白先物化为单空格，或与上一 run 的尾随空白合并
+        // 行中文本：挂起空白物化为单空格；上一 run 已以可折叠空白结尾时并入之
+        // 不追加（T5 评审 Minor-1：`<b>a </b> <i>b</i>` 不得产出双空格）
         let pending_style = self.pending.take();
-        if let Some(ws_style) = &pending_style {
+        if let Some(ws_style) = &pending_style
+            && !matches!(self.runs.last(), Some(InlineRun::Text { text, .. }) if text.ends_with(' '))
+        {
             self.runs.push(InlineRun::Text {
                 text: " ".to_string(),
                 style: ws_style.clone(),
@@ -884,13 +1036,16 @@ impl InlineBuffer {
         self.trailing_ws = false;
     }
 
-    /// 发射非文本 run（Link / Image）：挂起的行中空白先物化为单空格。
+    /// 发射非文本 run（Link / Image）：挂起的行中空白物化为单空格（上一 run
+    /// 已以可折叠空白结尾时并入之，不追加——与 [`Self::push_text`] 同语义）。
     fn push_wrapped(&mut self, run: InlineRun) {
         if self.ws == Ws::Preserve {
             self.runs.push(run);
             return;
         }
-        if let Some(ws_style) = self.pending.take() {
+        if let Some(ws_style) = self.pending.take()
+            && !matches!(self.runs.last(), Some(InlineRun::Text { text, .. }) if text.ends_with(' '))
+        {
             self.runs.push(InlineRun::Text {
                 text: " ".to_string(),
                 style: ws_style,
@@ -1239,6 +1394,30 @@ mod tests {
     }
 
     #[test]
+    fn pending_whitespace_merges_into_trailing_ws() {
+        // T5 评审 Minor-1：前文尾随空白 + 独立空白节点不产双空格——物化挂起空白
+        // 时上一 run 已以可折叠空白结尾则并入之（注释宣称的合并分支）
+        let doc = doc("<p><b>a </b> <i>b</i></p>");
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(runs.len(), 2);
+        assert_eq!(run_text(runs), "a b");
+        // 链接前的物化同语义：不追加空格 run（渲染文本 "a l"，非 "a  l"）
+        let doc = build_document(
+            r#"<p><b>a </b> <a href="https://e">l</a></p>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(runs.len(), 2);
+        assert!(matches!(runs[0], InlineRun::Text { .. }));
+        assert!(matches!(runs[1], InlineRun::Link { .. }));
+    }
+
+    #[test]
     fn pre_preserves_whitespace_verbatim() {
         let doc = doc("<pre>  a\n    b  </pre>");
         let Block::Container { children, .. } = &doc.blocks[0] else {
@@ -1412,16 +1591,194 @@ mod tests {
             panic!("应为 Heading")
         };
         assert_eq!(*align, Align::Center);
-        // table（T6 前降级 Container）的 align 同样生效
+        // table 的 align 同样生效（T6 起由 Block::Table 的 style 承载，此前降级 Container）
         let doc = build_document(
             r#"<table align="center"><tr><td>c</td></tr></table>"#,
             &Limits::default(),
         )
         .unwrap();
-        let Block::Container { style, .. } = &doc.blocks[0] else {
-            panic!("应为 Container")
+        let Block::Table { style, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
         };
         assert_eq!(style.text_align, Some(Align::Center));
+    }
+
+    // ---- 表格构建（T6）----
+
+    #[test]
+    fn basic_two_row_table() {
+        // table>tr>td*2 → Table{rows:[Row[Cell,Cell], Row[Cell,Cell]]}
+        //（html5ever 隐式补的 tbody 在行遍历中透明）
+        let doc = doc("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>");
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Table { rows, style } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(*style, BlockStyle::default());
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            assert_eq!(row.cells.len(), 2);
+        }
+        assert_eq!(text_of(&rows[0].cells[0].blocks[0]), "a");
+        assert_eq!(text_of(&rows[0].cells[1].blocks[0]), "b");
+        assert_eq!(text_of(&rows[1].cells[0].blocks[0]), "c");
+        assert_eq!(text_of(&rows[1].cells[1].blocks[0]), "d");
+    }
+
+    #[test]
+    fn colspan_recorded() {
+        // <td colspan="3"> → TableCell{colspan:3}
+        let doc = doc(r#"<table><tr><td colspan="3">a</td><td>b</td></tr></table>"#);
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[0].cells[0].colspan, 3);
+        assert_eq!(rows[0].cells[1].colspan, 1);
+        // 畸形值回退默认 1；超出上限钳制 16（types.rs 契约：默认 1、上限 16）
+        let doc = build_document(
+            r#"<table><tr><td colspan="x">a</td><td colspan="0">b</td><td colspan="99">c</td></tr></table>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[0].cells[0].colspan, 1);
+        assert_eq!(rows[0].cells[1].colspan, 1);
+        assert_eq!(rows[0].cells[2].colspan, 16);
+    }
+
+    #[test]
+    fn nested_table_recurses_into_cell() {
+        // td 内 table → cell.blocks 含 Table（嵌套表格走同一条构建路径）
+        let doc = doc(
+            r#"<table><tr><td><table><tr><td>in</td></tr></table></td><td>out</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cells.len(), 2);
+        let Block::Table { rows: inner, .. } = &rows[0].cells[0].blocks[0] else {
+            panic!("cell.blocks 应含嵌套 Table")
+        };
+        assert_eq!(inner.len(), 1);
+        assert_eq!(text_of(&inner[0].cells[0].blocks[0]), "in");
+        assert_eq!(text_of(&rows[0].cells[1].blocks[0]), "out");
+    }
+
+    #[test]
+    fn rowspan_ignored_as_plain_row() {
+        // 带 rowspan 的表格不 panic，行结构平铺（各自行内独立，无跨行占位）
+        let doc =
+            doc(r#"<table><tr><td rowspan="2">a</td><td>b</td></tr><tr><td>c</td></tr></table>"#);
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].cells.len(), 2);
+        assert_eq!(rows[1].cells.len(), 1);
+        assert_eq!(text_of(&rows[0].cells[0].blocks[0]), "a");
+        assert_eq!(text_of(&rows[1].cells[0].blocks[0]), "c");
+    }
+
+    #[test]
+    fn thead_tbody_transparent_and_th_is_cell() {
+        // thead/tbody 透明容器（行按文档顺序平铺）；th 与 td 同构为 TableCell
+        let doc = doc(
+            "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>a</td></tr></tbody></table>",
+        );
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(text_of(&rows[0].cells[0].blocks[0]), "h");
+        assert_eq!(text_of(&rows[1].cells[0].blocks[0]), "a");
+    }
+
+    #[test]
+    fn cell_width_style_priority_and_attr_fallback() {
+        // 单元格宽度：style 优先、width 属性兜底；% 与 px；非有限值拒绝（T5 备案④）
+        let doc = doc(
+            r#"<table><tr><td width="600" style="width:300px">a</td><td width="50%">b</td><td width="NaN">c</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        let cells = &rows[0].cells;
+        assert_eq!(cells[0].width, Some(Width::Px(300.0)));
+        assert_eq!(cells[1].width, Some(Width::Percent(50.0)));
+        assert_eq!(cells[2].width, None);
+    }
+
+    #[test]
+    fn table_style_and_align_recorded() {
+        // 表格自身 style → Table 的 style；align 属性兜底 text_align；
+        // 白名单外声明（border-spacing）静默忽略
+        let doc = doc(
+            r#"<table align="center" style="background-color:#eee;width:600px;border-spacing:2px"><tr><td>c</td></tr></table>"#,
+        );
+        let Block::Table { style, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(style.background_color, Some([238, 238, 238, 255]));
+        assert_eq!(style.width, Some(Width::Px(600.0)));
+        assert_eq!(style.text_align, Some(Align::Center));
+        assert_eq!(style.border_top, None);
+    }
+
+    #[test]
+    fn td_style_font_props_become_run_base() {
+        // T5 评审捎带②：td/th 的字体属性族（color/font-size/font-weight）作为内容
+        // runs 的 base InlineStyle——表格单元格文字样式的主流来源
+        let doc = build_document(
+            r#"<table><tr><td style="color:#336699;font-size:13px;font-weight:bold">x</td></tr></table>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        let Block::Paragraph { runs, .. } = &rows[0].cells[0].blocks[0] else {
+            panic!("cell 内容应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([51, 102, 153, 255]));
+        assert_eq!(style.font_size, Some(13.0));
+        assert!(style.bold);
+        // 行内声明经 merge_inline 覆盖 base
+        let doc = build_document(
+            r#"<table><tr><td style="font-size:13px"><span style="font-size:16px">x</span></td></tr></table>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        let Block::Paragraph { runs, .. } = &rows[0].cells[0].blocks[0] else {
+            panic!("cell 内容应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.font_size, Some(16.0));
+    }
+
+    #[test]
+    fn hidden_cell_and_row_pruned() {
+        // display:none 的单元格/行在树构建期剪枝（types.rs 约定）
+        let doc = doc(
+            r#"<table><tr><td style="display:none">gone</td><td>kept</td></tr><tr style="display:none"><td>gone</td></tr><tr><td>kept2</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].cells.len(), 1);
+        assert_eq!(text_of(&rows[0].cells[0].blocks[0]), "kept");
+        assert_eq!(text_of(&rows[1].cells[0].blocks[0]), "kept2");
     }
 
     // ---- 图片（提升为块级 / 样式）----
@@ -1638,11 +1995,14 @@ mod tests {
     }
 
     #[test]
-    fn table_downgrades_to_container_before_task6() {
-        // T6 前 table 一族按未知标签降级为 Container（解析器隐式补的 tbody 同样降级）
+    fn table_cell_content_builds_existing_block_tree() {
+        // T6 接管：cell 内 blocks 递归走既有块级构建（p/h/div 在单元格内照常成型）
         let doc = doc("<table><tr><td><p>cell</p></td></tr></table>");
-        assert!(matches!(&doc.blocks[0], Block::Container { .. }));
-        assert!(contains_text(&doc.blocks, "cell"));
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[0].cells[0].blocks.len(), 1);
+        assert_eq!(text_of(&rows[0].cells[0].blocks[0]), "cell");
     }
 
     #[test]
