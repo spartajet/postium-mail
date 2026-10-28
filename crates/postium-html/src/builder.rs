@@ -39,10 +39,11 @@
 //! 5. 空白折叠（Task 5，HTML 块级上下文语义）：连续空白（空格/制表/换行）折叠
 //!    为单空格，段首/段尾与强制换行边界的空白删除；`pre` 例外（内容原样保留）；
 //!    `&nbsp;`（U+00A0）属内容空白，不折叠不删除；
-//! 6. 继承与对齐：块级 style 的 color 作为后代文本的 base [`InlineStyle`]（行内
-//!    样式经 merge 叠加）；td/th 的字体属性族（color/font-size/font-weight/
-//!    font-style/text-decoration）同样作为其内容 runs 的 base（表格单元格文字
-//!    样式的主流来源，T5 评审②）；对齐 `text-align` 样式优先、`align` 属性兜底；
+//! 6. 继承与对齐：块级 style 的字体属性族（color/font-size/font-weight/
+//!    font-style/text-decoration）统一作为后代文本的 base [`InlineStyle`]（行内
+//!    样式经 merge 叠加；T7 裁定①推广到全部块级 p/div/heading/li/table 一处
+//!    收口，此前仅 color 单属性 + td/th 双通道）；对齐 `text-align` 样式优先、
+//!    `align` 属性兜底；
 //! 7. `display:none` 子树剪枝（style 属性先经 [`parse_block_style`] 解析）；
 //!    树遍历深度超 [`MAX_TREE_DEPTH`] 的子树静默剪枝；
 //! 8. body 的 background-color（style / bgcolor 属性）应用到顶层首个无自身背景
@@ -300,7 +301,8 @@ impl<'a> TreeBuilder<'a> {
         inherited: Align,
         text_base: &InlineStyle,
     ) -> Result<Vec<Block>, HtmlError> {
-        let mut style = parse_block_style(attr_str(attrs, "style").unwrap_or(""));
+        let style_text = attr_str(attrs, "style").unwrap_or("");
+        let mut style = parse_block_style(style_text);
         if style.hidden {
             return Ok(Vec::new()); // display:none 子树整体剪枝
         }
@@ -315,14 +317,12 @@ impl<'a> TreeBuilder<'a> {
             .text_align
             .or_else(|| center.then_some(Align::Center))
             .unwrap_or(inherited);
-        // 块级 color → 后代文本 base 行内样式（T5 评审②）；其余块级字段不映射行内
-        let child_base = merge_inline(
-            text_base,
-            &InlineStyle {
-                color: style.color,
-                ..InlineStyle::default()
-            },
-        );
+        // 块级字体属性族 → 后代文本 base 行内样式（T7 裁定①：color/font-size/
+        // font-weight/font-style/text-decoration 五族经 parse_inline_style 统一
+        // 映射，p/div/heading/table 等全部块级一处收口——此前仅 color 单属性
+        // （T5 评审②），td/th 的双通道同语义（T6）；Heading 的块级 color 由同
+        // 一合并覆盖，不设第二份；行内声明经 merge_inline 照常叠加覆盖）
+        let child_base = merge_inline(text_base, &parse_inline_style(style_text));
         let blocks = match kind {
             BlockKind::Container { center } => {
                 // <center> 语义物化进自身样式（GPUI 渲染层消费 text_align）
@@ -406,8 +406,8 @@ impl<'a> TreeBuilder<'a> {
                     let local = name.local.as_ref();
                     if local == "li" {
                         let attrs = attrs.borrow();
-                        let style =
-                            parse_block_style(attr_str(attrs.as_slice(), "style").unwrap_or(""));
+                        let style_text = attr_str(attrs.as_slice(), "style").unwrap_or("");
+                        let style = parse_block_style(style_text);
                         if style.hidden {
                             continue;
                         }
@@ -416,13 +416,8 @@ impl<'a> TreeBuilder<'a> {
                             items.push(flushed);
                         }
                         let align = style.text_align.unwrap_or(inherited);
-                        let li_base = merge_inline(
-                            text_base,
-                            &InlineStyle {
-                                color: style.color,
-                                ..InlineStyle::default()
-                            },
-                        );
+                        // li 同块级字体属性族 base 通道（T7 裁定①"全部块级"）
+                        let li_base = merge_inline(text_base, &parse_inline_style(style_text));
                         items.push(self.child_blocks(child, depth + 1, align, &li_base, ws)?);
                         continue;
                     }
@@ -1725,6 +1720,77 @@ mod tests {
         assert_eq!(style.width, Some(Width::Px(600.0)));
         assert_eq!(style.text_align, Some(Align::Center));
         assert_eq!(style.border_top, None);
+    }
+
+    #[test]
+    fn block_font_props_become_run_base() {
+        // T7 裁定①：块级字体属性族（color/font-size/font-weight/font-style/
+        // text-decoration）统一作为后代 runs base——p/div/heading/li 全部块级
+        // 一处收口（此前仅 color 单属性 + td/th 双通道）
+        let para = doc(
+            r#"<p style="font-size:14px;font-weight:bold;font-style:italic;text-decoration:underline">x</p>"#,
+        );
+        let Block::Paragraph { runs, .. } = &para.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.font_size, Some(14.0));
+        assert!(style.bold && style.italic && style.underline);
+
+        // heading 同通道（T4 既有块级 color 行为不变，新增字号等四族）
+        let heading = doc(r#"<h3 style="color:#336699;font-size:20px">t</h3>"#);
+        let Block::Heading { runs, .. } = &heading.blocks[0] else {
+            panic!("应为 Heading")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([51, 102, 153, 255]));
+        assert_eq!(style.font_size, Some(20.0));
+
+        // 容器透传到子块；li 自身声明在继承 base 之上叠加
+        let nested = doc(
+            r#"<div style="color:red;font-size:13px"><p>直</p><ul><li style="font-weight:bold">项</li></ul></div>"#,
+        );
+        let Block::Container { children, .. } = &nested.blocks[0] else {
+            panic!("应为 Container")
+        };
+        let Block::Paragraph { runs, .. } = &children[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([255, 0, 0, 255]));
+        assert_eq!(style.font_size, Some(13.0));
+        let Block::List { items, .. } = &children[1] else {
+            panic!("应为 List")
+        };
+        let Block::Paragraph { runs, .. } = &items[0][0] else {
+            panic!("列表项应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([255, 0, 0, 255]));
+        assert_eq!(style.font_size, Some(13.0));
+        assert!(style.bold);
+
+        // 行内声明照常覆盖 base
+        let overridden =
+            doc(r#"<div style="font-size:13px"><span style="font-size:16px">x</span></div>"#);
+        let Block::Container { children, .. } = &overridden.blocks[0] else {
+            panic!("应为 Container")
+        };
+        let Block::Paragraph { runs, .. } = &children[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.font_size, Some(16.0));
     }
 
     #[test]
