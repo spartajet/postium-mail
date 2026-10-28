@@ -1089,6 +1089,123 @@ fn navigate_to_contacts_shows_title(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → ContactsView 三栏交互：导航懒建/装载/星标反转/刷新/搜索过滤
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_view_interactions(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+
+    // 种子联系人应已在 store（含 Primary E2E，初始为星标）
+    let primary = contacts
+        .iter()
+        .find(|c| c.email == "seed.e2e@postium.test")
+        .expect("store 联系人应含种子 Primary E2E");
+    assert_eq!(primary.name.as_deref(), Some("Primary E2E"));
+    assert!(primary.is_starred, "种子 Primary E2E 初始应为星标");
+    let primary_id = primary.id;
+
+    // 直驱星标路径（列表行 ★ 点击同款 store 方法）：乐观反转
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.toggle_starred(primary_id, &api, cx));
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let flipped = store
+                .contacts
+                .iter()
+                .find(|c| c.id == primary_id)
+                .filter(|c| !c.is_starred)
+                .is_some();
+            flipped.then_some(())
+        })
+    });
+
+    // 落库确认（异步写入：轮询直至持久化）
+    wait_for(cx, |_| {
+        let c = crate::runtime::runtime()
+            .block_on(async { api.get_contact(primary_id).await })
+            .expect("联系人查询失败")
+            .expect("联系人应存在");
+        (!c.is_starred).then_some(())
+    });
+
+    // store 刷新：装载完成后 DB 状态保持（仍为非星标）
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.load(&api, cx));
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version >= 2 && !store.loading)
+                .then(|| {
+                    store.contacts.iter().find(|c| c.id == primary_id).cloned()
+                })
+                .flatten()
+                .filter(|c| !c.is_starred)
+                .is_some()
+                .then_some(())
+        })
+    });
+
+    // 搜索过滤（工具条搜索输入防抖直达的 store 方法）：唯一词只命中种子联系人
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.set_query("seed.e2e", &api, cx));
+        });
+    });
+    let filtered = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.query == "seed.e2e" && store.contacts.len() == 1 && !store.loading)
+                .then(|| store.contacts.clone())
+        })
+    });
+    assert_eq!(
+        filtered[0].email, "seed.e2e@postium.test",
+        "搜索 seed.e2e 应只命中种子联系人"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]

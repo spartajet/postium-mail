@@ -106,6 +106,7 @@ pub struct AppShell {
     /// 托盘句柄（保持存活）
     _tray: Option<tray_icon::TrayIcon>,
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
+    pub(crate) contacts_view: Option<gpui_kit::Entity<crate::views::contacts::ContactsView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
@@ -326,6 +327,7 @@ impl AppShell {
             _appearance_sub: appearance_sub,
             _tray,
             calendar_view: None,
+            contacts_view: None,
             workflow_view: None,
             status_bar: None,
         };
@@ -427,7 +429,14 @@ impl Render for AppShell {
                 }
                 self.workflow_view.clone().unwrap().into_any_element()
             }
-            NavTarget::Contacts => placeholder_pane(&i18n::t("sidebar.contacts"), cx).into_any_element(),
+            NavTarget::Contacts => {
+                if self.contacts_view.is_none() {
+                    let api = self.api.clone();
+                    self.contacts_view =
+                        Some(cx.new(|cx| crate::views::contacts::ContactsView::new(api, window, cx)));
+                }
+                self.contacts_view.clone().unwrap().into_any_element()
+            }
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
             _ => h_flex()
                 .flex_1()
