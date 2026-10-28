@@ -144,6 +144,23 @@ pub fn apply_mode(mode: gpui_kit::component::ThemeMode, cx: &mut App) {
     apply_brand(cx);
 }
 
+/// 深浅主题互切并持久化偏好，返回新偏好（"dark" / "light"）。
+/// 顶栏与状态栏按钮共用；调用方负责触发重绘。
+pub fn toggle_theme_mode(cx: &mut App) -> &'static str {
+    use gpui_kit::component::ActiveTheme as _;
+    let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
+    let (mode, pref) = if dark {
+        (gpui_kit::component::ThemeMode::Light, "light")
+    } else {
+        (gpui_kit::component::ThemeMode::Dark, "dark")
+    };
+    apply_mode(mode, cx);
+    let mut ui = crate::ui_state::load();
+    ui.theme = Some(pref.to_string());
+    crate::ui_state::save(&ui);
+    pref
+}
+
 /// 由偏好与系统外观解析实际主题模式（"system" 跟随系统）。
 pub fn resolve_mode(pref: &str, appearance: gpui_kit::WindowAppearance) -> gpui_kit::component::ThemeMode {
     match pref {

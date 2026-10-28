@@ -3,8 +3,6 @@
 use std::sync::Arc;
 
 use gpui_kit::component::{
-    ActiveTheme as _,
-    button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     resizable::{h_resizable, resizable_panel},
@@ -14,7 +12,7 @@ use gpui_kit::*;
 
 use postium_core::api::{CoreApi, SyncEventRx};
 
-use crate::i18n::{self, Lang};
+use crate::i18n::{self};
 use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
 use crate::stores::detail::{DetailEvent, DetailStore};
@@ -368,26 +366,12 @@ impl AppShell {
     }
 
     fn toggle_lang(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let current = cx.global::<i18n::I18nGlobal>().lang;
-        let next = if current == Lang::Zh { Lang::En } else { Lang::Zh };
-        i18n::set_lang(next, cx);
-        let mut ui = crate::ui_state::load();
-        ui.lang = Some(match next { Lang::Zh => "zh".into(), Lang::En => "en".into() });
-        crate::ui_state::save(&ui);
+        crate::i18n::toggle_language(cx);
+        cx.notify();
     }
 
     pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
-        let (mode, pref) = if dark {
-            (gpui_kit::component::ThemeMode::Light, "light")
-        } else {
-            (gpui_kit::component::ThemeMode::Dark, "dark")
-        };
-        crate::theme::apply_mode(mode, cx);
-        self.theme_pref = pref.to_string();
-        let mut ui = crate::ui_state::load();
-        ui.theme = Some(pref.to_string());
-        crate::ui_state::save(&ui);
+        self.theme_pref = crate::theme::toggle_theme_mode(cx).into();
     }
 
 }
@@ -524,23 +508,6 @@ impl Render for AppShell {
                                     .text_size(px(13.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(nav_label),
-                            )
-                            .child(
-                                h_flex()
-                                    .ml_auto()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("lang")
-                                            .ghost()
-                                            .label("中/EN")
-                                            .on_click(cx.listener(Self::toggle_lang)),
-                                    )
-                                    .child(
-                                        Button::new("theme")
-                                            .ghost()
-                                            .label(i18n::t("settings.theme"))
-                                            .on_click(cx.listener(Self::toggle_theme)),
-                                    ),
                             ),
                     )
                     .child(div().flex_1().overflow_hidden().child(main))
