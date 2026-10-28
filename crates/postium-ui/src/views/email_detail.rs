@@ -1,13 +1,14 @@
 //! 邮件详情视图（移植自 src/lib/components/email/EmailDetail.svelte）。
 
-use std::sync::Arc;
+use std::cell::OnceCell;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui_kit::component::{
     ActiveTheme as _,
     Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
-    text::html,
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
@@ -19,6 +20,7 @@ use crate::i18n::{t, t_format};
 use crate::nav::NavTarget;
 use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
+use crate::views::email_html::{ImageCtx, render_html_document};
 
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
@@ -291,23 +293,192 @@ fn spawn_tokok_delete(api: Arc<CoreApi>, id: i32) -> smol::channel::Receiver<Res
     spawn_tokio(async move { api.delete_emails(vec![id]).await })
 }
 
+// ---------------------------------------------------------------------------
+// 正文 HTML 文档缓存（spec §7：LRU 8，同一邮件来回翻看零重解析）
+// ---------------------------------------------------------------------------
+
+/// 缓存条目：浅色（原样）文档 + 深色适配文档（按需生成）。
+struct CachedDoc {
+    /// 浅色文档：`render_pipeline` 产出，接入时即解析。
+    doc: postium_html::HtmlDocument,
+    /// 深色适配文档（`postium_html::adapt_document` 产出，按需生成）。
+    /// T14 主题接线才消费（本任务恒不填充，仅按 brief 值形态预留）。
+    #[allow(dead_code)] // T14 深色接线消费（spec §6）
+    dark_doc: OnceCell<postium_html::HtmlDocument>,
+}
+
+/// 正文 HTML 文档 LRU 缓存（容量 8，spec §7）。
+pub struct EmailHtmlCache {
+    /// 最近使用序（队首最旧、队尾最新，逐出从队首）。
+    order: VecDeque<i32>,
+    map: HashMap<i32, CachedDoc>,
+}
+
+impl EmailHtmlCache {
+    /// 缓存容量（spec §7）。
+    const CAPACITY: usize = 8;
+
+    /// 取文档（命中提升为最近使用）；未命中返回 None。
+    fn get(&mut self, key: i32) -> Option<postium_html::HtmlDocument> {
+        if let Some(pos) = self.order.iter().position(|k| *k == key) {
+            let k = self.order.remove(pos).expect("position 已验证存在");
+            self.order.push_back(k);
+        }
+        self.map.get(&key).map(|c| c.doc.clone())
+    }
+
+    /// 放入文档（已存在则覆盖并提升）；超容量逐出最久未用。
+    fn put(&mut self, key: i32, doc: postium_html::HtmlDocument) {
+        if !self.order.iter().any(|k| *k == key) {
+            self.order.push_back(key);
+        }
+        self.map.insert(
+            key,
+            CachedDoc {
+                doc,
+                dark_doc: OnceCell::new(),
+            },
+        );
+        while self.order.len() > Self::CAPACITY {
+            let evicted = self.order.pop_front().expect("长度受控非空");
+            self.map.remove(&evicted);
+        }
+    }
+}
+
+/// 进程级正文文档缓存。
+///
+/// 为什么放静态而非 EmailDetailView 字段：AppShell 在每次 SelectionChanged
+/// 都重建 EmailDetailView（app.rs `detail_view = Some(cx.new(…))`），挂在
+/// 视图上缓存随选中丢弃；进程级静态让缓存跨视图重建存活。GPUI 单 UI 线程
+/// 模型下 Mutex 无实际争用，仅为满足 static 的 Sync 要求（毒化走
+/// `into_inner` 兜底，不 panic）。
+static EMAIL_HTML_CACHE: OnceLock<Mutex<EmailHtmlCache>> = OnceLock::new();
+
+fn email_html_cache() -> &'static Mutex<EmailHtmlCache> {
+    EMAIL_HTML_CACHE.get_or_init(|| {
+        Mutex::new(EmailHtmlCache {
+            order: VecDeque::new(),
+            map: HashMap::new(),
+        })
+    })
+}
+
+/// 正文 HTML → 新渲染器元素；管线超限/净化后空（`Err`）→ `None` 走纯文本降级。
+///
+/// 缓存键为邮件数据库 id：`EmailDetail` 未暴露 message_id（该字段仅存于
+/// 仓储层模型，DTO 无此字段），进程会话内 db id 稳定唯一，缓存随进程生灭
+/// 语义等价。
+fn rendered_html_body(html: &str, email_id: i32, cx: &mut gpui_kit::App) -> Option<AnyElement> {
+    let doc = {
+        let mut cache = email_html_cache().lock().unwrap_or_else(|e| e.into_inner());
+        match cache.get(email_id) {
+            Some(doc) => doc,
+            None => {
+                let doc = postium_html::render_pipeline(html).ok()?;
+                cache.put(email_id, doc.clone());
+                doc
+            }
+        }
+    };
+    // dark 固定 false（T14 接主题接线）；图片三源 enabled=false 全占位（T13 接管）
+    Some(render_html_document(
+        &doc,
+        false,
+        ImageCtx::default(),
+        open_safe_url,
+        cx,
+    ))
+}
+
+/// 链接打开动作（SafeUrl 之外不产生回调）：Http/Mailto 同走系统默认处理器
+/// （`open::that_detached`——OAuth 授权链接 settings.rs 同款项目现有路径）。
+fn open_safe_url(url: &postium_html::SafeUrl) {
+    match url {
+        postium_html::SafeUrl::Http(u) | postium_html::SafeUrl::Mailto(u) => {
+            let _ = open::that_detached(u);
+        }
+    }
+}
+
+/// 纯文本正文块（现有纯文本路径；HTML 降级共用同一形态）。
+fn plain_text_body(text: String) -> AnyElement {
+    div()
+        .flex_1()
+        .overflow_hidden()
+        .p_4()
+        .child(
+            div()
+                .text_size(px(13.5))
+                .line_height(relative(1.8))
+                .child(text),
+        )
+        .into_any_element()
+}
+
+/// 未选中邮件的占位面板。
+fn no_selection_placeholder(cx: &gpui_kit::App) -> AnyElement {
+    v_flex()
+        .flex_1()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .text_size(px(13.))
+                .text_color(cx.theme().muted_foreground)
+                .child(t("email.noEmailSelected")),
+        )
+        .into_any_element()
+}
+
+
 impl Render for EmailDetailView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let store = self.store.read(cx);
+        // ── 正文输入先行取齐并结束 store 借用：新渲染器需要 &mut App（读主题），
+        // detail 共享借用不得跨越该调用 ──
+        let body_input = {
+            let store = self.store.read(cx);
+            store
+                .detail
+                .as_ref()
+                .map(|d| (d.email.id, store.html.clone().unwrap_or_default()))
+        };
+        let Some((email_id, body_html_str)) = body_input else {
+            return no_selection_placeholder(cx);
+        };
 
+        // 正文：HTML 邮件经新渲染器（管线超限/净化后空 → 纯文本降级 + 提示条）；
+        // 纯文本邮件路径不动
+        let (body, html_fallback) = match rendered_html_body(&body_html_str, email_id, cx) {
+            Some(el) => (
+                div()
+                    .id("email-html-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_4()
+                    .child(el)
+                    .into_any_element(),
+                false,
+            ),
+            None => {
+                // 降级：现有纯文本路径 + 顶部提示条（第二短借取纯文本正文）
+                let body_text = {
+                    let store = self.store.read(cx);
+                    store
+                        .detail
+                        .as_ref()
+                        .and_then(|d| d.body_text.clone())
+                        .unwrap_or_default()
+                };
+                (plain_text_body(body_text), true)
+            }
+        };
+
+        let store = self.store.read(cx);
         let Some(detail) = &store.detail else {
-            return v_flex()
-                .flex_1()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .text_size(px(13.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(t("email.noEmailSelected")),
-                )
-                .into_any_element();
+            return no_selection_placeholder(cx);
         };
 
         let sent_time = chrono::DateTime::from_timestamp(detail.email.sent_at, 0)
@@ -318,27 +489,6 @@ impl Render for EmailDetailView {
             .sender_name
             .clone()
             .unwrap_or_else(|| detail.email.sender_email.clone());
-
-        let body_html_str = store.html.clone().unwrap_or_default();
-        let body: AnyElement = if !body_html_str.is_empty() {
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .child(html(body_html_str).p_4().scrollable(true).selectable(true))
-                .into_any_element()
-        } else {
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .p_4()
-                .child(
-                    div()
-                        .text_size(px(13.5))
-                        .line_height(relative(1.8))
-                        .child(detail.body_text.clone().unwrap_or_default()),
-                )
-                .into_any_element()
-        };
 
         v_flex()
             .flex_1()
@@ -544,6 +694,17 @@ impl Render for EmailDetailView {
                         })),
                 )
             })
+            // 降级提示条：HTML 无法渲染（超限/净化后空）时的纯文本降级标记
+            .children(html_fallback.then(|| {
+                div()
+                    .flex_none()
+                    .px_3()
+                    .py_1()
+                    .text_size(px(12.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t("email.htmlFallback"))
+                    .debug_selector(|| "email-html-fallback".to_string())
+            }))
             // 正文
             .child(body)
             .into_any_element()
@@ -588,4 +749,38 @@ fn cc_display(detail: &postium_core::service::email_service::EmailDetail) -> Opt
 fn separator(cx: &gpui_kit::App) -> impl IntoElement {
     let _ = cx;
     div().w(px(1.)).h(px(14.)).mx_1().bg(gpui_kit::black().opacity(0.15))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc() -> postium_html::HtmlDocument {
+        postium_html::HtmlDocument::default()
+    }
+
+    /// LRU 8 语义锁（spec §7）：容量逐出最久未用、命中提升保活。
+    ///
+    /// `core::prelude::v1::test` 显式路径：本模块父级的 `use gpui_kit::*` glob
+    /// 在测试构建下包含 GPUI 的 `test` 宏（gpui-kit lib.rs 98-99 行注释明示
+    /// 该遮蔽问题），裸 `#[test]` 会解析到它并递归爆栈。
+    #[core::prelude::v1::test]
+    fn cache_lru_eviction_and_recency_bump() {
+        let mut cache = EmailHtmlCache {
+            order: VecDeque::new(),
+            map: HashMap::new(),
+        };
+        for id in 1..=8 {
+            cache.put(id, doc());
+        }
+        // 访问 1 号（提升为最近使用），9 号入场应逐出 2 号（最久未用）
+        assert!(cache.get(1).is_some(), "命中 1 号");
+        cache.put(9, doc());
+        assert!(cache.get(2).is_none(), "最久未用的 2 号应被逐出");
+        assert!(cache.get(1).is_some(), "刚访问过的 1 号应保活");
+        for id in 3..=9 {
+            assert!(cache.get(id).is_some(), "{id} 号应仍在缓存");
+        }
+        assert!(cache.get(10).is_none(), "未放入的键不命中");
+    }
 }

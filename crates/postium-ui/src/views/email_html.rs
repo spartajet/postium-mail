@@ -40,10 +40,8 @@ use postium_html::{
 #[cfg(test)]
 use gpui_kit::InteractiveElement as _;
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 正文基础字号（px）。邮件作者未声明字号时的兜底。
 const BASE_FONT_SIZE: f32 = 14.;
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 正文基础行高（倍数）。
 const BASE_LINE_HEIGHT: f32 = 1.6;
 
@@ -61,7 +59,6 @@ pub struct ImageCtx {
     pub attachments: Vec<(String, Arc<RenderImage>)>,
 }
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 渲染期常量：主题衍生默认色板 + 主题字体 + 链接回调，一次取齐（帧内不可变）。
 struct RenderCtx {
     dark: bool,
@@ -79,7 +76,6 @@ struct RenderCtx {
     link_ix: Cell<usize>,
 }
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 impl RenderCtx {
     fn new(dark: bool, on_link: Arc<dyn Fn(&SafeUrl) + 'static>, cx: &App) -> Self {
         let theme = cx.theme();
@@ -118,7 +114,6 @@ impl RenderCtx {
 
 /// 块级递归的继承上下文。
 #[derive(Clone, Copy, Default)]
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 struct Inherited {
     /// 块级 `color` 继承（IR BlockStyle.color → 行内默认色）。
     color: Option<Hsla>,
@@ -132,7 +127,6 @@ struct Inherited {
 /// - `images`：图片上下文（Task 13 接管三源渲染）。
 /// - `on_link`：链接点击回调（InteractiveText hitbox 命中链接区间时以
 ///   [`SafeUrl`] 调用；email_detail 侧 http/mailto → `cx.open_url`）。
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 pub fn render_html_document(
     doc: &HtmlDocument,
     dark: bool,
@@ -149,7 +143,6 @@ pub fn render_html_document(
         .into_any_element()
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 块级序列 → 纵向 flex 列。
 fn render_blocks(blocks: &[Block], inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let mut col = v_flex().w_full();
@@ -159,7 +152,6 @@ fn render_blocks(blocks: &[Block], inh: Inherited, rcx: &RenderCtx) -> gpui_kit:
     col
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 单个块级元素 → GPUI 元素。
 fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     match block {
@@ -248,7 +240,6 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     }
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 列表：标记列（• / 序号）+ 内容列（项内块序列递归）。
 fn render_list(ordered: bool, items: &[Vec<Block>], inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     let mut col = v_flex().w_full().pl(px(24. * (inh.depth as f32 + 1.)));
@@ -286,7 +277,6 @@ fn render_list(ordered: bool, items: &[Vec<Block>], inh: Inherited, rcx: &Render
     col.into_any_element()
 }
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 表格行 → 横向 flex（cells 沿主轴排布，交叉轴拉伸等高——UA 行高 = 最高单元格）。
 fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let mut r = h_flex().w_full().items_stretch();
@@ -296,7 +286,6 @@ fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit
     r
 }
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 表格单元格 → 容器（colspan → flex_grow 权重、width → 固定宽/百分比宽、
 /// 无显式宽 basis 归零交 grow 相位分配、cell.style → map_block_style；
 /// 嵌套块递归 [`render_blocks`]，空单元格占最小行高防塌陷）。
@@ -330,7 +319,6 @@ fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_
     c
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流 → 文本元素（字号分组的 [`StyledText`]）与行内图片占位的序列。
 ///
 /// `default_size`：run 未声明字号时的兜底字号——由调用方按块类型传入
@@ -391,7 +379,6 @@ fn render_inline_flow(
     els
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流中间产物。
 enum FlowSeg {
     /// 文本段（同样式段已合并；`link` 携带归属链接的 [`SafeUrl`]，Task 10
@@ -405,7 +392,6 @@ enum FlowSeg {
     Image { style: ImageStyle, alt: String },
 }
 
-#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 行内 run 序列扁平化：相邻同样式段合并、链接内层携带 href、br 折行。
 fn flatten_runs(
     runs: &[InlineRun],
@@ -473,7 +459,6 @@ fn flatten_runs(
     }
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 把积累的文本段组渲染为一个文本元素（相邻同样式段合并成单一 [`TextRun`]）。
 ///
 /// 组内含链接段时以 [`InteractiveText`] 承载：链接段按 seg 级标记 + 段长
@@ -556,7 +541,6 @@ fn flush_text_group(
     els.push(d.into_any_element());
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// [`TextRun`] 同样式判据（比较样式字段、不含 `len`——len 是入列时回填的
 /// 字节数，参与比较会使合并判据恒假；`with_runs` 要求 run 恰好覆盖全文，
 /// 相邻同样式 run 合并保证 run 序列最简）。
@@ -568,7 +552,6 @@ fn same_run_style(a: &TextRun, b: &TextRun) -> bool {
         && a.strikethrough == b.strikethrough
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 构建单段 [`TextRun`]（字体/颜色/下划线/删除线；链接段附加链接色与下划线）。
 fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &RenderCtx) -> TextRun {
     TextRun {
@@ -593,7 +576,6 @@ fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &Ren
     }
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 图片占位框（Task 13 三源真实渲染接管）：固定高度灰框 + alt 文本，
 /// 宽度尽量取 style.width（防加载后布局跳动，spec §5）。
 fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyElement {
@@ -634,7 +616,6 @@ fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyEleme
     d.child(label).into_any_element()
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// [`BlockStyle`] → GPUI div 样式映射（背景/边框/间距/宽度，spec §3 映射表）。
 ///
 /// `dark` 仅标记消费的是已适配文档（`postium_html::adapt` 产出），颜色
@@ -713,13 +694,11 @@ fn map_block_style(style: &BlockStyle, dark: bool) -> gpui_kit::Div {
     d
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// IR 颜色（RGBA 0–255）→ GPUI [`Hsla`]。
 fn ir_color(c: Rgba) -> Hsla {
     rgba(u32::from_be_bytes(c)).into()
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// IR 对齐 → GPUI 文本对齐（Justify 降级 Left：GPUI 暂无两端对齐）。
 fn map_align(a: Align) -> TextAlign {
     match a {
@@ -729,7 +708,6 @@ fn map_align(a: Align) -> TextAlign {
     }
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 标题默认字号（HTML UA 近似：h1 2em → h6 0.67em，基准 16px）。
 fn heading_size(level: u8) -> f32 {
     match level {
@@ -746,7 +724,6 @@ fn heading_size(level: u8) -> f32 {
 // 测试探针（仅测试构建生效）：块级锚点与行内文本段以选择器写入渲染树，
 // e2e 经 `VisualTestContext::debug_bounds` 查询；正常构建直通零开销。
 // ---------------------------------------------------------------------------
-#[allow(dead_code)] // Task 11 接入 email_detail 前仅探针路径使用
 trait ProbeExt: Sized {
     fn when_probe(self, selector: &str) -> Self;
 }

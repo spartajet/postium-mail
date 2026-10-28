@@ -2126,3 +2126,151 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
         "on_link 应收到 SafeUrl::Http"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Task 11：email_detail 正文接入新渲染器——种子 HTML 邮件打开后正文文本以
+// 新渲染器探针键出现（旧 gpui_kit text::html 路径不产生 html-txt-* 探针，
+// 探针键由 email_html 渲染层在测试构建写入）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_renders_via_new_renderer(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
+
+    // 种子 HTML 邮件（body_html = <p>This is deterministic E2E body content …</p>）
+    let email_id = with_app(cx, |app| {
+        shell
+            .read(app)
+            .emails
+            .read(app)
+            .emails
+            .iter()
+            .find(|e| {
+                e.subject
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("Primary Inbox Message 01")
+            })
+            .map(|e| e.id)
+            .expect("收件箱应含 Primary Inbox Message 01 种子邮件")
+    });
+
+    // 行选中同款事件：SelectionChanged → 详情装载 + 详情视图重建
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(email_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    email_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == email_id).then_some(())
+        })
+    });
+
+    // 正文文本以新渲染器探针键可见（text_probe_key：内容字母数字前缀 16 字符）
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-Thisisdeterminis")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 11：降级路径——>1MB 正文经 render_pipeline TooLarge → 纯文本降级 +
+// 顶部提示条出现、不 panic。形态选择：>1MB 正文经 save_draft 真实落库
+// （e2e 草稿路径本地写入，compose e2e 已覆盖），再按行选中同款事件打开
+// 详情——走完整降级链路（DetailStore 装载 → 管线超限 → 降级渲染），
+// 不用函数级直调（保留 e2e 全栈语义）。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_oversize_falls_back(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Oversize Fallback Probe".into(),
+            body_html: format!("<p>{}</p>", "x".repeat(1024 * 1024 + 64)),
+            body_text: "超大邮件降级后的纯文本正文".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("超大草稿应保存成功")
+            .draft_id
+    };
+    assert!(draft_id > 0, "草稿应保存并返回正 id");
+
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+
+    // 降级提示条可见（debug_selector 探针，contacts-import-btn 同款查询模式）；
+    // 超限分支不进入渲染树构建，测试进程存活即不 panic 断言
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-html-fallback")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+}
