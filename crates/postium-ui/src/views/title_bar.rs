@@ -127,7 +127,8 @@ pub fn render(
             secondary_hover,
             cx,
         ))
-        // 关闭：应用层处理（保存窗口状态后最小化；退出走托盘菜单）
+        // 关闭：保存窗口状态后销毁窗口（程序驻留托盘，「显示窗口」重建主窗口；
+        // 退出走托盘菜单）。销毁需异步（事件分发栈上同步移除自身窗口不安全）。
         .child(
             div()
                 .id("win-close")
@@ -139,9 +140,13 @@ pub fn render(
                 .justify_center()
                 .text_color(theme.foreground)
                 .hover(move |s| s.bg(theme.danger).text_color(theme.danger_foreground))
-                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
                     crate::window_state::save(window);
-                    window.minimize_window();
+                    let handle = window.window_handle();
+                    cx.spawn(async move |cx| {
+                        let _ = handle.update(cx, |_, window, _| window.remove_window());
+                    })
+                    .detach();
                 })
                 .child(gpui_kit::component::Icon::new(IconName::WindowClose).size_3p5()),
         )

@@ -72,8 +72,15 @@ pub(crate) fn window_title_for(
     }
 }
 
-pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
-    let options = match crate::window_state::saved_bounds() {
+/// 打开主窗口。
+///
+/// `sync_rx` 为主窗口的同步事件接收端；`None` 时（托盘重建已关闭的
+/// 主窗口）使用空通道占位——后台调度的消费循环随旧窗口销毁，重建窗口
+/// 不再接收调度事件（同步状态以列表轮询刷新为准）。
+pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mut App) {
+    let sync_rx = sync_rx
+        .unwrap_or_else(|| crate::stores::sync::sync_event_channel().1);
+    let mut options = match crate::window_state::saved_bounds() {
         Some(bounds) => WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
@@ -82,16 +89,13 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
     };
     // 原生标题栏深浅只随系统外观（Windows 上无法应用内切换），改为透明 +
     // 应用自绘标题栏（views::title_bar，背景跟随主题 title_bar 色）
-    let mut options = options;
     options.titlebar = Some(TitlebarOptions {
         appears_transparent: true,
         ..Default::default()
     });
-    let (_handle, shell_view) = gpui_kit::open_window(
-        options,
-        cx,
-        |window, cx| cx.new(|cx| AppShell::new(api, sync_rx, window, cx)),
-    )
+    let (_handle, shell_view) = gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| AppShell::new(api, sync_rx, window, cx))
+    })
     .expect("打开主窗口失败");
     // 注册全局弱引用（窗口关闭后自动失效）
     cx.set_global(MainShell(shell_view.downgrade()));
@@ -130,7 +134,7 @@ pub struct AppShell {
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     /// 主窗口句柄：选中邮件时更新窗口标题用
-    window_handle: gpui_kit::AnyWindowHandle,
+    pub(crate) window_handle: gpui_kit::AnyWindowHandle,
     /// 同步中节流刷新：上次刷新时刻 / 到期未刷标记
     sync_refresh_at: Option<std::time::Instant>,
     sync_refresh_pending: bool,
