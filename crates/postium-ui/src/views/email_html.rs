@@ -26,9 +26,9 @@ use std::sync::{Arc, Mutex};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, FontStyle, FontWeight, Hsla, IntoElement as _, ParentElement as _, RenderImage,
-    SharedString, StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun, UnderlineStyle,
-    div, font as base_font, px, relative, rgba,
+    AnyElement, App, FontStyle, FontWeight, Hsla, IntoElement as _, ParentElement as _,
+    RenderImage, SharedString, StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun,
+    UnderlineStyle, div, font as base_font, px, relative, rgba,
 };
 use postium_html::{
     Align, Block, BlockStyle, HtmlDocument, ImageStyle, InlineRun, InlineStyle, Rgba, SafeUrl,
@@ -304,7 +304,11 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
                 if text.is_empty() {
                     continue;
                 }
-                if let Some(FlowSeg::Text { text: last, style: ls, link: ll }) = out.last_mut()
+                if let Some(FlowSeg::Text {
+                    text: last,
+                    style: ls,
+                    link: ll,
+                }) = out.last_mut()
                     && *ll == link
                     && *ls == style
                 {
@@ -320,10 +324,7 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
             InlineRun::Link { runs, .. } => flatten_runs(runs, true, force_bold, out),
             InlineRun::Br => {
                 // 折行归并进前段；但不得并入链接段（换行符带下划线会画出线尾）
-                let joins_last = matches!(
-                    out.last(),
-                    Some(FlowSeg::Text { link: false, .. })
-                );
+                let joins_last = matches!(out.last(), Some(FlowSeg::Text { link: false, .. }));
                 if joins_last {
                     if let Some(FlowSeg::Text { text, .. }) = out.last_mut() {
                         text.push('\n');
@@ -359,7 +360,12 @@ fn flush_text_group(
     let mut runs: Vec<TextRun> = Vec::new();
     let mut size: Option<f32> = None;
     for seg in &group {
-        let FlowSeg::Text { text: seg_text, style, link } = seg else {
+        let FlowSeg::Text {
+            text: seg_text,
+            style,
+            link,
+        } = seg
+        else {
             continue;
         };
         let run = text_run(style, *link, base_color, rcx);
@@ -373,7 +379,10 @@ fn flush_text_group(
         {
             last.len += seg_len;
         } else {
-            runs.push(TextRun { len: seg_len, ..run });
+            runs.push(TextRun {
+                len: seg_len,
+                ..run
+            });
         }
     }
     if text.is_empty() {
@@ -589,6 +598,10 @@ impl ProbeExt for gpui_kit::Div {
 
 #[cfg(test)]
 fn text_probe_key(text: &str) -> String {
-    let key: String = text.chars().filter(|c| c.is_alphanumeric()).take(16).collect();
+    let key: String = text
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .take(16)
+        .collect();
     format!("html-txt-{key}")
 }

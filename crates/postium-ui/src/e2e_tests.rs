@@ -1769,7 +1769,11 @@ struct HtmlRenderProbe {
 }
 
 impl gpui_kit::Render for HtmlRenderProbe {
-    fn render(&mut self, _: &mut gpui_kit::Window, cx: &mut gpui_kit::Context<Self>) -> impl gpui_kit::IntoElement {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
         use gpui_kit::{ParentElement as _, Styled as _};
         let element = crate::views::email_html::render_html_document(
             &self.doc,
@@ -1790,7 +1794,10 @@ fn html_render_smoke(cx: &mut TestAppContext) {
     };
 
     fn text(t: &str) -> InlineRun {
-        InlineRun::Text { text: t.into(), style: InlineStyle::default() }
+        InlineRun::Text {
+            text: t.into(),
+            style: InlineStyle::default(),
+        }
     }
 
     let doc = HtmlDocument {
@@ -1890,8 +1897,9 @@ fn html_render_smoke(cx: &mut TestAppContext) {
     for _ in 0..200 {
         cx.run_until_parked();
         missing.retain(|k| {
-            cx.debug_bounds(k)
-                .is_none_or(|b| b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.))
+            cx.debug_bounds(k).is_none_or(|b| {
+                b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.)
+            })
         });
         if missing.is_empty() {
             break;
