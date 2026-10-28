@@ -243,22 +243,24 @@ impl Render for Sidebar {
                 crate::theme::compose_button(t("sidebar.compose"), on_compose)
             })
             .child(scroll)
-            // 固定底部：回收站（停靠） + 设置
+            // 固定底部：回收站（停靠） + 分隔线 + 设置
             .child(
-                div().pt_1().mt_1().border_t_1().border_color(theme.border).child(
-                    nav!("nav-trash", IconName::Trash, t(category_label_key(&EmailCategory::Trash)), trash_unread, NavTarget::Category(EmailCategory::Trash)),
-                )
-                .child(
-                    Button::new("settings")
-                        .ghost()
-                        .w_full()
-                        .justify_start()
-                        .icon(IconName::Settings2)
-                        .label(t("settings.title"))
-                        .on_click(cx.listener(|_, _, _, cx| {
-                            cx.emit(SidebarEvent::Settings);
-                        })),
-                ),
+                div().pt_1().mt_1().border_t_1().border_color(theme.border)
+                    .child(
+                        nav!("nav-trash", IconName::Trash, t(category_label_key(&EmailCategory::Trash)), trash_unread, NavTarget::Category(EmailCategory::Trash)),
+                    )
+                    .child(divider(&theme))
+                    .child(
+                        Button::new("settings")
+                            .ghost()
+                            .w_full()
+                            .justify_start()
+                            .icon(IconName::Settings2)
+                            .label(t("settings.title"))
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                cx.emit(SidebarEvent::Settings);
+                            })),
+                    ),
             )
     }
 }
