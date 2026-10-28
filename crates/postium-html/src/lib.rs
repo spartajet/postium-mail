@@ -13,11 +13,15 @@
 //! 安全边界：树构建期再做终审白名单（SafeUrl / ImageRef，见 spec §4.4），
 //! 本 crate 的净化只负责结构白名单与脚本剔除。
 
+pub mod builder;
 pub mod error;
+pub mod pipeline;
 pub mod sanitize;
 pub mod types;
 
+pub use builder::build_document;
 pub use error::HtmlError;
+pub use pipeline::{inline_css, render_pipeline};
 pub use sanitize::{sanitize_lenient, strip_mso_comments};
 pub use types::{
     Align, Block, BlockStyle, Border, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle,

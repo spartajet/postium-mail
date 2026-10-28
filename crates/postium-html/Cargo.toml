@@ -7,6 +7,7 @@ description = "Postium Mail 邮件 HTML 渲染预处理：MSO 剥离 / 宽松净
 
 [dependencies]
 ammonia = "4.2.4"
+css-inline = { version = "0.23.1", default-features = false }
 serde = { workspace = true, features = ["rc"] }
 thiserror.workspace = true
 
