@@ -183,21 +183,43 @@ impl ComposeView {
                         // 提交后输入清空：作废在途防抖查询，防止迟到结果重开浮层
                         this.sugg_gen += 1;
                         let handle = this.window_ref;
-                        let pick_first = match which {
-                            // 浮层开且有候选 → Enter 取第一项（set_value 后 commit）
-                            0 if this.to_field.sugg_open && !this.to_field.suggestions.is_empty() => {
-                                this.to_field.suggestions[0].email.clone()
+                        // 空输入 Enter（防抖窗口内候选尚挂旧值）：不取候选直接收浮层，
+                        // 避免把陈旧候选提交成 chip（T12 遗留边缘）
+                        let input_empty = match which {
+                            0 => this.to_field.input.read(cx).value().trim().is_empty(),
+                            1 => this.cc_field.input.read(cx).value().trim().is_empty(),
+                            _ => this.bcc_field.input.read(cx).value().trim().is_empty(),
+                        };
+                        if input_empty {
+                            match which {
+                                0 => this.to_field.close_suggestions(),
+                                1 => this.cc_field.close_suggestions(),
+                                _ => this.bcc_field.close_suggestions(),
                             }
-                            1 if this.cc_field.sugg_open && !this.cc_field.suggestions.is_empty() => {
-                                this.cc_field.suggestions[0].email.clone()
+                        }
+                        let pick_first = if input_empty {
+                            String::new()
+                        } else {
+                            match which {
+                                // 浮层开且有候选 → Enter 取第一项（set_value 后 commit）
+                                0 if this.to_field.sugg_open
+                                    && !this.to_field.suggestions.is_empty() =>
+                                {
+                                    this.to_field.suggestions[0].email.clone()
+                                }
+                                1 if this.cc_field.sugg_open
+                                    && !this.cc_field.suggestions.is_empty() =>
+                                {
+                                    this.cc_field.suggestions[0].email.clone()
+                                }
+                                _ if which == 2
+                                    && this.bcc_field.sugg_open
+                                    && !this.bcc_field.suggestions.is_empty() =>
+                                {
+                                    this.bcc_field.suggestions[0].email.clone()
+                                }
+                                _ => String::new(),
                             }
-                            _ if which == 2
-                                && this.bcc_field.sugg_open
-                                && !this.bcc_field.suggestions.is_empty() =>
-                            {
-                                this.bcc_field.suggestions[0].email.clone()
-                            }
-                            _ => String::new(),
                         };
                         let _ = handle.update(cx, |_, window, cx| {
                             if !pick_first.is_empty() {
