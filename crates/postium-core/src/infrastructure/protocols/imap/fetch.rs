@@ -579,7 +579,7 @@ impl ImapClient {
                 if let Some(msg) = mail_parser::MessageParser::default().parse(raw) {
                     body_text = decoded_body_text(&msg);
                     body_html = decoded_body_html(&msg);
-                    preview = body_text.as_ref().map(|t| t.chars().take(200).collect());
+                    preview = body_text.as_ref().map(|t| parser::normalize_preview(t));
                     headers = Some(extract_headers_from_message_with_raw(&msg, raw, now));
                 }
             }
@@ -754,7 +754,7 @@ impl ImapClient {
         let body_html = decoded_body_html(&message);
         let preview = body_text
             .as_ref()
-            .map(|text| text.chars().take(200).collect());
+            .map(|text| parser::normalize_preview(text));
         let attachments = parser::extract_attachments_from_raw(raw_body);
         let received_at = fetch
             .internal_date()

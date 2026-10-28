@@ -720,6 +720,30 @@ pub fn build_attachment_info(
 
 // ─── 从原始邮件解析附件（不依赖服务器 BODYSTRUCTURE） ───
 
+/// 规范化列表预览文本：压平换行与连续空白、trim、截断到 200 字符。
+///
+/// 列表行的预览是单行展示（对齐 Tauri 版 CSS truncate 效果），
+/// 正文里天然的换行必须压平，否则行高参差。
+pub fn normalize_preview(text: &str) -> String {
+    let mut out = String::with_capacity(text.len().min(400));
+    let mut last_was_space = false;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            if !last_was_space {
+                out.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            out.push(c);
+            last_was_space = false;
+        }
+        if out.chars().count() >= 200 {
+            break;
+        }
+    }
+    out.trim().to_string()
+}
+
 /// 从原始 RFC822 邮件全文解析附件元数据，并计算 IMAP section 编号。
 ///
 /// 为何不依赖 BODYSTRUCTURE：网易（Coremail）等服务器会在 BODYSTRUCTURE
@@ -968,6 +992,22 @@ PK\r\n\
         // message/rfc822 位于 part 2，内层第一个部件 = 2.1
         assert_eq!(attachments[0].section_path, "2.1");
         assert_eq!(attachments[0].filename.as_deref(), Some("a.zip"));
+    }
+
+    /// 预览规范化：换行压平、连续空白合一、trim、200 字符截断
+    #[test]
+    fn normalize_preview_flattens_newlines_and_truncates() {
+        let text = "第一行\r\n第二行\n\n  第三行\t结束  ";
+        assert_eq!(
+            normalize_preview(text),
+            "第一行 第二行 第三行 结束"
+        );
+
+        let long = "ab".repeat(500);
+        assert_eq!(normalize_preview(&long).chars().count(), 200);
+
+        assert_eq!(normalize_preview("   "), "");
+        assert_eq!(normalize_preview(""), "");
     }
 
     /// 测试检测无文件名的内联 CID 图片为附件

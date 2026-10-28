@@ -64,83 +64,113 @@ impl RenderOnce for EmailRow {
                 }
             })
             .unwrap_or_default();
-        let preview = self.email.preview.clone().unwrap_or_default();
+        let unread = !self.email.is_read;
+
+        // 三行等高结构（对齐 Tauri 版 EmailList.svelte 的邮件项）：
+        // ①发件人+时间 ②星标+主题 ③预览（单行，空时占位保持行高一致）。
+        // 每行容器固定高度，行与行之间 border-b 分隔。
+        let line = |h: f32| div().w_full().h(px(h)).overflow_hidden();
+
+        // ① 发件人 + 时间；未读时发件人加粗（tauri: font-semibold text-foreground）
+        let mut row1 = h_flex().gap_2().items_center();
+        if unread {
+            row1 = row1.child(
+                div()
+                    .flex_none()
+                    .w(px(6.))
+                    .h(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().accent),
+            );
+        }
+        row1 = row1
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        self.email
+                            .sender_name
+                            .clone()
+                            .unwrap_or_else(|| self.email.sender_email.clone()),
+                    ),
+            )
+            .when(self.email.has_attachments, |this| {
+                this.child(
+                    gpui_kit::component::Icon::new(IconName::Paperclip)
+                        .size_3()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.5))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(time),
+            );
+
+        // ② 星标 + 主题；未读时主题中粗
+        let row2 = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .when(self.email.is_starred, |this| {
+                this.child(
+                    gpui_kit::component::Icon::new(IconName::Star)
+                        .size_3()
+                        .flex_none()
+                        .text_color(gpui_kit::rgb(0xf59e0b)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::MEDIUM).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        self.email
+                            .subject
+                            .clone()
+                            .unwrap_or_else(|| "（无主题）".into()),
+                    ),
+            );
+
+        // ③ 预览单行；空时占位同高，保证全部邮件等高
+        let preview_text = self.email.preview.clone().unwrap_or_default();
+        let row3 = div()
+            .mt(px(2.))
+            .h(px(15.))
+            .overflow_hidden()
+            .text_size(px(12.))
+            .text_color(cx.theme().muted_foreground)
+            .when(!preview_text.is_empty(), |d| {
+                d.whitespace_nowrap().line_clamp(1).child(preview_text)
+            });
 
         let row = self
             .base
-            .py_2()
-            .px_3()
-            // 行间分隔线（最后一行也带，视觉上与“加载更多”区隔开）
+            .px(px(20.))
+            .py(px(12.))
+            // 行间分隔线（最后一行也带，视觉上与”加载更多”区隔开）
             .border_b_1()
             .border_color(cx.theme().border.opacity(0.6))
-            .child(
-            v_flex()
-                .flex_1()
-                .overflow_hidden()
-                .gap_1()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .when(self.email.is_starred, |this| {
-                            this.child(
-                                gpui_kit::component::Icon::new(IconName::Star)
-                                    .size_3()
-                                    .text_color(gpui_kit::rgb(0xf59e0b)),
-                            )
-                        })
-                        .when(self.email.has_attachments, |this| {
-                            this.child(
-                                gpui_kit::component::Icon::new(IconName::Paperclip).size_3(),
-                            )
-                        })
-                        .child(
-                            div()
-                                .text_size(px(12.5))
-                                .text_color(cx.theme().muted_foreground)
-                                .line_clamp(1)
-                                .child(
-                                    self.email
-                                        .sender_name
-                                        .clone()
-                                        .unwrap_or_else(|| self.email.sender_email.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .ml_auto()
-                                .text_size(px(11.5))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(time),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_size(px(13.5))
-                        .text_color(cx.theme().foreground)
-                        .when(!self.email.is_read, |this| {
-                            this.font_weight(FontWeight::SEMIBOLD)
-                        })
-                        .line_clamp(1)
-                        .child(
-                            self.email
-                                .subject
-                                .clone()
-                                .unwrap_or_else(|| "（无主题）".into()),
-                        ),
-                )
-                .when(!preview.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(cx.theme().muted_foreground)
-                            .line_clamp(1)
-                            .child(preview),
-                    )
-                }),
-        );
+            .child(line(18.).child(row1))
+            .child(line(18.).mt(px(2.)).child(row2))
+            .child(row3);
 
-        // 右键菜单（对齐旧版 EmailContextMenu；旧版"更多操作"为占位未复刻）
+        // 右键菜单（对齐旧版 EmailContextMenu；旧版”更多操作”为占位未复刻）
         match menu_ctx {
             (Some(api), Some(store)) => div()
                 .child(row)
