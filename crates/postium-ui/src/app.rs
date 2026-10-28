@@ -60,7 +60,9 @@ pub fn set_theme_pref(pref: &str, cx: &mut App) {
 pub const MAIN_WINDOW_TITLE: &str = "Postium Mail";
 
 /// 由详情状态推导窗口标题：有详情显示「主题 — Postium Mail」，无则默认。
-fn window_title_for(detail: Option<&postium_core::service::email_service::EmailDetail>) -> String {
+pub(crate) fn window_title_for(
+    detail: Option<&postium_core::service::email_service::EmailDetail>,
+) -> String {
     let subject = detail
         .and_then(|d| d.email.subject.clone())
         .filter(|s| !s.trim().is_empty());
@@ -375,6 +377,9 @@ impl AppShell {
     /// 更新窗口标题：选中邮件时显示「邮件主题 — Postium Mail」，
     /// 无选中（详情空）时恢复默认标题。
     pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {
+        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
+        // 这里 notify 触发重绘；系统窗口标题（任务栏显示）同步更新。
+        cx.notify();
         let title = window_title_for(self.detail.read(cx).detail.as_ref());
         let _ = self.window_handle.update(cx, |_, window, _| {
             window.set_window_title(&title);
@@ -487,7 +492,7 @@ impl Render for AppShell {
         // 根布局：自定义标题栏（跟随主题深浅）+ 侧栏/内容列（拖把手可调宽）
         v_flex()
             .size_full()
-            .child(crate::views::title_bar::render(window, cx))
+            .child(crate::views::title_bar::render(self, window, cx))
             .child(
                 div()
                     .flex_1()

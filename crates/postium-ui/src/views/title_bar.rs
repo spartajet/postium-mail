@@ -18,11 +18,17 @@ use gpui_kit_assets::IconName;
 pub const TITLE_BAR_HEIGHT: f32 = 32.;
 
 /// 渲染主窗口标题栏。
-pub fn render(_window: &mut Window, cx: &mut Context<crate::app::AppShell>) -> impl IntoElement {
+pub fn render(
+    shell: &crate::app::AppShell,
+    _window: &mut Window,
+    cx: &mut Context<crate::app::AppShell>,
+) -> impl IntoElement {
     let theme = cx.theme();
     let title_bar_bg = theme.title_bar;
     let border = theme.border;
     let muted_fg = theme.muted_foreground;
+    // 选中邮件时标题栏显示邮件主题（与系统窗口标题一致）
+    let title_text = crate::app::window_title_for(shell.detail.read(cx).detail.as_ref());
 
     let ctrl_btn =
         |id: &'static str, icon: IconName, on_click: fn(&mut Window, &mut Context<crate::app::AppShell>)| {
@@ -43,14 +49,17 @@ pub fn render(_window: &mut Window, cx: &mut Context<crate::app::AppShell>) -> i
         .bg(title_bar_bg)
         .border_b_1()
         .border_color(border)
-        // 左：应用名
+        // 左：应用名 / 选中邮件的主题
         .child(
             div()
+                .flex_none()
+                .max_w(px(360.))
                 .px_1()
                 .text_size(px(12.5))
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .text_color(muted_fg)
-                .child(crate::app::MAIN_WINDOW_TITLE),
+                .line_clamp(1)
+                .child(title_text),
         )
         // 中：拖动区（空白区域整体可拖动窗口）
         .child(
