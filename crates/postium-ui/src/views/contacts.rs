@@ -346,48 +346,58 @@ impl ContactsView {
 
     // ── 导入/导出 ──
 
-    /// 工具条「导入」：后台线程 rfd 选 `.vcf/.csv` 并读文本（UI 线程不做
-    /// 阻塞 IO）→ 按扩展名分派（无扩展/未知按内容嗅探：BEGIN:VCARD 开头
-    /// → vCard，否则 CSV）→ store 导入（api 调用 + 刷新 + toast 报告）。
+    /// 工具条「导入」：后台线程 rfd 选 `.vcf/.csv` 并读字节（UI 线程不做
+    /// 阻塞 IO；`read_to_string` 只认 UTF-8，中文 Windows 上 GBK 编码 CSV
+    /// 必失败——改 `read` 字节 + `from_utf8_lossy`：GBK 会乱码但可导入）→
+    /// 读文件失败 toast 导入失败（不折叠成取消静默）→ 按扩展名分派
+    ///（无扩展/未知按内容嗅探：BEGIN:VCARD 开头 → vCard，否则 CSV）→
+    /// store 导入（api 调用 + 刷新 + toast 报告）。
     fn import_contacts(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let (tx, rx) = smol::channel::bounded(1);
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new()
                 .add_filter("Contacts", &["vcf", "csv"])
                 .pick_file()
-                .and_then(|path| {
-                    std::fs::read_to_string(&path)
-                        .ok()
-                        .map(|text| (path, text))
+                .map(|path| {
+                    std::fs::read(&path)
+                        .map(|bytes| (path, String::from_utf8_lossy(&bytes).into_owned()))
+                        .map_err(|e| format!("{e}"))
                 });
             let _ = tx.try_send(picked);
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(Some((path, text))) = rx.recv().await {
-                this.update(cx, |view, cx| {
-                    let api = view.api.clone();
-                    let vcard = match path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.to_ascii_lowercase())
-                        .as_deref()
-                    {
-                        Some("vcf") | Some("vcard") => true,
-                        Some("csv") => false,
-                        _ => text
-                            .trim_start()
-                            .to_ascii_uppercase()
-                            .starts_with("BEGIN:VCARD"),
-                    };
-                    view.store.update(cx, |store, cx| {
-                        if vcard {
-                            store.import_contacts_vcard_text(text, &api, cx);
-                        } else {
-                            store.import_contacts_csv_text(text, &api, cx);
-                        }
-                    });
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Some(Ok((path, text)))) => {
+                    this.update(cx, |view, cx| {
+                        let api = view.api.clone();
+                        let vcard = match path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_ascii_lowercase())
+                            .as_deref()
+                        {
+                            Some("vcf") | Some("vcard") => true,
+                            Some("csv") => false,
+                            _ => sniff_is_vcard(&text),
+                        };
+                        view.store.update(cx, |store, cx| {
+                            if vcard {
+                                store.import_contacts_vcard_text(text, &api, cx);
+                            } else {
+                                store.import_contacts_csv_text(text, &api, cx);
+                            }
+                        });
+                    })
+                    .ok();
+                }
+                // 读文件失败（权限/占用/磁盘等）：toast 导入失败而非静默返回
+                Ok(Some(Err(error))) => {
+                    crate::notify::toast(t_format(
+                        "contacts.importFailed",
+                        &[("error", &error)],
+                    ));
+                }
+                _ => {} // 取消对话框 / 通道关闭
             }
         })
         .detach();
@@ -1281,4 +1291,34 @@ fn split_list(s: &str) -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// 内容嗅探是否 vCard 文本：去 BOM（`\u{feff}`，CSV 导出带 BOM）与首部空白后，
+/// 以 BEGIN:VCARD 开头（ASCII 大小写不敏感；字节前缀零拷贝比对，
+/// 不做 `to_ascii_uppercase` 的整串 Unicode 拷贝）。
+fn sniff_is_vcard(text: &str) -> bool {
+    const PREFIX: &[u8] = b"BEGIN:VCARD";
+    let head = text.trim_start_matches('\u{feff}').trim_start();
+    head.len() >= PREFIX.len() && head.as_bytes()[..PREFIX.len()].eq_ignore_ascii_case(PREFIX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sniff_is_vcard;
+
+    #[test]
+    fn sniff_detects_vcard_head_with_bom_and_case_insensitive() {
+        assert!(sniff_is_vcard("BEGIN:VCARD\r\nVERSION:3.0\r\nEND:VCARD\r\n"));
+        // 小写 begin:vcard（core 解析层同样按大小写不敏感识别）
+        assert!(sniff_is_vcard("begin:vcard\r\nVERSION:3.0\r\n"));
+        // UTF-8 BOM 前缀（导出产物带 BOM）不影响嗅探
+        assert!(sniff_is_vcard("\u{feff}BEGIN:VCARD\r\n"));
+        // 首部空白/换行后才是卡片头
+        assert!(sniff_is_vcard("  \r\nBEGIN:VCARD\r\n"));
+        // CSV / 空文本按 CSV 路径处理
+        assert!(!sniff_is_vcard("name,email\r\nCarol,c@postium.test\r\n"));
+        assert!(!sniff_is_vcard(""));
+        // 前缀不完整不算 vCard
+        assert!(!sniff_is_vcard("BEGIN:VCAR"));
+    }
 }
