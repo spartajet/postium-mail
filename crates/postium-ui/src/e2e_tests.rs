@@ -1508,6 +1508,144 @@ fn contact_merge_and_detail_add(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → Task 15: 导入导出 UI 入口
+//（store 导入路径：vCard/CSV 文本 → api 导入 → 列表刷新；工具条按钮存在性）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_import_export_entry(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let before = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.len())
+        })
+    });
+
+    // ── 工具条按钮存在于渲染树（debug_selector 在绘制帧记录 bounds）──
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("contacts-import-btn")
+            .zip(cx.debug_bounds("contacts-export-btn"))
+            .map(|_| ())
+    });
+
+    // ── 导入路径（按钮文件 IO 后的直达 store 方法）：vCard 两有效卡 + 一缺邮箱卡 ──
+    const TWO_CARDS_PLUS_NO_EMAIL: &str = concat!(
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:Alice Import\r\n",
+        "EMAIL;TYPE=INTERNET:alice.import@postium.test\r\n",
+        "END:VCARD\r\n",
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:Bob Import\r\n",
+        "EMAIL;TYPE=INTERNET:bob.import@postium.test\r\n",
+        "END:VCARD\r\n",
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:NoEmail\r\n",
+        "TEL:13811111111\r\n",
+        "END:VCARD\r\n",
+    );
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.import_contacts_vcard_text(TWO_CARDS_PLUS_NO_EMAIL.to_string(), &api, cx)
+            });
+        });
+    });
+    // store 刷新后列表多出两枚（缺邮箱卡计入跳过，不进列表）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let alice = store.contacts.iter().any(|c| c.email == "alice.import@postium.test");
+            let bob = store.contacts.iter().any(|c| c.email == "bob.import@postium.test");
+            (!store.loading && store.contacts.len() == before + 2 && alice && bob)
+                .then_some(())
+        })
+    });
+    // DB 层：两卡已入库（toast 在无 Root 防护下不 panic，见 notify.rs）
+    let db_emails = wait_for(cx, |_| {
+        crate::runtime::runtime().block_on(async {
+            let a = api
+                .get_contact_by_email("alice.import@postium.test".into())
+                .await
+                .ok()
+                .flatten();
+            let b = api
+                .get_contact_by_email("bob.import@postium.test".into())
+                .await
+                .ok()
+                .flatten();
+            (a.is_some() && b.is_some()).then(|| (a.unwrap().id, b.unwrap().id))
+        })
+    });
+    assert_ne!(db_emails.0, db_emails.1);
+
+    // ── CSV 导入路径（同款 store 方法）：通用方言单行 ──
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.import_contacts_csv_text(
+                    "name,email\r\nCarol Import,carol.import@postium.test\r\n".to_string(),
+                    &api,
+                    cx,
+                )
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (!store.loading
+                && store
+                    .contacts
+                    .iter()
+                    .any(|c| c.email == "carol.import@postium.test"))
+            .then_some(())
+        })
+    });
+
+    // ── 导出冒烟（按钮接线层直调 api：CoreApi 层等价性已在 T14 测过）──
+    let exported = crate::runtime::runtime().block_on(async {
+        api.export_contacts_vcard(None, None, false).await
+    })
+    .expect("导出 vCard 不应失败");
+    assert!(exported.contains("BEGIN:VCARD"), "导出应为 vCard 文本");
+    assert!(
+        exported.contains("alice.import@postium.test"),
+        "导出应含刚导入的联系人"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]

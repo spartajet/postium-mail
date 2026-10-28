@@ -20,7 +20,7 @@ use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::{ContactDto, ContactWrite};
 
-use crate::i18n::t;
+use crate::i18n::{t, t_format};
 use crate::runtime::spawn_tokio;
 use crate::stores::contacts::{init_contacts_store, ContactsStore};
 
@@ -344,6 +344,129 @@ impl ContactsView {
         cx.notify();
     }
 
+    // ── 导入/导出 ──
+
+    /// 工具条「导入」：后台线程 rfd 选 `.vcf/.csv` 并读文本（UI 线程不做
+    /// 阻塞 IO）→ 按扩展名分派（无扩展/未知按内容嗅探：BEGIN:VCARD 开头
+    /// → vCard，否则 CSV）→ store 导入（api 调用 + 刷新 + toast 报告）。
+    fn import_contacts(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let (tx, rx) = smol::channel::bounded(1);
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new()
+                .add_filter("Contacts", &["vcf", "csv"])
+                .pick_file()
+                .and_then(|path| {
+                    std::fs::read_to_string(&path)
+                        .ok()
+                        .map(|text| (path, text))
+                });
+            let _ = tx.try_send(picked);
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Some((path, text))) = rx.recv().await {
+                this.update(cx, |view, cx| {
+                    let api = view.api.clone();
+                    let vcard = match path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_ascii_lowercase())
+                        .as_deref()
+                    {
+                        Some("vcf") | Some("vcard") => true,
+                        Some("csv") => false,
+                        _ => text
+                            .trim_start()
+                            .to_ascii_uppercase()
+                            .starts_with("BEGIN:VCARD"),
+                    };
+                    view.store.update(cx, |store, cx| {
+                        if vcard {
+                            store.import_contacts_vcard_text(text, &api, cx);
+                        } else {
+                            store.import_contacts_csv_text(text, &api, cx);
+                        }
+                    });
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// 工具条「导出」：后台线程 rfd 保存对话框（默认名 postium-contacts.vcf）
+    /// → 按所选扩展分派 api 导出（用 store 当前 query/分组/星标过滤，UI 线程
+    /// 拍快照）→ 后台线程写文件 → toast「已导出到 <路径>」；失败 toast 错误。
+    fn export_contacts(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // 过滤条件快照（对话框期间列表过滤可能变化，导出以点击时为准）
+        let (query, group, starred) = {
+            let s = self.store.read(cx);
+            (s.query.trim().to_string(), s.active_group, s.starred_only)
+        };
+        let api = self.api.clone();
+        let (tx, rx) = smol::channel::bounded(1);
+        std::thread::spawn(move || {
+            let picked = rfd::FileDialog::new()
+                .add_filter("vCard", &["vcf"])
+                .add_filter("CSV", &["csv"])
+                .set_file_name("postium-contacts.vcf")
+                .save_file();
+            let _ = tx.try_send(picked);
+        });
+        cx.spawn(async move |_this, _cx| {
+            if let Ok(Some(mut path)) = rx.recv().await {
+                // 扩展分派：.csv → CSV 导出；其余（含无扩展，补 .vcf 后缀）→ vCard
+                let as_csv = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("csv"));
+                if path.extension().is_none() {
+                    path = path.with_extension("vcf");
+                }
+                let query = (!query.is_empty()).then(|| query.clone());
+                let rx = spawn_tokio(async move {
+                    if as_csv {
+                        api.export_contacts_csv(query, group, starred).await
+                    } else {
+                        api.export_contacts_vcard(query, group, starred).await
+                    }
+                });
+                match rx.recv().await {
+                    Ok(Ok(text)) => {
+                        // 写文件留在后台线程（文件 IO 不占 UI 线程）
+                        let (wtx, wrx) = smol::channel::bounded(1);
+                        std::thread::spawn(move || {
+                            let written = std::fs::write(&path, text).map(|_| path);
+                            let _ = wtx.try_send(written);
+                        });
+                        match wrx.recv().await {
+                            Ok(Ok(path)) => crate::notify::toast(t_format(
+                                "contacts.exportDone",
+                                &[("path", &path.display().to_string())],
+                            )),
+                            Ok(Err(e)) => {
+                                tracing::warn!("联系人导出写文件失败: {e}");
+                                crate::notify::toast(t_format(
+                                    "contacts.exportFailed",
+                                    &[("error", &format!("{e}"))],
+                                ));
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("联系人导出失败: {e}");
+                        crate::notify::toast(t_format(
+                            "contacts.exportFailed",
+                            &[("error", &format!("{e}"))],
+                        ));
+                    }
+                    Err(_) => {}
+                }
+            }
+        })
+        .detach();
+    }
+
     // ── 分组栏 ──
 
     /// 展开/收起新建分组内联输入（展开时清空残留）。
@@ -438,6 +561,32 @@ impl Render for ContactsView {
                         })),
                 )
             })
+            // 导入入口：文件 IO 在后台线程，实际导入走 store（可测路径）
+            .child(
+                div()
+                    .debug_selector(|| "contacts-import-btn".to_string())
+                    .child(
+                        Button::new("contact-import")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::FileUp)
+                            .label(t("contacts.import"))
+                            .on_click(cx.listener(Self::import_contacts)),
+                    ),
+            )
+            // 导出入口：保存对话框 + 后台线程写文件 + toast 结果
+            .child(
+                div()
+                    .debug_selector(|| "contacts-export-btn".to_string())
+                    .child(
+                        Button::new("contact-export")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::FileDown)
+                            .label(t("contacts.export"))
+                            .on_click(cx.listener(Self::export_contacts)),
+                    ),
+            )
             .child(
                 div()
                     .ml_auto()

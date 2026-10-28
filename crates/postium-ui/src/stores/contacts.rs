@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use gpui_kit::{App, AppContext as _, Context, Entity};
 use postium_core::api::CoreApi;
+use postium_core::error::MailError;
 use postium_core::infrastructure::storage::repository::contact_repo::ContactGroupWithCount;
-use postium_core::service::email_service::ContactDto;
+use postium_core::service::email_service::{ContactDto, ImportReport};
 
 use crate::runtime::spawn_tokio;
 
@@ -174,6 +175,69 @@ impl ContactsStore {
         self.active_group = None;
         self.starred_only = false;
         self.load(api, cx);
+    }
+
+    /// 导入 vCard 文本（工具条「导入」选 `.vcf` 后的直达入口）：
+    /// api 导入 → 写代数失效在途陈旧快照 → 补跑装载刷新 → toast 报告。
+    pub fn import_contacts_vcard_text(
+        &mut self,
+        text: String,
+        api: &Arc<CoreApi>,
+        cx: &mut Context<Self>,
+    ) {
+        let api = api.clone();
+        let api_late = api.clone();
+        let rx = spawn_tokio(async move { api.import_contacts_vcard(text).await });
+        self.finish_import(rx, api_late, cx);
+    }
+
+    /// 导入 CSV 文本（工具条「导入」选 `.csv` 后的直达入口，同款路径）。
+    pub fn import_contacts_csv_text(
+        &mut self,
+        text: String,
+        api: &Arc<CoreApi>,
+        cx: &mut Context<Self>,
+    ) {
+        let api = api.clone();
+        let api_late = api.clone();
+        let rx = spawn_tokio(async move { api.import_contacts_csv(text).await });
+        self.finish_import(rx, api_late, cx);
+    }
+
+    /// 导入完成链（vCard/CSV 共用）：成功推进写代数 + 补跑装载收敛 +
+    /// toast「成功 N 跳过 M」；失败 toast 错误（列表不动）。
+    fn finish_import(
+        &mut self,
+        rx: smol::channel::Receiver<Result<ImportReport, MailError>>,
+        api: Arc<CoreApi>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            match rx.recv().await {
+                Ok(Ok(report)) => {
+                    let imported = report.imported.to_string();
+                    let skipped = report.skipped.to_string();
+                    this.update(cx, |store, cx| {
+                        store.write_gen += 1; // 导入是写：在途 load 的陈旧快照不得覆盖
+                        store.load(&api, cx); // 读后于写提交，收敛到导入后状态
+                    })
+                    .ok();
+                    crate::notify::toast(crate::i18n::t_format(
+                        "contacts.importDone",
+                        &[("imported", &imported), ("skipped", &skipped)],
+                    ));
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("联系人导入失败: {e}");
+                    crate::notify::toast(crate::i18n::t_format(
+                        "contacts.importFailed",
+                        &[("error", &format!("{e}"))],
+                    ));
+                }
+                Err(_) => {}
+            }
+        })
+        .detach();
     }
 
     /// 合并联系人（工具条「合并」，absorbed 并入 primary 后删除）。
