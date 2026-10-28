@@ -24,17 +24,35 @@ use crate::i18n::{t, t_format};
 use crate::runtime::spawn_tokio;
 use crate::stores::accounts::AccountsStore;
 
+/// 设置窗口句柄注册表（单例守卫：重复点击设置按钮时激活已有窗口）。
+static SETTINGS_WINDOW: std::sync::OnceLock<std::sync::Mutex<Option<gpui_kit::AnyWindowHandle>>> =
+    std::sync::OnceLock::new();
+
 /// 打开设置窗口（居中 980×640：180 导航 + 最宽 768 面板 + 边距，内容不再被裁切）。
+///
+/// 单例：窗口已存在时仅激活它，不重复创建。
 pub fn open_settings_window(
     accounts: &Entity<AccountsStore>,
     sync: &Entity<crate::stores::sync::SyncStore>,
     api: &Arc<CoreApi>,
     cx: &mut App,
 ) {
+    let registry = SETTINGS_WINDOW.get_or_init(|| std::sync::Mutex::new(None));
+    let mut guard = registry.lock().expect("设置窗口注册表锁");
+
+    // 已有设置窗口且存活：激活置前即可
+    if let Some(handle) = guard.as_ref()
+        && cx.windows().iter().any(|w| w.window_id() == handle.window_id())
+    {
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
+        cx.activate(true);
+        return;
+    }
+
     let accounts = accounts.clone();
     let sync = sync.clone();
     let api = api.clone();
-    gpui_kit::open_window(
+    let (handle, _view) = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
@@ -49,6 +67,8 @@ pub fn open_settings_window(
         },
     )
     .expect("打开设置窗口失败");
+    // 记录句柄（窗口关闭后由上面的存活检查惰性清理）
+    *guard = Some(handle);
     cx.activate(true);
 }
 
