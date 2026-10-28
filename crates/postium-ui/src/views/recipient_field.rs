@@ -152,6 +152,7 @@ impl RecipientField {
         if let Some(err) = &self.error {
             row = row.child(
                 div()
+                    .max_w(px(240.))
                     .text_size(px(11.))
                     .text_color(gpui_kit::rgb(0xf43e5e))
                     .line_clamp(1)

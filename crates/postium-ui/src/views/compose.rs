@@ -576,10 +576,14 @@ impl Render for ComposeView {
                             .label(t("email.attach"))
                             .on_click(cx.listener(Self::add_attachment)),
                     )
+                    // 发送失败等长错误文本：占据剩余宽度并自动换行，不溢出窗口
                     .child(
                         div()
+                            .flex_1()
+                            .min_w(px(0.))
                             .text_size(px(12.))
                             .text_color(cx.theme().muted_foreground)
+                            .line_clamp(3)
                             .child(self.status.clone()),
                     ),
             )

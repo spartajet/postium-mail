@@ -1471,6 +1471,18 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
 
     let display_block = field_block("display", t("account.displayName"), &add.display_name, None::<Button>);
 
+    // 错误提示：独占整行（在 footer 上方），自动换行不溢出模态框。
+    // 不能内嵌进 footer 的 h_flex——与按钮争宽时长消息会单向溢出。
+    let error_block = (!add.error.is_empty()).then(|| {
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .text_size(px(12.))
+            .text_color(gpui_kit::rgb(0xf43f5e))
+            .line_clamp(3)
+            .child(add.error.clone())
+    });
+
     // 底部：返回 + 确认
     let footer = h_flex()
         .pt_1()
@@ -1484,21 +1496,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
                     view.back_to_select(cx);
                 })),
         )
-        .child(
-            div()
-                .flex_1()
-                .when_some(
-                    (!add.error.is_empty()).then(|| add.error.clone()),
-                    |this, e| this.child(
-                        div()
-                            .flex_1()
-                            .text_size(px(12.))
-                            .text_color(gpui_kit::rgb(0xf43f5e))
-                            .line_clamp(2)
-                            .child(e),
-                    ),
-                ),
-        )
+        .child(div().flex_1())
         .child(if add.submitting {
             div()
                 .h(px(32.))
@@ -1595,9 +1593,10 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
         if add.use_password {
             body = body
                 .child(field_block("password", t("account.password"), &add.password, None::<Button>))
+                .when_some(error_block, |this, e| this.child(e))
                 .child(footer);
         } else {
-            body = body.child(footer);
+            body = body.when_some(error_block, |this, e| this.child(e)).child(footer);
         }
     } else {
         // ── 密码 / 手动路径 ──
@@ -1611,7 +1610,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
         if manual {
             body = body.child(manual_server_block(add, cx));
         }
-        body = body.child(footer);
+        body = body.when_some(error_block, |this, e| this.child(e)).child(footer);
     }
 
     body
