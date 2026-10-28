@@ -16,16 +16,21 @@ use crate::domain::{
 use crate::error::MailError;
 use crate::infrastructure::{
     auth::oauth2::{OAuth2AuthUrl, OAuth2Manager, OAuth2PollResult},
+    carddav::CardDavClient,
     storage::database::{self, DbConn},
+    storage::repository::contact_repo::{ContactDto, ContactGroupWithCount, ContactListResponse, ContactWrite},
 };
 use crate::service::{
     account_service::{AccountDto, AccountService, CreateAccountRequest, UpdateAccountRequest},
     attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto},
+    contact_service::ContactService,
+    contact_sync,
     email_service::{
         EmailCategory,
         EmailDetail,
         EmailListResponse,
         EmailService,
+        ImportReport,
         ReloadEmailResult,
         SaveDraftRequest,
         SaveDraftResponse,
@@ -48,6 +53,7 @@ pub struct CoreApi {
     pub emails: EmailService,
     pub sync: SyncService,
     pub labels: LabelService,
+    pub contacts: ContactService,
     pub attachments: AttachmentService,
     pub oauth2: Arc<OAuth2Manager>,
     pub data_dir: std::path::PathBuf,
@@ -91,6 +97,7 @@ impl CoreApi {
         let emails = EmailService::new_for_runtime(auth.clone(), db.clone(), e2e, e2e_truth);
         let sync = SyncService::new(db.clone(), auth.clone());
         let labels = LabelService::new(db.clone());
+        let contacts = ContactService::new(db.clone());
         let attachments = AttachmentService::new(db.clone(), auth.clone(), data_dir.to_path_buf());
         let oauth2 = Arc::new(OAuth2Manager::new(auth.clone(), db.clone())?);
         auth.set_oauth2_manager(oauth2.clone());
@@ -106,6 +113,7 @@ impl CoreApi {
                 emails,
                 sync,
                 labels,
+                contacts,
                 attachments,
                 oauth2,
                 data_dir: data_dir.to_path_buf(),
@@ -388,5 +396,156 @@ impl CoreApi {
 
     pub async fn list_emails_by_label(&self, label_id: i32) -> Result<Vec<i32>, MailError> {
         self.labels.list_emails_by_label(label_id).await
+    }
+
+    // ===== contact =====
+
+    pub async fn backfill_contacts(&self) -> Result<usize, MailError> {
+        self.contacts.backfill().await
+    }
+
+    pub async fn list_contacts(
+        &self,
+        query: Option<String>,
+        group_id: Option<i32>,
+        starred_only: bool,
+        page: usize,
+        limit: usize,
+    ) -> Result<ContactListResponse, MailError> {
+        self.contacts
+            .list(query, group_id, starred_only, page, limit)
+            .await
+    }
+
+    pub async fn get_contact(&self, id: i32) -> Result<Option<ContactDto>, MailError> {
+        self.contacts.get(id).await
+    }
+
+    /// 按邮箱查询联系人（大小写不敏感）；邮件详情页「查看/添加联系人」联动入口。
+    pub async fn get_contact_by_email(&self, email: String) -> Result<Option<ContactDto>, MailError> {
+        self.contacts.get_by_email(&email).await
+    }
+
+    pub async fn create_contact(&self, w: ContactWrite) -> Result<ContactDto, MailError> {
+        self.contacts.create(w).await
+    }
+
+    pub async fn update_contact(&self, id: i32, w: ContactWrite) -> Result<(), MailError> {
+        self.contacts.update(id, w).await
+    }
+
+    pub async fn delete_contact(&self, id: i32) -> Result<(), MailError> {
+        self.contacts.delete(id).await
+    }
+
+    pub async fn set_contact_starred(&self, id: i32, starred: bool) -> Result<(), MailError> {
+        self.contacts.set_starred(id, starred).await
+    }
+
+    pub async fn merge_contacts(&self, primary_id: i32, absorbed: Vec<i32>) -> Result<ContactDto, MailError> {
+        self.contacts.merge(primary_id, &absorbed).await
+    }
+
+    pub async fn list_contact_groups(&self) -> Result<Vec<ContactGroupWithCount>, MailError> {
+        self.contacts.group_list().await
+    }
+
+    pub async fn create_contact_group(&self, name: String) -> Result<i32, MailError> {
+        self.contacts.group_insert(&name).await
+    }
+
+    pub async fn rename_contact_group(&self, id: i32, name: String) -> Result<(), MailError> {
+        self.contacts.group_rename(id, &name).await
+    }
+
+    pub async fn delete_contact_group(&self, id: i32) -> Result<(), MailError> {
+        self.contacts.group_delete(id).await
+    }
+
+    pub async fn set_contact_group_members(&self, contact_id: i32, group_ids: Vec<i32>) -> Result<(), MailError> {
+        self.contacts.group_set_members(contact_id, &group_ids).await
+    }
+
+    pub async fn import_contacts_vcard(&self, text: String) -> Result<ImportReport, MailError> {
+        self.contacts.import_contacts_vcard(text).await
+    }
+
+    pub async fn export_contacts_vcard(
+        &self,
+        query: Option<String>,
+        group_id: Option<i32>,
+        starred_only: bool,
+    ) -> Result<String, MailError> {
+        self.contacts
+            .export_contacts_vcard(query, group_id, starred_only)
+            .await
+    }
+
+    pub async fn import_contacts_csv(&self, text: String) -> Result<ImportReport, MailError> {
+        self.contacts.import_contacts_csv(text).await
+    }
+
+
+    // ── CardDAV 绑定（密码经 AuthManager 托管，键 "dav:{account_id}"）──
+
+    pub async fn save_dav_binding(
+        &self,
+        account_id: i32,
+        url: String,
+        username: String,
+        password: String,
+        addressbook_href: Option<String>,
+    ) -> Result<(), MailError> {
+        self.auth
+            .save_password(&format!("dav:{account_id}"), &password)?;
+        self.contacts
+            .save_dav_binding(account_id, &url, &username, addressbook_href.as_deref())
+            .await
+    }
+
+    pub async fn delete_dav_binding(&self, account_id: i32) -> Result<(), MailError> {
+        let _ = self.auth.delete_password(&format!("dav:{account_id}"));
+        self.contacts.delete_dav_binding(account_id).await
+    }
+
+    pub async fn list_dav_bindings(
+        &self,
+    ) -> Result<Vec<crate::infrastructure::storage::repository::contact_repo::DavBindingDto>, MailError>
+    {
+        self.contacts.list_dav_bindings().await
+    }
+
+    /// CardDAV 双向同步单账号。e2e 离线模式短路返回空报告（无网络调用）。
+    pub async fn sync_contacts(&self, account_id: i32) -> Result<crate::service::DavSyncReport, MailError> {
+        if self.e2e_offline {
+            return Ok(crate::service::DavSyncReport::default());
+        }
+        contact_sync::sync_account(&self.db, &self.auth, account_id).await
+    }
+
+    /// 直连临时 client 发现通讯录（保存绑定前探测用）。
+    /// e2e 离线模式短路返回空列表。
+    pub async fn discover_addressbooks(
+        &self,
+        url: String,
+        username: String,
+        password: String,
+    ) -> Result<Vec<(String, String)>, MailError> {
+        if self.e2e_offline {
+            return Ok(Vec::new());
+        }
+        let client = CardDavClient::new(&url, &username, &password)?;
+        client.discover_addressbooks().await
+    }
+
+    pub async fn export_contacts_csv(
+        &self,
+        query: Option<String>,
+        group_id: Option<i32>,
+        starred_only: bool,
+    ) -> Result<String, MailError> {
+        self.contacts
+            .export_contacts_csv(query, group_id, starred_only)
+            .await
     }
 }

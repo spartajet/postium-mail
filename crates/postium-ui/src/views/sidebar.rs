@@ -163,11 +163,12 @@ impl Render for Sidebar {
             ));
         }
 
-        // 分隔线 → 快捷入口：日历 / 工作流
+        // 分隔线 → 快捷入口：日历 / 工作流 / 联系人
         scroll = scroll
             .child(divider(&theme))
             .child(nav!("nav-calendar", IconName::Calendar, t("sidebar.calendar"), None, NavTarget::Calendar))
             .child(nav!("nav-workflow", IconName::ListTodo, t("sidebar.workflow"), None, NavTarget::Workflow))
+            .child(nav!("nav-contacts", IconName::Users, t("sidebar.contacts"), None, NavTarget::Contacts))
             .child(divider(&theme));
 
         // 各账号：账号名标题 + 文件夹行 + 标签行

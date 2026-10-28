@@ -7,7 +7,7 @@ use crate::error::MailError;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::attachment_repo::AttachmentWrite;
 use crate::infrastructure::storage::repository::{
-    account_repo, attachment_repo, email_repo, sync_repo,
+    account_repo, attachment_repo, contact_repo, email_repo, sync_repo,
 };
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
@@ -30,6 +30,9 @@ pub use crate::service::email_address::{
 pub use crate::service::mail_draft::{SaveDraftRequest, SaveDraftResponse};
 pub use crate::service::mail_send::{
     ComposeAttachmentInput, LocalAttachmentDraft, SendEmailResponse,
+};
+pub use crate::infrastructure::storage::repository::contact_repo::{
+    ContactDto, ContactGroupDto, ContactListResponse, ContactWrite,
 };
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -213,6 +216,23 @@ pub struct EmailListResponse {
     pub page: usize,
     /// 每页数量
     pub limit: usize,
+}
+
+/// 联系人导入结果报告（vCard / CSV 导入共用）
+///
+/// # 字段说明
+///
+/// - `imported`: 成功导入的联系人数量
+/// - `skipped`: 被跳过的条目数量（邮箱已存在 / 条目缺邮箱等）
+/// - `errors`: 每个被跳过或失败条目的原因描述（与 `skipped` 对应）
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ImportReport {
+    /// 成功导入的联系人数量
+    pub imported: usize,
+    /// 被跳过的条目数量
+    pub skipped: usize,
+    /// 每个被跳过条目的原因描述
+    pub errors: Vec<String>,
 }
 
 /// 发送邮件请求
@@ -1032,6 +1052,31 @@ impl EmailService {
             message_id = %built.message_id,
             "邮件发送成功"
         );
+
+        // Task 7: 发送成功后把收件人 / 抄送并入联系人表（失败只记日志，不影响发送结果）。
+        // 地址可能是显示格式（`Bob <b@x>`，收件人栏 chips 之外的输入兜底）——
+        // 先归一为裸地址再入库（终审 I-2，与同步/回填路径同一规则）。
+        let contact_items: Vec<contact_repo::IncomingContact> = req
+            .to
+            .iter()
+            .chain(req.cc.iter())
+            .flat_map(|raw| crate::domain::sync::split_display_addresses(raw))
+            .map(|addr| contact_repo::IncomingContact {
+                email: addr,
+                name: None,
+                contacted_at: now,
+            })
+            .collect();
+        if !contact_items.is_empty() {
+            if let Err(error) = contact_repo::upsert_from_emails(&self.db, &contact_items).await {
+                tracing::warn!(
+                    error = %error,
+                    account_id = req.account_id,
+                    "发送路径联系人自动收集失败（不影响发送结果）"
+                );
+            }
+        }
+
         Ok(SendEmailResponse {
             message_id: built.message_id,
             local_email_id: sent_model.id,

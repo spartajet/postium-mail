@@ -1,5 +1,5 @@
 use crate::{
-    domain::sync::{HISTORY_UID_BATCH_SIZE, SyncResult},
+    domain::sync::{HISTORY_UID_BATCH_SIZE, SyncResult, whole_emails_to_contacts},
     error::MailError,
     infrastructure::{
         protocols::imap::ImapClient,
@@ -52,6 +52,8 @@ pub async fn sync_folder_incremental(
             .await?;
         fetched += new_emails.len();
         inserted += save_batch_emails(&db, account_id, folder, &new_emails).await?;
+        // Task 7: 落库成功后把发件人（含 sender_name）/ 收件人 / 抄送并入联系人表（失败不阻断同步）
+        whole_emails_to_contacts(&db, &new_emails).await;
     }
 
     if !new_uids.is_empty() {
