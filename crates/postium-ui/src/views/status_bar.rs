@@ -72,7 +72,7 @@ impl Render for StatusBar {
                         }
                     }),
             )
-            // 右侧：语言/主题切换 + 上次同步时间
+            // 右侧：语言/主题切换（图标）+ 上次同步时间
             .child(
                 h_flex()
                     .ml_auto()
@@ -81,7 +81,8 @@ impl Render for StatusBar {
                         Button::new("status-lang")
                             .ghost()
                             .xsmall()
-                            .label("中/EN")
+                            .icon(IconName::Languages)
+                            .tooltip("切换中/英文")
                             .on_click({
                                 let this = cx.entity().downgrade();
                                 move |_, _, cx| {
@@ -91,10 +92,16 @@ impl Render for StatusBar {
                             }),
                     )
                     .child(
+                        // 图标随当前主题：暗色显示太阳（点击转浅色），浅色显示月亮
                         Button::new("status-theme")
                             .ghost()
                             .xsmall()
-                            .label(t("settings.theme"))
+                            .icon(if cx.theme().mode == gpui_kit::component::ThemeMode::Dark {
+                                IconName::Sun
+                            } else {
+                                IconName::Moon
+                            })
+                            .tooltip("切换深浅主题")
                             .on_click({
                                 let this = cx.entity().downgrade();
                                 move |_, _, cx| {
