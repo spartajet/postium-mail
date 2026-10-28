@@ -1758,3 +1758,146 @@ fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
     assert!(!open, "ESC 应关闭 CardDAV 配置弹窗");
     cx.run_until_parked();
 }
+
+// ---------------------------------------------------------------------------
+// Task 9：GPUI HTML 渲染层冒烟——IR 文档嵌入测试窗口渲染不 panic、文本可查询
+// （行内段以内容为键写入渲染树 debug_selector，与 contacts-import 的
+// debug_bounds 查询同款 gpui_pre 文本查询模式）
+// ---------------------------------------------------------------------------
+struct HtmlRenderProbe {
+    doc: postium_html::HtmlDocument,
+}
+
+impl gpui_kit::Render for HtmlRenderProbe {
+    fn render(&mut self, _: &mut gpui_kit::Window, cx: &mut gpui_kit::Context<Self>) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{ParentElement as _, Styled as _};
+        let element = crate::views::email_html::render_html_document(
+            &self.doc,
+            false,
+            crate::views::email_html::ImageCtx::default(),
+            |_| {},
+            cx,
+        );
+        gpui_kit::div().size_full().overflow_hidden().child(element)
+    }
+}
+
+#[gpui_pre::test]
+fn html_render_smoke(cx: &mut TestAppContext) {
+    use postium_html::{
+        Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle,
+        SafeUrl,
+    };
+
+    fn text(t: &str) -> InlineRun {
+        InlineRun::Text { text: t.into(), style: InlineStyle::default() }
+    }
+
+    let doc = HtmlDocument {
+        blocks: vec![
+            // 容器 + 内嵌段落
+            Block::Container {
+                style: BlockStyle {
+                    background_color: Some([240, 244, 255, 255]),
+                    ..Default::default()
+                },
+                children: vec![Block::Paragraph {
+                    style: BlockStyle::default(),
+                    runs: vec![text("容器段落文本")],
+                    align: Align::Left,
+                }],
+            },
+            // 段落：行内文本 + 链接 + br 换行
+            Block::Paragraph {
+                style: BlockStyle {
+                    color: Some([178, 34, 34, 255]),
+                    ..Default::default()
+                },
+                runs: vec![
+                    text("普通段落"),
+                    InlineRun::Link {
+                        href: SafeUrl::Http("https://example.com/".into()),
+                        runs: vec![text("链接文字")],
+                    },
+                    InlineRun::Br,
+                    text("换行后文本"),
+                ],
+                align: Align::Left,
+            },
+            // 标题
+            Block::Heading {
+                level: 2,
+                align: Align::Center,
+                runs: vec![text("二级标题文本")],
+            },
+            // 无序列表
+            Block::List {
+                ordered: false,
+                items: vec![
+                    vec![Block::Paragraph {
+                        style: BlockStyle::default(),
+                        runs: vec![text("列表项甲")],
+                        align: Align::Left,
+                    }],
+                    vec![Block::Paragraph {
+                        style: BlockStyle::default(),
+                        runs: vec![text("列表项乙")],
+                        align: Align::Left,
+                    }],
+                ],
+            },
+            // 引用
+            Block::Quote {
+                children: vec![Block::Paragraph {
+                    style: BlockStyle::default(),
+                    runs: vec![text("引用内容文本")],
+                    align: Align::Left,
+                }],
+            },
+            // 图片占位（Task 13 接管真实渲染）
+            Block::Image {
+                src: ImageRef::Invalid,
+                alt: "替代文字图片".into(),
+                style: ImageStyle::default(),
+            },
+            Block::Hr,
+        ],
+    };
+
+    let (probe, cx) = cx.add_window_view(|_window, cx| {
+        setup(cx);
+        HtmlRenderProbe { doc }
+    });
+    let _ = &probe;
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+    // 渲染不 panic 已由重绘覆盖；文本内容可查询：行内段以内容为键出现。
+    // 探针键粒度 = 字号分组文本元素（同组段合并为一个文本元素，
+    // 键取组文本前缀）：第二段三 run 同字号 → 单键；链接 run 的下划线/
+    // 链接色、br 折行均在该组文本内呈现。
+    let keys = [
+        "html-txt-容器段落文本",
+        "html-txt-普通段落链接文字换行后文本",
+        "html-txt-二级标题文本",
+        "html-txt-列表项甲",
+        "html-txt-列表项乙",
+        "html-txt-引用内容文本",
+        "html-txt-替代文字图片",
+        "html-hr",
+        "html-root",
+    ];
+    let mut missing = keys.to_vec();
+    for _ in 0..200 {
+        cx.run_until_parked();
+        missing.retain(|k| {
+            cx.debug_bounds(k)
+                .is_none_or(|b| b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.))
+        });
+        if missing.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    assert!(missing.is_empty(), "渲染树缺失文本探针: {missing:?}");
+    cx.run_until_parked();
+}
