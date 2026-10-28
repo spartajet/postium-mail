@@ -106,10 +106,19 @@ impl ColumnMap {
 }
 
 /// 逐列分类表头（先精确匹配本应用专用列名，再按前缀/别名归类）
+///
+/// 真实 Google 导出的成对列 `E-mail 1 - Type` / `E-mail 1 - Value`、
+/// `Phone 1 - Type` / `Phone 1 - Value`（Type 在前）中，`- Type` 列只承载
+/// 类型词不承载值，分类时整体跳过（只取 `- Value` 列与无后缀列）；
+/// 残余污染另由值级过滤兜底（邮箱值须含 `@`、电话值丢弃类型词）。
 fn classify(header: &[String]) -> ColumnMap {
     let mut map = ColumnMap::new();
     for (index, cell) in header.iter().enumerate() {
         let h = norm_header(cell);
+        // Google 成对列的 Type 侧（… - Type）不是值列
+        if h.ends_with("- type") {
+            continue;
+        }
         // 本应用导出专用列须先于通用前缀匹配（如 "phones_extra" 以 "phone" 开头）
         match h.as_str() {
             "extra_emails" | "extra emails" | "extra email" => {
@@ -230,18 +239,34 @@ fn split_multi(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// 拼接姓名：两列（中文 姓+名 无空格 / 英文 First + Last 空格）或单列
+/// 电话列值的类型词判定：短（≤10 字符）且不含任何数字的值视为类型词
+/// （"Home" / "Mobile" / "Work" / "Home Fax" 等），丢弃不作为电话。
+/// 真实电话号码必含数字，不受影响。
+fn is_phone_type_word(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.chars().count() <= 10
+        && !value.chars().any(|c| c.is_ascii_digit() || c.is_numeric())
+}
+
+/// 拼接姓名：两列（中文 姓+名 无空格 / 英文 First + Last 空格）或单列；
+/// 两拆列均空时回退单列 Name 值（Gmail 同时导出拆列与 Name 列）。
 fn compose_name(row: &[String], map: &ColumnMap) -> Option<String> {
     if let (Some(first_col), Some(last_col)) = (map.first_col, map.last_col) {
         let first = cell(row, first_col);
         let last = cell(row, last_col);
-        let joined = if map.chinese_style_name {
-            format!("{last}{first}")
-        } else {
-            format!("{first} {last}")
-        };
-        let joined = joined.trim().to_string();
-        return (!joined.is_empty()).then_some(joined);
+        if !first.is_empty() || !last.is_empty() {
+            let joined = if map.chinese_style_name {
+                format!("{last}{first}")
+            } else {
+                format!("{first} {last}")
+            };
+            let joined = joined.trim().to_string();
+            if !joined.is_empty() {
+                return Some(joined);
+            }
+        }
+        // 两拆列均空：落到单列 Name 回退
     }
     optional_cell(row, map.single_name_col)
 }
@@ -253,12 +278,13 @@ fn convert_row(
     line_no: usize,
     outcome: &mut CsvImportOutcome,
 ) {
-    // 邮箱列按顺序取值：首个非空为主邮箱，其余为额外邮箱
+    // 邮箱列按顺序取值：值必须含 '@' 才采纳（Type 列/类型词污染防线），
+    // 首个采纳值为主邮箱，其余为额外邮箱
     let mut email = String::new();
     let mut extras_from_cols: Vec<String> = Vec::new();
     for col in &map.email_cols {
         let value = cell(row, *col);
-        if value.is_empty() {
+        if value.is_empty() || !value.contains('@') {
             continue;
         }
         if email.is_empty() {
@@ -273,7 +299,8 @@ fn convert_row(
         return;
     }
 
-    // 额外邮箱：邮箱列余量 + extra_emails 列，忽略大小写去重并排除主邮箱
+    // 额外邮箱：邮箱列余量 + extra_emails 列（同样要求含 '@'），
+    // 忽略大小写去重并排除主邮箱
     let email_key = email.to_lowercase();
     let mut extra_emails: Vec<String> = Vec::new();
     let push_extra = |list: &mut Vec<String>, value: String| {
@@ -286,14 +313,21 @@ fn convert_row(
         push_extra(&mut extra_emails, value);
     }
     for value in split_multi(&cell_opt(row, map.extra_emails_col)) {
-        push_extra(&mut extra_emails, value);
+        if value.contains('@') {
+            push_extra(&mut extra_emails, value);
+        }
     }
 
-    // 电话：电话列 + phones_extra 列，去重保序
-    let mut phones: Vec<String> = map.phone_cols.iter().map(|col| cell(row, *col)).collect();
-    phones.retain(|value| !value.is_empty());
+    // 电话：电话列 + phones_extra 列，丢弃类型词（"Home"/"Mobile"/"Work" 等
+    // 短且无数字的值），去重保序
+    let mut phones: Vec<String> = map
+        .phone_cols
+        .iter()
+        .map(|col| cell(row, *col))
+        .filter(|value| !value.is_empty() && !is_phone_type_word(value))
+        .collect();
     for value in split_multi(&cell_opt(row, map.phones_extra_col)) {
-        if !phones.contains(&value) {
+        if !is_phone_type_word(&value) && !phones.contains(&value) {
             phones.push(value);
         }
     }
@@ -490,6 +524,84 @@ mod tests {
         assert_eq!(jane.write.email, "jane@x.com");
         assert_eq!(jane.write.name.as_deref(), Some("Jane"), "Last 为空时姓名只剩 First");
         assert_eq!(jane.write.extra_emails, Some(Vec::new()));
+    }
+
+    // ── 真实 Google 导出：Type/Value 成对列 ─────────────────────
+
+    #[test]
+    fn parse_real_google_paired_type_value_columns() {
+        // 真实 Google Contacts 导出样式：Type 列在前、Value 列在后
+        let text = concat!(
+            "First Name,Last Name,E-mail 1 - Type,E-mail 1 - Value,E-mail 2 - Type,E-mail 2 - Value,Phone 1 - Type,Phone 1 - Value\r\n",
+            "John,Doe,Home,john@x.com,Work,john2@x.com,Mobile,+8613800000000\r\n",
+        );
+        let outcome = parse_contacts(text).unwrap();
+        assert_eq!(outcome.rows.len(), 1);
+        assert_eq!(outcome.skipped, 0);
+
+        let row = &outcome.rows[0];
+        assert_eq!(row.write.email, "john@x.com", "主邮箱取首个 Value 列，不得被 Type 列污染");
+        assert_eq!(
+            row.write.extra_emails,
+            Some(vec!["john2@x.com".to_string()]),
+            "第二个 Value 列并入 extra_emails，Type 列值不得混入"
+        );
+        assert_eq!(
+            row.write.phones,
+            Some(vec!["+8613800000000".to_string()]),
+            "phones 只含号码，不得混入类型词 Mobile"
+        );
+        assert_eq!(row.write.name.as_deref(), Some("John Doe"));
+        assert!(
+            !format!("{:?}", row.write).contains("Home"),
+            "写入结构不得残留任何类型词: {:?}",
+            row.write
+        );
+    }
+
+    #[test]
+    fn parse_drops_non_email_values_and_phone_type_words() {
+        // email 列值不含 '@'（如被 Type 列污染的 "Home"）→ 不采纳，整行无邮箱跳过；
+        // phone 列的短且无数字类型词丢弃，含数字号码保留
+        let text = concat!(
+            "name,email,phone\r\n",
+            "Bob,bob.home,\r\n",
+            "Ann,ann@x.com,Mobile\r\n",
+            "Cy,cy@x.com,13800000003\r\n",
+        );
+        let outcome = parse_contacts(text).unwrap();
+        assert_eq!(outcome.rows.len(), 2);
+        assert_eq!(outcome.skipped, 1, "不含 @ 的邮箱候选丢弃后整行无邮箱");
+        assert_eq!(outcome.errors.len(), 1);
+        assert!(outcome.errors[0].contains("缺少邮箱"));
+
+        assert_eq!(outcome.rows[0].write.email, "ann@x.com");
+        assert_eq!(outcome.rows[0].write.phones, Some(Vec::new()), "类型词 Mobile 应被丢弃");
+        assert_eq!(outcome.rows[1].write.email, "cy@x.com");
+        assert_eq!(outcome.rows[1].write.phones, Some(vec!["13800000003".to_string()]));
+    }
+
+    // ── 拆列姓名均空时回退单列 Name ────────────────────────────
+
+    #[test]
+    fn parse_two_name_columns_empty_falls_back_to_single_name() {
+        let text = concat!(
+            "First Name,Last Name,Name,email\r\n",
+            ",,Jane Doe,jane@x.com\r\n",
+            "John,Doe,Johnny,john@x.com\r\n",
+        );
+        let outcome = parse_contacts(text).unwrap();
+        assert_eq!(outcome.rows.len(), 2);
+        assert_eq!(
+            outcome.rows[0].write.name.as_deref(),
+            Some("Jane Doe"),
+            "拆列均空时应回退单列 Name 值"
+        );
+        assert_eq!(
+            outcome.rows[1].write.name.as_deref(),
+            Some("John Doe"),
+            "拆列非空时仍优先拼接拆列"
+        );
     }
 
     // ── Outlook 中文：姓/名 拼接（姓在前，无空格） ───────────────

@@ -250,8 +250,10 @@ impl ContactService {
             .await?;
         let mut out = String::new();
         for contact in contacts {
-            let mut data = vcard::VcardData::default();
-            data.fn_name = contact.name.clone().filter(|name| !name.trim().is_empty());
+        let mut data = vcard::VcardData {
+            fn_name: contact.name.clone().filter(|name| !name.trim().is_empty()),
+            ..Default::default()
+        };
             let primary_key = contact.email.to_lowercase();
             data.emails.push(contact.email.clone());
             data.emails.extend(
@@ -496,19 +498,38 @@ mod tests {
         ContactService::new(DbConn::open_in_memory_for_test().await.unwrap())
     }
 
-    /// 提取联系人的可比较签名（导入导出等价性断言用；忽略顺序敏感字段）
-    fn signature(c: &ContactDto) -> (String, Option<String>, Vec<String>, Vec<String>, Option<String>, Option<String>, Vec<String>) {
+    /// 联系人可比较签名（导入导出等价性断言用；忽略顺序敏感字段）：
+    /// (email, name, extra_emails, phones, notes, org, group_names)
+    type ContactSignature = (
+        String,
+        Option<String>,
+        Vec<String>,
+        Vec<String>,
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+    );
+
+    fn signature(c: &ContactDto) -> ContactSignature {
         let mut extras = c.extra_emails.clone();
         extras.sort();
         let mut phones = c.phones.clone();
         phones.sort();
         let mut groups: Vec<String> = c.groups.iter().map(|g| g.name.clone()).collect();
         groups.sort();
-        (c.email.clone(), c.name.clone(), extras, phones, c.notes.clone(), c.org.clone(), groups)
+        (
+            c.email.clone(),
+            c.name.clone(),
+            extras,
+            phones,
+            c.notes.clone(),
+            c.org.clone(),
+            groups,
+        )
     }
 
-    fn signatures(contacts: &[ContactDto]) -> Vec<(String, Option<String>, Vec<String>, Vec<String>, Option<String>, Option<String>, Vec<String>)> {
-        let mut out: Vec<_> = contacts.iter().map(signature).collect();
+    fn signatures(contacts: &[ContactDto]) -> Vec<ContactSignature> {
+        let mut out: Vec<ContactSignature> = contacts.iter().map(signature).collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
@@ -583,6 +604,38 @@ mod tests {
             report.errors
         );
         assert_eq!(svc.group_list().await.unwrap().len(), 2, "分组不得重复创建");
+    }
+
+    /// M-1：组名复用分支——预建同名分组，导入 CATEGORIES 同名卡片应挂入既有组
+    #[tokio::test]
+    async fn import_vcard_reuses_preexisting_group_by_name() {
+        let svc = service().await;
+        let group_id = svc.group_insert("同事").await.unwrap();
+
+        let text = concat!(
+            "BEGIN:VCARD\r\n",
+            "VERSION:3.0\r\n",
+            "FN:Carol\r\n",
+            "EMAIL;TYPE=INTERNET:carol@postium.test\r\n",
+            "CATEGORIES:同事\r\n",
+            "END:VCARD\r\n",
+        );
+        let report = svc.import_contacts_vcard(text.to_string()).await.unwrap();
+        assert_eq!(
+            report,
+            ImportReport { imported: 1, skipped: 0, errors: Vec::new() },
+            "重名分组应静默复用，不产生任何错误"
+        );
+
+        let carol = svc.get_by_email("carol@postium.test").await.unwrap().unwrap();
+        assert_eq!(carol.groups.len(), 1, "应挂入分组");
+        assert_eq!(carol.groups[0].id, group_id, "应挂入既有分组（同 ID）");
+        assert_eq!(carol.groups[0].name, "同事");
+
+        let groups = svc.group_list().await.unwrap();
+        assert_eq!(groups.len(), 1, "分组不得重复创建");
+        assert_eq!(groups[0].id, group_id);
+        assert_eq!(groups[0].count, 1, "既有分组成员计数应 +1");
     }
 
     #[tokio::test]
