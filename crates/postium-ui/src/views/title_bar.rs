@@ -11,7 +11,7 @@ use gpui_kit::component::{
     Sizable as _,
     h_flex,
 };
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
 
 /// 标题栏高度（px）。
@@ -27,8 +27,14 @@ pub fn render(
     let title_bar_bg = theme.title_bar;
     let border = theme.border;
     let muted_fg = theme.muted_foreground;
-    // 选中邮件时标题栏显示邮件主题（与系统窗口标题一致）
-    let title_text = crate::app::window_title_for(shell.detail.read(cx).detail.as_ref());
+    // 选中邮件时标题栏居中显示邮件主题；无选中时中间留空
+    let subject = shell
+        .detail
+        .read(cx)
+        .detail
+        .as_ref()
+        .and_then(|d| d.email.subject.clone())
+        .filter(|s| !s.trim().is_empty());
 
     let ctrl_btn =
         |id: &'static str, icon: IconName, on_click: fn(&mut Window, &mut Context<crate::app::AppShell>)| {
@@ -49,25 +55,42 @@ pub fn render(
         .bg(title_bar_bg)
         .border_b_1()
         .border_color(border)
-        // 左：应用名 / 选中邮件的主题
+        // 左：应用名
         .child(
             div()
                 .flex_none()
-                .max_w(px(360.))
                 .px_1()
                 .text_size(px(12.5))
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .text_color(muted_fg)
-                .line_clamp(1)
-                .child(title_text),
+                .child(crate::app::MAIN_WINDOW_TITLE),
         )
-        // 中：拖动区（空白区域整体可拖动窗口）
+        // 中：邮件主题居中（整块可拖动窗口）；无选中时为空白拖动区
         .child(
             div()
                 .flex_1()
                 .h_full()
+                .overflow_hidden()
                 .on_mouse_down(MouseButton::Left, |_, window, _| {
                     window.start_window_move();
+                })
+                .when_some(subject, |this, s| {
+                    this.child(
+                        h_flex()
+                            .w_full()
+                            .h_full()
+                            .items_center()
+                            .justify_center()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .max_w(px(520.))
+                                    .text_size(px(12.5))
+                                    .text_color(muted_fg)
+                                    .line_clamp(1)
+                                    .child(s),
+                            ),
+                    )
                 }),
         )
         // 右：窗口控制按钮
