@@ -383,6 +383,12 @@ pub struct OAuthConfig {
     pub pkce_enabled: bool,
     /// 租户 ID（仅企业版需要）
     pub tenant_id: Option<String>,
+    /// 重定向 URI（可选）。
+    ///
+    /// 必须与服务商开发者后台注册的 URI 完全一致；应用会解析其端口/路径
+    /// 并在此监听回调。为空时用默认值 `http://localhost:36279/callback`。
+    /// 编译期由 *_REDIRECT_URI 环境变量注入（见 .env.example）。
+    pub redirect_uri: Option<String>,
 }
 
 // ═══════════════════════════════════════════════════════════════

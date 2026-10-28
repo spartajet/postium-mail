@@ -128,15 +128,30 @@ impl ImapClient {
         let mut client = async_imap::Client::new(tls);
 
         let _greeting = client.read_response().await.map_err(|e| {
+            tracing::warn!(host, error = %e, "IMAP: 读取 greeting 失败");
             MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
         })?;
+
+        // RFC 2971 ID：网易（163/126/yeah）要求 LOGIN 前自报客户端身份，
+        // 否则以 "Unsafe Login" 拒绝登录；对其他服务器无害，失败可忽略。
+        // （async-imap 未认证阶段的 Client 未暴露 id()，借 Connection 的裸命令接口发送）
+        let id_command = format!(
+            "ID (\"name\" \"Postium Mail\" \"version\" \"{}\")",
+            env!("CARGO_PKG_VERSION")
+        );
+        if let Err(e) = client.run_command_and_check_ok(id_command.as_str(), None).await {
+            tracing::debug!(host, error = %e, "IMAP: ID 命令失败（服务器可能不支持，忽略）");
+        }
 
         tracing::debug!(email, "IMAP: 正在登录");
         let session = client
             .login(email, password)
             .await
-            .map_err(|(e, _)| MailError::AuthFailed(format!("登录失败: {e}")))?;
-
+            .map_err(|(e, _)| {
+                let msg = login_error_message(host, &e.to_string());
+                tracing::warn!(host, email, error = %msg, "IMAP: 登录失败");
+                MailError::AuthFailed(msg)
+            })?;
         tracing::info!(host, email, "IMAP: 连接并登录成功");
         Ok(Self { session })
     }
@@ -172,7 +187,10 @@ impl ImapClient {
         let session = client
             .authenticate("XOAUTH2", authenticator)
             .await
-            .map_err(|(e, _)| MailError::AuthFailed(format!("XOAUTH2 认证失败: {e}")))?;
+            .map_err(|(e, _)| {
+                tracing::warn!(email, error = %e, "IMAP: XOAUTH2 认证失败");
+                MailError::AuthFailed(format!("XOAUTH2 认证失败: {e}"))
+            })?;
         tracing::info!(email, "IMAP: XOAUTH2 认证成功");
         Ok(Self { session })
     }
@@ -440,7 +458,7 @@ impl ImapClient {
     /// 获取服务器能力列表
     ///
     /// # 返回
-    /// 成功时返回能力字符串列表（如 "IMAP4rev1"、"UIDPLUS"、"MOVE" 等）
+    /// 能力字符串列表（如 "IMAP4rev1"、"UIDPLUS"、"MOVE" 等）
     pub async fn capabilities(&mut self) -> Result<Vec<String>, MailError> {
         let caps = self
             .session
@@ -448,5 +466,73 @@ impl ImapClient {
             .await
             .map_err(|e| MailError::ImapConnectionFailed(format!("获取能力列表失败: {e}")))?;
         Ok(caps.iter().map(|c| format!("{c:?}")).collect())
+    }
+}
+
+/// 构建 IMAP 登录失败的错误消息
+///
+/// 网易系（163.com / 126.com / yeah.net）服务器追加授权码提示：
+/// 其 IMAP/SMTP 不接受网页版登录密码，必须使用「客户端授权码」。
+fn login_error_message(host: &str, server_error: &str) -> String {
+    let mut msg = format!("登录失败: {server_error}");
+    if is_netease_host(host) {
+        msg.push_str(
+            "。网易邮箱需在网页版 设置→POP3/SMTP/IMAP 开启服务，并使用客户端授权码登录（而非登录密码）",
+        );
+    }
+    msg
+}
+
+/// 判断 IMAP 主机是否属于网易系（163.com / 126.com / yeah.net）域名
+fn is_netease_host(host: &str) -> bool {
+    const NETEASE_DOMAINS: [&str; 3] = ["163.com", "126.com", "yeah.net"];
+    NETEASE_DOMAINS
+        .iter()
+        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn netease_hosts_should_be_recognized() {
+        for host in [
+            "imap.163.com",
+            "imap.126.com",
+            "imap.yeah.net",
+            "163.com",
+            "126.com",
+            "yeah.net",
+        ] {
+            assert!(is_netease_host(host), "应识别 {host}");
+        }
+    }
+
+    #[test]
+    fn non_netease_hosts_should_not_be_recognized() {
+        for host in [
+            "imap.gmail.com",
+            "outlook.office365.com",
+            "imap.qq.com",
+            "x163.com.example.org",
+            "imap.163.com.evil.example",
+        ] {
+            assert!(!is_netease_host(host), "不应识别 {host}");
+        }
+    }
+
+    #[test]
+    fn login_error_should_append_hint_for_netease() {
+        let msg = login_error_message("imap.163.com", "NO LOGIN Unsafe Login");
+        assert!(msg.contains("登录失败"));
+        assert!(msg.contains("授权码"), "网易登录失败应附带授权码提示: {msg}");
+    }
+
+    #[test]
+    fn login_error_should_not_append_hint_for_others() {
+        let msg = login_error_message("imap.gmail.com", "AUTHENTICATIONFAILED");
+        assert!(msg.starts_with("登录失败"));
+        assert!(!msg.contains("授权码"));
     }
 }

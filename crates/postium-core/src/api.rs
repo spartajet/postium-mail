@@ -83,8 +83,14 @@ impl CoreApi {
             .ok_or_else(|| MailError::ProviderNotSupported("provider pool 未初始化".into()))?
             .clone();
 
-        let auth = Arc::new(AuthManager::default());
-        // e2e（非真连库）模式跳过 IMAP 真连验证，允许离线创建测试账号
+        // e2e（非真连库）模式使用内存凭据存储并跳过 IMAP 真连验证：
+        // CI/headless 环境无系统 Keyring（Linux keyutils/DBus 不可用），
+        // 允许离线创建测试账号
+        let auth = Arc::new(if e2e && !e2e_truth {
+            AuthManager::in_memory()
+        } else {
+            AuthManager::default()
+        });
         let accounts = if e2e && !e2e_truth {
             AccountService::new_with_imap_verifier(
                 db.clone(),

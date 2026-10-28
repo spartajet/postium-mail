@@ -26,14 +26,16 @@ pub fn apply_brand(cx: &mut App) {
                 c.background = gpui_kit::rgb(0x161632).into();
                 c.sidebar = gpui_kit::rgb(0x181832).into();
                 c.title_bar = gpui_kit::rgb(0x15152c).into();
-                c.border = gpui_kit::rgb(0x32325c).into();
+                // 分隔线加深一档：32325c 在深背景上几乎不可见
+                c.border = gpui_kit::rgb(0x404070).into();
                 c.muted = gpui_kit::rgb(0x22224a).into();
             }
             ThemeMode::Light => {
                 c.background = gpui_kit::rgb(0xf7f5fc).into();
                 c.sidebar = gpui_kit::rgb(0xf1eefc).into();
                 c.title_bar = gpui_kit::rgb(0xedeaf9).into();
-                c.border = gpui_kit::rgb(0xe4e1f0).into();
+                // 分隔线加深一档：e4e1f0 在浅背景上几乎不可见
+                c.border = gpui_kit::rgb(0xd4d0e6).into();
                 c.muted = gpui_kit::rgb(0xece9f8).into();
             }
         }
@@ -140,6 +142,23 @@ use gpui_kit::{px, ParentElement as _, InteractiveElement as _, IntoElement, Sta
 pub fn apply_mode(mode: gpui_kit::component::ThemeMode, cx: &mut App) {
     gpui_kit::component::Theme::change(mode, None, cx);
     apply_brand(cx);
+}
+
+/// 深浅主题互切并持久化偏好，返回新偏好（"dark" / "light"）。
+/// 顶栏与状态栏按钮共用；调用方负责触发重绘。
+pub fn toggle_theme_mode(cx: &mut App) -> &'static str {
+    use gpui_kit::component::ActiveTheme as _;
+    let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
+    let (mode, pref) = if dark {
+        (gpui_kit::component::ThemeMode::Light, "light")
+    } else {
+        (gpui_kit::component::ThemeMode::Dark, "dark")
+    };
+    apply_mode(mode, cx);
+    let mut ui = crate::ui_state::load();
+    ui.theme = Some(pref.to_string());
+    crate::ui_state::save(&ui);
+    pref
 }
 
 /// 由偏好与系统外观解析实际主题模式（"system" 跟随系统）。

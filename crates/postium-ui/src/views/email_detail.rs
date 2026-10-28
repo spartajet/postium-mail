@@ -36,11 +36,15 @@ impl EmailDetailView {
         let rx = spawn_tokio(async move { api.toggle_star(id).await });
         let store = self.store.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(starred)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.apply_star(starred);
-                    cx.notify();
-                });
+            match rx.recv().await {
+                Ok(Ok(starred)) => {
+                    store.update(cx, |s, cx| {
+                        s.apply_star(starred);
+                        cx.notify();
+                    });
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "切换星标失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -54,17 +58,23 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "归档邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -78,17 +88,23 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "删除邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -126,17 +142,23 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "标记未读失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -150,10 +172,14 @@ impl EmailDetailView {
         let store = self.store.clone();
         let rx = spawn_tokio(async move { api.reload_email(id).await });
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.force_load(id, &api_keep, cx);
-                });
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    store.update(cx, |s, cx| {
+                        s.force_load(id, &api_keep, cx);
+                    });
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "从服务器重载邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -291,6 +317,80 @@ fn spawn_tokok_delete(api: Arc<CoreApi>, id: i32) -> smol::channel::Receiver<Res
     spawn_tokio(async move { api.delete_emails(vec![id]).await })
 }
 
+/// 详情面板被操作清空（归档/删除/标未读）后恢复主窗口默认标题。
+/// 这些路径不经过 DetailStore::load，不会发 DetailEvent::Loaded。
+fn restore_window_title(cx: &mut gpui_kit::AsyncApp) {
+    let _ = cx.update(|app| {
+        if let Some(main) = app.try_global::<crate::app::MainShell>()
+            && let Some(shell) = main.0.upgrade()
+        {
+            let _ = shell.update(app, |shell, cx| shell.update_window_title(cx));
+        }
+    });
+}
+
+/// 邮件正文 TextView 样式。
+///
+/// `html()` 组件内部把 HTML 降级为富文本结构（内联 CSS 不生效），
+/// 这里把观感对齐常见邮件客户端：段落间距收紧、标题按层级放大加粗。
+/// （组件层不暴露链接颜色定制，链接色跟随应用主题主色。）
+fn email_text_view_style(cx: &gpui_kit::App) -> gpui_kit::component::text::TextViewStyle {
+    use std::sync::Arc;
+
+    let base = gpui_kit::component::text::TextViewStyle::default();
+    gpui_kit::component::text::TextViewStyle {
+        // 默认 0.75rem 段距在邮件里显得松散（模板还叠空段，已由
+        // collapse_empty_blocks 折叠）
+        paragraph_gap: gpui_kit::rems(0.35),
+        heading_base_font_size: px(14.),
+        heading_font_size: Some(Arc::new(|level, base_size| match level {
+            1 => px(20.),
+            2 => px(17.),
+            3 => px(15.5),
+            _ => base_size,
+        })),
+        is_dark: cx.theme().is_dark(),
+        ..base
+    }
+}
+
+/// 折叠邮件 HTML 里的空段落 / 空 div / mso 空标签。
+///
+/// Outlook、163 等客户端的邮件模板用 `<p>&nbsp;</p>`、`<o:p></o:p>`
+/// 之类的空块撑视觉间距，逐段渲染时叠加段落 gap 产生巨大空隙。
+fn collapse_empty_blocks(source: &str) -> String {
+    static EMPTY_BLOCKS: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+    // 忽略型内容：空白、&nbsp;、<br>、HTML 注释；span 只包忽略型内容时也算空
+    let ignore = r"(?:\s|&nbsp;|&#160;|<br\s*/?>|<!--.*?-->)";
+    let patterns = [
+        // 空 p：可含忽略型内容或纯空的 span
+        format!(r"(?is)<p(\s[^>]*)?>(?:{ignore}|<span(\s[^>]*)?>(?:{ignore})*</span>)*</p>"),
+        // 空 div（空 p 已在前一轮删掉后，此处内容只剩忽略型）
+        format!(r"(?is)<div(\s[^>]*)?>(?:{ignore})*</div>"),
+        // mso 空段
+        format!(r"(?is)<o:p(\s[^>]*)?>(?:{ignore})*</o:p>"),
+    ];
+    let res = EMPTY_BLOCKS.get_or_init(|| {
+        patterns
+            .iter()
+            .map(|p| regex::Regex::new(p).expect("空块正则"))
+            .collect()
+    });
+
+    let mut out = source.to_string();
+    // 嵌套空块（div 套空 p）需要迭代收敛，上限防止病态输入死循环
+    for _ in 0..4 {
+        let before = out.len();
+        for re in res.iter() {
+            out = re.replace_all(&out, "").into_owned();
+        }
+        if out.len() == before {
+            break;
+        }
+    }
+    out
+}
+
 impl Render for EmailDetailView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let store = self.store.read(cx);
@@ -324,7 +424,13 @@ impl Render for EmailDetailView {
             div()
                 .flex_1()
                 .overflow_hidden()
-                .child(html(body_html_str).p_4().scrollable(true).selectable(true))
+                .child(
+                    html(collapse_empty_blocks(&body_html_str))
+                        .style(email_text_view_style(cx))
+                        .p_4()
+                        .scrollable(true)
+                        .selectable(true),
+                )
                 .into_any_element()
         } else {
             div()
@@ -588,4 +694,42 @@ fn cc_display(detail: &postium_core::service::email_service::EmailDetail) -> Opt
 fn separator(cx: &gpui_kit::App) -> impl IntoElement {
     let _ = cx;
     div().w(px(1.)).h(px(14.)).mx_1().bg(gpui_kit::black().opacity(0.15))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collapse_empty_blocks;
+
+    #[test]
+    fn collapses_empty_paragraphs_and_divs() {
+        let src = r#"<p style="margin:0">正文一</p><p style="margin:0">&nbsp;</p><p>正文二</p><div></div><div><br></div>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(out.contains("正文一"));
+        assert!(out.contains("正文二"));
+        assert!(!out.contains("&nbsp;"));
+        assert!(!out.contains("<div>"), "空 div 应被折叠: {out}");
+    }
+
+    #[test]
+    fn collapses_nested_empty_blocks_and_mso_tags() {
+        let src = r#"<div><p><span>&nbsp;</span></p></div><o:p></o:p><p>内容</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(!out.contains("<div>"));
+        assert!(!out.contains("o:p"));
+        assert!(out.contains("内容"));
+    }
+
+    #[test]
+    fn keeps_non_empty_blocks_untouched() {
+        let src = r#"<p style="color:#0067b8">新应用有权访问你的数据</p><p>onedriver 已连接。</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert_eq!(out, src, "无空块时原样返回");
+    }
+
+    #[test]
+    fn keeps_comments_and_real_content_inside_blocks() {
+        let src = r#"<p><!--[if mso]><o:p>&nbsp;</o:p><![endif]--><br>真实文本</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(out.contains("真实文本"), "含真实文本的块不能删: {out}");
+    }
 }

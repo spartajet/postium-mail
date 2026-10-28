@@ -1003,7 +1003,7 @@ impl EmailService {
                     .join(","),
                 cc_emails: non_empty_joined(&req.cc),
                 bcc_emails: non_empty_joined(&req.bcc),
-                preview: Some(req.body_text.chars().take(200).collect()),
+                preview: Some(crate::infrastructure::protocols::imap::parser::normalize_preview(&req.body_text)),
                 body_text: Some(req.body_text.clone()),
                 body_html: Some(req.body_html.clone()),
                 is_read: Some(true),

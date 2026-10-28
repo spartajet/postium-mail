@@ -61,7 +61,10 @@ impl DetailStore {
         let api = api.clone();
         let rx = spawn_tokio(async move {
             let detail = api.get_email(email_id).await;
-            let inline = api.resolve_inline_attachments(email_id).await.unwrap_or_default();
+            let inline = api.resolve_inline_attachments(email_id).await.unwrap_or_else(|e| {
+                tracing::warn!(target: "postium::ui", email_id, "解析内联附件失败: {e}");
+                Vec::new()
+            });
             (detail, inline)
         });
 
@@ -72,13 +75,18 @@ impl DetailStore {
                     if store.email_id != Some(email_id) {
                         return;
                     }
-                    if let Ok(detail) = detail {
-                        let injected = match &detail.body_html {
-                            Some(html) => inject_images(html, &inline, RemoteImagePolicy::Block),
-                            None => String::new(),
-                        };
-                        store.html = Some(injected);
-                        store.detail = Some(detail);
+                    match detail {
+                        Ok(detail) => {
+                            let injected = match &detail.body_html {
+                                Some(html) => inject_images(html, &inline, RemoteImagePolicy::Block),
+                                None => String::new(),
+                            };
+                            store.html = Some(injected);
+                            store.detail = Some(detail);
+                        }
+                        Err(e) => {
+                            tracing::warn!(target: "postium::ui", email_id, "加载邮件详情失败: {e}")
+                        }
                     }
                     store.loading = false;
                     cx.emit(DetailEvent::Loaded);

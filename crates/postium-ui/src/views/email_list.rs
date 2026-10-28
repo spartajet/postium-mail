@@ -19,6 +19,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::component::Disableable as _;
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::{EmailCategory, EmailDto};
@@ -55,7 +56,7 @@ impl RenderOnce for EmailRow {
         let email_rc = self.email.clone();
         let time = chrono::DateTime::from_timestamp(self.email.sent_at, 0)
             .map(|dt| {
-                
+
                 let now = chrono::Utc::now();
                 if dt.date_naive() == now.date_naive() {
                     dt.format("%H:%M").to_string()
@@ -64,73 +65,113 @@ impl RenderOnce for EmailRow {
                 }
             })
             .unwrap_or_default();
+        let unread = !self.email.is_read;
 
-        let row = self.base.py_2().px_3().child(
-            v_flex()
-                .flex_1()
-                .overflow_hidden()
-                .gap_1()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .when(self.email.is_starred, |this| {
-                            this.child(
-                                gpui_kit::component::Icon::new(IconName::Star)
-                                    .size_3()
-                                    .text_color(gpui_kit::rgb(0xf59e0b)),
-                            )
-                        })
-                        .when(self.email.has_attachments, |this| {
-                            this.child(
-                                gpui_kit::component::Icon::new(IconName::Paperclip).size_3(),
-                            )
-                        })
-                        .child(
-                            div()
-                                .text_size(px(12.5))
-                                .text_color(cx.theme().muted_foreground)
-                                .line_clamp(1)
-                                .child(
-                                    self.email
-                                        .sender_name
-                                        .clone()
-                                        .unwrap_or_else(|| self.email.sender_email.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .ml_auto()
-                                .text_size(px(11.5))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(time),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_size(px(13.5))
-                        .text_color(cx.theme().foreground)
-                        .when(!self.email.is_read, |this| {
-                            this.font_weight(FontWeight::SEMIBOLD)
-                        })
-                        .line_clamp(1)
-                        .child(
-                            self.email
-                                .subject
-                                .clone()
-                                .unwrap_or_else(|| "（无主题）".into()),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .line_clamp(1)
-                        .child(self.email.preview.clone().unwrap_or_default()),
-                ),
-        );
+        // 三行等高结构（对齐 Tauri 版 EmailList.svelte 的邮件项）：
+        // ①发件人+时间 ②星标+主题 ③预览（单行，空时占位保持行高一致）。
+        // 每行容器固定高度，行与行之间 border-b 分隔。
+        let line = |h: f32| div().w_full().h(px(h)).overflow_hidden();
 
-        // 右键菜单（对齐旧版 EmailContextMenu；旧版"更多操作"为占位未复刻）
+        // ① 发件人 + 时间；未读时发件人加粗（tauri: font-semibold text-foreground）
+        let mut row1 = h_flex().gap_2().items_center();
+        if unread {
+            row1 = row1.child(
+                div()
+                    .flex_none()
+                    .w(px(6.))
+                    .h(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().accent),
+            );
+        }
+        row1 = row1
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        self.email
+                            .sender_name
+                            .clone()
+                            .unwrap_or_else(|| self.email.sender_email.clone()),
+                    ),
+            )
+            .when(self.email.has_attachments, |this| {
+                this.child(
+                    gpui_kit::component::Icon::new(IconName::Paperclip)
+                        .size_3()
+                        .flex_none()
+                        .text_color(cx.theme().muted_foreground),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.5))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(time),
+            );
+
+        // ② 星标 + 主题；未读时主题中粗
+        let row2 = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .when(self.email.is_starred, |this| {
+                this.child(
+                    gpui_kit::component::Icon::new(IconName::Star)
+                        .size_3()
+                        .flex_none()
+                        .text_color(gpui_kit::rgb(0xf59e0b)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::MEDIUM).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        self.email
+                            .subject
+                            .clone()
+                            .unwrap_or_else(|| "（无主题）".into()),
+                    ),
+            );
+
+        // ③ 预览单行；空时占位同高，保证全部邮件等高
+        let preview_text = self.email.preview.clone().unwrap_or_default();
+        let row3 = div()
+            .mt(px(2.))
+            .h(px(15.))
+            .overflow_hidden()
+            .text_size(px(12.))
+            .text_color(cx.theme().muted_foreground)
+            .when(!preview_text.is_empty(), |d| {
+                d.whitespace_nowrap().line_clamp(1).child(preview_text)
+            });
+
+        let row = self
+            .base
+            .px(px(20.))
+            .py(px(12.))
+            // 行间分隔线（全强度主题分隔色；最后一行也带，与“加载更多”区隔开）
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(line(18.).child(row1))
+            .child(line(18.).mt(px(2.)).child(row2))
+            .child(row3);
+
+        // 右键菜单（对齐旧版 EmailContextMenu；旧版”更多操作”为占位未复刻）
         match menu_ctx {
             (Some(api), Some(store)) => div()
                 .child(row)
@@ -159,6 +200,11 @@ fn act_on_email(
     cx: &mut App,
 ) {
     let api_keep = api.clone();
+    let action_label = match action {
+        RowAction::ToggleStar => "ToggleStar",
+        RowAction::MarkRead(_) => "MarkRead",
+        RowAction::Delete => "Delete",
+    };
     let rx = spawn_tokio(async move {
         match action {
             RowAction::ToggleStar => api.toggle_star(id).await.map(|_| ()),
@@ -166,13 +212,26 @@ fn act_on_email(
             RowAction::Delete => api.delete_emails(vec![id]).await.map(|_| ()),
         }
     });
+    let unread_changed = matches!(action_label, "MarkRead");
     cx.spawn(async move |cx| {
-        if let Ok(Ok(())) = rx.recv().await
-            && let Some(store) = store.upgrade()
-        {
-            let _ = cx.update(|cx: &mut App| {
-                store.update(cx, |s, cx| s.refresh_now(&api_keep, cx));
-            });
+        match rx.recv().await {
+            Ok(Ok(())) => {
+                if let Some(store) = store.upgrade() {
+                    let _ = cx.update(|cx: &mut App| {
+                        store.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                            // 标已读/未读：通知宿主刷新侧栏未读徽章
+                            if unread_changed {
+                                cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                            }
+                        });
+                    });
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "postium::ui", "列表行操作失败（{action_label}）: {e}")
+            }
+            Err(_) => {}
         }
     })
     .detach();
@@ -190,41 +249,47 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
     let api_keep = api.clone();
     let rx = spawn_tokio(async move { api.get_email(id).await });
     cx.spawn(async move |cx| {
-        if let Ok(Ok(detail)) = rx.recv().await {
-            let mode = match kind {
-                ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
-                    email_id: detail.email.id,
-                    account_id: detail.email.account_id,
-                    to: detail.email.sender_email.clone(),
-                    subject: detail.email.subject.clone().unwrap_or_default(),
-                    original_html: detail.body_html.clone().unwrap_or_default(),
-                },
-                ReplyKind::ReplyAll => {
-                    let mut to = vec![detail.email.sender_email.clone()];
-                    for r in detail.recipient_emails.split([',', ';']) {
-                        let r = r.trim();
-                        if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
-                            to.push(r.to_string());
-                        }
-                    }
-                    crate::views::compose::ComposeMode::ReplyAll {
+        match rx.recv().await {
+            Ok(Ok(detail)) => {
+                let mode = match kind {
+                    ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
                         email_id: detail.email.id,
                         account_id: detail.email.account_id,
-                        to: to.join(", "),
+                        to: detail.email.sender_email.clone(),
                         subject: detail.email.subject.clone().unwrap_or_default(),
                         original_html: detail.body_html.clone().unwrap_or_default(),
+                    },
+                    ReplyKind::ReplyAll => {
+                        let mut to = vec![detail.email.sender_email.clone()];
+                        for r in detail.recipient_emails.split([',', ';']) {
+                            let r = r.trim();
+                            if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
+                                to.push(r.to_string());
+                            }
+                        }
+                        crate::views::compose::ComposeMode::ReplyAll {
+                            email_id: detail.email.id,
+                            account_id: detail.email.account_id,
+                            to: to.join(", "),
+                            subject: detail.email.subject.clone().unwrap_or_default(),
+                            original_html: detail.body_html.clone().unwrap_or_default(),
+                        }
                     }
-                }
-                ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
-                    email_id: detail.email.id,
-                    account_id: detail.email.account_id,
-                    subject: detail.email.subject.clone().unwrap_or_default(),
-                    original_html: detail.body_html.clone().unwrap_or_default(),
-                },
-            };
-            let _ = cx.update(|cx: &mut App| {
-                crate::views::compose::open_compose_window(mode, &api_keep, cx);
-            });
+                    ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
+                        email_id: detail.email.id,
+                        account_id: detail.email.account_id,
+                        subject: detail.email.subject.clone().unwrap_or_default(),
+                        original_html: detail.body_html.clone().unwrap_or_default(),
+                    },
+                };
+                let _ = cx.update(|cx: &mut App| {
+                    crate::views::compose::open_compose_window(mode, &api_keep, cx);
+                });
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "postium::ui", "打开回复/转发窗口失败（取详情）: {e}")
+            }
+            Err(_) => {}
         }
     })
     .detach();
@@ -272,7 +337,8 @@ fn build_row_menu(
         PopupMenuItem::new(if unread { "标为已读".to_string() } else { "标为未读".to_string() })
             .icon(IconName::MailOpen)
             .on_click(move |_, _, cx| {
-                act_on_email(api.clone(), store.clone(), id, RowAction::MarkRead(!unread), cx);
+                // unread 即目标已读状态：未读(true)→标已读(true)、已读(false)→标未读(false)
+                act_on_email(api.clone(), store.clone(), id, RowAction::MarkRead(unread), cx);
             })
     };
     let delete_item = {
@@ -297,6 +363,8 @@ pub struct EmailListDelegate {
     selected_email: Option<i32>,
     store: gpui_kit::WeakEntity<EmailsStore>,
     api: Arc<postium_core::api::CoreApi>,
+    /// 「加载更早邮件」服务器同步中（防重复触发；footer 按钮显示态）
+    older_syncing: bool,
 }
 
 impl EmailListDelegate {
@@ -356,7 +424,7 @@ impl ListDelegate for EmailListDelegate {
                 }
             });
 
-            // 异步标记已读：完成后原位更新行内 is_read 标记
+            // 异步标记已读：完成后原位更新行内 is_read 标记 + 通知侧栏刷新徽章
             if let Some((id, _unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
                 let api = self.api.clone();
                 let rx = spawn_tokio(async move { api.mark_as_read(id, true).await });
@@ -375,6 +443,10 @@ impl ListDelegate for EmailListDelegate {
                             cx.notify();
                         })
                         .ok();
+                        // 通知宿主刷新文件夹统计（侧栏未读徽章）
+                        store.update(cx, |_, cx| {
+                            cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                        });
                     }
                 })
                 .detach();
@@ -398,13 +470,113 @@ impl ListDelegate for EmailListDelegate {
             store: Some(self.store.clone()),
         })
     }
+
+    /// 列表末尾的加载按钮（合并「加载更多」/「加载更早邮件」）。
+    ///
+    /// 作为 section footer 物理位于列表末尾——滚到底才可见，列表
+    /// 不满一屏（邮件少）时自然显示，无需滚动监听。
+    fn render_section_footer(
+        &mut self,
+        _: usize,
+        _: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Option<impl IntoElement> {
+        let store_entity = self.store.upgrade()?;
+        let can_more = {
+            let store = store_entity.read(cx);
+            (store.emails.len() as u64) < store.total
+        };
+        let label = if self.older_syncing {
+            t("email.syncingOlder")
+        } else if can_more {
+            t("email.loadMore")
+        } else {
+            t("email.syncOlder")
+        };
+
+        let store = self.store.clone();
+        let api = self.api.clone();
+        let state = cx.weak_entity();
+        let mut btn = Button::new("list-load-footer").ghost().xsmall();
+        if self.older_syncing {
+            btn = btn.disabled(true);
+        } else {
+            btn = btn.on_click(move |_, _, cx| {
+                if can_more {
+                    let _ = store.update(cx, |s, cx| s.load_more(&api, cx));
+                } else if let Some(state) = state.upgrade() {
+                    let _ = state.update(cx, |state, cx| state.delegate_mut().start_sync_older(cx));
+                }
+            });
+        }
+        btn = btn.label(label.to_string());
+
+        Some(
+            h_flex()
+                .w_full()
+                .justify_center()
+                .py_2()
+                .child(btn),
+        )
+    }
+}
+
+impl EmailListDelegate {
+    /// 从服务器同步更早邮件（本地数据到底后 footer 按钮触发）。
+    fn start_sync_older(&mut self, cx: &mut Context<ListState<Self>>) {
+        if self.older_syncing {
+            return;
+        }
+        self.older_syncing = true;
+        cx.notify();
+        let nav = self.store.upgrade().map(|s| s.read(cx).nav.clone());
+        let api = self.api.clone();
+        let api_keep = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokio(async move {
+            match &nav {
+                Some(NavTarget::AccountFolder { account_id, .. }) => {
+                    api.sync_older_emails(*account_id, EmailCategory::Inbox).await.map(|_| ())
+                }
+                Some(NavTarget::Category(c)) => {
+                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    for a in accounts {
+                        let _ = api.sync_older_emails(a.id, c.clone()).await;
+                    }
+                    Ok(())
+                }
+                // 全部收件箱：对全部账号同步收件箱更早邮件
+                Some(NavTarget::AllInbox) => {
+                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    for a in accounts {
+                        let _ = api.sync_older_emails(a.id, EmailCategory::Inbox).await;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            if rx.recv().await.is_ok() && let Some(store) = store.upgrade() {
+                store.update(cx, |s, cx| {
+                    s.refresh_now(&api_keep, cx);
+                });
+            }
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |state, cx| {
+                    state.delegate_mut().older_syncing = false;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
 }
 
 pub struct EmailListView {
     pub state: Entity<ListState<EmailListDelegate>>,
     pub store: Entity<EmailsStore>,
     pub api: Arc<CoreApi>,
-    pub older_syncing: bool,
 }
 
 enum SelectedAction {
@@ -422,6 +594,7 @@ impl EmailListView {
         let api = self.api.clone();
         let api_keep = self.api.clone();
         let store = self.store.clone();
+        let unread_changed = matches!(action, SelectedAction::ToggleRead(_));
         let rx = spawn_tokio(async move {
             match action {
                 SelectedAction::Star => api.toggle_star(id).await.map(|_| ()),
@@ -436,65 +609,12 @@ impl EmailListView {
                 let _ = result;
                 store.update(cx, |store, cx| {
                     store.refresh_now(&api_keep, cx);
+                    // 标已读/未读：通知宿主刷新侧栏未读徽章
+                    if unread_changed {
+                        cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                    }
                 });
                 this.update(cx, |_, cx| cx.notify()).ok();
-            }
-        })
-        .detach();
-    }
-
-    fn load_more(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let api = self.api.clone();
-        self.store.update(cx, |store, cx| {
-            store.load_more(&api, cx);
-        });
-        cx.notify();
-    }
-
-    /// 加载更早邮件（sync_older_emails，对当前范围账号）。
-    fn sync_older(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.older_syncing {
-            return;
-        }
-        self.older_syncing = true;
-        cx.notify();
-        let api = self.api.clone();
-        let nav = self.store.read(cx).nav.clone();
-        let rx = spawn_tokio(async move {
-            match &nav {
-                NavTarget::AccountFolder { account_id, .. } => {
-                    api.sync_older_emails(*account_id, EmailCategory::Inbox).await.map(|_| ())
-                }
-                NavTarget::Category(c) => {
-                    let accounts = api.list_accounts().await.unwrap_or_default();
-                    for a in accounts {
-                        let _ = api.sync_older_emails(a.id, c.clone()).await;
-                    }
-                    Ok(())
-                }
-                // 全部收件箱：对全部账号同步收件箱更早邮件
-                NavTarget::AllInbox => {
-                    let accounts = api.list_accounts().await.unwrap_or_default();
-                    for a in accounts {
-                        let _ = api.sync_older_emails(a.id, EmailCategory::Inbox).await;
-                    }
-                    Ok(())
-                }
-                _ => Ok(()),
-            }
-        });
-        let store = self.store.clone();
-        let api2 = self.api.clone();
-        cx.spawn(async move |this, cx| {
-            if rx.recv().await.is_ok() {
-                store.update(cx, |store, cx| {
-                    store.refresh_now(&api2, cx);
-                });
-                this.update(cx, |view, cx| {
-                    view.older_syncing = false;
-                    cx.notify();
-                })
-                .ok();
             }
         })
         .detach();
@@ -515,23 +635,29 @@ impl EmailListView {
         let api2 = self.api.clone();
         let rx = spawn_tokio(async move { api.get_email(id).await });
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(detail)) = rx.recv().await {
-                let subject = detail.email.subject.clone().unwrap_or_default();
-                let original_html = detail.body_html.clone().unwrap_or_default();
-                let email_id = detail.email.id;
-                let account_id = detail.email.account_id;
-                cx.update(|cx| {
-                    crate::views::compose::open_compose_window(
-                        crate::views::compose::ComposeMode::Forward {
-                            email_id,
-                            account_id,
-                            subject,
-                            original_html,
-                        },
-                        &api2,
-                        cx,
-                    );
-                });
+            match rx.recv().await {
+                Ok(Ok(detail)) => {
+                    let subject = detail.email.subject.clone().unwrap_or_default();
+                    let original_html = detail.body_html.clone().unwrap_or_default();
+                    let email_id = detail.email.id;
+                    let account_id = detail.email.account_id;
+                    cx.update(|cx| {
+                        crate::views::compose::open_compose_window(
+                            crate::views::compose::ComposeMode::Forward {
+                                email_id,
+                                account_id,
+                                subject,
+                                original_html,
+                            },
+                            &api2,
+                            cx,
+                        );
+                    });
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(target: "postium::ui", "打开转发窗口失败（取详情）: {e}")
+                }
+                Err(_) => {}
             }
         })
         .detach();
@@ -548,8 +674,6 @@ impl Render for EmailListView {
             .find(|e| Some(e.id) == store.selected)
             .map(|e| !e.is_read)
             .unwrap_or(false);
-        let can_more = (store.emails.len() as u64) < store.total;
-
         let mut toolbar = h_flex()
             .gap_1()
             .items_center()
@@ -587,7 +711,8 @@ impl Render for EmailListView {
                         .xsmall()
                         .label(if selected_unread { "标已读" } else { "标未读" })
                         .on_click(cx.listener(move |this: &mut Self, _, _, cx| {
-                            this.act_on_selected(SelectedAction::ToggleRead(!selected_unread), cx);
+                            // selected_unread 即目标已读状态（切换语义）
+                            this.act_on_selected(SelectedAction::ToggleRead(selected_unread), cx);
                         })),
                 )
                 .child(
@@ -628,38 +753,13 @@ impl Render for EmailListView {
                 );
         }
 
+        // 加载按钮在列表末尾（delegate render_section_footer）：滚到底才可见
         v_flex()
             .size_full()
             .p_2()
             .gap_2()
             .child(toolbar)
             .child(List::new(&self.state).flex_1())
-            .child(
-                h_flex()
-                    .flex_none()
-                    .gap_2()
-                    .justify_center()
-                    .when(can_more, |this| {
-                        this.child(
-                            Button::new("load-more")
-                                .ghost()
-                                .xsmall()
-                                .label(t("email.loadMore"))
-                                .on_click(cx.listener(Self::load_more)),
-                        )
-                    })
-                    .child(
-                        Button::new("sync-older")
-                            .ghost()
-                            .xsmall()
-                            .label(if self.older_syncing {
-                                t("email.syncingOlder")
-                            } else {
-                                t("email.syncOlder")
-                            })
-                            .on_click(cx.listener(Self::sync_older)),
-                    ),
-            )
     }
 }
 
@@ -686,6 +786,7 @@ pub fn rebuild_list_state(
                 selected_email: selected,
                 store: weak,
                 api: api.clone(),
+                older_syncing: false,
             },
             window,
             cx,

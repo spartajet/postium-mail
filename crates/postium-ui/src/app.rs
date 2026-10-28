@@ -3,20 +3,19 @@
 use std::sync::Arc;
 
 use gpui_kit::component::{
-    ActiveTheme as _,
-    button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    resizable::{h_resizable, resizable_panel},
     v_flex,
 };
 use gpui_kit::*;
 
 use postium_core::api::{CoreApi, SyncEventRx};
 
-use crate::i18n::{self, Lang};
+use crate::i18n::{self};
 use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
-use crate::stores::detail::DetailStore;
+use crate::stores::detail::{DetailEvent, DetailStore};
 use crate::stores::sync::SyncStore;
 use crate::stores::emails::{EmailsEvent, EmailsStore};
 use crate::views::email_detail::EmailDetailView;
@@ -57,19 +56,46 @@ pub fn set_theme_pref(pref: &str, cx: &mut App) {
 }
 
 /// 打开主窗口（应用启动时调用一次）。
-pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
-    let options = match crate::window_state::saved_bounds() {
+/// 主窗口默认标题。
+pub const MAIN_WINDOW_TITLE: &str = "Postium Mail";
+
+/// 由详情状态推导窗口标题：有详情显示「主题 — Postium Mail」，无则默认。
+pub(crate) fn window_title_for(
+    detail: Option<&postium_core::service::email_service::EmailDetail>,
+) -> String {
+    let subject = detail
+        .and_then(|d| d.email.subject.clone())
+        .filter(|s| !s.trim().is_empty());
+    match subject {
+        Some(s) => format!("{s} — {MAIN_WINDOW_TITLE}"),
+        None => MAIN_WINDOW_TITLE.to_string(),
+    }
+}
+
+/// 打开主窗口。
+///
+/// `sync_rx` 为主窗口的同步事件接收端；`None` 时（托盘重建已关闭的
+/// 主窗口）使用空通道占位——后台调度的消费循环随旧窗口销毁，重建窗口
+/// 不再接收调度事件（同步状态以列表轮询刷新为准）。
+pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mut App) {
+    let sync_rx = sync_rx
+        .unwrap_or_else(|| crate::stores::sync::sync_event_channel().1);
+    let mut options = match crate::window_state::saved_bounds() {
         Some(bounds) => WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         },
         None => WindowOptions::default(),
     };
-    let (_handle, shell_view) = gpui_kit::open_window(
-        options,
-        cx,
-        |window, cx| cx.new(|cx| AppShell::new(api, sync_rx, window, cx)),
-    )
+    // 原生标题栏深浅只随系统外观（Windows 上无法应用内切换），改为透明 +
+    // 应用自绘标题栏（views::title_bar，背景跟随主题 title_bar 色）
+    options.titlebar = Some(TitlebarOptions {
+        appears_transparent: true,
+        ..Default::default()
+    });
+    let (_handle, shell_view) = gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| AppShell::new(api, sync_rx, window, cx))
+    })
     .expect("打开主窗口失败");
     // 注册全局弱引用（窗口关闭后自动失效）
     cx.set_global(MainShell(shell_view.downgrade()));
@@ -111,6 +137,11 @@ pub struct AppShell {
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     pub(crate) contacts_view: Option<gpui_kit::Entity<crate::views::contacts::ContactsView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
+    /// 主窗口句柄：选中邮件时更新窗口标题用
+    pub(crate) window_handle: gpui_kit::AnyWindowHandle,
+    /// 同步中节流刷新：上次刷新时刻 / 到期未刷标记
+    sync_refresh_at: Option<std::time::Instant>,
+    sync_refresh_pending: bool,
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
 
@@ -199,6 +230,15 @@ impl AppShell {
             scheduler.start();
             std::mem::forget(scheduler); // 调度器随进程存活（Drop 会停止）
         }
+
+        // 同步进行中：节流刷新邮件列表与侧栏徽章（边同步边更新 UI）
+        cx.subscribe(&sync_store, |this: &mut Self, _, event: &crate::stores::sync::SyncEvent, cx| {
+            if matches!(event, crate::stores::sync::SyncEvent::Progress) {
+                this.refresh_lists_throttled(cx);
+            }
+        })
+        .detach();
+
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(i18n::t("email.search"))
         });
@@ -215,6 +255,7 @@ impl AppShell {
                     this.detail.update(cx, |store, cx| {
                         store.clear(cx);
                     });
+                    this.update_window_title(cx);
                     this.detail_view = None;
                     this.email_list = None; // 等 Reloaded 重建
                     cx.notify();
@@ -222,8 +263,9 @@ impl AppShell {
                 SidebarEvent::Settings => {
                     let api = this.api.clone();
                     let accounts = this.accounts.clone();
+                    let sync = this.sync_store.clone();
                     cx.defer(move |cx| {
-                        crate::views::settings::open_settings_window(&accounts, &api, cx);
+                        crate::views::settings::open_settings_window(&accounts, &sync, &api, cx);
                     });
                 }
                 SidebarEvent::Compose => {
@@ -242,18 +284,35 @@ impl AppShell {
 
         // 选中邮件 → 装载详情（视图按选中版本重建，保住展开态/滚动）
         cx.subscribe(&emails, |this: &mut Self, _, event: &EmailsEvent, cx| {
-            if let EmailsEvent::SelectionChanged(id) = event {
-                this.detail.update(cx, |store, cx| {
-                    store.load(*id, &this.api, cx);
-                });
-                this.detail_view = Some(cx.new(|_| EmailDetailView {
-                    store: this.detail.clone(),
-                    api: this.api.clone(),
-                    emails: this.emails.downgrade(),
-                    recipients_expanded: false,
-                }));
-                this.detail_build_version = this.emails.read(cx).selected_version;
-                cx.notify();
+            match event {
+                EmailsEvent::SelectionChanged(id) => {
+                    this.detail.update(cx, |store, cx| {
+                        store.load(*id, &this.api, cx);
+                    });
+                    this.detail_view = Some(cx.new(|_| EmailDetailView {
+                        store: this.detail.clone(),
+                        api: this.api.clone(),
+                        emails: this.emails.downgrade(),
+                        recipients_expanded: false,
+                    }));
+                    this.detail_build_version = this.emails.read(cx).selected_version;
+                    cx.notify();
+                }
+                // 标已读/未读后刷新文件夹统计（侧栏未读徽章）
+                EmailsEvent::UnreadChanged => {
+                    this.accounts.update(cx, |store, cx| {
+                        store.reload(&this.api, cx);
+                    });
+                }
+                EmailsEvent::Reloaded => {}
+            }
+        })
+        .detach();
+
+        // 详情装载完成 → 窗口标题显示邮件主题（无详情时恢复默认）
+        cx.subscribe(&detail, |this: &mut Self, _, event: &DetailEvent, cx| {
+            if matches!(event, DetailEvent::Loaded) {
+                this.update_window_title(cx);
             }
         })
         .detach();
@@ -334,6 +393,9 @@ impl AppShell {
             contacts_view: None,
             workflow_view: None,
             status_bar: None,
+            window_handle: window.window_handle(),
+            sync_refresh_at: None,
+            sync_refresh_pending: false,
         };
 
         // 启动即回填：把存量邮件的往来地址聚合进联系人表（fire-and-forget，
@@ -346,27 +408,72 @@ impl AppShell {
         shell
     }
 
+    /// 同步进行中的节流刷新（SyncEvent::Progress 驱动）：
+    /// 距上次刷新 ≥2s 立即刷；否则标记 pending、1.5s 后补刷一次，
+    /// 避免高频事件拖垮列表重绘，同时保证收尾必有最后一次刷新。
+    fn refresh_lists_throttled(&mut self, cx: &mut Context<Self>) {
+        const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+        const DEFER: std::time::Duration = std::time::Duration::from_millis(1500);
+        let now = std::time::Instant::now();
+        let due = self
+            .sync_refresh_at
+            .map_or(true, |t| now.duration_since(t) >= MIN_INTERVAL);
+        if due {
+            self.sync_refresh_at = Some(now);
+            self.sync_refresh_pending = false;
+            self.refresh_lists_now(cx);
+            return;
+        }
+        if self.sync_refresh_pending {
+            return;
+        }
+        self.sync_refresh_pending = true;
+        let weak = cx.entity().downgrade();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(DEFER).await;
+            this.update(cx, |this, cx| {
+                if !this.sync_refresh_pending {
+                    return;
+                }
+                this.sync_refresh_pending = false;
+                this.sync_refresh_at = Some(std::time::Instant::now());
+                this.refresh_lists_now(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 立即刷新邮件列表与侧栏徽章（文件夹统计）。
+    fn refresh_lists_now(&mut self, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        self.emails.update(cx, |store, cx| {
+            store.refresh_now(&api, cx);
+        });
+        self.accounts.update(cx, |store, cx| {
+            store.reload(&api, cx);
+        });
+        cx.notify();
+    }
+
+    /// 更新窗口标题：选中邮件时显示「邮件主题 — Postium Mail」，
+    /// 无选中（详情空）时恢复默认标题。
+    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
+        // 这里 notify 触发重绘；系统窗口标题（任务栏显示）同步更新。
+        cx.notify();
+        let title = window_title_for(self.detail.read(cx).detail.as_ref());
+        let _ = self.window_handle.update(cx, |_, window, _| {
+            window.set_window_title(&title);
+        });
+    }
+
     fn toggle_lang(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let current = cx.global::<i18n::I18nGlobal>().lang;
-        let next = if current == Lang::Zh { Lang::En } else { Lang::Zh };
-        i18n::set_lang(next, cx);
-        let mut ui = crate::ui_state::load();
-        ui.lang = Some(match next { Lang::Zh => "zh".into(), Lang::En => "en".into() });
-        crate::ui_state::save(&ui);
+        crate::i18n::toggle_language(cx);
+        cx.notify();
     }
 
     pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let dark = cx.theme().mode == gpui_kit::component::ThemeMode::Dark;
-        let (mode, pref) = if dark {
-            (gpui_kit::component::ThemeMode::Light, "light")
-        } else {
-            (gpui_kit::component::ThemeMode::Dark, "dark")
-        };
-        crate::theme::apply_mode(mode, cx);
-        self.theme_pref = pref.to_string();
-        let mut ui = crate::ui_state::load();
-        ui.theme = Some(pref.to_string());
-        crate::ui_state::save(&ui);
+        self.theme_pref = crate::theme::toggle_theme_mode(cx).into();
     }
 
 }
@@ -386,7 +493,6 @@ impl Render for AppShell {
                 state,
                 store: self.emails.clone(),
                 api,
-                older_syncing: false,
             }));
             self.list_nav_version = nav_v;
             self.list_data_version = data_v;
@@ -454,36 +560,55 @@ impl Render for AppShell {
                 self.contacts_view.clone().unwrap().into_any_element()
             }
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
-            _ => h_flex()
-                .flex_1()
-                .size_full()
-                .overflow_hidden()
-                .child(match &self.email_list {
-                    Some(list) => div().flex_1().size_full().child(list.clone()).into_any_element(),
-                    None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
-                })
+            _ => h_resizable("mail-columns")
                 .child(
-                    match self.detail_view.clone() {
-                        Some(view) => view.into_any_element(),
-                        None => {
-                            // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
-                            let view = cx.new(|_| EmailDetailView {
-                                store: self.detail.clone(),
-                                api: self.api.clone(),
-                                emails: self.emails.downgrade(),
-                                recipients_expanded: false,
-                            });
-                            self.detail_view = Some(view.clone());
-                            view.into_any_element()
-                        }
-                    },
+                    resizable_panel()
+                        .size(px(420.))
+                        .size_range(px(280.)..px(720.))
+                        .child(match &self.email_list {
+                            Some(list) => list.clone().into_any_element(),
+                            None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
+                        }),
+                )
+                .child(
+                    resizable_panel().child(
+                        match self.detail_view.clone() {
+                            Some(view) => view.into_any_element(),
+                            None => {
+                                // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
+                                let view = cx.new(|_| EmailDetailView {
+                                    store: self.detail.clone(),
+                                    api: self.api.clone(),
+                                    emails: self.emails.downgrade(),
+                                    recipients_expanded: false,
+                                });
+                                self.detail_view = Some(view.clone());
+                                view.into_any_element()
+                            }
+                        },
+                    ),
                 )
                 .into_any_element(),
         };
 
-        h_flex()
+        // 根布局：自定义标题栏（跟随主题深浅）+ 侧栏/内容列（拖把手可调宽）
+        v_flex()
             .size_full()
-            .child(self.sidebar.clone())
+            .child(crate::views::title_bar::render(self, window, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(
+                        h_resizable("root-columns")
+            .child(
+                resizable_panel()
+                    .size(px(220.))
+                    .size_range(px(170.)..px(420.))
+                    .fixed()
+                    .child(self.sidebar.clone()),
+            )
             .child(
                 v_flex()
                     .relative()
@@ -515,23 +640,6 @@ impl Render for AppShell {
                                     .text_size(px(13.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(nav_label),
-                            )
-                            .child(
-                                h_flex()
-                                    .ml_auto()
-                                    .gap_2()
-                                    .child(
-                                        Button::new("lang")
-                                            .ghost()
-                                            .label("中/EN")
-                                            .on_click(cx.listener(Self::toggle_lang)),
-                                    )
-                                    .child(
-                                        Button::new("theme")
-                                            .ghost()
-                                            .label(i18n::t("settings.theme"))
-                                            .on_click(cx.listener(Self::toggle_theme)),
-                                    ),
                             ),
                     )
                     .child(div().flex_1().overflow_hidden().child(main))
@@ -547,7 +655,10 @@ impl Render for AppShell {
                             self.status_bar = Some(bar.clone());
                             bar.into_any_element()
                         }
-                    }),
+                    })
+                    .into_any_element(),
+            ),
+                    ),
             )
     }
 }

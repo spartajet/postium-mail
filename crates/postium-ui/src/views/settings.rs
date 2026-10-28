@@ -24,23 +24,51 @@ use crate::i18n::{t, t_format};
 use crate::runtime::spawn_tokio;
 use crate::stores::accounts::AccountsStore;
 
-/// 打开设置窗口（居中 760×560，参照旧 open_settings_window）。
-pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>, cx: &mut App) {
+/// 设置窗口句柄注册表（单例守卫：重复点击设置按钮时激活已有窗口）。
+static SETTINGS_WINDOW: std::sync::OnceLock<std::sync::Mutex<Option<gpui_kit::AnyWindowHandle>>> =
+    std::sync::OnceLock::new();
+
+/// 打开设置窗口（居中 980×640：180 导航 + 最宽 768 面板 + 边距，内容不再被裁切）。
+///
+/// 单例：窗口已存在时仅激活它，不重复创建。
+pub fn open_settings_window(
+    accounts: &Entity<AccountsStore>,
+    sync: &Entity<crate::stores::sync::SyncStore>,
+    api: &Arc<CoreApi>,
+    cx: &mut App,
+) {
+    let registry = SETTINGS_WINDOW.get_or_init(|| std::sync::Mutex::new(None));
+    let mut guard = registry.lock().expect("设置窗口注册表锁");
+
+    // 已有设置窗口且存活：激活置前即可
+    if let Some(handle) = guard.as_ref()
+        && cx.windows().iter().any(|w| w.window_id() == handle.window_id())
+    {
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
+        cx.activate(true);
+        return;
+    }
+
     let accounts = accounts.clone();
+    let sync = sync.clone();
     let api = api.clone();
-    gpui_kit::open_window(
+    let (handle, _view) = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(760.), px(560.)),
+                size(px(980.), px(640.)),
                 cx,
             ))),
             ..Default::default()
         },
         cx,
-        move |window, cx| cx.new(|cx| SettingsView::new(accounts.clone(), api.clone(), window, cx)),
+        move |window, cx| {
+            cx.new(|cx| SettingsView::new(accounts.clone(), sync.clone(), api.clone(), window, cx))
+        },
     )
     .expect("打开设置窗口失败");
+    // 记录句柄（窗口关闭后由上面的存活检查惰性清理）
+    *guard = Some(handle);
     cx.activate(true);
 }
 
@@ -179,7 +207,8 @@ impl AddFlow {
             use_password: false,
             email: input("you@example.com", window, cx),
             display_name: input(&t("account.displayName"), window, cx),
-            password: input("", window, cx),
+            // 密码掩码显示（mask_toggle 眼睛按钮在渲染处开启）
+            password: cx.new(|cx| InputState::new(window, cx).masked(true)),
             imap_host: input("imap.example.com", window, cx),
             imap_port: port("993", window, cx),
             imap_ssl: SslMode::Tls,
@@ -233,6 +262,8 @@ pub struct SettingsView {
     /// 当前分区
     pub(crate) active_section: SettingsSection,
     pub(crate) accounts: Entity<AccountsStore>,
+    /// 同步状态（添加账号后的首同步进度转发到这里，状态栏展示）
+    pub(crate) sync: Entity<crate::stores::sync::SyncStore>,
     api: Arc<CoreApi>,
     /// 主题偏好（dark | light | system）
     pub(crate) theme_pref: String,
@@ -254,6 +285,7 @@ pub struct SettingsView {
 impl SettingsView {
     pub(crate) fn new(
         accounts: Entity<AccountsStore>,
+        sync: Entity<crate::stores::sync::SyncStore>,
         api: Arc<CoreApi>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -268,7 +300,8 @@ impl SettingsView {
         )]);
         let edit_name = input(cx);
         let edit_display = input(cx);
-        let edit_password = input(cx);
+        // 改密码：掩码显示 + 眼睛切换
+        let edit_password = cx.new(|cx| InputState::new(window, cx).masked(true));
         // 设置窗口同样跟随系统外观（偏好为 system 时）
         let weak = cx.entity().downgrade();
         let appearance_sub = window.observe_window_appearance(move |window, cx| {
@@ -283,6 +316,7 @@ impl SettingsView {
         Self {
             active_section: SettingsSection::General,
             accounts,
+            sync,
             api,
             theme_pref: crate::ui_state::load().theme.unwrap_or_else(|| "dark".into()),
             _appearance_sub: appearance_sub,
@@ -330,15 +364,19 @@ impl SettingsView {
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.list_providers() });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(providers)) = rx.recv().await {
-                this.update(cx, |view, cx| {
-                    if let Some(add) = view.add.as_mut() {
-                        add.providers = providers.iter().map(ProviderCard::from_info).collect();
-                        add.loading_providers = false;
-                    }
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(providers)) => {
+                    this.update(cx, |view, cx| {
+                        if let Some(add) = view.add.as_mut() {
+                            add.providers = providers.iter().map(ProviderCard::from_info).collect();
+                            add.loading_providers = false;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "加载服务商列表失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -464,6 +502,7 @@ impl SettingsView {
             // ── OAuth2：start → 系统浏览器 → 轮询 → 按邮箱定位账号 ──
             let provider_id = provider.as_ref().map(|p| p.id.clone()).unwrap_or_else(|| "generic".into());
             let api_start = api.clone();
+            let email_for_log = email.clone();
             let rx = spawn_tokio(async move { api_start.start_oauth2(provider_id, email, display).await });
             if let Some(add) = self.add.as_mut() {
                 add.oauth_polling = true;
@@ -475,6 +514,7 @@ impl SettingsView {
                     Ok(Ok(auth)) => {
                         let _ = open::that_detached(&auth.url);
                         let state = auth.state;
+                        tracing::info!(target: "postium::ui", email = %email_for_log, "OAuth2: 已打开浏览器等待授权");
                         this.update(cx, |view, cx| {
                             view.status = "请在浏览器中完成授权...".into();
                             cx.notify();
@@ -502,7 +542,15 @@ impl SettingsView {
                             Ok(Some(acct_email)) if !acct_email.starts_with("__error__") => {
                                 // 按邮箱定位账号（对齐旧版 resolveOAuth2CompletedAccount）
                                 let api_list = api.clone();
-                                let rx = spawn_tokio(async move { api_list.list_accounts().await.unwrap_or_default() });
+                                let rx = spawn_tokio(async move {
+                                    match api_list.list_accounts().await {
+                                        Ok(accs) => accs,
+                                        Err(e) => {
+                                            tracing::warn!(target: "postium::ui", "OAuth2 完成后加载账号列表失败: {e}");
+                                            Vec::new()
+                                        }
+                                    }
+                                });
                                 if let Ok(accs) = rx.recv().await {
                                     let id = accs.iter().find(|a| a.email == acct_email).map(|a| a.id);
                                     accounts_store.update(cx, |store, cx| store.reload(&api, cx));
@@ -515,10 +563,12 @@ impl SettingsView {
                                                     add.step = AddStep::SyncScope;
                                                 }
                                                 None => {
-                                                    add.error = t_format(
+                                                    let msg = t_format(
                                                         "account.oauthAccountMissing",
                                                         &[("{email}", &acct_email)],
                                                     );
+                                                    tracing::warn!(target: "postium::ui", "OAuth2: {msg}");
+                                                    add.error = msg;
                                                 }
                                             }
                                         }
@@ -528,16 +578,19 @@ impl SettingsView {
                                 }
                             }
                             Ok(Some(err)) => {
+                                let msg = err.trim_start_matches("__error__");
+                                tracing::warn!(target: "postium::ui", "OAuth2: {msg}");
                                 this.update(cx, |view, cx| {
                                     if let Some(add) = view.add.as_mut() {
                                         add.oauth_polling = false;
-                                        add.error = err.trim_start_matches("__error__").into();
+                                        add.error = msg.into();
                                     }
                                     cx.notify();
                                 })
                                 .ok();
                             }
                             _ => {
+                                tracing::warn!(target: "postium::ui", "OAuth2: 授权超时，请重试");
                                 this.update(cx, |view, cx| {
                                     if let Some(add) = view.add.as_mut() {
                                         add.oauth_polling = false;
@@ -550,6 +603,7 @@ impl SettingsView {
                         }
                     }
                     Ok(Err(e)) => {
+                        tracing::warn!(target: "postium::ui", "OAuth2: 启动授权失败: {e}");
                         this.update(cx, |view, cx| {
                             if let Some(add) = view.add.as_mut() {
                                 add.oauth_polling = false;
@@ -606,6 +660,7 @@ impl SettingsView {
                         .ok();
                     }
                     Ok(Err(e)) => {
+                        tracing::warn!(target: "postium::ui", "创建账号失败: {e}");
                         this.update(cx, |view, cx| {
                             if let Some(add) = view.add.as_mut() {
                                 add.submitting = false;
@@ -646,7 +701,8 @@ impl SettingsView {
     }
 
     /// 触发后台首次同步并刷新账号列表（不关窗；供向导与测试复用）。
-    /// 消费进度事件至完成（保活通道）；完成后刷新账号列表与主窗口邮件列表。
+    /// 进度事件转发到 SyncStore（主窗口状态栏展示）；完成后刷新账号列表
+    /// 与主窗口邮件列表。
     pub(crate) fn begin_sync(&mut self, cx: &mut Context<Self>) {
         let Some(add) = self.add.as_ref() else { return };
         let Some(id) = add.pending_sync else { return };
@@ -656,12 +712,31 @@ impl SettingsView {
         let api_keep = self.api.clone();
         let accounts_store = self.accounts.clone();
         let accounts_store_late = self.accounts.clone();
+        let sync_store = self.sync.clone();
         let (tx, rx) = smol::channel::bounded(256);
+        // 即时反馈：事件尚未到达前状态栏先进入同步态
+        sync_store.update(cx, |store, cx| {
+            store.syncing = true;
+            store.progress.insert(id, "准备同步...".into());
+            cx.notify();
+        });
         let _ = spawn_tokio(async move {
             let _ = api_sync.sync_account_with_range(tx, id, range).await;
         });
         cx.spawn(async move |_, cx| {
-            while rx.recv().await.is_ok() {}
+            // 进度事件逐条转发给状态栏（SyncStore::apply 内含 Completed 收尾）
+            while let Ok(event) = rx.recv().await {
+                let _ = sync_store.update(cx, |store, cx| {
+                    store.apply(event, cx);
+                    cx.notify();
+                });
+            }
+            // 通道关闭（同步结束）：兜底复位状态，防止 Completed 事件丢失时卡在同步态
+            let _ = sync_store.update(cx, |store, cx| {
+                store.progress.remove(&id);
+                store.syncing = !store.progress.is_empty();
+                cx.notify();
+            });
             let _ = accounts_store_late.update(cx, |store, cx| {
                 store.reload(&api_keep, cx);
             });
@@ -672,8 +747,10 @@ impl SettingsView {
     }
 
     fn set_add_error(&mut self, msg: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let msg = msg.into();
+        tracing::warn!(target: "postium::ui", "添加账号向导: {msg}");
         if let Some(add) = self.add.as_mut() {
-            add.error = msg.into();
+            add.error = msg;
         }
         cx.notify();
     }
@@ -707,16 +784,21 @@ impl SettingsView {
             .await
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                accounts.update(cx, |store, cx| {
-                    store.reload(&api_keep, cx);
-                });
-                this.update(cx, |view, cx| {
-                    view.editing = None;
-                    view.status = "已保存 ✓".into();
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    tracing::info!(target: "postium::ui", "账号信息已保存");
+                    accounts.update(cx, |store, cx| {
+                        store.reload(&api_keep, cx);
+                    });
+                    this.update(cx, |view, cx| {
+                        view.editing = None;
+                        view.status = "已保存 ✓".into();
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "保存账号信息失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -737,13 +819,18 @@ impl SettingsView {
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.update_account_password(id, pw).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                this.update(cx, |view, cx| {
-                    view.edit_password_for = None;
-                    view.status = "密码已更新 ✓".into();
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    tracing::info!(target: "postium::ui", "账号密码已更新");
+                    this.update(cx, |view, cx| {
+                        view.edit_password_for = None;
+                        view.status = "密码已更新 ✓".into();
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "更新账号密码失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -755,12 +842,16 @@ impl SettingsView {
         let accounts = self.accounts.clone();
         let rx = spawn_tokio(async move { api.delete_account(id).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                let api2 = api_keep.clone();
-                accounts.update(cx, |store, cx| {
-                    store.reload(&api2, cx);
-                });
-                this.update(cx, |_, cx| cx.notify()).ok();
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    let api2 = api_keep.clone();
+                    accounts.update(cx, |store, cx| {
+                        store.reload(&api2, cx);
+                    });
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "删除账号失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -847,7 +938,8 @@ impl Render for SettingsView {
             SettingsSection::General => v_flex()
                 .p_5()
                 .gap_2()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
@@ -874,7 +966,8 @@ impl Render for SettingsView {
             SettingsSection::Appearance => v_flex()
                 .p_5()
                 .gap_3()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
@@ -900,7 +993,8 @@ impl Render for SettingsView {
             SettingsSection::Accounts => v_flex()
                 .p_5()
                 .gap_3()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
@@ -983,7 +1077,7 @@ impl Render for SettingsView {
                         .border_color(theme.border)
                         .rounded(theme.radius)
                         .child(div().w(px(80.)).text_size(px(12.)).child(t("account.password")))
-                        .child(div().flex_1().child(Input::new(&self.edit_password)))
+                        .child(div().flex_1().child(Input::new(&self.edit_password).mask_toggle()))
                         .child(
                             Button::new("save-pw")
                                 .primary()
@@ -1062,29 +1156,41 @@ fn render_account_card(g: &crate::stores::accounts::AccountNode, cx: &mut Contex
                     });
                     let id2 = id;
                     cx.spawn(async move |this, cx| {
-                        if let Ok(Ok(enabled)) = rx.recv().await {
-                            let api2 = api_keep.clone();
-                            let rx = crate::runtime::spawn_tokio(async move {
-                                api2.update_account(UpdateAccountRequest {
-                                    id: id2,
-                                    name: None,
-                                    display_name: None,
-                                    color: None,
-                                    sync_enabled: Some(!enabled),
-                                })
-                                .await
-                            });
-                            if let Ok(Ok(_)) = rx.recv().await {
-                                // 刷新账号列表使"同步：开/关"标签立即更新
-                                this.update(cx, |view, cx| {
-                                    let api3 = api_keep.clone();
-                                    view.accounts.update(cx, |store, cx| {
-                                        store.reload(&api3, cx);
-                                    });
-                                    cx.notify();
-                                })
-                                .ok();
+                        match rx.recv().await {
+                            Ok(Ok(enabled)) => {
+                                let api2 = api_keep.clone();
+                                let rx = crate::runtime::spawn_tokio(async move {
+                                    api2.update_account(UpdateAccountRequest {
+                                        id: id2,
+                                        name: None,
+                                        display_name: None,
+                                        color: None,
+                                        sync_enabled: Some(!enabled),
+                                    })
+                                    .await
+                                });
+                                match rx.recv().await {
+                                    Ok(Ok(_)) => {
+                                        // 刷新账号列表使"同步：开/关"标签立即更新
+                                        this.update(cx, |view, cx| {
+                                            let api3 = api_keep.clone();
+                                            view.accounts.update(cx, |store, cx| {
+                                                store.reload(&api3, cx);
+                                            });
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                    }
+                                    Ok(Err(e)) => {
+                                        tracing::warn!(target: "postium::ui", "切换账号同步开关失败: {e}")
+                                    }
+                                    Err(_) => {}
+                                }
                             }
+                            Ok(Err(e)) => {
+                                tracing::warn!(target: "postium::ui", "读取账号同步状态失败: {e}")
+                            }
+                            Err(_) => {}
                         }
                     })
                     .detach();
@@ -1324,13 +1430,22 @@ fn render_step_select(add: &AddFlow, cx: &mut Context<SettingsView>) -> impl Int
 }
 
 /// 表单字段块（label 上置 + 输入行）。
+///
+/// `mask_toggle` = true 时输入框右侧带显示/隐藏密码的眼睛按钮。
 fn field_block(
     key: &str,
     label: SharedString,
     input: &Entity<InputState>,
     trailing: Option<impl IntoElement>,
+    mask_toggle: bool,
 ) -> impl IntoElement {
-    let mut row = h_flex().flex_1().gap_2().items_center().child(Input::new(input));
+    let mut row = h_flex().flex_1().gap_2().items_center();
+    let input_el = if mask_toggle {
+        Input::new(input).mask_toggle()
+    } else {
+        Input::new(input)
+    };
+    row = row.child(input_el);
     if let Some(extra) = trailing {
         row = row.child(extra);
     }
@@ -1408,6 +1523,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
                 .label(t("account.detected"))
                 .on_click(cx.listener(SettingsView::detect_provider)),
         ),
+        false,
     );
     let detect_hint = add.detected.clone().map(|d| {
         div()
@@ -1420,7 +1536,19 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
             .child(d)
     });
 
-    let display_block = field_block("display", t("account.displayName"), &add.display_name, None::<Button>);
+    let display_block = field_block("display", t("account.displayName"), &add.display_name, None::<Button>, false);
+
+    // 错误提示：独占整行（在 footer 上方），自动换行不溢出模态框。
+    // 不能内嵌进 footer 的 h_flex——与按钮争宽时长消息会单向溢出。
+    let error_block = (!add.error.is_empty()).then(|| {
+        div()
+            .w_full()
+            .min_w(px(0.))
+            .text_size(px(12.))
+            .text_color(gpui_kit::rgb(0xf43f5e))
+            .line_clamp(3)
+            .child(add.error.clone())
+    });
 
     // 底部：返回 + 确认
     let footer = h_flex()
@@ -1435,21 +1563,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
                     view.back_to_select(cx);
                 })),
         )
-        .child(
-            div()
-                .flex_1()
-                .when_some(
-                    (!add.error.is_empty()).then(|| add.error.clone()),
-                    |this, e| this.child(
-                        div()
-                            .flex_1()
-                            .text_size(px(12.))
-                            .text_color(gpui_kit::rgb(0xf43f5e))
-                            .line_clamp(2)
-                            .child(e),
-                    ),
-                ),
-        )
+        .child(div().flex_1())
         .child(if add.submitting {
             div()
                 .h(px(32.))
@@ -1545,10 +1659,11 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
         // 切换后显示密码表单
         if add.use_password {
             body = body
-                .child(field_block("password", t("account.password"), &add.password, None::<Button>))
+                .child(field_block("password", t("account.password"), &add.password, None::<Button>, true))
+                .when_some(error_block, |this, e| this.child(e))
                 .child(footer);
         } else {
-            body = body.child(footer);
+            body = body.when_some(error_block, |this, e| this.child(e)).child(footer);
         }
     } else {
         // ── 密码 / 手动路径 ──
@@ -1557,12 +1672,12 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
             .child(email_block)
             .when_some(detect_hint, |this, h| this.child(h))
             .child(display_block)
-            .child(field_block("password", t("account.password"), &add.password, None::<Button>));
+            .child(field_block("password", t("account.password"), &add.password, None::<Button>, true));
 
         if manual {
             body = body.child(manual_server_block(add, cx));
         }
-        body = body.child(footer);
+        body = body.when_some(error_block, |this, e| this.child(e)).child(footer);
     }
 
     body
