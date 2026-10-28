@@ -15,11 +15,13 @@
 //!   （CSS 基础 16 色 + `grey` 别名 + `orange`）；
 //! - font-size 基准 16px：`pt` × 96/72、`%` × 16/100；em/rem/关键词不在映射表，忽略；
 //! - margin/padding 简写按 CSS TRouBLe 顺序展开 1–4 值；百分比间距在
-//!   [`Spacing`](crate::types::Spacing)（纯 px）中不可表达，记 0；
+//!   [`Spacing`](crate::types::Spacing)（纯 px）中不可表达，记 0（已知限制）；
 //! - 边框只保留宽度与颜色（非 solid 样式一律按 solid 近似，spec §3）；浏览器仅在
 //!   border-style 生效时渲染边框，故宽度/颜色单独出现不构成边框；缺宽度取
 //!   medium ≈ 3px，缺色按 currentColor 近似（本块 `color`，否则黑）；
-//! - `margin: auto` 的"视为居中"（spec §3）需布局层配合，本表无对应字段，记 0。
+//! - `margin`/`margin-left`/`margin-right` 含 `auto` → [`BlockStyle::margin_auto`]
+//!   居中标记（spec §3"auto 视为居中"），auto 侧记 0，GPUI 渲染层映射水平居中；
+//! - `max-width` 解析进 [`BlockStyle::max_width`]，由图片渲染层做宽度钳制。
 
 use crate::types::{Align, BlockStyle, Border, InlineStyle, Rgba, Spacing, Width};
 
@@ -77,11 +79,34 @@ pub fn parse_block_style(css_text: &str) -> BlockStyle {
             }
             "color" => style.color = parse_color(&value),
             "text-align" => style.text_align = parse_align(&value),
-            "margin" => style.margin = expand_spacing(&value),
+            "margin" => {
+                if value
+                    .split_whitespace()
+                    .any(|t| t.eq_ignore_ascii_case("auto"))
+                {
+                    style.margin_auto = true;
+                }
+                style.margin = expand_spacing(&value);
+            }
             "margin-top" => set_px(&mut style.margin[0], &value),
-            "margin-right" => set_px(&mut style.margin[1], &value),
+            "margin-right" => {
+                // 左/右 auto 计入居中标记并归零该侧；上下 auto 无水平语义，不计
+                if value.eq_ignore_ascii_case("auto") {
+                    style.margin_auto = true;
+                    style.margin[1] = 0.0;
+                } else {
+                    set_px(&mut style.margin[1], &value);
+                }
+            }
             "margin-bottom" => set_px(&mut style.margin[2], &value),
-            "margin-left" => set_px(&mut style.margin[3], &value),
+            "margin-left" => {
+                if value.eq_ignore_ascii_case("auto") {
+                    style.margin_auto = true;
+                    style.margin[3] = 0.0;
+                } else {
+                    set_px(&mut style.margin[3], &value);
+                }
+            }
             "padding" => style.padding = expand_spacing(&value),
             "padding-top" => set_px(&mut style.padding[0], &value),
             "padding-right" => set_px(&mut style.padding[1], &value),
@@ -89,6 +114,7 @@ pub fn parse_block_style(css_text: &str) -> BlockStyle {
             "padding-left" => set_px(&mut style.padding[3], &value),
             "width" => style.width = parse_width(&value),
             "height" => style.height = parse_width(&value),
+            "max-width" => style.max_width = parse_width(&value),
             "display" => {
                 if value.eq_ignore_ascii_case("none") {
                     style.hidden = true;
@@ -461,9 +487,20 @@ fn expand_trouble<T: Copy>(value: &str, parse: impl Fn(&str) -> Option<T>) -> [O
     }
 }
 
-/// 间距展开（[`Spacing`] 为纯 px）：百分比等不可表达的 token 记 0。
+/// 间距展开（[`Spacing`] 为纯 px）：`auto` 记 0（居中由 `margin_auto` 承载）；
+/// 百分比等不可表达的 token 记 0（无布局上下文，已知限制）。
 fn expand_spacing(value: &str) -> Spacing {
-    expand_trouble(value, parse_px).map(|v| v.unwrap_or(0.0))
+    let tokens: Vec<&str> = value
+        .split_whitespace()
+        .map(|t| {
+            if t.eq_ignore_ascii_case("auto") {
+                "0"
+            } else {
+                t
+            }
+        })
+        .collect();
+    expand_trouble(&tokens.join(" "), parse_px).map(|v| v.unwrap_or(0.0))
 }
 
 /// 单边 px 赋值（值不可解析时保持原值）。
@@ -497,7 +534,7 @@ fn normalize_parens(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Align, Width};
+    use crate::types::{Align, ImageStyle, Width};
 
     // ---- brief 测试（逐字采用，格式按 rustfmt 展开）----
 
@@ -598,6 +635,30 @@ mod tests {
     }
 
     #[test]
+    fn margin_auto_detection() {
+        // （css, margin_auto, margin）——auto 侧记 0，其余 px 值照常解析
+        const CASES: &[(&str, bool, [f32; 4])] = &[
+            ("margin: 0 auto", true, [0.0; 4]),
+            ("margin: auto", true, [0.0; 4]),
+            ("margin: 10px auto", true, [10.0, 0.0, 10.0, 0.0]),
+            ("margin-left: auto", true, [0.0; 4]),
+            ("margin-right: auto", true, [0.0; 4]),
+            ("margin: 10px", false, [10.0; 4]),
+            ("margin: 0", false, [0.0; 4]),
+            ("margin-top: auto", false, [0.0; 4]), // 上下 auto 无水平居中语义
+        ];
+        for (css, want_auto, want_margin) in CASES {
+            let s = parse_block_style(css);
+            assert_eq!(s.margin_auto, *want_auto, "margin_auto {css}");
+            assert_eq!(s.margin, *want_margin, "margin {css}");
+        }
+        // 长手 auto 覆盖先前 px（该侧归零），其余侧保留
+        let s = parse_block_style("margin: 10px; margin-left: auto");
+        assert!(s.margin_auto);
+        assert_eq!(s.margin, [10.0, 10.0, 10.0, 0.0]);
+    }
+
+    #[test]
     fn block_style_whitelist() {
         let s = parse_block_style(
             "background-color: #eee; COLOR: Red; text-align: center; width: 600px; height: 50%; display: none",
@@ -615,6 +676,25 @@ mod tests {
         let s = parse_block_style("height: auto; text-align: right; text-align: justify");
         assert_eq!(s.height, None);
         assert_eq!(s.text_align, Some(Align::Justify)); // 后声明覆盖
+    }
+
+    #[test]
+    fn max_width_parsing() {
+        const CASES: &[(&str, Option<Width>)] = &[
+            ("max-width: 600px", Some(Width::Px(600.0))),
+            ("max-width: 100%", Some(Width::Percent(100.0))),
+            ("max-width: 0", Some(Width::Px(0.0))),
+            ("max-width: auto", None),
+            ("max-width: 10em", None), // em 不在映射表
+        ];
+        for (css, want) in CASES {
+            assert_eq!(parse_block_style(css).max_width, *want, "{css}");
+        }
+        // 与 width 并存互不干扰；ImageStyle 同步获得字段（图片渲染层消费）
+        let s = parse_block_style("width: 100%; max-width: 600px");
+        assert_eq!(s.width, Some(Width::Percent(100.0)));
+        assert_eq!(s.max_width, Some(Width::Px(600.0)));
+        assert_eq!(ImageStyle::default().max_width, None);
     }
 
     #[test]

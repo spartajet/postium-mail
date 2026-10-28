@@ -64,12 +64,17 @@ pub struct BlockStyle {
     pub text_align: Option<Align>,
     /// 外边距（px）。
     pub margin: Spacing,
+    /// `margin` / `margin-left` / `margin-right` 含 `auto`：水平居中标记
+    /// （spec §3"auto 视为居中"，GPUI 渲染层映射）；auto 侧在 [`BlockStyle::margin`] 记 0。
+    pub margin_auto: bool,
     /// 内边距（px）。
     pub padding: Spacing,
     /// 宽度（px / %）。
     pub width: Option<Width>,
     /// 高度（px / %）。
     pub height: Option<Width>,
+    /// 最大宽度（px / %）：渲染层宽度钳制上限（响应式邮件高频属性）。
+    pub max_width: Option<Width>,
     /// 上边框。
     pub border_top: Option<Border>,
     /// 右边框。
@@ -106,6 +111,8 @@ pub struct ImageStyle {
     pub width: Option<Width>,
     /// 高度（px / %）。
     pub height: Option<Width>,
+    /// 最大宽度（px / %）：图片渲染宽度钳制上限。
+    pub max_width: Option<Width>,
 }
 
 /// 解析完成的邮件正文文档：块级树的根。
