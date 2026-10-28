@@ -1,0 +1,849 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": null,
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": null,
+          "height": null,
+          "max_width": {
+            "Px": 600.0
+          },
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  16.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "各位同事：",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  16.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "以下是 ",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": "2026 年第三季度",
+                    "style": {
+                      "color": [
+                        192,
+                        57,
+                        43,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": true,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": " 的经营摘要，详细数据请见附件。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Table": {
+              "style": {
+                "background_color": [
+                  249,
+                  249,
+                  249,
+                  255
+                ],
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": {
+                  "Percent": 100.0
+                },
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "指标",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": true,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": {
+                        "Percent": 50.0
+                      },
+                      "style": {
+                        "background_color": [
+                          238,
+                          238,
+                          238,
+                          255
+                        ],
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    },
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "数值",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": true,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": {
+                        "Percent": 50.0
+                      },
+                      "style": {
+                        "background_color": [
+                          238,
+                          238,
+                          238,
+                          255
+                        ],
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "新增用户",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    },
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "12,480",
+                                  "style": {
+                                    "color": [
+                                      39,
+                                      174,
+                                      96,
+                                      255
+                                    ],
+                                    "font_size": null,
+                                    "bold": true,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "送达率",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    },
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "99.2%",
+                                  "style": {
+                                    "color": [
+                                      39,
+                                      174,
+                                      96,
+                                      255
+                                    ],
+                                    "font_size": null,
+                                    "bold": true,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  153,
+                  153,
+                  153,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  16.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "本报告由系统自动发送，请勿直接回复。",
+                    "style": {
+                      "color": [
+                        153,
+                        153,
+                        153,
+                        255
+                      ],
+                      "font_size": 12.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                "Br",
+                {
+                  "Text": {
+                    "text": "如有疑问请联系 ",
+                    "style": {
+                      "color": [
+                        153,
+                        153,
+                        153,
+                        255
+                      ],
+                      "font_size": 12.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Link": {
+                    "href": {
+                      "Mailto": "mailto:ops@postium.example"
+                    },
+                    "runs": [
+                      {
+                        "Text": {
+                          "text": "运维组",
+                          "style": {
+                            "color": [
+                              153,
+                              153,
+                              153,
+                              255
+                            ],
+                            "font_size": 12.0,
+                            "bold": false,
+                            "italic": false,
+                            "underline": false,
+                            "strikethrough": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "Text": {
+                    "text": "。",
+                    "style": {
+                      "color": [
+                        153,
+                        153,
+                        153,
+                        255
+                      ],
+                      "font_size": 12.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

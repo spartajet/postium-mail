@@ -95,8 +95,13 @@ fn is_conditional_open(s: &str) -> bool {
 /// - `class/id/style` 对所有白名单标签放行（css-inline 选择器匹配依赖）；
 /// - `align` 放行：遗留呈现属性（T5：p/div/h1–h6/table 对齐兜底，style 优先），
 ///   无 URL/脚本向量；
-/// - `width` 放行（td/th，T6）：遗留呈现属性 `<td width="300">` 是单元格宽度的
-///   主流来源（builder 的 Width 解析依赖它到达树构建）；纯数值/百分比取值，
+/// - `width` 放行（td/th，T6；table，T8 管线实证补）：遗留呈现属性
+///   `<td width="300">` / `<table width="600">` 是单元格/表格宽度的主流来源
+///   （builder 的 Width 解析依赖它到达树构建）；纯数值/百分比取值，
+///   无 URL/脚本向量；
+/// - `bgcolor` 放行（table/td/th，T6 预批准补）：遗留背景色属性
+///   `<table bgcolor="silver">`，取值经 builder 的 `parse_color` 通道终审
+///   （基础 16 色表 + 十六进制/rgb 函数），白名单外取值解析为 None 自然丢弃；
 ///   无 URL/脚本向量；
 /// - `colspan` 在 ammonia 默认属性表（td/th），照常放行；
 /// - `href`（a）/ `src`（img）沿用 ammonia 默认属性表；
@@ -149,10 +154,12 @@ pub fn sanitize_lenient(html: &str) -> String {
     ammonia::Builder::default()
         .tags(tags)
         .generic_attributes(HashSet::from(["class", "id", "style", "align"]))
-        // td/th 的 width 属性放行（T6）：单元格宽度属性的主流来源，builder 依赖
-        // 它到达树构建；colspan 本就在 ammonia 默认表
-        .add_tag_attributes("td", &["width"])
-        .add_tag_attributes("th", &["width"])
+        // td/th 的 width 属性放行（T6）+ 三者的 bgcolor（T6 预批准补）：
+        // 宽度/背景色的遗留呈现属性主流来源，builder 依赖它们到达树构建；
+        // table 的 width 一并放行（T8 管线 fixture 实证补齐，与 bgcolor 同批）
+        .add_tag_attributes("table", &["width", "bgcolor"])
+        .add_tag_attributes("td", &["width", "bgcolor"])
+        .add_tag_attributes("th", &["width", "bgcolor"])
         // cid:/data: 先过 ammonia 的 scheme 校验（其 url_schemes 是全局白名单、
         // 无 per-tag 配置）；attribute_filter 在其后执行、只能收紧——不合规形态
         // （a href="data:…"、img 的 data:text 等）在净化期即被剥除
@@ -229,6 +236,27 @@ mod tests {
         // th 同通道；非单元格元素的 width 不放行（如 p 的 width 仍剔除）
         let out = sanitize_lenient(r#"<p width="300">x</p>"#);
         assert!(!out.contains("width"));
+    }
+
+    #[test]
+    fn sanitize_keeps_table_width_and_bgcolor() {
+        // T6 预批准补：table 的 width/bgcolor、td/th 的 bgcolor 放行（遗留呈现
+        // 属性，builder 的宽度/parse_color 通道消费；无 URL/脚本向量）
+        let out = sanitize_lenient(
+            r##"<table width="600" bgcolor="#f9f9f9"><tr><td bgcolor="silver">x</td></tr></table>"##,
+        );
+        assert!(
+            out.contains(r##"width="600""##)
+                && out.contains(r##"bgcolor="#f9f9f9""##)
+                && out.contains(r##"bgcolor="silver""##)
+        );
+        // th 同通道（th 须在表格上下文内，fragment 解析才保留）；白名单外
+        // 元素的 bgcolor 仍剔除
+        let out = sanitize_lenient(
+            r#"<table><tr><th bgcolor="teal">h</th></tr></table><p bgcolor="red">x</p>"#,
+        );
+        assert!(out.contains(r#"bgcolor="teal""#));
+        assert!(!out.contains(r#"bgcolor="red""#));
     }
 
     #[test]

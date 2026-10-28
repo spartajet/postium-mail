@@ -25,9 +25,9 @@
 //!    | hr | [`Block::Hr`] |
 //!    | br | [`InlineRun::Br`]（并入所在段落） |
 //!    | table 一族 | [`Block::Table`]：tbody/thead/tfoot 透明容器、tr→TableRow、
-//!      td/th→TableCell（colspan/宽度/自身样式解析，字体属性族进 runs base）、
-//!      cell 内递归既有块级构建（嵌套表格自然成立）；rowspan 忽略（各自行内平铺）；
-//!      caption/colgroup/col 跳过 |
+//!      td/th→TableCell（colspan/宽度/bgcolor 属性兜底解析、自身样式，字体属性族
+//!      进 runs base）、cell 内递归既有块级构建（嵌套表格自然成立）；
+//!      rowspan 忽略（各自行内平铺）；caption/colgroup/col 跳过 |
 //!    | script / style / head / title 等元数据 | 连同子树整体跳过 |
 //!
 //! 4. 行内扁平化（Task 5）：行内元素样式经 [`parse_inline_style`] 解析、
@@ -360,7 +360,8 @@ impl<'a> TreeBuilder<'a> {
                         style,
                     }]
                 } else {
-                    split_image_blocks(runs, own_align)
+                    // 非空段落同样携带自身样式（T7 评审发现修复，见 split_image_blocks）
+                    split_image_blocks(runs, own_align, style)
                 }
             }
             BlockKind::Heading(level) => vec![Block::Heading {
@@ -376,7 +377,18 @@ impl<'a> TreeBuilder<'a> {
                 children: self.child_blocks(node, depth + 1, own_align, &child_base, Ws::Fold)?,
             }],
             BlockKind::Table => vec![Block::Table {
-                style,
+                // 遗留呈现属性兜底（T6 预批准补）：style 声明优先，`width` 属性
+                // 兜底宽度（与 td/img 同序）、`bgcolor` 属性兜底背景色（具名色走
+                // parse_color 的基础 16 色表——遗留邮件惯用 `<table bgcolor="…">`）
+                style: BlockStyle {
+                    width: style
+                        .width
+                        .or_else(|| attr_str(attrs, "width").and_then(parse_dim_attr)),
+                    background_color: style
+                        .background_color
+                        .or_else(|| attr_str(attrs, "bgcolor").and_then(parse_color)),
+                    ..style
+                },
                 rows: self.build_table_rows(node, depth + 1, own_align, &child_base)?,
             }],
             BlockKind::Hr => vec![Block::Hr],
@@ -560,6 +572,8 @@ impl<'a> TreeBuilder<'a> {
     /// - colspan：默认 1，数值钳制 1–16（types.rs 契约；0/负/非数字回退默认）；
     /// - 宽度：style `width` 优先、`width` 属性兜底（与 img 尺寸同序）；
     /// - 自身样式：style 属性 → BlockStyle；对齐 text-align 样式优先、align 属性兜底；
+    /// - 背景：style `background-color` 优先、`bgcolor` 属性兜底（T6 预批准补——
+    ///   表格单元格底色是遗留邮件的主流写法，具名色走 [`parse_color`] 基础 16 色表）；
     /// - 字体属性族进 runs base（T5 评审捎带②）：style 声明中的 color/font-size/
     ///   font-weight/font-style/text-decoration 经 [`parse_inline_style`] 映射、
     ///   [`merge_inline`] 叠加为内容 runs 的 base——表格单元格文字样式的主流来源
@@ -574,9 +588,12 @@ impl<'a> TreeBuilder<'a> {
         text_base: &InlineStyle,
     ) -> Result<Option<TableCell>, HtmlError> {
         let style_text = attr_str(attrs, "style").unwrap_or("");
-        let style = parse_block_style(style_text);
+        let mut style = parse_block_style(style_text);
         if style.hidden {
             return Ok(None);
+        }
+        if style.background_color.is_none() {
+            style.background_color = attr_str(attrs, "bgcolor").and_then(parse_color);
         }
         let colspan = attr_str(attrs, "colspan")
             .and_then(parse_colspan)
@@ -860,33 +877,44 @@ fn parse_colspan(value: &str) -> Option<u8> {
         .map(|n| n.clamp(1, 16) as u8)
 }
 
-/// 用聚合的行内 run 物化段落（聚合段落无自身样式，对齐继承父容器）。
-fn paragraph(runs: Vec<InlineRun>, align: Align) -> Block {
-    Block::Paragraph {
-        style: BlockStyle::default(),
-        runs,
-        align,
-    }
+/// 用行内 run 物化段落（`style` 为段落自身 BlockStyle；聚合内容无自身样式时
+/// 由调用方传 [`BlockStyle::default`]，对齐继承父容器）。
+fn paragraph(runs: Vec<InlineRun>, align: Align, style: BlockStyle) -> Block {
+    Block::Paragraph { style, runs, align }
 }
 
 /// 行内 run 序列按图片切分为 `[段落, Image, 段落, …]`——行内 img 一律提升为
-/// 块级图片（plan Task 5：简化布局）；非空 run 物化为段落，顺序保持。
-fn split_image_blocks(runs: Vec<InlineRun>, align: Align) -> Vec<Block> {
+/// 块级图片（plan Task 5：简化布局）；非空 run 物化为段落并携带 `style`
+/// （T7 评审发现修复：此前经本路径物化的非空段落被换成默认样式，`<p>` 自身的
+/// margin/background 等声明丢失；空段占位行为本就保留 style，不变），顺序保持。
+fn split_image_blocks(runs: Vec<InlineRun>, align: Align, style: BlockStyle) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut current: Vec<InlineRun> = Vec::new();
     for run in runs {
         match run {
-            InlineRun::Image { src, alt, style } => {
+            InlineRun::Image {
+                src,
+                alt,
+                style: image,
+            } => {
                 if !current.is_empty() {
-                    blocks.push(paragraph(std::mem::take(&mut current), align));
+                    blocks.push(paragraph(
+                        std::mem::take(&mut current),
+                        align,
+                        style.clone(),
+                    ));
                 }
-                blocks.push(Block::Image { src, alt, style });
+                blocks.push(Block::Image {
+                    src,
+                    alt,
+                    style: image,
+                });
             }
             other => current.push(other),
         }
     }
     if !current.is_empty() {
-        blocks.push(paragraph(current, align));
+        blocks.push(paragraph(current, align, style));
     }
     blocks
 }
@@ -1068,16 +1096,17 @@ impl InlineBuffer {
     }
 
     /// 物化为块序列：折叠语义下按图片切分为 `[段落, Image, 段落, …]`（行内 img
-    /// 提升为块级，简化布局）；pre 语义下整段原样物化。
+    /// 提升为块级，简化布局）；pre 语义下整段原样物化。聚合内容无自身块级元素，
+    /// 段落样式取默认（对齐继承父容器）。
     fn flush_blocks(&mut self, align: Align) -> Vec<Block> {
         let runs = self.finish();
         if runs.is_empty() {
             return Vec::new();
         }
         if self.ws == Ws::Preserve {
-            return vec![paragraph(runs, align)];
+            return vec![paragraph(runs, align, BlockStyle::default())];
         }
-        split_image_blocks(runs, align)
+        split_image_blocks(runs, align, BlockStyle::default())
     }
 }
 
@@ -1720,6 +1749,78 @@ mod tests {
         assert_eq!(style.width, Some(Width::Px(600.0)));
         assert_eq!(style.text_align, Some(Align::Center));
         assert_eq!(style.border_top, None);
+    }
+
+    #[test]
+    fn nonempty_paragraph_keeps_own_block_style() {
+        // T7 评审发现修复：非空 <p> 的自身 BlockStyle 经 split_image_blocks→
+        // paragraph() 保留（此前被换成默认样式，margin/background 丢失）——
+        // margin:0 是邮件排版压掉默认段距的高频写法；空段占位行为不变
+        let doc = doc(r#"<p style="margin:0">文本</p>"#);
+        let Block::Paragraph { style, runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(style.margin, [0.0; 4]);
+        assert_eq!(run_text(runs), "文本");
+        // 非默认值同样保留：背景与 margin:auto 居中标记不再丢失
+        let centered = build_document(
+            r#"<p style="background-color:#eeeeee;margin:0 auto">文本</p>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Paragraph { style, .. } = &centered.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(style.background_color, Some([238, 238, 238, 255]));
+        assert!(style.margin_auto);
+        // 图片切分路径：切分出的各段均携带自身样式
+        let split = build_document(
+            r#"<p style="background-color:#eeeeee">a<img src="cid:x" alt="i">b</p>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(split.blocks.len(), 3);
+        let Block::Paragraph { style, .. } = &split.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(style.background_color, Some([238, 238, 238, 255]));
+        let Block::Paragraph { style, .. } = &split.blocks[2] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(style.background_color, Some([238, 238, 238, 255]));
+    }
+
+    #[test]
+    fn table_and_cell_width_bgcolor_attr_fallback() {
+        // T6 预批准补：table 的 width/bgcolor 属性、td/th 的 bgcolor 属性兜底
+        //（style 声明优先；具名色走 parse_color 的基础 16 色表）
+        let doc = doc(
+            r##"<table width="600" bgcolor="silver"><tr><td bgcolor="#eeeeee">a</td><td style="background-color:teal" bgcolor="red">b</td></tr></table>"##,
+        );
+        let Block::Table { style, rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(style.width, Some(Width::Px(600.0)));
+        assert_eq!(style.background_color, Some([192, 192, 192, 255]));
+        assert_eq!(
+            rows[0].cells[0].style.background_color,
+            Some([238, 238, 238, 255])
+        );
+        // style 声明优先于属性
+        assert_eq!(
+            rows[0].cells[1].style.background_color,
+            Some([0, 128, 128, 255])
+        );
+        // 表格 style width 优先于 width 属性
+        let styled = build_document(
+            r#"<table width="600" style="width:300px"><tr><td>x</td></tr></table>"#,
+            &Limits::default(),
+        )
+        .unwrap();
+        let Block::Table { style, .. } = &styled.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(style.width, Some(Width::Px(300.0)));
     }
 
     #[test]
