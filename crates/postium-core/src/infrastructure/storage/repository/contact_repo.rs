@@ -393,10 +393,27 @@ pub async fn update(db: &DbConn, id: i32, write: ContactWrite) -> Result<(), Mai
 
 /// 根据 ID 删除联系人。
 ///
-/// 所属分组成员关系由外键 `ON DELETE CASCADE` 自动清理。
+/// 所属分组成员关系由外键 `ON DELETE CASCADE` 自动清理。删除的条目若带
+/// CardDAV 归属（`dav_account_id` + `dav_href`），写入 `dav_deletes` 墓碑
+/// 供同步推送阶段向服务器发 DELETE（同 href 重删以最新时间覆盖）。
 pub async fn delete(db: &DbConn, id: i32) -> Result<(), MailError> {
     db.call(move |conn| {
+        let existing: Option<(Option<i32>, Option<String>)> = conn
+            .query_row(
+                "SELECT dav_account_id, dav_href FROM contacts WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (account_id, href) = existing.unwrap_or((None, None));
         conn.execute("DELETE FROM contacts WHERE id = ?1", [id])?;
+        if let (Some(account_id), Some(href)) = (account_id, href) {
+            conn.execute(
+                "INSERT INTO dav_deletes (account_id, href, deleted_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(account_id, href) DO UPDATE SET deleted_at = excluded.deleted_at",
+                rusqlite::params![account_id, href, chrono::Utc::now().timestamp()],
+            )?;
+        }
         Ok(())
     })
     .await
@@ -1067,6 +1084,283 @@ pub async fn binding_touch_synced(
         Ok(())
     })
     .await
+}
+
+// ── CardDAV 同步引擎所需查询/落库 ────────────────────────────────────────────
+
+/// 拉取脏条目（推送候选）：`updated_at > since` 且 source 为 local/dav
+/// （collected 从不推送），且 CardDAV 归属为空或属于该账号。
+#[derive(Debug, Clone)]
+pub struct DavDirtyContact {
+    pub contact: ContactDto,
+    /// 变更时间戳（412 冲突时与服务器 REV 比较）
+    pub updated_at: i64,
+    /// 服务器原卡文本（dav 条目合并推送的基底；local 条目为 None）
+    pub raw_vcard: Option<String>,
+}
+
+/// 按账号 + UID 查找 dav 条目。
+pub async fn find_by_uid(
+    db: &DbConn,
+    account_id: i32,
+    uid: &str,
+) -> Result<Option<ContactDto>, MailError> {
+    let account = account_id;
+    let uid = uid.to_string();
+    db.call(move |conn| {
+        conn.query_row(
+            &format!(
+                "SELECT {CONTACT_COLUMNS} FROM contacts WHERE dav_account_id = ?1 AND dav_uid = ?2"
+            ),
+            rusqlite::params![account, uid],
+            map_contact,
+        )
+        .optional()
+        .map_err(Into::into)
+    })
+    .await
+}
+
+/// 账号名下的全部 dav 条目（服务器消失检测用）。
+pub async fn dav_contacts_for_account(
+    db: &DbConn,
+    account_id: i32,
+) -> Result<Vec<ContactDto>, MailError> {
+    let account = account_id;
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CONTACT_COLUMNS} FROM contacts
+             WHERE source = 'dav' AND dav_account_id = ?1"
+        ))?;
+        let mut rows = stmt
+            .query_map([account], map_contact)?
+            .collect::<Result<Vec<_>, _>>()?;
+        attach_groups(conn, &mut rows)?;
+        Ok(rows)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+/// 推送候选（见 [`DavDirtyContact`]）。
+pub async fn list_dav_dirty(
+    db: &DbConn,
+    account_id: i32,
+    since: i64,
+) -> Result<Vec<DavDirtyContact>, MailError> {
+    let account = account_id;
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CONTACT_COLUMNS}, updated_at, raw_vcard FROM contacts
+             WHERE updated_at > ?1
+               AND source IN ('local', 'dav')
+               AND (dav_account_id IS NULL OR dav_account_id = ?2)"
+        ))?;
+        let mut rows = stmt
+            .query_map(rusqlite::params![since, account], |row| {
+                let contact = map_contact(row)?;
+                Ok(DavDirtyContact {
+                    contact,
+                    updated_at: row.get("updated_at")?,
+                    raw_vcard: row.get("raw_vcard")?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut dtos: Vec<ContactDto> = rows.iter().map(|d| d.contact.clone()).collect();
+        attach_groups(conn, &mut dtos)?;
+        for (dirty, dto) in rows.iter_mut().zip(dtos) {
+            dirty.contact = dto;
+        }
+        Ok(rows)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+/// 拉取落库（已有条目）：结构化字段跟随服务器卡片 + CardDAV 元数据 + raw_vcard。
+///
+/// `sync_ts` 为本次同步游标（binding 上次 last_sync_at）：写入该值而非
+/// `now`，使拉到的行不会被本账号下一轮推送当作脏条目回推。
+#[allow(clippy::too_many_arguments)]
+pub async fn dav_pull_apply(
+    db: &DbConn,
+    id: i32,
+    write: &ContactWrite,
+    account_id: i32,
+    uid: &str,
+    href: &str,
+    etag: &str,
+    raw_vcard: &str,
+    sync_ts: i64,
+) -> Result<(), MailError> {
+    let email = write.email.trim().to_lowercase();
+    let extra_emails = serialize_json_strings(write.extra_emails.clone())?;
+    let phones = serialize_json_strings(write.phones.clone())?;
+    let write = write.clone();
+    let uid = uid.to_string();
+    let href = href.to_string();
+    let etag = etag.to_string();
+    let raw_vcard = raw_vcard.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE contacts
+             SET email = ?1, extra_emails = ?2, name = ?3, phones = ?4, notes = ?5, org = ?6,
+                 dav_account_id = ?7, dav_uid = ?8, dav_href = ?9, dav_etag = ?10,
+                 raw_vcard = ?11, source = 'dav', updated_at = ?12
+             WHERE id = ?13",
+            rusqlite::params![
+                email,
+                extra_emails,
+                write.name,
+                phones,
+                write.notes,
+                write.org,
+                account_id,
+                uid,
+                href,
+                etag,
+                raw_vcard,
+                sync_ts,
+                id,
+            ],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+/// 拉取落库（新条目）：source='dav' 直插，返回新 ID。
+#[allow(clippy::too_many_arguments)]
+pub async fn dav_pull_insert(
+    db: &DbConn,
+    write: &ContactWrite,
+    account_id: i32,
+    uid: &str,
+    href: &str,
+    etag: &str,
+    raw_vcard: &str,
+    sync_ts: i64,
+) -> Result<i32, MailError> {
+    let email = write.email.trim().to_lowercase();
+    let extra_emails = serialize_json_strings(write.extra_emails.clone())?;
+    let phones = serialize_json_strings(write.phones.clone())?;
+    let write = write.clone();
+    let uid = uid.to_string();
+    let href = href.to_string();
+    let etag = etag.to_string();
+    let raw_vcard = raw_vcard.to_string();
+    let duplicate_message = format!("联系人已存在: {email}");
+    let inserted = db
+        .call(move |conn| {
+            match conn.execute(
+                "INSERT INTO contacts (
+                    email, extra_emails, name, phones, notes, org, source,
+                    dav_account_id, dav_uid, dav_href, dav_etag, raw_vcard,
+                    created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'dav', ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+                rusqlite::params![
+                    email,
+                    extra_emails,
+                    write.name,
+                    phones,
+                    write.notes,
+                    write.org,
+                    account_id,
+                    uid,
+                    href,
+                    etag,
+                    raw_vcard,
+                    sync_ts,
+                ],
+            ) {
+                Ok(_) => Ok(Some(conn.last_insert_rowid() as i32)),
+                Err(err) if is_unique_violation(&err) => Ok(None),
+                Err(err) => Err(err),
+            }
+        })
+        .await?;
+
+    inserted.ok_or_else(|| MailError::DatabaseError(duplicate_message))
+}
+
+/// 推送落库：来源升级为 'dav' + 新 UID/href/etag + raw_vcard（同 [`dav_pull_apply`]
+/// 的 `sync_ts` 游标语义，避免自推自拉）。
+#[allow(clippy::too_many_arguments)]
+pub async fn dav_push_mark(
+    db: &DbConn,
+    id: i32,
+    account_id: i32,
+    uid: &str,
+    href: &str,
+    etag: &str,
+    raw_vcard: &str,
+    sync_ts: i64,
+) -> Result<(), MailError> {
+    let uid = uid.to_string();
+    let href = href.to_string();
+    let etag = etag.to_string();
+    let raw_vcard = raw_vcard.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE contacts
+             SET source = 'dav', dav_account_id = ?1, dav_uid = ?2, dav_href = ?3,
+                 dav_etag = ?4, raw_vcard = ?5, updated_at = ?6
+             WHERE id = ?7",
+            rusqlite::params![account_id, uid, href, etag, raw_vcard, sync_ts, id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+/// `since` 之后本地删除的 href 列表（推送删除阶段用）。
+pub async fn dav_tombstones(
+    db: &DbConn,
+    account_id: i32,
+    since: i64,
+) -> Result<Vec<String>, MailError> {
+    let account = account_id;
+    db.call(move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT href FROM dav_deletes WHERE account_id = ?1 AND deleted_at > ?2")?;
+        let rows = stmt
+            .query_map(rusqlite::params![account, since], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })
+    .await
+}
+
+/// 服务器确认删除后清除墓碑。
+pub async fn dav_tombstone_remove(
+    db: &DbConn,
+    account_id: i32,
+    href: &str,
+) -> Result<(), MailError> {
+    let href = href.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "DELETE FROM dav_deletes WHERE account_id = ?1 AND href = ?2",
+            rusqlite::params![account_id, href],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+/// 建组或复用同名分组（同步拉取 CATEGORIES 入组用；与导入路径同一语义）。
+pub async fn group_ensure(db: &DbConn, name: &str) -> Result<i32, MailError> {
+    let name = name.trim().to_string();
+    match group_insert(db, &name).await {
+        Ok(id) => Ok(id),
+        Err(MailError::DatabaseError(message)) if message.contains("分组已存在") => group_list(db)
+            .await?
+            .into_iter()
+            .find(|group| group.name == name)
+            .map(|group| group.id)
+            .ok_or(MailError::DatabaseError(message)),
+        Err(err) => Err(err),
+    }
 }
 
 #[cfg(test)]

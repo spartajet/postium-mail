@@ -184,3 +184,12 @@ CREATE TABLE IF NOT EXISTS dav_bindings (
     sync_token TEXT,
     last_sync_at INTEGER
 );
+-- 本地删除的 CardDAV 条目墓碑：同步推送阶段据此向服务器发 DELETE，
+-- 服务端确认后清除。`deleted_at` 为同步游标（仅推上次同步之后的删除）。
+CREATE TABLE IF NOT EXISTS dav_deletes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    href TEXT NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    UNIQUE(account_id, href)
+);

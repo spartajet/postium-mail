@@ -16,6 +16,7 @@ use crate::domain::{
 use crate::error::MailError;
 use crate::infrastructure::{
     auth::oauth2::{OAuth2AuthUrl, OAuth2Manager, OAuth2PollResult},
+    carddav::CardDavClient,
     storage::database::{self, DbConn},
     storage::repository::contact_repo::{ContactDto, ContactGroupWithCount, ContactListResponse, ContactWrite},
 };
@@ -23,6 +24,7 @@ use crate::service::{
     account_service::{AccountDto, AccountService, CreateAccountRequest, UpdateAccountRequest},
     attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto},
     contact_service::ContactService,
+    contact_sync,
     email_service::{
         EmailCategory,
         EmailDetail,
@@ -511,6 +513,29 @@ impl CoreApi {
     ) -> Result<Vec<crate::infrastructure::storage::repository::contact_repo::DavBindingDto>, MailError>
     {
         self.contacts.list_dav_bindings().await
+    }
+
+    /// CardDAV 双向同步单账号。e2e 离线模式短路返回空报告（无网络调用）。
+    pub async fn sync_contacts(&self, account_id: i32) -> Result<crate::service::DavSyncReport, MailError> {
+        if self.e2e_offline {
+            return Ok(crate::service::DavSyncReport::default());
+        }
+        contact_sync::sync_account(&self.db, &self.auth, account_id).await
+    }
+
+    /// 直连临时 client 发现通讯录（保存绑定前探测用）。
+    /// e2e 离线模式短路返回空列表。
+    pub async fn discover_addressbooks(
+        &self,
+        url: String,
+        username: String,
+        password: String,
+    ) -> Result<Vec<(String, String)>, MailError> {
+        if self.e2e_offline {
+            return Ok(Vec::new());
+        }
+        let client = CardDavClient::new(&url, &username, &password)?;
+        client.discover_addressbooks().await
     }
 
     pub async fn export_contacts_csv(

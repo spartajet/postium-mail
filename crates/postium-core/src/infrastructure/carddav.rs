@@ -19,6 +19,14 @@ pub fn conflict() -> MailError {
     MailError::CardDavError("版本冲突（412）".into())
 }
 
+/// 判断错误是否为 412 版本冲突。
+pub fn is_conflict(err: &MailError) -> bool {
+    matches!(
+        err,
+        MailError::CardDavError(m) if m.contains("412") || m.contains("冲突")
+    )
+}
+
 pub struct CardDavClient {
     http: Client,
     /// 用户输入的基地址（发现链起点）

@@ -8,7 +8,7 @@
 //! 生成固定 VERSION:3.0、CRLF 行结束、75 字节折行（UTF-8 字符边界安全）。
 
 use crate::error::MailError;
-use chrono::{DateTime, NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate};
 
 /// vCard 建模属性名（emit 顺序即输出顺序，也是 merge 的替换集合）。
 const MODELED_PROPS: [&str; 9] = [
@@ -502,14 +502,36 @@ fn parse_rev(value: &str) -> Option<i64> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(v) {
         return Some(dt.timestamp());
     }
-    let basic = v.strip_suffix('Z').or_else(|| v.strip_suffix('z')).unwrap_or(v);
-    if let Ok(nd) = NaiveDateTime::parse_from_str(basic, "%Y%m%dT%H%M%S") {
-        return Some(nd.and_utc().timestamp());
+    // vCard 基本格式：chrono 的 %Y 贪婪吞位导致 %Y%m%dT%H%M%S 失配，手工切片
+    let basic = v.strip_suffix(['Z', 'z']).unwrap_or(v);
+    let (date, time) = match basic.split_once('T') {
+        Some((date, time)) => (date, Some(time)),
+        None => (basic, None),
+    };
+    if date.len() != 8 || !date.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
-    if let Ok(date) = NaiveDate::parse_from_str(basic, "%Y%m%d") {
-        return Some(date.and_hms_opt(0, 0, 0)?.and_utc().timestamp());
-    }
-    None
+    let year: i32 = date[0..4].parse().ok()?;
+    let month: u32 = date[4..6].parse().ok()?;
+    let day: u32 = date[6..8].parse().ok()?;
+    let (hour, minute, second) = match time {
+        None => (0, 0, 0),
+        Some(t) => {
+            if t.len() != 6 || !t.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            (
+                t[0..2].parse().ok()?,
+                t[2..4].parse().ok()?,
+                t[4..6].parse().ok()?,
+            )
+        }
+    };
+    NaiveDate::from_ymd_opt(year, month, day)?
+        .and_hms_opt(hour, minute, second)?
+        .and_utc()
+        .timestamp()
+        .into()
 }
 
 /// epoch 秒 → vCard 3.0 REV 基本格式（`20261028T120000Z`）；越界返回 None。
@@ -928,3 +950,5 @@ mod tests {
         assert_eq!(back.categories, ["work", "client"]);
     }
 }
+
+

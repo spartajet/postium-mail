@@ -69,6 +69,16 @@ pub mod mail_send;
 /// - ContactService: 联系人服务实现（DTO 复用 contact_repo 中的定义）
 pub mod contact_service;
 
+/// CardDAV 双向同步引擎
+///
+/// 职责：
+/// - 单账号拉取（REPORT + multiget）/ 推送（PUT + If-Match）/ 删除（墓碑）
+/// - 412 冲突 last-write-wins 裁决（服务端 REV vs 本地 updated_at）
+///
+/// 主要类型：
+/// - DavSyncReport: 同步结果报告
+pub mod contact_sync;
+
 /// 标签服务模块
 ///
 /// 职责：
@@ -114,6 +124,7 @@ pub use attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentD
 ///
 /// - ContactService: 联系人服务实例（DTO 复用 contact_repo / email_service 中的定义）
 pub use contact_service::ContactService;
+pub use contact_sync::DavSyncReport;
 
 /// 标签相关导出
 ///
