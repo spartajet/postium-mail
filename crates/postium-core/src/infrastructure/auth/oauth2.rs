@@ -44,6 +44,33 @@ use tokio::sync::Mutex;
 
 // static REDIRECT_URI: &str = "http://localhost:{port}/oauth/callback";
 
+/// 按提供商标识解析 OAuth2 凭据的查找键：
+/// 返回（环境变量前缀，配置文件键名）。
+fn credential_keys(provider_id: &str) -> (&'static str, &'static str) {
+    let id = provider_id.to_ascii_lowercase();
+    if id.contains("microsoft") || id.contains("outlook") {
+        ("MICROSOFT", "microsoft_client_id")
+    } else {
+        ("GOOGLE", "google_client_id")
+    }
+}
+
+/// 校验 OAuth2 凭据已配置，未配置时返回带指引的错误。
+///
+/// 凭据由构建脚本从工作区根 `.env` 编译期注入（见 postium-core/build.rs）：
+/// 构建时没有 `.env` 或其中缺少键，`option_env!` 结果为空串，
+/// 授权 URL 会缺 `client_id`（微软报 AADSTS900144）——这里提前拦截。
+fn ensure_credentials(provider_id: &str, config: &crate::domain::providers::OAuthConfig) -> Result<(), MailError> {
+    if config.client_id.trim().is_empty() {
+        let (env_prefix, _) = credential_keys(provider_id);
+        return Err(MailError::OAuth2Error(format!(
+            "未配置 OAuth2 客户端 ID：请在工作区根目录创建 .env 文件，\
+             写入 {env_prefix}_CLIENT_ID=你的客户端ID 后重新构建"
+        )));
+    }
+    Ok(())
+}
+
 /// OAuth2 授权 URL 结果
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OAuth2AuthUrl {
@@ -212,22 +239,26 @@ impl OAuth2Manager {
         let config = provider.oauth_config().ok_or_else(|| {
             MailError::OAuth2Error(format!("provider {provider_id} 不支持 OAuth2"))
         })?;
+        ensure_credentials(provider_id, &config)?;
 
-        // 绑定临时端口用于回调
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        // 回调使用固定端口与路径——服务商开发者后台注册的重定向 URI 必须与此
+        // 完全一致（见 .env.example 的注册指引：http://localhost:36279/callback）
+        const CALLBACK_PORT: u16 = 36279;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
             .await
-            .map_err(|e| MailError::OAuth2Error(format!("绑定回调端口失败: {e}")))?;
-        let port = listener
-            .local_addr()
-            .map_err(|e| MailError::OAuth2Error(format!("获取本地地址失败: {e}")))?
-            .port();
+            .map_err(|e| {
+                MailError::OAuth2Error(format!(
+                    "OAuth2 回调端口 {CALLBACK_PORT} 被占用: {e}（释放该端口后重试）"
+                ))
+            })?;
+        let port = CALLBACK_PORT;
         tracing::info!("使用本地端口 {port} 作为 OAuth2 回调端口");
 
         let auth_url = AuthUrl::new(config.auth_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 auth_url: {e}")))?;
         let token_url = TokenUrl::new(config.token_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 token_url: {e}")))?;
-        let redirect_url = RedirectUrl::new(format!("http://localhost:{port}/oauth/callback"))
+        let redirect_url = RedirectUrl::new(format!("http://localhost:{port}/callback"))
             .map_err(|e| MailError::OAuth2Error(format!("无效 redirect_url: {e}")))?;
 
         let client_id = ClientId::new(config.client_id.clone());
@@ -593,9 +624,11 @@ async fn do_token_exchange(
         AuthUrl::new(config.auth_url.clone()).map_err(|e| format!("无效 auth_url: {e}"))?;
     let token_url =
         TokenUrl::new(config.token_url.clone()).map_err(|e| format!("无效 token_url: {e}"))?;
-    let redirect_url =
-        RedirectUrl::new(format!("http://localhost:{}/oauth/callback", session.port))
-            .map_err(|e| format!("无效 redirect_url: {e}"))?;
+    let redirect_url = RedirectUrl::new(format!(
+        "http://localhost:{}/callback",
+        session.port
+    ))
+    .map_err(|e| format!("无效 redirect_url: {e}"))?;
 
     let client_id = ClientId::new(config.client_id.clone());
     let mut client_builder = BasicClient::new(client_id);
