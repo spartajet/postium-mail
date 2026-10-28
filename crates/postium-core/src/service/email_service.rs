@@ -31,6 +31,9 @@ pub use crate::service::mail_draft::{SaveDraftRequest, SaveDraftResponse};
 pub use crate::service::mail_send::{
     ComposeAttachmentInput, LocalAttachmentDraft, SendEmailResponse,
 };
+pub use crate::infrastructure::storage::repository::contact_repo::{
+    ContactDto, ContactGroupDto, ContactListResponse, ContactWrite,
+};
 
 // ═════════════════════════════════════════════════════════════════════════
 // 邮件服务模块 (Email Service)
