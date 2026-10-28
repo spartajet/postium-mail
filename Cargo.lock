@@ -6094,6 +6094,7 @@ dependencies = [
  "gpui-kit",
  "gpui-kit-assets",
  "gpui-pre",
+ "image",
  "open",
  "png 0.17.16",
  "postium-core",

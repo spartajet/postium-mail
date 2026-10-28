@@ -275,6 +275,15 @@ impl CoreApi {
         self.attachments.resolve_inline_images(email_id).await
     }
 
+    /// 读取邮件内联图片字节（`(content_id, bytes)` 列表，Task 13 消费）。
+    /// 纯本地缓存读取（无网络路径），e2e 离线模式同样可用。
+    pub async fn read_inline_image_bytes(
+        &self,
+        email_id: i32,
+    ) -> Result<Vec<(String, Arc<[u8]>)>, MailError> {
+        self.attachments.read_inline_image_bytes(email_id).await
+    }
+
     /// 拉取远程图片字节（HTML 渲染远程图片加载，Task 13 消费）。
     /// e2e 离线模式短路返回 Err（e2e 不发网络请求，UI 层以占位框兜底）。
     pub async fn fetch_image(&self, url: String) -> Result<Arc<[u8]>, MailError> {

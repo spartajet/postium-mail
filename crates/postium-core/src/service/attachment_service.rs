@@ -370,6 +370,35 @@ impl AttachmentService {
         }
         Ok(resolved)
     }
+
+    /// 读取邮件内联图片字节（Task 13：GPUI 渲染层 CID 匹配的数据源）。
+    ///
+    /// 按 [`Self::resolve_inline_images`] 的筛选口径（image/* + 存在
+    /// Content-ID + 不超缓存上限 + 已缓存）逐项读取本地缓存文件字节，
+    /// 返回 `(content_id, bytes)` 列表。单个文件读取失败跳过该项
+    /// （best-effort：UI 侧对应图显示占位框），不整体失败。
+    ///
+    /// # 参数
+    ///
+    /// - `email_id`: 邮件的数据库 ID
+    ///
+    /// # 返回
+    ///
+    /// 成功时返回 `(content_id 原文, 图片字节)` 列表（content_id 未做
+    /// 尖括号/大小写归一——匹配口径由 UI 层统一处理），失败时返回 `MailError`。
+    pub async fn read_inline_image_bytes(
+        &self,
+        email_id: i32,
+    ) -> Result<Vec<(String, Arc<[u8]>)>, MailError> {
+        let resolved = self.resolve_inline_images(email_id).await?;
+        let mut out = Vec::with_capacity(resolved.len());
+        for dto in resolved {
+            if let Ok(bytes) = tokio::fs::read(&dto.url).await {
+                out.push((dto.content_id, Arc::from(bytes.into_boxed_slice())));
+            }
+        }
+        Ok(out)
+    }
 }
 
 // ─── 转换与工具函数部分 ───

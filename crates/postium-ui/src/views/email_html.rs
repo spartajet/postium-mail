@@ -2,7 +2,7 @@
 //!
 //! 块级（Container/Paragraph/Heading/List/Quote/Hr/Table）与行内 run 序列
 //! （同样式段合并）、表格 flex 模拟与链接 InteractiveText 点击接线；
-//! 图片三源真实渲染归 Task 13（本任务一律占位框）。
+//! 图片三源真实渲染（Remote 拦截放行 / Cid 附件 / DataUri 直解码，Task 13）。
 //!
 //! # 行内 run 选型（实现记录）
 //!
@@ -28,35 +28,70 @@ use std::sync::{Arc, Mutex};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ElementId, FontStyle, FontWeight, Hsla, InteractiveText, IntoElement as _,
-    ParentElement as _, RenderImage, SharedString, StrikethroughStyle, Styled as _, StyledText,
-    TextAlign, TextRun, UnderlineStyle, div, font as base_font, px, relative, rgba,
+    AnyElement, App, ElementId, FontStyle, FontWeight, Hsla, InteractiveElement as _,
+    InteractiveText, IntoElement as _, ParentElement as _, RenderImage, SharedString,
+    StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun, UnderlineStyle, div,
+    font as base_font, img, px, relative, rgba,
 };
 use postium_html::{
-    Align, Block, BlockStyle, HtmlDocument, ImageStyle, InlineRun, InlineStyle, Rgba, SafeUrl,
-    TableCell, TableRow, Width,
+    Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Rgba,
+    SafeUrl, TableCell, TableRow, Width,
 };
-
-#[cfg(test)]
-use gpui_kit::InteractiveElement as _;
 
 /// 正文基础字号（px）。邮件作者未声明字号时的兜底。
 const BASE_FONT_SIZE: f32 = 14.;
 /// 正文基础行高（倍数）。
 const BASE_LINE_HEIGHT: f32 = 1.6;
 
-/// 图片渲染上下文（Task 13 扩展真实加载：Remote 拉取 / Cid 附件 / DataUri 解码）。
-#[derive(Default)]
+/// 图片渲染上下文（单次渲染调用的入参快照）。
+///
+/// 三源消费（Task 13）：`Remote` 查 [`ImageCtx::resolved`]（键为 URL），
+/// `Cid` 线性扫 [`ImageCtx::attachments`]，`DataUri` 直接解码（不占 resolved）。
 pub struct ImageCtx {
     /// 用户是否放行远程图片（默认拦截，spec §4.4 隐私默认）。
-    #[allow(dead_code)] // Task 13 消费
     pub enabled: bool,
     /// 已解析的远程图片缓存（键：URL；值 None 表示加载失败占位）。
-    #[allow(dead_code)] // Task 13 消费
+    /// 渲染只读；放行后的后台拉取由 email_detail/DetailStore 写入。
     pub resolved: Arc<Mutex<HashMap<String, Option<Arc<RenderImage>>>>>,
     /// 内嵌附件图片（键：content-id 小写）。
-    #[allow(dead_code)] // Task 13 消费
     pub attachments: Vec<(String, Arc<RenderImage>)>,
+}
+
+impl Default for ImageCtx {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            resolved: Arc::new(Mutex::new(HashMap::new())),
+            attachments: Vec::new(),
+        }
+    }
+}
+
+/// 详情侧按邮件维度持有的图片渲染状态（email_detail/DetailStore 持有，
+/// 切换邮件即重置——spec §4.4「放行状态按邮件维度存内存，不持久化」）。
+///
+/// 与 [`ImageCtx`] 的分工：本结构是状态（随邮件装载生灭、被后台拉取
+/// 任务写入），[`ImageCtx`] 是单帧渲染快照（[`HtmlRenderState::to_ctx`]
+/// 克隆派生，渲染树只读消费）。
+#[derive(Default)]
+pub struct HtmlRenderState {
+    /// 远程图片是否已放行（「加载图片」按钮翻转）。
+    pub enabled: bool,
+    /// 已解析的远程图片缓存（键：URL；后台拉取任务写回）。
+    pub resolved: Arc<Mutex<HashMap<String, Option<Arc<RenderImage>>>>>,
+    /// 内嵌附件图片（键：content-id 小写，装载期解码一次）。
+    pub attachments: Vec<(String, Arc<RenderImage>)>,
+}
+
+impl HtmlRenderState {
+    /// 派生单帧渲染快照（Arc 共享 resolved、克隆附件列表——每帧廉价）。
+    pub fn to_ctx(&self) -> ImageCtx {
+        ImageCtx {
+            enabled: self.enabled,
+            resolved: Arc::clone(&self.resolved),
+            attachments: self.attachments.clone(),
+        }
+    }
 }
 
 /// 渲染期常量：主题衍生默认色板 + 主题字体 + 链接回调，一次取齐（帧内不可变）。
@@ -72,13 +107,20 @@ struct RenderCtx {
     /// 链接点击回调（InteractiveText hitbox → 调用方打开动作；email_detail
     /// 侧为 open::that_detached 系统处理，见其 open_safe_url）。
     on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+    /// 图片三源上下文（Remote 查 resolved / Cid 扫 attachments / DataUri 解码）。
+    images: ImageCtx,
     /// 链接元素 id 序号（InteractiveText::new 需唯一 ElementId；每次渲染
     /// 从 0 起算，树结构不变则 id 帧间稳定，元素状态不串）。
     link_ix: Cell<usize>,
 }
 
 impl RenderCtx {
-    fn new(dark: bool, on_link: Arc<dyn Fn(&SafeUrl) + 'static>, cx: &App) -> Self {
+    fn new(
+        dark: bool,
+        on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+        images: ImageCtx,
+        cx: &App,
+    ) -> Self {
         let theme = cx.theme();
         Self {
             dark,
@@ -89,6 +131,7 @@ impl RenderCtx {
             border: theme.border,
             placeholder_bg: theme.secondary,
             on_link,
+            images,
             link_ix: Cell::new(0),
         }
     }
@@ -125,7 +168,7 @@ struct Inherited {
 /// 渲染整封 HTML 邮件文档（spec §5 GPUI 渲染层入口）。
 ///
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
-/// - `images`：图片上下文（Task 13 接管三源渲染）。
+/// - `images`：图片三源上下文（Remote/Cid/DataUri，Task 13）。
 /// - `on_link`：链接点击回调（InteractiveText hitbox 命中链接区间时以
 ///   [`SafeUrl`] 调用；email_detail 侧接线为 `open::that_detached`——
 ///   Http/https 系统浏览器、mailto 系统邮件客户端）。
@@ -136,10 +179,7 @@ pub fn render_html_document(
     on_link: impl Fn(&SafeUrl) + 'static,
     cx: &mut App,
 ) -> AnyElement {
-    // Task 13：按 ImageCtx.enabled / attachments / resolved 渲染三源图片。
-    let _ = images;
-
-    let rcx = RenderCtx::new(dark, Arc::new(on_link), cx);
+    let rcx = RenderCtx::new(dark, Arc::new(on_link), images, cx);
     render_blocks(&doc.blocks, Inherited::default(), &rcx)
         .when_probe("html-root")
         .into_any_element()
@@ -229,10 +269,7 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
                 .children(rows.iter().map(|row| render_table_row(row, child_inh, rcx)))
                 .into_any_element()
         }
-        Block::Image { src, alt, style } => {
-            let _ = src; // Task 13：三源（Remote/Cid/DataUri）真实渲染接管占位框
-            image_placeholder(style, alt, rcx)
-        }
+        Block::Image { src, alt, style } => render_image_ref(src, alt, style, rcx),
         Block::Hr => div()
             .w_full()
             .h(px(1.))
@@ -347,7 +384,7 @@ fn render_inline_flow(
     let mut group_size: Option<Option<f32>> = None;
     for seg in segs {
         match seg {
-            FlowSeg::Image { style, alt } => {
+            FlowSeg::Image { src, style, alt } => {
                 flush_text_group(
                     std::mem::take(&mut group),
                     base_color,
@@ -356,7 +393,7 @@ fn render_inline_flow(
                     &mut els,
                 );
                 group_size = None;
-                els.push(image_placeholder(&style, &alt, rcx));
+                els.push(render_image_ref(&src, &alt, &style, rcx));
             }
             text_seg @ FlowSeg::Text { .. } => {
                 let size = match &text_seg {
@@ -390,8 +427,13 @@ enum FlowSeg {
         style: InlineStyle,
         link: Option<SafeUrl>,
     },
-    /// 行内图片占位（Task 13 接管）。
-    Image { style: ImageStyle, alt: String },
+    /// 行内图片（Task 13 三源真实渲染；IR 保留变体兜底——行内 img 已在
+    /// 树构建期提升为块级）。
+    Image {
+        src: ImageRef,
+        style: ImageStyle,
+        alt: String,
+    },
 }
 
 /// 行内 run 序列扁平化：相邻同样式段合并、链接内层携带 href、br 折行。
@@ -451,8 +493,8 @@ fn flatten_runs(
                 }
             }
             InlineRun::Image { src, alt, style } => {
-                let _ = src; // Task 13：三源真实渲染
                 out.push(FlowSeg::Image {
+                    src: src.clone(),
                     style: style.clone(),
                     alt: alt.clone(),
                 });
@@ -578,8 +620,71 @@ fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &Ren
     }
 }
 
-/// 图片占位框（Task 13 三源真实渲染接管）：固定高度灰框 + alt 文本，
-/// 宽度尽量取 style.width（防加载后布局跳动，spec §5）。
+/// 图片三源分发（Task 13，spec §4.4 / §5）：
+///
+/// - `DataUri`：字节已在 [`ImageRef`] 中，直接解码显示（不占 resolved）；
+///   解码失败 → 占位框（与加载失败同形态）。
+/// - `Cid`：按 content-id 在 [`ImageCtx::attachments`] 中匹配（装载期
+///   已由 DetailStore 解码）；未匹配 → 占位框。
+/// - `Remote`：放行且已拉取成功 → 真图；未放行 / 加载中 / 加载失败 → 占位框。
+/// - `Invalid`：来源非法（协议不在白名单）→ 占位框。
+fn render_image_ref(src: &ImageRef, alt: &str, style: &ImageStyle, rcx: &RenderCtx) -> AnyElement {
+    let resolved: Option<Arc<RenderImage>> = match src {
+        ImageRef::DataUri { bytes, .. } => decode_render_image(bytes),
+        ImageRef::Cid { content_id } => rcx
+            .images
+            .attachments
+            .iter()
+            .find(|(cid, _)| cid == content_id)
+            .map(|(_, img)| Arc::clone(img)),
+        ImageRef::Remote { url } if rcx.images.enabled => rcx
+            .images
+            .resolved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(url)
+            .cloned()
+            .flatten(),
+        ImageRef::Remote { .. } | ImageRef::Invalid => None,
+    };
+    match resolved {
+        Some(img) => render_loaded_image(&img, style, rcx),
+        None => image_placeholder(style, alt, rcx),
+    }
+}
+
+/// 已解析图片 → GPUI [`img`] 元素（宽度取 style.width、高度取 style.height、
+/// max_width 钳制，与占位框同口径防布局跳动，spec §5）。
+fn render_loaded_image(
+    image: &Arc<RenderImage>,
+    style: &ImageStyle,
+    rcx: &RenderCtx,
+) -> AnyElement {
+    let _ = rcx;
+    // 尺寸样式直接落在 Img（Styled）上：无显式宽时保持图片固有尺寸。
+    let mut el = img(image.clone()).overflow_hidden();
+    match style.width {
+        Some(Width::Px(v)) => el = el.w(px(v)),
+        Some(Width::Percent(p)) => el = el.w(relative((p / 100.).clamp(0., 1.))),
+        None => {}
+    }
+    match style.height {
+        Some(Width::Px(v)) => el = el.h(px(v)),
+        Some(Width::Percent(p)) => el = el.h(relative((p / 100.).clamp(0., 1.))),
+        None => {}
+    }
+    match style.max_width {
+        Some(Width::Px(v)) => el = el.max_w(px(v)),
+        Some(Width::Percent(p)) => el = el.max_w(relative((p / 100.).clamp(0., 1.))),
+        None => {}
+    }
+    // 已加载真图探针：e2e 断言「无真图渲染」的负向键（占位框为 html-img）。
+    el.debug_selector(|| "html-img-loaded".to_string())
+        .into_any_element()
+}
+
+/// 图片占位框（未放行/加载中/加载失败/Cid 未匹配/Invalid/DataUri 解码失败）：
+/// 固定高度灰框 + alt 文本，宽度尽量取 style.width（防加载后布局跳动，spec §5）。
 fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyElement {
     let mut d = div()
         .h(px(64.))
@@ -616,6 +721,108 @@ fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyEleme
         label.debug_selector(move || key)
     };
     d.child(label).into_any_element()
+}
+
+/// 图片字节 → GPUI [`RenderImage`]（Task 13 三源解码入口）。
+///
+/// 白名单格式 png/jpeg/gif/webp（与 Cargo feature 口径一致）；解码为
+/// RGBA 后交换 R/B 成 BGRA（GPUI [`RenderImage`] 帧缓冲为 BGRA 字节序，
+/// gpui-pre `decode_static_image` 同款处理），帧缓冲单帧——GIF/WebP 动图
+/// 取首帧（v1 取舍，见 task 报告）。解码失败返回 None（调用方以占位框兜底）。
+pub fn decode_render_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    use image::ImageFormat;
+
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    // 格式白名单：未知格式（SVG 等非 raster）与白名单外格式一律拒绝
+    if !matches!(
+        reader.format()?,
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::WebP
+    ) {
+        return None;
+    }
+    let decoded = reader.decode().ok()?;
+    let mut raw = decoded.to_rgba8().into_raw();
+    for [r, _, b, _] in raw.as_chunks_mut::<4>().0 {
+        std::mem::swap(r, b); // RGBA → BGRA
+    }
+    let buffer = image::RgbaImage::from_raw(decoded.width(), decoded.height(), raw)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])))
+}
+
+/// 收集文档中的远程图片 URL（去重、保序）——「加载图片」放行后逐图拉取
+/// 的清单，以及正文顶部条的存在性判据（非空 ⇔ 存在 Remote 图）。
+///
+/// 块级与行内图片都走查（行内 img 常规已提升为块级，此处覆盖 IR 保留变体）；
+/// 嵌套容器/引用块/表格单元格/列表项递归。
+pub fn collect_remote_image_urls(doc: &HtmlDocument) -> Vec<String> {
+    fn walk_blocks(
+        blocks: &[Block],
+        out: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        for block in blocks {
+            match block {
+                Block::Image { src, .. } => push_remote(src, out, seen),
+                Block::Container { children, .. } | Block::Quote { children } => {
+                    walk_blocks(children, out, seen)
+                }
+                Block::Paragraph { runs, .. } | Block::Heading { runs, .. } => {
+                    walk_runs(runs, out, seen)
+                }
+                Block::List { items, .. } => {
+                    for item in items {
+                        walk_blocks(item, out, seen);
+                    }
+                }
+                Block::Table { rows, .. } => {
+                    for row in rows {
+                        for cell in &row.cells {
+                            walk_blocks(&cell.blocks, out, seen);
+                        }
+                    }
+                }
+                Block::Hr => {}
+            }
+        }
+    }
+    fn walk_runs(
+        runs: &[InlineRun],
+        out: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        for run in runs {
+            match run {
+                InlineRun::Image { src, .. } => push_remote(src, out, seen),
+                InlineRun::Link { runs, .. } => walk_runs(runs, out, seen),
+                InlineRun::Text { .. } | InlineRun::Br => {}
+            }
+        }
+    }
+    fn push_remote(
+        src: &ImageRef,
+        out: &mut Vec<String>,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        if let ImageRef::Remote { url } = src
+            && seen.insert(url.clone())
+        {
+            out.push(url.clone());
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    walk_blocks(&doc.blocks, &mut out, &mut seen);
+    out
+}
+
+/// 归一化 content-id 匹配键（CID 附件侧 → [`ImageRef::Cid`] 侧口径）：
+/// 去尖括号 + 小写。HTML 侧由 builder 完成 trim + 小写（`cid:` 后原文），
+/// DB 侧 content_id 可能带 `<…>` 或大小写不一，统一到小写无括号形态。
+pub fn normalize_content_id(cid: &str) -> String {
+    cid.trim().trim_matches(['<', '>']).to_ascii_lowercase()
 }
 
 /// [`BlockStyle`] → GPUI div 样式映射（背景/边框/间距/宽度，spec §3 映射表）。
@@ -766,7 +973,7 @@ fn text_probe_key(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::text_probe_key;
+    use super::*;
 
     /// T9 交接：纯空白/符号文本的字母数字前缀为空，旧实现一律退化为
     /// "html-txt-"——br 独立成组（"\n"）、符号分隔线等组互相碰撞同键，
@@ -789,5 +996,126 @@ mod tests {
         // 常规文本路径不受影响：字母数字前缀键保持原语义
         assert_eq!(text_probe_key("普通文本ABC"), "html-txt-普通文本ABC");
         assert_ne!(text_probe_key("甲"), text_probe_key("乙"));
+    }
+
+    /// 最小合法 PNG：1×1 红色像素（手工构造字节，免依赖编码器 feature）。
+    fn tiny_png() -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let chunk = |v: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]| {
+            v.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            v.extend_from_slice(kind);
+            v.extend_from_slice(data);
+            let mut crc_data = kind.to_vec();
+            crc_data.extend_from_slice(data);
+            v.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+        };
+        // IHDR: width=1 height=1 bitdepth=8 color=6(RGBA) 压缩/滤波/隔行=0
+        chunk(&mut v, b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+        // IDAT: zlib(stored deflate) of [filter=0, R=255, G=0, B=0, A=255]
+        let mut zlib = vec![0x78, 0x01];
+        zlib.extend_from_slice(&[0x01, 0x05, 0x00, 0xFA, 0xFF, 0x00, 255, 0, 0, 255]);
+        let (mut s1, mut s2) = (1u32, 0u32);
+        for b in [0u8, 255, 0, 0, 255] {
+            s1 = (s1 + b as u32) % 65521;
+            s2 = (s2 + s1) % 65521;
+        }
+        zlib.extend_from_slice(&((s2 << 16) | s1).to_be_bytes());
+        chunk(&mut v, b"IDAT", &zlib);
+        chunk(&mut v, b"IEND", &[]);
+        v
+    }
+
+    /// CRC32（PNG chunk 校验字段）。
+    fn crc32(data: &[u8]) -> u32 {
+        let mut table = [0u32; 256];
+        for (i, t) in table.iter_mut().enumerate() {
+            let mut c = i as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 {
+                    0xEDB88320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
+            }
+            *t = c;
+        }
+        let mut crc = 0xFFFF_FFFFu32;
+        for b in data {
+            crc = table[((crc ^ u32::from(*b)) & 0xFF) as usize] ^ (crc >> 8);
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+
+    /// 解码：1×1 PNG → RenderImage（RGBA→BGRA 字节序交换）。
+    #[test]
+    fn decodes_png_to_render_image() {
+        let png = tiny_png();
+        let img = decode_render_image(&png).expect("合法 PNG 应解码成功");
+        assert_eq!(
+            img.size(0),
+            gpui_kit::size(gpui_kit::DevicePixels(1), gpui_kit::DevicePixels(1))
+        );
+        let bytes = img.as_bytes(0).expect("应有帧字节");
+        // 原 RGBA(255,0,0,255) → BGRA(0,0,255,255)
+        assert_eq!(bytes, &[0, 0, 255, 255], "R/B 应互换为 BGRA 字节序");
+    }
+
+    /// 解码拒绝：非图片字节 / 残缺数据 → None（调用方占位框兜底）。
+    #[test]
+    fn rejects_invalid_bytes() {
+        assert!(decode_render_image(b"not an image at all").is_none());
+        assert!(decode_render_image(b"").is_none());
+        // GIF 魔数在白名单内但内容残缺 → 解码失败 → None
+        assert!(decode_render_image(b"GIF89a\x01\x00\x01\x00broken").is_none());
+    }
+
+    /// 远程 URL 收集：块级/嵌套全覆盖、去重保序、非 Remote 不收。
+    #[test]
+    fn collects_remote_urls_dedup_in_order() {
+        let img = |src: ImageRef| Block::Image {
+            src,
+            alt: String::new(),
+            style: postium_html::ImageStyle::default(),
+        };
+        let doc = HtmlDocument {
+            blocks: vec![
+                img(ImageRef::Remote {
+                    url: "https://a/1.png".into(),
+                }),
+                img(ImageRef::Cid {
+                    content_id: "x@y".into(),
+                }),
+                img(ImageRef::DataUri {
+                    mime: "image/png".into(),
+                    bytes: vec![1].into(),
+                }),
+                img(ImageRef::Invalid),
+                Block::Quote {
+                    children: vec![Block::Container {
+                        style: postium_html::BlockStyle::default(),
+                        children: vec![img(ImageRef::Remote {
+                            url: "https://b/2.png".into(),
+                        })],
+                    }],
+                },
+                img(ImageRef::Remote {
+                    url: "https://a/1.png".into(),
+                }),
+            ],
+        };
+        let urls = collect_remote_image_urls(&doc);
+        assert_eq!(
+            urls,
+            vec!["https://a/1.png".to_string(), "https://b/2.png".to_string()],
+            "应去重保序且跳过 Cid/DataUri/Invalid"
+        );
+    }
+
+    /// content-id 归一化：去尖括号 + 小写（与 builder `cid:` 后 trim+小写对齐）。
+    #[test]
+    fn normalizes_content_id() {
+        assert_eq!(normalize_content_id("<ABC@def>"), "abc@def");
+        assert_eq!(normalize_content_id("abc@DEF"), "abc@def");
+        assert_eq!(normalize_content_id("  x@y  "), "x@y");
     }
 }
