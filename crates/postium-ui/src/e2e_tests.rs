@@ -2274,3 +2274,182 @@ fn html_email_oversize_falls_back(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
 }
+
+// ---------------------------------------------------------------------------
+// Task 11 评审修复 P1：纯文本邮件不得误显示降级提示条——body_html 缺失时
+// DetailStore.html = Some("")，空 html 不得进 render_pipeline（Err(Empty)
+// 会把每封纯文本邮件误标「无法渲染」）。断言：提示条缺席 + 纯文本正文可见。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn plain_text_email_no_fallback_banner(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 纯文本草稿：body_html 空白（DetailStore 装载后 html = Some("")）
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Plain Text Probe".into(),
+            body_html: String::new(),
+            body_text: "纯文本邮件正文，不应出现降级提示条。".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("纯文本草稿应保存成功")
+            .draft_id
+    };
+
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+    // 正文先渲染到位（纯文本路径探针可见）
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-plain-body")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    // 多帧后提示条始终缺席（出现即红——纯文本邮件不得误标「无法渲染」）
+    for _ in 0..10 {
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds("email-html-fallback").is_none(),
+            "纯文本邮件不得出现降级提示条"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 11 评审修复 P2：文档缓存内容感知失效——同 id 新正文到达后旧文档不得
+// 命中（生产同 id 换内容路径：同步 UPSERT_EMAIL_SQL 按 (account,folder,uid)
+// 原位更新 body_html；评审所述草稿重存实测为「新行 id + 删旧行」，同 id
+// 新内容经由 DetailStore.html 到达，此处沿该接缝驱动真实渲染路径断言）。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_cache_same_id_new_content_renders(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Cache Content Probe".into(),
+            body_html: "<p>CacheKeyAlpha</p>".into(),
+            body_text: "CacheKeyAlpha".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("缓存探针草稿应保存成功")
+            .draft_id
+    };
+
+    // 打开详情 → Alpha 文本经新渲染器可见
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-CacheKeyAlpha")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+
+    // 同 id 新正文到达（同步重取/重载路径同款接缝）→ 重渲染必须展示新内容：
+    // 内容感知键 (id, hash) 未命中 → 走管线渲染 Beta；id-only 键会命中陈旧
+    // Alpha 文档 → Beta 缺席即红
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.detail.update(cx, |store, cx| {
+                store.html = Some("<p>CacheKeyBeta</p>".into());
+                cx.notify();
+            });
+        });
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-CacheKeyBeta")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("html-txt-CacheKeyAlpha").is_none(),
+        "同 id 新内容渲染后陈旧文本不得残留"
+    );
+    cx.run_until_parked();
+}

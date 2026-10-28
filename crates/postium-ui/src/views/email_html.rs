@@ -69,7 +69,8 @@ struct RenderCtx {
     border: Hsla,
     /// 图片/表格占位底色（主题 secondary）。
     placeholder_bg: Hsla,
-    /// 链接点击回调（InteractiveText hitbox → 调用方 open_url / 状态栏预览）。
+    /// 链接点击回调（InteractiveText hitbox → 调用方打开动作；email_detail
+    /// 侧为 open::that_detached 系统处理，见其 open_safe_url）。
     on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
     /// 链接元素 id 序号（InteractiveText::new 需唯一 ElementId；每次渲染
     /// 从 0 起算，树结构不变则 id 帧间稳定，元素状态不串）。
@@ -126,7 +127,8 @@ struct Inherited {
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
 /// - `images`：图片上下文（Task 13 接管三源渲染）。
 /// - `on_link`：链接点击回调（InteractiveText hitbox 命中链接区间时以
-///   [`SafeUrl`] 调用；email_detail 侧 http/mailto → `cx.open_url`）。
+///   [`SafeUrl`] 调用；email_detail 侧接线为 `open::that_detached`——
+///   Http/https 系统浏览器、mailto 系统邮件客户端）。
 pub fn render_html_document(
     doc: &HtmlDocument,
     dark: bool,

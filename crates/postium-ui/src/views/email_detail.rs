@@ -2,6 +2,7 @@
 
 use std::cell::OnceCell;
 use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui_kit::component::{
@@ -293,6 +294,19 @@ fn spawn_tokok_delete(api: Arc<CoreApi>, id: i32) -> smol::channel::Receiver<Res
     spawn_tokio(async move { api.delete_emails(vec![id]).await })
 }
 
+impl EmailDetailView {
+    /// 详情中的纯文本正文（短借 store 取完即还——正文渲染需 `&mut App`，
+    /// detail 共享借用不得跨越该调用）。
+    fn detail_body_text(&self, cx: &App) -> String {
+        self.store
+            .read(cx)
+            .detail
+            .as_ref()
+            .and_then(|d| d.body_text.clone())
+            .unwrap_or_default()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 正文 HTML 文档缓存（spec §7：LRU 8，同一邮件来回翻看零重解析）
 // ---------------------------------------------------------------------------
@@ -308,10 +322,25 @@ struct CachedDoc {
 }
 
 /// 正文 HTML 文档 LRU 缓存（容量 8，spec §7）。
+///
+/// 键为内容感知二元组 `(email_id, hash(html))`（评审 P2）：同 id 新正文到达
+/// 后旧文档立即失效，不再以 id 命中陈旧渲染。生产同 id 换内容路径：同步
+/// `UPSERT_EMAIL_SQL` 按 (account, folder, uid) 原位更新 body_html。64 位
+/// 默认 hash 在 LRU 8 的空间内误撞概率可忽略。
 pub struct EmailHtmlCache {
     /// 最近使用序（队首最旧、队尾最新，逐出从队首）。
-    order: VecDeque<i32>,
-    map: HashMap<i32, CachedDoc>,
+    order: VecDeque<CacheKey>,
+    map: HashMap<CacheKey, CachedDoc>,
+}
+
+/// 缓存键：邮件 id + 正文内容 hash。
+type CacheKey = (i32, u64);
+
+/// 计算正文内容感知缓存键。
+fn content_key(email_id: i32, html: &str) -> CacheKey {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    html.hash(&mut hasher);
+    (email_id, hasher.finish())
 }
 
 impl EmailHtmlCache {
@@ -319,7 +348,7 @@ impl EmailHtmlCache {
     const CAPACITY: usize = 8;
 
     /// 取文档（命中提升为最近使用）；未命中返回 None。
-    fn get(&mut self, key: i32) -> Option<postium_html::HtmlDocument> {
+    fn get(&mut self, key: CacheKey) -> Option<postium_html::HtmlDocument> {
         if let Some(pos) = self.order.iter().position(|k| *k == key) {
             let k = self.order.remove(pos).expect("position 已验证存在");
             self.order.push_back(k);
@@ -328,7 +357,7 @@ impl EmailHtmlCache {
     }
 
     /// 放入文档（已存在则覆盖并提升）；超容量逐出最久未用。
-    fn put(&mut self, key: i32, doc: postium_html::HtmlDocument) {
+    fn put(&mut self, key: CacheKey, doc: postium_html::HtmlDocument) {
         if !self.order.iter().any(|k| *k == key) {
             self.order.push_back(key);
         }
@@ -366,17 +395,18 @@ fn email_html_cache() -> &'static Mutex<EmailHtmlCache> {
 
 /// 正文 HTML → 新渲染器元素；管线超限/净化后空（`Err`）→ `None` 走纯文本降级。
 ///
-/// 缓存键为邮件数据库 id：`EmailDetail` 未暴露 message_id（该字段仅存于
-/// 仓储层模型，DTO 无此字段），进程会话内 db id 稳定唯一，缓存随进程生灭
-/// 语义等价。
+/// 缓存键内容感知（[`content_key`]）：`(email_id, hash(html))`——同 id 新正文
+/// 到达即失效，键中的 email id 为数据库主键（`EmailDetail` 未暴露 message_id，
+/// 该字段仅存于仓储层模型；进程会话内稳定唯一，缓存随进程生灭语义等价）。
 fn rendered_html_body(html: &str, email_id: i32, cx: &mut gpui_kit::App) -> Option<AnyElement> {
+    let key = content_key(email_id, html);
     let doc = {
         let mut cache = email_html_cache().lock().unwrap_or_else(|e| e.into_inner());
-        match cache.get(email_id) {
+        match cache.get(key) {
             Some(doc) => doc,
             None => {
                 let doc = postium_html::render_pipeline(html).ok()?;
-                cache.put(email_id, doc.clone());
+                cache.put(key, doc.clone());
                 doc
             }
         }
@@ -411,7 +441,8 @@ fn plain_text_body(text: String) -> AnyElement {
             div()
                 .text_size(px(13.5))
                 .line_height(relative(1.8))
-                .child(text),
+                .child(text)
+                .debug_selector(|| "email-plain-body".to_string()),
         )
         .into_any_element()
 }
@@ -448,31 +479,27 @@ impl Render for EmailDetailView {
             return no_selection_placeholder(cx);
         };
 
-        // 正文：HTML 邮件经新渲染器（管线超限/净化后空 → 纯文本降级 + 提示条）；
-        // 纯文本邮件路径不动
-        let (body, html_fallback) = match rendered_html_body(&body_html_str, email_id, cx) {
-            Some(el) => (
-                div()
-                    .id("email-html-body")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .p_4()
-                    .child(el)
-                    .into_any_element(),
-                false,
-            ),
-            None => {
-                // 降级：现有纯文本路径 + 顶部提示条（第二短借取纯文本正文）
-                let body_text = {
-                    let store = self.store.read(cx);
-                    store
-                        .detail
-                        .as_ref()
-                        .and_then(|d| d.body_text.clone())
-                        .unwrap_or_default()
-                };
-                (plain_text_body(body_text), true)
+        // 正文：纯文本邮件（html 空白，含 body_html 缺失 → DetailStore
+        // html = Some("")）直走纯文本路径、无提示条——空 html 不进管线
+        // （render_pipeline("") = Err(Empty) 会把纯文本邮件误标「无法渲染」，
+        // 评审 P1）；HTML 邮件经新渲染器，管线超限/净化后空 → 纯文本降级 +
+        // 顶部提示条
+        let (body, html_fallback) = if body_html_str.trim().is_empty() {
+            (plain_text_body(self.detail_body_text(cx)), false)
+        } else {
+            match rendered_html_body(&body_html_str, email_id, cx) {
+                Some(el) => (
+                    div()
+                        .id("email-html-body")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .p_4()
+                        .child(el)
+                        .into_any_element(),
+                    false,
+                ),
+                None => (plain_text_body(self.detail_body_text(cx)), true),
             }
         };
 
@@ -759,28 +786,35 @@ mod tests {
         postium_html::HtmlDocument::default()
     }
 
-    /// LRU 8 语义锁（spec §7）：容量逐出最久未用、命中提升保活。
+    /// LRU 8 语义锁（spec §7）+ 内容感知键（评审 P2）：容量逐出最久未用、
+    /// 命中提升保活、同 id 新内容 hash 不命中旧文档。
     ///
     /// `core::prelude::v1::test` 显式路径：本模块父级的 `use gpui_kit::*` glob
     /// 在测试构建下包含 GPUI 的 `test` 宏（gpui-kit lib.rs 98-99 行注释明示
     /// 该遮蔽问题），裸 `#[test]` 会解析到它并递归爆栈。
     #[core::prelude::v1::test]
-    fn cache_lru_eviction_and_recency_bump() {
+    fn cache_lru_eviction_and_content_aware_key() {
         let mut cache = EmailHtmlCache {
             order: VecDeque::new(),
             map: HashMap::new(),
         };
-        for id in 1..=8 {
-            cache.put(id, doc());
+        let key = |id: i32, content: i32| (id, content as u64);
+        for i in 1..=8 {
+            cache.put(key(i, i), doc());
         }
         // 访问 1 号（提升为最近使用），9 号入场应逐出 2 号（最久未用）
-        assert!(cache.get(1).is_some(), "命中 1 号");
-        cache.put(9, doc());
-        assert!(cache.get(2).is_none(), "最久未用的 2 号应被逐出");
-        assert!(cache.get(1).is_some(), "刚访问过的 1 号应保活");
-        for id in 3..=9 {
-            assert!(cache.get(id).is_some(), "{id} 号应仍在缓存");
+        assert!(cache.get(key(1, 1)).is_some(), "命中 1 号");
+        cache.put(key(9, 9), doc());
+        assert!(cache.get(key(2, 2)).is_none(), "最久未用的 2 号应被逐出");
+        assert!(cache.get(key(1, 1)).is_some(), "刚访问过的 1 号应保活");
+        for i in 3..=9 {
+            assert!(cache.get(key(i, i)).is_some(), "{i} 号应仍在缓存");
         }
-        assert!(cache.get(10).is_none(), "未放入的键不命中");
+        // 内容感知：同 id 换内容 hash 是不同键——旧文档不得被新正文命中
+        assert!(
+            cache.get(key(1, 999)).is_none(),
+            "同 id 新内容不得命中旧文档"
+        );
+        assert!(cache.get(key(10, 10)).is_none(), "未放入的键不命中");
     }
 }
