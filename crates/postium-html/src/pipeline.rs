@@ -121,4 +121,61 @@ mod tests {
         assert!(dump.contains("正文"), "正文应保留");
         assert!(!dump.contains("邮 件"), "head 中的标题文本不应泄漏进正文");
     }
+
+    #[test]
+    fn pipeline_cid_image_reaches_builder() {
+        // T5 评审裁定修复：cid: img src 经 sanitize 精细放行 → ImageRef::Cid
+        // 端到端可达（此前被 ammonia 默认 scheme 白名单剥成 Invalid 占位）
+        use crate::types::{Block, ImageRef};
+        let doc = render_pipeline(r#"<img src="cid:Image001@ABC" alt="签章">"#).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Image {
+            src: ImageRef::Cid { content_id },
+            alt,
+            ..
+        } = &doc.blocks[0]
+        else {
+            panic!("cid: 图片应以内嵌附件形态到达树构建")
+        };
+        assert_eq!(content_id, "image001@abc"); // content_id 小写化
+        assert_eq!(alt, "签章");
+    }
+
+    #[test]
+    fn pipeline_data_image_reaches_builder() {
+        use crate::types::{Block, ImageRef};
+        let doc = render_pipeline(r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Image {
+            src: ImageRef::DataUri { mime, bytes },
+            ..
+        } = &doc.blocks[0]
+        else {
+            panic!("data:image 图片应以 DataUri 形态到达树构建")
+        };
+        assert_eq!(mime, "image/png");
+        assert_eq!(
+            &bytes[..8],
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+        );
+    }
+
+    #[test]
+    fn pipeline_data_href_still_downgrades_to_text() {
+        // 负例：scheme 精细放行仅限 img src——a href="data:" 仍被剥除，
+        // 树构建收到无 href 的链接 → 降级纯文字（spec §4.4）
+        use crate::types::{Block, InlineRun};
+        let doc = render_pipeline(r#"<a href="data:text/html,<b>evil</b>">点我</a>"#).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert!(runs.iter().all(|run| matches!(run, InlineRun::Text { .. })));
+        assert!(
+            runs.iter()
+                .any(|run| matches!(run, InlineRun::Text { text, .. } if text == "点我"))
+        );
+        let dump = serde_json::to_string(&doc).unwrap();
+        assert!(!dump.contains("data:"), "data: 协议不得出现在任何字段");
+    }
 }

@@ -9,6 +9,7 @@
 //! 2. [`sanitize_lenient`]：ammonia 宽松净化——结构白名单 + 保留 `class/id/style`
 //!    （css-inline 选择器匹配依赖它们），剔除 script/iframe/form 等，事件属性不进白名单。
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use ammonia::UrlRelative;
@@ -95,6 +96,10 @@ fn is_conditional_open(s: &str) -> bool {
 /// - `align` 放行：遗留呈现属性（T5：p/div/h1–h6/table 对齐兜底，style 优先），
 ///   无 URL/脚本向量；
 /// - `href`（a）/ `src`（img）沿用 ammonia 默认属性表；
+/// - 本地/内容 scheme 精细放行（[`local_content_scheme_filter`]，T5 评审裁定）：
+///   `cid:`（内嵌附件引用）与 `data:image/*` 的 **img src** 穿透净化到达树构建
+///   终审（spec §4.4 的 ImageRef 分类因此端到端可达——内嵌附件图片是邮件图片
+///   显示的主流机制）；其余元素与其余 data: 取值一律维持剥除；
 /// - URL 相对路径原样透传（后续渲染按原始文档上下文处理，不做改写）；
 /// - clean_content_tags 在 ammonia 默认（script/style）之上追加 title/noscript/template：
 ///   ammonia 以 fragment 解析、剥 html/head/body 壳但把 head 内容重挂到顶层，
@@ -140,12 +145,44 @@ pub fn sanitize_lenient(html: &str) -> String {
     ammonia::Builder::default()
         .tags(tags)
         .generic_attributes(HashSet::from(["class", "id", "style", "align"]))
+        // cid:/data: 先过 ammonia 的 scheme 校验（其 url_schemes 是全局白名单、
+        // 无 per-tag 配置）；attribute_filter 在其后执行、只能收紧——不合规形态
+        // （a href="data:…"、img 的 data:text 等）在净化期即被剥除
+        .add_url_schemes(&["cid", "data"])
+        .attribute_filter(local_content_scheme_filter)
         .clean_content_tags(HashSet::from([
             "script", "style", "title", "noscript", "template",
         ]))
         .url_relative(UrlRelative::PassThrough)
         .clean(html)
         .to_string()
+}
+
+/// 本地/内容 URL scheme 的精细放行（attribute_filter 回调，ammonia 在 scheme
+/// 校验之后调用，返回 None 即剥除该属性）：
+///
+/// - `cid:` 仅 **img src** 放行（内嵌附件引用，纯本地）；
+/// - `data:` 仅 **img src** 且值为 `data:image/` 前缀放行（大小写不敏感、前导
+///   空白 trim）；MIME 合法性与 base64 解码由树构建期终审
+///   （`classify_image_src`：非 image/* 或解码失败 → `ImageRef::Invalid` 占位）；
+/// - 其余一切 cid:/data: 形态（`a href="data:text/html"`、img 的
+///   `data:text/...`、任意元素上的 cid: 等）一律剥除——攻击面与 ammonia 默认
+///   行为一致；
+/// - 其余属性原样透传。
+fn local_content_scheme_filter<'u>(
+    element: &str,
+    attribute: &str,
+    value: &'u str,
+) -> Option<Cow<'u, str>> {
+    let lowered = value.trim().to_ascii_lowercase();
+    if !lowered.starts_with("cid:") && !lowered.starts_with("data:") {
+        // 非本地/内容 scheme：原样透传（scheme 白名单校验由 ammonia 照常执行）
+        return Some(Cow::Borrowed(value));
+    }
+    let allowed = element.eq_ignore_ascii_case("img")
+        && attribute.eq_ignore_ascii_case("src")
+        && (lowered.starts_with("cid:") || lowered.starts_with("data:image/"));
+    allowed.then_some(Cow::Borrowed(value))
 }
 
 #[cfg(test)]
@@ -174,5 +211,30 @@ mod tests {
         let out = sanitize_lenient(r#"<p align="center" valign="middle">x</p>"#);
         assert!(out.contains(r#"align="center""#));
         assert!(!out.contains("valign"), "白名单外属性仍应剔除");
+    }
+
+    #[test]
+    fn sanitize_passes_cid_and_data_image_src_on_img() {
+        // T5 评审裁定：cid:/data:image 的 img src 放行（内嵌/数据图片端到端可达）
+        let out = sanitize_lenient(
+            r#"<img src="cid:image001@ABC" alt="c"><img src="data:image/png;base64,iVBOR" alt="d">"#,
+        );
+        assert!(out.contains(r#"src="cid:image001@ABC""#));
+        assert!(out.contains(r#"src="data:image/png;base64,iVBOR""#));
+        // 大小写不敏感 + 前导空白 trim（filter 裁定）
+        let out = sanitize_lenient(r#"<img src=" DATA:IMAGE/PNG;BASE64,iVBOR ">"#);
+        assert!(out.contains("DATA:IMAGE/PNG;BASE64,iVBOR"));
+    }
+
+    #[test]
+    fn sanitize_strips_data_and_cid_outside_img_src() {
+        // img 上的非图片 data:（data:text 攻击面不变）
+        let out = sanitize_lenient(r#"<img src="data:text/html,<b>x</b>" alt="x">"#);
+        assert!(!out.contains("data:"));
+        // a href 的 cid:/data: 不放行（scheme 白名单仅对 img src 精细放行）
+        let out =
+            sanitize_lenient(r#"<a href="cid:image001">c</a><a href="data:text/html,evil">d</a>"#);
+        assert!(!out.contains("cid:") && !out.contains("data:"));
+        assert!(out.contains("c") && out.contains("d"));
     }
 }

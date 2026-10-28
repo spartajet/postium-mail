@@ -15,7 +15,9 @@
 //! 净化全量拦截（远程样式表已禁用）。
 //!
 //! 安全边界：树构建期再做终审白名单（SafeUrl / ImageRef，见 spec §4.4），
-//! 本 crate 的净化只负责结构白名单与脚本剔除。
+//! 本 crate 的净化只负责结构白名单、脚本剔除与本地/内容 scheme 的 img src
+//! 精细放行（`cid:` / `data:image/*`，内嵌附件图片端到端可达所必需）——协议
+//! 与 MIME 的终审仍在树构建期。
 
 pub mod builder;
 pub mod error;
