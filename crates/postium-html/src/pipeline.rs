@@ -93,4 +93,20 @@ mod tests {
         // 净化兜底：script 标签与内容剔除，`<style>` 块不再残留。
         assert!(!out.contains("<style>") && !out.contains("script"));
     }
+
+    #[test]
+    fn pipeline_builds_document_from_fragment() {
+        // Task 4 接管：stub（恒空文档）移除后，管线产出真实块级树
+        let doc = render_pipeline(r#"<div style="padding:4px"><p>hi</p></div>"#).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+        assert!(matches!(
+            &doc.blocks[0],
+            crate::types::Block::Container { .. }
+        ));
+    }
+
+    #[test]
+    fn pipeline_empty_html_is_empty_error() {
+        assert!(matches!(render_pipeline(""), Err(HtmlError::Empty)));
+    }
 }

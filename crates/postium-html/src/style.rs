@@ -14,8 +14,8 @@
 //! - 颜色：`#rgb` / `#rrggbb` / `#rrggbbaa` / `rgb()` / `rgba()` / 18 个常见色名
 //!   （CSS 基础 16 色 + `grey` 别名 + `orange`）；
 //! - font-size 基准 16px：`pt` × 96/72、`%` × 16/100；em/rem/关键词不在映射表，忽略；
-//! - margin/padding 简写按 CSS TRouBLe 顺序展开 1–4 值；百分比间距在
-//!   [`Spacing`](crate::types::Spacing)（纯 px）中不可表达，记 0（已知限制）；
+//! - margin/padding 简写按 CSS TRouBLe 顺序展开 1–4 值；百分比槽位在
+//!   [`Spacing`](crate::types::Spacing)（纯 px）中不可换算，原位记 0（已知限制）；
 //! - 边框只保留宽度与颜色（非 solid 样式一律按 solid 近似，spec §3）；浏览器仅在
 //!   border-style 生效时渲染边框，故宽度/颜色单独出现不构成边框；缺宽度取
 //!   medium ≈ 3px，缺色按 currentColor 近似（本块 `color`，否则黑）；
@@ -116,9 +116,9 @@ pub fn parse_block_style(css_text: &str) -> BlockStyle {
             "height" => style.height = parse_width(&value),
             "max-width" => style.max_width = parse_width(&value),
             "display" => {
-                if value.eq_ignore_ascii_case("none") {
-                    style.hidden = true;
-                }
+                // 按声明出现顺序消费，后置覆盖前置（CSS 级联语义）：
+                // display:none; display:block → 可见，none 标记可被撤销
+                style.hidden = value.eq_ignore_ascii_case("none");
             }
             "border" => {
                 let decl = parse_border_decl(&value);
@@ -488,19 +488,18 @@ fn expand_trouble<T: Copy>(value: &str, parse: impl Fn(&str) -> Option<T>) -> [O
 }
 
 /// 间距展开（[`Spacing`] 为纯 px）：`auto` 记 0（居中由 `margin_auto` 承载）；
-/// 百分比等不可表达的 token 记 0（无布局上下文，已知限制）。
+/// 百分比槽位**原位记 0**（无布局上下文不可换算，但占住 TRouBLe 位置——裁定：
+/// `margin:10px 5%` → `[10,0,10,0]` 而非复制首个有效值）；em 等其余不可解析
+/// token 跳过（宽容降级，其余值照常 TRouBLe 展开，已知限制）。
 fn expand_spacing(value: &str) -> Spacing {
-    let tokens: Vec<&str> = value
-        .split_whitespace()
-        .map(|t| {
-            if t.eq_ignore_ascii_case("auto") {
-                "0"
-            } else {
-                t
-            }
-        })
-        .collect();
-    expand_trouble(&tokens.join(" "), parse_px).map(|v| v.unwrap_or(0.0))
+    expand_trouble(value, |token| {
+        if token.eq_ignore_ascii_case("auto") || token.ends_with('%') {
+            Some(0.0)
+        } else {
+            parse_px(token)
+        }
+    })
+    .map(|v| v.unwrap_or(0.0))
 }
 
 /// 单边 px 赋值（值不可解析时保持原值）。
@@ -632,6 +631,42 @@ mod tests {
         // 单边长手
         let s = parse_block_style("margin-top: 8px; margin-left: 2px");
         assert_eq!(s.margin, [8.0, 0.0, 0.0, 2.0]);
+    }
+
+    #[test]
+    fn spacing_percent_slots_zeroed_in_place() {
+        // 混合 px+% 槽位：百分比原位记 0、占住 TRouBLe 位置（裁定：不再复制首个有效值）
+        const CASES: &[(&str, [f32; 4])] = &[
+            ("10px 5%", [10.0, 0.0, 10.0, 0.0]),
+            ("1% 2px 3% 4px", [0.0, 2.0, 0.0, 4.0]),
+            ("5%", [0.0; 4]),
+            ("10px 20px 30% 40px", [10.0, 20.0, 0.0, 40.0]),
+            ("2px 4% 6px", [2.0, 0.0, 6.0, 0.0]), // 三值展开 [a,b,c,b]
+            ("1em 2px", [2.0, 2.0, 2.0, 2.0]),    // em 跳过 → 单值复制（已知限制）
+            ("10em", [0.0; 4]),                   // 全部跳过 → 全 0
+            ("10px auto", [10.0, 0.0, 10.0, 0.0]),
+        ];
+        for (value, want) in CASES {
+            let css = format!("margin: {value}");
+            assert_eq!(parse_block_style(&css).margin, *want, "{css}");
+        }
+        // padding 同语义
+        assert_eq!(
+            parse_block_style("padding: 10% 5px").padding,
+            [0.0, 5.0, 0.0, 5.0]
+        );
+    }
+
+    #[test]
+    fn display_none_is_overridden_by_later_declaration() {
+        // 后置声明覆盖前置标记（按出现顺序消费，CSS 级联语义）
+        assert!(parse_block_style("display: none").hidden);
+        assert!(!parse_block_style("display: none; display: block").hidden);
+        assert!(!parse_block_style("display: none; display: flex").hidden);
+        assert!(parse_block_style("display: block; display: none").hidden);
+        // 非 none 取值不构成隐藏
+        assert!(!parse_block_style("display: block").hidden);
+        assert!(!parse_block_style("display: grid").hidden);
     }
 
     #[test]
