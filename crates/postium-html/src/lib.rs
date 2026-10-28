@@ -18,7 +18,12 @@
 //! 本 crate 的净化只负责结构白名单、脚本剔除与本地/内容 scheme 的 img src
 //! 精细放行（`cid:` / `data:image/*`，内嵌附件图片端到端可达所必需）——协议
 //! 与 MIME 的终审仍在树构建期。
+//!
+//! 解析产物上的后处理纯函数（spec §6）：[`adapt_document`] / [`needs_dark_adapt`]
+//! 实现深色模式智能反转——UI 层主题切换时计算一次并随文档缓存，渲染映射阶段
+//! 直接消费，不做每帧变换。
 
+pub mod adapt;
 pub mod builder;
 pub mod error;
 pub mod pipeline;
@@ -26,6 +31,7 @@ pub mod sanitize;
 pub mod style;
 pub mod types;
 
+pub use adapt::{adapt_document, needs_dark_adapt};
 pub use builder::build_document;
 pub use error::HtmlError;
 pub use pipeline::{inline_css, render_pipeline};
