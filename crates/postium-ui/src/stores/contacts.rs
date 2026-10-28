@@ -1,5 +1,8 @@
 //! 联系人状态（模式同 accounts.rs）：过滤列表（搜索/分组/星标）+ 分组
 //! （含成员计数）+ 选中项；星标走局部乐观更新，失败回滚。
+//! 竞态防护：写操作推进 `write_gen`，在途 load 的完成回调比对代数，
+//! 陈旧快照（装载期间发生过写）不覆盖本地列表；星标写完成后自行补跑
+//! load 收敛到数据库最新状态。
 
 use std::sync::Arc;
 
@@ -31,6 +34,9 @@ pub struct ContactsStore {
     pub active_group: Option<i32>,
     /// 数据版本：每次列表装载完成 +1（视图/e2e 等待用）
     pub list_version: u64,
+    /// 写操作代数：乐观星标等写路径 +1；在途 load 完成时比对，
+    /// 不一致则丢弃陈旧快照（参照 emails.rs 的 load_gen 模式）
+    write_gen: u64,
     /// 在途 load 期间又有 load 请求：完成后补跑
     pending_reload: bool,
 }
@@ -47,6 +53,7 @@ impl ContactsStore {
             starred_only: false,
             active_group: None,
             list_version: 0,
+            write_gen: 0,
             pending_reload: false,
         }
     }
@@ -58,6 +65,7 @@ impl ContactsStore {
             return;
         }
         self.loading = true;
+        let write_g = self.write_gen;
         cx.notify();
 
         let query = self.query.trim().to_string();
@@ -82,6 +90,13 @@ impl ContactsStore {
         cx.spawn(async move |this, cx| {
             let result = rx.recv().await.ok();
             this.update(cx, |store, cx| {
+                store.loading = false;
+                if store.write_gen != write_g {
+                    // 装载期间发生过写操作（乐观星标）：陈旧快照不覆盖本地列表；
+                    // 写路径完成后会自行补跑 load 收敛（见 toggle_starred）
+                    cx.notify();
+                    return;
+                }
                 if let Some((list, groups)) = result {
                     match list {
                         Ok(l) => {
@@ -95,7 +110,6 @@ impl ContactsStore {
                         store.groups = g;
                     }
                 }
-                store.loading = false;
                 cx.notify();
             })
             .ok();
@@ -116,22 +130,18 @@ impl ContactsStore {
         self.load(api, cx);
     }
 
-    /// 切换分组过滤（Some(id) = 该分组成员；None = 不限，即「全部」）。
-    /// 选分组时退出星标模式（左栏三态互斥：全部 / 星标 / 某分组）。
+    /// 切换分组过滤（Some(id) = 该分组成员；None = 「全部」）。
+    /// 任何调用都退出星标模式（左栏三态互斥：全部 / 星标 / 某分组）。
     pub fn select_group(&mut self, group: Option<i32>, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         self.active_group = group;
-        if group.is_some() {
-            self.starred_only = false;
-        }
+        self.starred_only = false;
         self.load(api, cx);
     }
 
-    /// 切换「仅星标」过滤（进入时退出分组过滤）。
-    pub fn set_starred_only(&mut self, starred_only: bool, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
-        self.starred_only = starred_only;
-        if starred_only {
-            self.active_group = None;
-        }
+    /// 「星标」过滤（独立入口：进入星标态并退出分组过滤）。
+    pub fn select_starred(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.starred_only = true;
+        self.active_group = None;
         self.load(api, cx);
     }
 
@@ -141,27 +151,38 @@ impl ContactsStore {
         cx.notify();
     }
 
-    /// 乐观星标反转（列表行 ★ 点击）：本地立即翻转，落库失败回滚。
+    /// 乐观星标反转（列表行 ★ 点击）：本地立即翻转 + write_gen 失效在途快照，
+    /// 落库失败回滚；成功后补跑一次 load（读后于写提交，保证最终一致）。
     pub fn toggle_starred(&mut self, id: i32, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         let Some(contact) = self.contacts.iter_mut().find(|c| c.id == id) else {
             return;
         };
         contact.is_starred = !contact.is_starred;
         let starred = contact.is_starred;
+        self.write_gen += 1; // 在途 load 的快照已过期：完成时不得覆盖本地列表
         cx.notify();
 
         let api = api.clone();
+        let api_late = api.clone();
         let rx = spawn_tokio(async move { api.set_contact_starred(id, starred).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(Err(e)) = rx.recv().await {
-                tracing::warn!("联系人星标切换失败: {e}");
-                this.update(cx, |store, cx| {
-                    if let Some(contact) = store.contacts.iter_mut().find(|c| c.id == id) {
-                        contact.is_starred = !contact.is_starred;
-                    }
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    // 写已落库：补一次装载收敛（防止被更早发起的陈旧快照覆盖过）
+                    let api = api_late;
+                    this.update(cx, |store, cx| store.load(&api, cx)).ok();
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("联系人星标切换失败: {e}");
+                    this.update(cx, |store, cx| {
+                        if let Some(contact) = store.contacts.iter_mut().find(|c| c.id == id) {
+                            contact.is_starred = !contact.is_starred;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Err(_) => {}
             }
         })
         .detach();

@@ -151,10 +151,10 @@ impl ContactsView {
         cx.notify();
     }
 
-    /// 左栏「星标」过滤。
+    /// 左栏「星标」过滤（独立入口：星标态 + 退出分组）。
     pub(crate) fn pick_starred(&mut self, cx: &mut Context<Self>) {
         let api = self.api.clone();
-        self.store.update(cx, |store, cx| store.set_starred_only(true, &api, cx));
+        self.store.update(cx, |store, cx| store.select_starred(&api, cx));
         cx.notify();
     }
 
@@ -214,7 +214,9 @@ impl ContactsView {
         cx.notify();
     }
 
-    /// 保存：新建走 create_contact，编辑走 update_contact；分组勾选全量替换。
+    /// 保存：新建走 create_contact，编辑走 update_contact；随后分组勾选全量
+    /// 替换。两个写调用在同一异步链顺序执行，任一失败都中断保存流程
+    /// （status 错误提示、不 toast 成功、保留编辑态供重试）。
     fn save_edit(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.editing else { return };
         let email = Self::value(&self.edit_email, cx).trim().to_string();
@@ -235,27 +237,24 @@ impl ContactsView {
         let api = self.api.clone();
         let api_keep = api.clone();
         let store = self.store.clone();
-        let rx = spawn_tokio(async move {
-            match target {
-                EditTarget::New => api.create_contact(write).await.map(|c| c.id),
-                EditTarget::Existing(id) => api.update_contact(id, write).await.map(|_| id),
-            }
-        });
+        let rx: smol::channel::Receiver<Result<i32, postium_core::error::MailError>> =
+            spawn_tokio(async move {
+                // 写主体 → 写分组：任一 Err 都短路为整链失败
+                let id = match target {
+                    EditTarget::New => api.create_contact(write).await.map(|c| c.id)?,
+                    EditTarget::Existing(id) => api.update_contact(id, write).await.map(|_| id)?,
+                };
+                api.set_contact_group_members(id, group_ids).await?;
+                Ok(id)
+            });
         self.status = t("email.loading");
         cx.notify();
         cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(id)) => {
-                    // 分组勾选全量替换（含清空）
-                    let rx_groups = spawn_tokio({
-                        let api = api_keep.clone();
-                        async move { api.set_contact_group_members(id, group_ids).await }
-                    });
-                    let _ = rx_groups.recv().await;
-                    let api = api_keep;
                     store.update(cx, |store, cx| {
                         store.selected = Some(id);
-                        store.load(&api, cx);
+                        store.load(&api_keep, cx);
                     });
                     this.update(cx, |view, cx| {
                         view.editing = None;
@@ -270,6 +269,7 @@ impl ContactsView {
                     });
                 }
                 Ok(Err(e)) => {
+                    // 主体或分组设置失败：中断保存，保留编辑态与错误提示
                     this.update(cx, |view, cx| {
                         view.status = format!("{e}").into();
                         cx.notify();

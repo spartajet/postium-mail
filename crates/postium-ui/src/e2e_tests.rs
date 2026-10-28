@@ -1206,6 +1206,90 @@ fn contacts_view_interactions(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → 星标写操作与在途 load 的竞态：陈旧快照不得覆盖乐观态，
+// 写完成后补跑 load 最终一致（write_gen 代数防护回归）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_star_write_race_converges(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+
+    // 目标：种子中未星标的联系人（写操作会翻转其状态）
+    let target = contacts
+        .iter()
+        .find(|c| c.email == "sender.secondary@postium.test")
+        .expect("store 应含种子 sender.secondary");
+    let id = target.id;
+    let expected = !target.is_starred;
+
+    // 同一 UI 帧内：先发起 load（改查询触发在途装载），紧接着乐观星标写入。
+    // 完成回调只能在 UI 线程跑（必然晚于本帧），装载快照在写之后才回到
+    // UI 线程 —— 陈旧快照覆盖乐观态的竞态场景。
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.set_query("postium.test", &api, cx); // 触发在途 load
+                store.toggle_starred(id, &api, cx); // 写路径：乐观翻转 + write_gen++
+            });
+        });
+    });
+
+    // 最终一致：装载全部收尾后，本地列表中该联系人保持翻转后的星标态
+    // （陈旧快照被 write_gen 拦截，写完成后的补跑 load 收敛到 DB 真值）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let settled = !store.loading
+                && store
+                    .contacts
+                    .iter()
+                    .any(|c| c.id == id && c.is_starred == expected);
+            settled.then_some(())
+        })
+    });
+
+    // DB 同步收敛为同一真值
+    wait_for(cx, |_| {
+        let c = crate::runtime::runtime()
+            .block_on(async { api.get_contact(id).await })
+            .expect("联系人查询失败")
+            .expect("联系人应存在");
+        (c.is_starred == expected).then_some(())
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
