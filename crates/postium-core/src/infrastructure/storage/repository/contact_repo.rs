@@ -15,6 +15,7 @@
 //! - 删除：物理删除（分组成员关系随外键级联清理）
 
 use crate::error::MailError;
+use rusqlite::OptionalExtension as _;
 use crate::infrastructure::storage::database::DbConn;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -964,9 +965,158 @@ pub async fn backfill_from_emails(db: &DbConn) -> Result<usize, MailError> {
     .await
 }
 
+
+/// CardDAV 绑定 DTO（不含密码——密码经 AuthManager 托管，键 `dav:{account_id}`）。
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DavBindingDto {
+    pub id: i32,
+    pub account_id: i32,
+    pub url: String,
+    pub username: String,
+    pub addressbook_href: Option<String>,
+    pub sync_token: Option<String>,
+    pub last_sync_at: Option<i64>,
+}
+
+/// 行映射。
+fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DavBindingDto> {
+    Ok(DavBindingDto {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        url: row.get("url")?,
+        username: row.get("username")?,
+        addressbook_href: row.get("addressbook_href")?,
+        sync_token: row.get("sync_token")?,
+        last_sync_at: row.get("last_sync_at")?,
+    })
+}
+
+/// 新增或覆盖账号的 CardDAV 绑定（UNIQUE account_id；密码不入库）。
+/// 账号不存在时 FK 约束报错。
+pub async fn binding_upsert(
+    db: &DbConn,
+    account_id: i32,
+    url: &str,
+    username: &str,
+    addressbook_href: Option<&str>,
+) -> Result<(), MailError> {
+    let url = url.to_string();
+    let username = username.to_string();
+    let href = addressbook_href.map(str::to_string);
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO dav_bindings (account_id, url, username, addressbook_href)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(account_id) DO UPDATE SET
+                url = excluded.url,
+                username = excluded.username,
+                addressbook_href = excluded.addressbook_href",
+            rusqlite::params![account_id, url, username, href],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+/// 全部绑定。
+pub async fn binding_get_all(db: &DbConn) -> Result<Vec<DavBindingDto>, MailError> {
+    db.call(|conn| {
+        Ok(conn
+            .prepare("SELECT * FROM dav_bindings ORDER BY account_id")?
+            .query_map([], binding_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+    .await
+}
+
+/// 按账号取绑定。
+pub async fn binding_get(db: &DbConn, account_id: i32) -> Result<Option<DavBindingDto>, MailError> {
+    db.call(move |conn| {
+        Ok(conn
+            .query_row(
+                "SELECT * FROM dav_bindings WHERE account_id = ?1",
+                [account_id],
+                binding_from_row,
+            )
+            .optional()?)
+    })
+    .await
+}
+
+/// 删除账号绑定。
+pub async fn binding_delete(db: &DbConn, account_id: i32) -> Result<(), MailError> {
+    db.call(move |conn| {
+        conn.execute("DELETE FROM dav_bindings WHERE account_id = ?1", [account_id])?;
+        Ok(())
+    })
+    .await
+}
+
+/// 同步完成回写：sync-token 与时间戳。
+pub async fn binding_touch_synced(
+    db: &DbConn,
+    account_id: i32,
+    sync_token: Option<String>,
+) -> Result<(), MailError> {
+    let now = chrono::Utc::now().timestamp();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE dav_bindings SET sync_token = ?1, last_sync_at = ?2 WHERE account_id = ?3",
+            rusqlite::params![sync_token, now, account_id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[tokio::test]
+    async fn dav_binding_upsert_idempotent_and_touch() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        db.call(|conn| conn.execute("INSERT INTO accounts (name, email, provider, account_type, created_at, updated_at) VALUES ('a', 'a@x', 'custom', 'personal', 0, 0)", [])).await.unwrap();
+        binding_upsert(&db, 1, "https://dav.example/", "user", None).await.unwrap();
+        // 同 account_id 二次 upsert 覆盖 URL 不报错不双行
+        binding_upsert(&db, 1, "https://dav2.example/", "user", Some("/ab/")).await.unwrap();
+        let all = binding_get_all(&db).await.unwrap();
+        assert_eq!(all.len(), 1, "同账号应覆盖不双行");
+        assert_eq!(all[0].url, "https://dav2.example/");
+        assert_eq!(all[0].addressbook_href.as_deref(), Some("/ab/"));
+
+        let one = binding_get(&db, 1).await.unwrap().expect("按账号应查到");
+        assert_eq!(one.username, "user");
+
+        // touch 更新 token/时间
+        binding_touch_synced(&db, 1, Some("token-1".into())).await.unwrap();
+        let one = binding_get(&db, 1).await.unwrap().unwrap();
+        assert_eq!(one.sync_token.as_deref(), Some("token-1"));
+        assert!(one.last_sync_at.is_some());
+
+        // 删除后消失
+        binding_delete(&db, 1).await.unwrap();
+        assert!(binding_get(&db, 1).await.unwrap().is_none());
+        assert!(binding_get_all(&db).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dav_binding_requires_existing_account() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        // accounts 表为空：FK 约束应报错
+        assert!(binding_upsert(&db, 99, "https://x/", "u", None).await.is_err());
+    }
+
+    #[test]
+    fn dav_password_roundtrip_in_memory_auth() {
+        let auth = crate::domain::auth::AuthManager::in_memory();
+        let key = "dav:7";
+        auth.save_password(key, "app-secret").unwrap();
+        assert_eq!(auth.get_password(key).unwrap(), "app-secret");
+        auth.delete_password(key).unwrap();
+        assert!(auth.get_password(key).is_err());
+    }
 
     #[tokio::test]
     async fn crud_roundtrip_and_dedup() {

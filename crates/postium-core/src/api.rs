@@ -483,6 +483,36 @@ impl CoreApi {
         self.contacts.import_contacts_csv(text).await
     }
 
+
+    // ── CardDAV 绑定（密码经 AuthManager 托管，键 "dav:{account_id}"）──
+
+    pub async fn save_dav_binding(
+        &self,
+        account_id: i32,
+        url: String,
+        username: String,
+        password: String,
+        addressbook_href: Option<String>,
+    ) -> Result<(), MailError> {
+        self.auth
+            .save_password(&format!("dav:{account_id}"), &password)?;
+        self.contacts
+            .save_dav_binding(account_id, &url, &username, addressbook_href.as_deref())
+            .await
+    }
+
+    pub async fn delete_dav_binding(&self, account_id: i32) -> Result<(), MailError> {
+        let _ = self.auth.delete_password(&format!("dav:{account_id}"));
+        self.contacts.delete_dav_binding(account_id).await
+    }
+
+    pub async fn list_dav_bindings(
+        &self,
+    ) -> Result<Vec<crate::infrastructure::storage::repository::contact_repo::DavBindingDto>, MailError>
+    {
+        self.contacts.list_dav_bindings().await
+    }
+
     pub async fn export_contacts_csv(
         &self,
         query: Option<String>,

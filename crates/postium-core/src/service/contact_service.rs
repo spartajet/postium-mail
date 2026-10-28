@@ -18,7 +18,7 @@ use crate::error::MailError;
 use crate::infrastructure::csv_contacts;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::contact_repo::{
-    self, ContactDto, ContactGroupWithCount, ContactListResponse, ContactWrite,
+    self, ContactDto, ContactGroupWithCount, ContactListResponse, ContactWrite, DavBindingDto,
 };
 use crate::infrastructure::vcard;
 use crate::service::email_service::ImportReport;
@@ -435,6 +435,30 @@ impl ContactService {
         }
         Ok(report)
     }
+
+    // ── CardDAV 绑定（密码经 CoreApi 门面 + AuthManager，本层只管 binding 行）──
+
+    pub async fn save_dav_binding(
+        &self,
+        account_id: i32,
+        url: &str,
+        username: &str,
+        addressbook_href: Option<&str>,
+    ) -> Result<(), MailError> {
+        contact_repo::binding_upsert(&self.db, account_id, url, username, addressbook_href).await
+    }
+
+    pub async fn delete_dav_binding(&self, account_id: i32) -> Result<(), MailError> {
+        contact_repo::binding_delete(&self.db, account_id).await
+    }
+
+    pub async fn list_dav_bindings(&self) -> Result<Vec<DavBindingDto>, MailError> {
+        contact_repo::binding_get_all(&self.db).await
+    }
+
+    pub async fn get_dav_binding(&self, account_id: i32) -> Result<Option<DavBindingDto>, MailError> {
+        contact_repo::binding_get(&self.db, account_id).await
+    }
 }
 
 /// 导入条目：可导入的写入数据 + 目标分组；`Err(原因)` 为解析期已判定的跳过项
@@ -489,6 +513,7 @@ fn split_vcard_texts(text: &str) -> Vec<String> {
     }
     cards
 }
+
 
 #[cfg(test)]
 mod tests {
