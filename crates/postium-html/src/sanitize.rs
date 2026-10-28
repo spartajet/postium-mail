@@ -94,7 +94,10 @@ fn is_conditional_open(s: &str) -> bool {
 /// - `class/id/style` 对所有白名单标签放行（css-inline 选择器匹配依赖）；
 /// - `href`（a）/ `src`（img）沿用 ammonia 默认属性表；
 /// - URL 相对路径原样透传（后续渲染按原始文档上下文处理，不做改写）；
-/// - script/style 的内容随标签一并删除（ammonia 默认 clean_content_tags）。
+/// - clean_content_tags 在 ammonia 默认（script/style）之上追加 title/noscript/template：
+///   ammonia 以 fragment 解析、剥 html/head/body 壳但把 head 内容重挂到顶层，
+///   `<title>` 若不在白名单会被解包保留文本（评审 I-1：邮件标题泄漏为正文首段），
+///   内容型剔除连文本一并移除；noscript/template 同理整体删除。
 pub fn sanitize_lenient(html: &str) -> String {
     let tags = HashSet::from([
         "a",
@@ -135,6 +138,9 @@ pub fn sanitize_lenient(html: &str) -> String {
     ammonia::Builder::default()
         .tags(tags)
         .generic_attributes(HashSet::from(["class", "id", "style"]))
+        .clean_content_tags(HashSet::from([
+            "script", "style", "title", "noscript", "template",
+        ]))
         .url_relative(UrlRelative::PassThrough)
         .clean(html)
         .to_string()

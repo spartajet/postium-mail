@@ -109,4 +109,16 @@ mod tests {
     fn pipeline_empty_html_is_empty_error() {
         assert!(matches!(render_pipeline(""), Err(HtmlError::Empty)));
     }
+
+    #[test]
+    fn pipeline_full_document_head_not_leaked() {
+        // 评审 I-1：ammonia 以 fragment 解析、剥 html/head/body 壳但把 head 内容
+        // 重挂到顶层，<title> 不在白名单被解包 → 标题文本曾泄漏为正文首段。
+        let html = "<html><head><title>邮 件</title></head><body><p>正文</p></body></html>";
+        let doc = render_pipeline(html).unwrap();
+        assert_eq!(doc.blocks.len(), 1, "只应剩下正文一个段落");
+        let dump = format!("{doc:?}");
+        assert!(dump.contains("正文"), "正文应保留");
+        assert!(!dump.contains("邮 件"), "head 中的标题文本不应泄漏进正文");
+    }
 }
