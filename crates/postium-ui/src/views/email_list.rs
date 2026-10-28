@@ -159,6 +159,11 @@ fn act_on_email(
     cx: &mut App,
 ) {
     let api_keep = api.clone();
+    let action_label = match action {
+        RowAction::ToggleStar => "ToggleStar",
+        RowAction::MarkRead(_) => "MarkRead",
+        RowAction::Delete => "Delete",
+    };
     let rx = spawn_tokio(async move {
         match action {
             RowAction::ToggleStar => api.toggle_star(id).await.map(|_| ()),
@@ -167,12 +172,18 @@ fn act_on_email(
         }
     });
     cx.spawn(async move |cx| {
-        if let Ok(Ok(())) = rx.recv().await
-            && let Some(store) = store.upgrade()
-        {
-            let _ = cx.update(|cx: &mut App| {
-                store.update(cx, |s, cx| s.refresh_now(&api_keep, cx));
-            });
+        match rx.recv().await {
+            Ok(Ok(())) => {
+                if let Some(store) = store.upgrade() {
+                    let _ = cx.update(|cx: &mut App| {
+                        store.update(cx, |s, cx| s.refresh_now(&api_keep, cx));
+                    });
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "postium::ui", "列表行操作失败（{action_label}）: {e}")
+            }
+            Err(_) => {}
         }
     })
     .detach();
@@ -190,41 +201,47 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
     let api_keep = api.clone();
     let rx = spawn_tokio(async move { api.get_email(id).await });
     cx.spawn(async move |cx| {
-        if let Ok(Ok(detail)) = rx.recv().await {
-            let mode = match kind {
-                ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
-                    email_id: detail.email.id,
-                    account_id: detail.email.account_id,
-                    to: detail.email.sender_email.clone(),
-                    subject: detail.email.subject.clone().unwrap_or_default(),
-                    original_html: detail.body_html.clone().unwrap_or_default(),
-                },
-                ReplyKind::ReplyAll => {
-                    let mut to = vec![detail.email.sender_email.clone()];
-                    for r in detail.recipient_emails.split([',', ';']) {
-                        let r = r.trim();
-                        if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
-                            to.push(r.to_string());
-                        }
-                    }
-                    crate::views::compose::ComposeMode::ReplyAll {
+        match rx.recv().await {
+            Ok(Ok(detail)) => {
+                let mode = match kind {
+                    ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
                         email_id: detail.email.id,
                         account_id: detail.email.account_id,
-                        to: to.join(", "),
+                        to: detail.email.sender_email.clone(),
                         subject: detail.email.subject.clone().unwrap_or_default(),
                         original_html: detail.body_html.clone().unwrap_or_default(),
+                    },
+                    ReplyKind::ReplyAll => {
+                        let mut to = vec![detail.email.sender_email.clone()];
+                        for r in detail.recipient_emails.split([',', ';']) {
+                            let r = r.trim();
+                            if !r.is_empty() && !to.iter().any(|x| x.eq_ignore_ascii_case(r)) {
+                                to.push(r.to_string());
+                            }
+                        }
+                        crate::views::compose::ComposeMode::ReplyAll {
+                            email_id: detail.email.id,
+                            account_id: detail.email.account_id,
+                            to: to.join(", "),
+                            subject: detail.email.subject.clone().unwrap_or_default(),
+                            original_html: detail.body_html.clone().unwrap_or_default(),
+                        }
                     }
-                }
-                ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
-                    email_id: detail.email.id,
-                    account_id: detail.email.account_id,
-                    subject: detail.email.subject.clone().unwrap_or_default(),
-                    original_html: detail.body_html.clone().unwrap_or_default(),
-                },
-            };
-            let _ = cx.update(|cx: &mut App| {
-                crate::views::compose::open_compose_window(mode, &api_keep, cx);
-            });
+                    ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {
+                        email_id: detail.email.id,
+                        account_id: detail.email.account_id,
+                        subject: detail.email.subject.clone().unwrap_or_default(),
+                        original_html: detail.body_html.clone().unwrap_or_default(),
+                    },
+                };
+                let _ = cx.update(|cx: &mut App| {
+                    crate::views::compose::open_compose_window(mode, &api_keep, cx);
+                });
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "postium::ui", "打开回复/转发窗口失败（取详情）: {e}")
+            }
+            Err(_) => {}
         }
     })
     .detach();
@@ -515,23 +532,29 @@ impl EmailListView {
         let api2 = self.api.clone();
         let rx = spawn_tokio(async move { api.get_email(id).await });
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(detail)) = rx.recv().await {
-                let subject = detail.email.subject.clone().unwrap_or_default();
-                let original_html = detail.body_html.clone().unwrap_or_default();
-                let email_id = detail.email.id;
-                let account_id = detail.email.account_id;
-                cx.update(|cx| {
-                    crate::views::compose::open_compose_window(
-                        crate::views::compose::ComposeMode::Forward {
-                            email_id,
-                            account_id,
-                            subject,
-                            original_html,
-                        },
-                        &api2,
-                        cx,
-                    );
-                });
+            match rx.recv().await {
+                Ok(Ok(detail)) => {
+                    let subject = detail.email.subject.clone().unwrap_or_default();
+                    let original_html = detail.body_html.clone().unwrap_or_default();
+                    let email_id = detail.email.id;
+                    let account_id = detail.email.account_id;
+                    cx.update(|cx| {
+                        crate::views::compose::open_compose_window(
+                            crate::views::compose::ComposeMode::Forward {
+                                email_id,
+                                account_id,
+                                subject,
+                                original_html,
+                            },
+                            &api2,
+                            cx,
+                        );
+                    });
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(target: "postium::ui", "打开转发窗口失败（取详情）: {e}")
+                }
+                Err(_) => {}
             }
         })
         .detach();

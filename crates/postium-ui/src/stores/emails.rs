@@ -120,10 +120,14 @@ impl EmailsStore {
         self.page = 0;
         cx.notify();
         let api = api.clone();
+        let q_for_log = q.clone();
         let rx = spawn_tokio(async move { api.search_emails(&q, None, Some(100)).await });
         cx.spawn(async move |this, cx| {
             // recv Err（任务 panic/通道关闭）也走到统一收尾，loading 必复位
             let result = rx.recv().await.ok().and_then(|r| r.ok());
+            if result.is_none() {
+                tracing::warn!(target: "postium::ui", query = %q_for_log, "邮件搜索失败");
+            }
             this.update(cx, |store, cx| {
                 if store.load_gen != load_g {
                     return; // 过期结果：用户已导航/再次搜索
@@ -205,7 +209,10 @@ impl EmailsStore {
                 }
                 NavTarget::Label(label_id) => {
                     // 标签视图：取标签下全部 id，按页切片取详情摘要
-                    let ids = api.list_emails_by_label(*label_id).await.unwrap_or_default();
+                    let ids = api.list_emails_by_label(*label_id).await.unwrap_or_else(|e| {
+                        tracing::warn!(target: "postium::ui", "加载标签邮件失败: {e}");
+                        Vec::new()
+                    });
                     let start = page * PAGE_LIMIT;
                     let mut out = Vec::new();
                     for id in ids.iter().skip(start).take(PAGE_LIMIT) {
@@ -231,6 +238,9 @@ impl EmailsStore {
 
         cx.spawn(async move |this, cx| {
             let result = rx.recv().await.ok().and_then(|r| r.ok());
+            if result.is_none() {
+                tracing::warn!(target: "postium::ui", page, "邮件列表加载失败（保持现有数据）");
+            }
             this.update(cx, |store, cx| {
                 if store.load_gen != load_g {
                     return; // 过期结果：导航/搜索已切换

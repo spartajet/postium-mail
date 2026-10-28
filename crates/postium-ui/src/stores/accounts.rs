@@ -49,11 +49,23 @@ impl AccountsStore {
         let api = api.clone();
         let api_keep = api.clone();
         let rx = spawn_tokio(async move {
-            let accounts = api.list_accounts().await.unwrap_or_default();
+            let accounts = match api.list_accounts().await {
+                Ok(accs) => accs,
+                Err(e) => {
+                    tracing::warn!(target: "postium::ui", "加载账号列表失败: {e}");
+                    Vec::new()
+                }
+            };
             let mut groups = Vec::with_capacity(accounts.len());
             for account in accounts {
-                let stats = api.get_folder_stats(account.id).await.unwrap_or_default();
-                let labels = api.list_labels(account.id).await.unwrap_or_default();
+                let stats = api.get_folder_stats(account.id).await.unwrap_or_else(|e| {
+                    tracing::warn!(target: "postium::ui", id = account.id, "加载文件夹统计失败: {e}");
+                    Vec::new()
+                });
+                let labels = api.list_labels(account.id).await.unwrap_or_else(|e| {
+                    tracing::warn!(target: "postium::ui", id = account.id, "加载标签失败: {e}");
+                    Vec::new()
+                });
                 groups.push(AccountNode { account, stats, labels });
             }
             groups

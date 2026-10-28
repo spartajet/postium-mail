@@ -330,15 +330,19 @@ impl SettingsView {
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.list_providers() });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(providers)) = rx.recv().await {
-                this.update(cx, |view, cx| {
-                    if let Some(add) = view.add.as_mut() {
-                        add.providers = providers.iter().map(ProviderCard::from_info).collect();
-                        add.loading_providers = false;
-                    }
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(providers)) => {
+                    this.update(cx, |view, cx| {
+                        if let Some(add) = view.add.as_mut() {
+                            add.providers = providers.iter().map(ProviderCard::from_info).collect();
+                            add.loading_providers = false;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "加载服务商列表失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -464,6 +468,7 @@ impl SettingsView {
             // ── OAuth2：start → 系统浏览器 → 轮询 → 按邮箱定位账号 ──
             let provider_id = provider.as_ref().map(|p| p.id.clone()).unwrap_or_else(|| "generic".into());
             let api_start = api.clone();
+            let email_for_log = email.clone();
             let rx = spawn_tokio(async move { api_start.start_oauth2(provider_id, email, display).await });
             if let Some(add) = self.add.as_mut() {
                 add.oauth_polling = true;
@@ -475,6 +480,7 @@ impl SettingsView {
                     Ok(Ok(auth)) => {
                         let _ = open::that_detached(&auth.url);
                         let state = auth.state;
+                        tracing::info!(target: "postium::ui", email = %email_for_log, "OAuth2: 已打开浏览器等待授权");
                         this.update(cx, |view, cx| {
                             view.status = "请在浏览器中完成授权...".into();
                             cx.notify();
@@ -502,7 +508,15 @@ impl SettingsView {
                             Ok(Some(acct_email)) if !acct_email.starts_with("__error__") => {
                                 // 按邮箱定位账号（对齐旧版 resolveOAuth2CompletedAccount）
                                 let api_list = api.clone();
-                                let rx = spawn_tokio(async move { api_list.list_accounts().await.unwrap_or_default() });
+                                let rx = spawn_tokio(async move {
+                                    match api_list.list_accounts().await {
+                                        Ok(accs) => accs,
+                                        Err(e) => {
+                                            tracing::warn!(target: "postium::ui", "OAuth2 完成后加载账号列表失败: {e}");
+                                            Vec::new()
+                                        }
+                                    }
+                                });
                                 if let Ok(accs) = rx.recv().await {
                                     let id = accs.iter().find(|a| a.email == acct_email).map(|a| a.id);
                                     accounts_store.update(cx, |store, cx| store.reload(&api, cx));
@@ -515,10 +529,12 @@ impl SettingsView {
                                                     add.step = AddStep::SyncScope;
                                                 }
                                                 None => {
-                                                    add.error = t_format(
+                                                    let msg = t_format(
                                                         "account.oauthAccountMissing",
                                                         &[("{email}", &acct_email)],
                                                     );
+                                                    tracing::warn!(target: "postium::ui", "OAuth2: {msg}");
+                                                    add.error = msg;
                                                 }
                                             }
                                         }
@@ -528,16 +544,19 @@ impl SettingsView {
                                 }
                             }
                             Ok(Some(err)) => {
+                                let msg = err.trim_start_matches("__error__");
+                                tracing::warn!(target: "postium::ui", "OAuth2: {msg}");
                                 this.update(cx, |view, cx| {
                                     if let Some(add) = view.add.as_mut() {
                                         add.oauth_polling = false;
-                                        add.error = err.trim_start_matches("__error__").into();
+                                        add.error = msg.into();
                                     }
                                     cx.notify();
                                 })
                                 .ok();
                             }
                             _ => {
+                                tracing::warn!(target: "postium::ui", "OAuth2: 授权超时，请重试");
                                 this.update(cx, |view, cx| {
                                     if let Some(add) = view.add.as_mut() {
                                         add.oauth_polling = false;
@@ -550,6 +569,7 @@ impl SettingsView {
                         }
                     }
                     Ok(Err(e)) => {
+                        tracing::warn!(target: "postium::ui", "OAuth2: 启动授权失败: {e}");
                         this.update(cx, |view, cx| {
                             if let Some(add) = view.add.as_mut() {
                                 add.oauth_polling = false;
@@ -606,6 +626,7 @@ impl SettingsView {
                         .ok();
                     }
                     Ok(Err(e)) => {
+                        tracing::warn!(target: "postium::ui", "创建账号失败: {e}");
                         this.update(cx, |view, cx| {
                             if let Some(add) = view.add.as_mut() {
                                 add.submitting = false;
@@ -672,8 +693,10 @@ impl SettingsView {
     }
 
     fn set_add_error(&mut self, msg: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let msg = msg.into();
+        tracing::warn!(target: "postium::ui", "添加账号向导: {msg}");
         if let Some(add) = self.add.as_mut() {
-            add.error = msg.into();
+            add.error = msg;
         }
         cx.notify();
     }
@@ -707,16 +730,21 @@ impl SettingsView {
             .await
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                accounts.update(cx, |store, cx| {
-                    store.reload(&api_keep, cx);
-                });
-                this.update(cx, |view, cx| {
-                    view.editing = None;
-                    view.status = "已保存 ✓".into();
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    tracing::info!(target: "postium::ui", "账号信息已保存");
+                    accounts.update(cx, |store, cx| {
+                        store.reload(&api_keep, cx);
+                    });
+                    this.update(cx, |view, cx| {
+                        view.editing = None;
+                        view.status = "已保存 ✓".into();
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "保存账号信息失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -737,13 +765,18 @@ impl SettingsView {
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.update_account_password(id, pw).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                this.update(cx, |view, cx| {
-                    view.edit_password_for = None;
-                    view.status = "密码已更新 ✓".into();
-                    cx.notify();
-                })
-                .ok();
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    tracing::info!(target: "postium::ui", "账号密码已更新");
+                    this.update(cx, |view, cx| {
+                        view.edit_password_for = None;
+                        view.status = "密码已更新 ✓".into();
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "更新账号密码失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -755,12 +788,16 @@ impl SettingsView {
         let accounts = self.accounts.clone();
         let rx = spawn_tokio(async move { api.delete_account(id).await });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                let api2 = api_keep.clone();
-                accounts.update(cx, |store, cx| {
-                    store.reload(&api2, cx);
-                });
-                this.update(cx, |_, cx| cx.notify()).ok();
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    let api2 = api_keep.clone();
+                    accounts.update(cx, |store, cx| {
+                        store.reload(&api2, cx);
+                    });
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "删除账号失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -1062,29 +1099,41 @@ fn render_account_card(g: &crate::stores::accounts::AccountNode, cx: &mut Contex
                     });
                     let id2 = id;
                     cx.spawn(async move |this, cx| {
-                        if let Ok(Ok(enabled)) = rx.recv().await {
-                            let api2 = api_keep.clone();
-                            let rx = crate::runtime::spawn_tokio(async move {
-                                api2.update_account(UpdateAccountRequest {
-                                    id: id2,
-                                    name: None,
-                                    display_name: None,
-                                    color: None,
-                                    sync_enabled: Some(!enabled),
-                                })
-                                .await
-                            });
-                            if let Ok(Ok(_)) = rx.recv().await {
-                                // 刷新账号列表使"同步：开/关"标签立即更新
-                                this.update(cx, |view, cx| {
-                                    let api3 = api_keep.clone();
-                                    view.accounts.update(cx, |store, cx| {
-                                        store.reload(&api3, cx);
-                                    });
-                                    cx.notify();
-                                })
-                                .ok();
+                        match rx.recv().await {
+                            Ok(Ok(enabled)) => {
+                                let api2 = api_keep.clone();
+                                let rx = crate::runtime::spawn_tokio(async move {
+                                    api2.update_account(UpdateAccountRequest {
+                                        id: id2,
+                                        name: None,
+                                        display_name: None,
+                                        color: None,
+                                        sync_enabled: Some(!enabled),
+                                    })
+                                    .await
+                                });
+                                match rx.recv().await {
+                                    Ok(Ok(_)) => {
+                                        // 刷新账号列表使"同步：开/关"标签立即更新
+                                        this.update(cx, |view, cx| {
+                                            let api3 = api_keep.clone();
+                                            view.accounts.update(cx, |store, cx| {
+                                                store.reload(&api3, cx);
+                                            });
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                    }
+                                    Ok(Err(e)) => {
+                                        tracing::warn!(target: "postium::ui", "切换账号同步开关失败: {e}")
+                                    }
+                                    Err(_) => {}
+                                }
                             }
+                            Ok(Err(e)) => {
+                                tracing::warn!(target: "postium::ui", "读取账号同步状态失败: {e}")
+                            }
+                            Err(_) => {}
                         }
                     })
                     .detach();

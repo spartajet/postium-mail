@@ -26,8 +26,12 @@ pub fn setup(window: &gpui_kit::Window, cx: &mut App) {
 }
 
 /// 发送 Toast（线程安全，任意上下文可用）。
+///
+/// Toast 即用户可见提示，统一在此记录 info 日志，保证「UI 提示必进日志」。
 pub fn toast(msg: impl Into<SharedString>) {
+    let msg = msg.into();
+    tracing::info!(target: "postium::ui", "Toast: {msg}");
     if let Some(tx) = TX.get() {
-        let _ = tx.try_send(msg.into());
+        let _ = tx.try_send(msg);
     }
 }

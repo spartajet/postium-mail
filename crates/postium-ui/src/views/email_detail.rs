@@ -34,11 +34,15 @@ impl EmailDetailView {
         let rx = spawn_tokio(async move { api.toggle_star(id).await });
         let store = self.store.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(starred)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.apply_star(starred);
-                    cx.notify();
-                });
+            match rx.recv().await {
+                Ok(Ok(starred)) => {
+                    store.update(cx, |s, cx| {
+                        s.apply_star(starred);
+                        cx.notify();
+                    });
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "切换星标失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -52,17 +56,21 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "归档邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -76,17 +84,21 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "删除邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -124,17 +136,21 @@ impl EmailDetailView {
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(())) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.detail = None;
-                    s.html = None;
-                    cx.notify();
-                });
-                if let Some(list) = emails.upgrade() {
-                    list.update(cx, |s, cx| {
-                        s.refresh_now(&api_keep, cx);
+            match rx.recv().await {
+                Ok(Ok(())) => {
+                    store.update(cx, |s, cx| {
+                        s.detail = None;
+                        s.html = None;
+                        cx.notify();
                     });
+                    if let Some(list) = emails.upgrade() {
+                        list.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                        });
+                    }
                 }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "标记未读失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
@@ -148,10 +164,14 @@ impl EmailDetailView {
         let store = self.store.clone();
         let rx = spawn_tokio(async move { api.reload_email(id).await });
         cx.spawn(async move |_, cx| {
-            if let Ok(Ok(_)) = rx.recv().await {
-                store.update(cx, |s, cx| {
-                    s.force_load(id, &api_keep, cx);
-                });
+            match rx.recv().await {
+                Ok(Ok(_)) => {
+                    store.update(cx, |s, cx| {
+                        s.force_load(id, &api_keep, cx);
+                    });
+                }
+                Ok(Err(e)) => tracing::warn!(target: "postium::ui", "从服务器重载邮件失败: {e}"),
+                Err(_) => {}
             }
         })
         .detach();
