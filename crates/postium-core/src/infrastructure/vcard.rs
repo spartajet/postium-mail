@@ -1,8 +1,9 @@
 //! vCard 解析/生成/属性级合并（自研轻量实现）。
 //!
 //! 覆盖 vCard 3.0/4.0 的建模属性（N/FN/EMAIL/TEL/ORG/NOTE/CATEGORIES/UID/REV），
-//! 2.1 的 QUOTED-PRINTABLE 与 RFC 2047 编码字尽力解码；未建模属性行（PHOTO/ADR/
-//! IMPP/X-* 等）原样保留在 [`VcardData::other_lines`]，供推送合并时回写。
+//! 2.1 的 QUOTED-PRINTABLE（含多行软/硬换行拼接）与 RFC 2047 编码字尽力解码；
+//! 未建模属性行（PHOTO/ADR/IMPP/X-* 等）原样保留在 [`VcardData::other_lines`]，
+//! 供推送合并时回写。
 //!
 //! 生成固定 VERSION:3.0、CRLF 行结束、75 字节折行（UTF-8 字符边界安全）。
 
@@ -190,19 +191,49 @@ pub fn merge_into_raw(raw: &str, d: &VcardData) -> String {
 
 // ========== 解析辅助 ==========
 
-/// 展折行并拆为逻辑行：CRLF/LF 后紧跟的单个空格/制表符是折行标记，删除之。
+/// 拆逻辑行（vCard 折行 + 2.1 多行 QP 值拼接），自上而下逐物理行归并：
+///
+/// 1. vCard 折行：续行以空格/制表符开头 → 剥掉一个前导空白后直接拼接；
+///    被拼接的是 QP 属性且行尾为 `=` 时，先去掉该软换行标记；
+/// 2. QP 软换行：上一逻辑行是 QUOTED-PRINTABLE 属性、行尾为 `=` → 去掉 `=`
+///    与下一物理行直接拼接（多段重复适用）；
+/// 3. QP 硬换行：上一逻辑行是 QP 属性且当前行不构成独立属性（引号外无 `:`）
+///    → 以 `\n` 拼接，保留为值内换行。
 fn logical_lines(text: &str) -> Vec<String> {
-    let unfolded = text
-        .replace("\r\n ", "")
-        .replace("\r\n\t", "")
-        .replace("\n ", "")
-        .replace("\n\t", "");
-    unfolded
-        .split('\n')
-        .map(|l| l.strip_suffix('\r').unwrap_or(l))
-        .filter(|l| !l.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    for raw in text.split('\n') {
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
+        if line.trim().is_empty() {
+            continue;
+        }
+        let joined = if let Some(last) = out.last_mut() {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                // vCard 折行续行：剥掉一个前导空白
+                if is_qp_line(last) && last.ends_with('=') {
+                    last.pop(); // 物理行尾 '=' 为 QP 软换行标记
+                }
+                last.push_str(&line[1..]);
+                true
+            } else if is_qp_line(last) && !is_property_line(line) {
+                if last.ends_with('=') {
+                    last.pop(); // QP 软换行标记
+                    last.push_str(line);
+                } else {
+                    last.push('\n'); // 硬换行保留为值内换行
+                    last.push_str(line);
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if !joined {
+            out.push(line.to_string());
+        }
+    }
+    out
 }
 
 /// 按 `:` 拆分属性行为（名称+参数，值）；引号内的 `:` 不算分隔符。
@@ -225,9 +256,28 @@ fn prop_name(left: &str) -> String {
     base.trim().to_ascii_uppercase()
 }
 
-/// 属性参数是否声明了 QUOTED-PRINTABLE 编码（vCard 2.1）。
+/// 属性是否声明了 QUOTED-PRINTABLE 编码（vCard 2.1）：参数段精确等于
+/// `ENCODING=QUOTED-PRINTABLE`（或 2.1 简写 `QUOTED-PRINTABLE`）才算，
+/// 属性名/其他参数值仅"包含"该子串时不算，避免普通值里的 `=XX` 被误解码。
 fn is_quoted_printable(left: &str) -> bool {
-    left.to_ascii_uppercase().contains("QUOTED-PRINTABLE")
+    left.split(';')
+        .skip(1) // 首段是属性名（可能带 2.1 分组前缀）
+        .any(|p| {
+            let p = p.trim().trim_matches('"').to_ascii_uppercase();
+            p == "ENCODING=QUOTED-PRINTABLE" || p == "QUOTED-PRINTABLE"
+        })
+}
+
+/// 逻辑行是否为 QUOTED-PRINTABLE 编码属性（多行 QP 值拼接判断用）。
+fn is_qp_line(line: &str) -> bool {
+    split_property(line)
+        .map(|(left, _)| is_quoted_printable(left))
+        .unwrap_or(false)
+}
+
+/// 物理行是否构成独立属性（引号外含 `:`）；不构成且紧随 QP 属性时视为其续段。
+fn is_property_line(line: &str) -> bool {
+    split_property(line).is_some()
 }
 
 /// 值解码：先按 ENCODING=QUOTED-PRINTABLE 解 =XX 十六进制，再解 RFC 2047 编码字。
@@ -724,6 +774,64 @@ mod tests {
             d.fn_name.as_deref(),
             Some("测试"),
             "=?UTF-8?Q?...?= 编码字应解出 UTF-8"
+        );
+    }
+
+    #[test]
+    fn vcard_2_1_qp_soft_line_breaks_join_and_decode() {
+        // 两段软换行：行尾 '=' 为软换行标记，续段（无空格前缀）直接拼接；
+        // FN 段额外覆盖「软换行 + vCard 空格折行续行」的组合
+        let text = concat!(
+            "BEGIN:VCARD\r\n",
+            "VERSION:2.1\r\n",
+            "N;ENCODING=QUOTED-PRINTABLE:=e6=b5=8b=\r\n",
+            "=e8=af=95\r\n",
+            "FN;ENCODING=QUOTED-PRINTABLE:=e6=b5=8b=\r\n",
+            " =e8=af=95\r\n",
+            "END:VCARD\r\n",
+        );
+        let d = parse(text).expect("parse 2.1 多行 QP 应成功");
+        assert_eq!(d.n_name.as_deref(), Some("测试"), "软换行两段应拼接后完整解码");
+        assert_eq!(
+            d.fn_name.as_deref(),
+            Some("测试"),
+            "软换行 + 空格折行续行应拼接后完整解码"
+        );
+        assert!(d.other_lines.is_empty(), "QP 续段不应落入 other_lines");
+    }
+
+    #[test]
+    fn vcard_2_1_qp_hard_line_break_preserved_as_newline() {
+        // 首段行尾无 '='：与续段之间为硬换行，保留为值内 \n；
+        // 续段之后真正的属性行不应被吞并
+        let text = concat!(
+            "BEGIN:VCARD\r\n",
+            "VERSION:2.1\r\n",
+            "NOTE;ENCODING=QUOTED-PRINTABLE:=e7=ac=ac=e4=b8=80=e8=a1=8c\r\n",
+            "=e7=ac=ac=e4=ba=8c=e8=a1=8c\r\n",
+            "TEL:+8613800000000\r\n",
+            "END:VCARD\r\n",
+        );
+        let d = parse(text).expect("parse 2.1 硬换行 QP 应成功");
+        assert_eq!(d.note.as_deref(), Some("第一行\n第二行"));
+        assert_eq!(d.phones, ["+8613800000000"], "续段后的属性行不应被吞并");
+        assert!(d.other_lines.is_empty());
+    }
+
+    #[test]
+    fn qp_decoding_requires_encoding_param_exact_match() {
+        // 属性名/其他参数值仅"包含" QUOTED-PRINTABLE 子串时，不得对值做 QP 解码
+        let text = concat!(
+            "BEGIN:VCARD\r\n",
+            "VERSION:3.0\r\n",
+            "EMAIL;X-SOURCE=QUOTED-PRINTABLE-STYLE:=e6=b5=8b@x.com\r\n",
+            "END:VCARD\r\n",
+        );
+        let d = parse(text).expect("parse 应成功");
+        assert_eq!(
+            d.emails,
+            ["=e6=b5=8b@x.com"],
+            "无 ENCODING=QUOTED-PRINTABLE 参数的普通值应原样保留"
         );
     }
 
