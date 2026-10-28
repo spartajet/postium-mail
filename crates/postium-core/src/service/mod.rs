@@ -79,6 +79,18 @@ pub mod contact_service;
 /// - DavSyncReport: 同步结果报告
 pub mod contact_sync;
 
+/// 远程图片拉取服务模块
+///
+/// 职责：
+/// - HTML 渲染器远程图片的后端拉取入口（spec §4.4）
+/// - moka 内存缓存（50MB 字节预算，按响应体字节权重）
+/// - 受限 HTTP 拉取委托 infrastructure::image_fetch（15s 超时 / 10MB 上限 /
+///   image/* Content-Type 校验）
+///
+/// 主要类型：
+/// - ImageFetchService: 图片拉取服务（缓存 + 受限 HTTP）
+pub mod image_fetch_service;
+
 /// 标签服务模块
 ///
 /// 职责：
@@ -125,6 +137,11 @@ pub use attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentD
 /// - ContactService: 联系人服务实例（DTO 复用 contact_repo / email_service 中的定义）
 pub use contact_service::ContactService;
 pub use contact_sync::DavSyncReport;
+
+/// 远程图片相关导出
+///
+/// - ImageFetchService: 图片拉取服务实例
+pub use image_fetch_service::ImageFetchService;
 
 /// 标签相关导出
 ///

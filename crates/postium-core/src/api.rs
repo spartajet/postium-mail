@@ -37,6 +37,7 @@ use crate::service::{
         SendEmailRequest,
         SendEmailResponse,
     },
+    image_fetch_service::ImageFetchService,
     label_service::{CreateLabelRequest, LabelDto, LabelService, UpdateLabelRequest},
     sync_service::{HistorySyncState, OlderSyncResult, SyncAllAccountsResult, SyncService},
 };
@@ -55,6 +56,7 @@ pub struct CoreApi {
     pub labels: LabelService,
     pub contacts: ContactService,
     pub attachments: AttachmentService,
+    pub images: ImageFetchService,
     pub oauth2: Arc<OAuth2Manager>,
     pub data_dir: std::path::PathBuf,
     /// e2e 离线模式（e2e=true 且非真连库）：同步入口短路，保证测试确定性。
@@ -115,6 +117,7 @@ impl CoreApi {
                 labels,
                 contacts,
                 attachments,
+                images: ImageFetchService::new(),
                 oauth2,
                 data_dir: data_dir.to_path_buf(),
                 e2e_offline: e2e && !e2e_truth,
@@ -270,6 +273,17 @@ impl CoreApi {
 
     pub async fn resolve_inline_attachments(&self, email_id: i32) -> Result<Vec<InlineAttachmentDto>, MailError> {
         self.attachments.resolve_inline_images(email_id).await
+    }
+
+    /// 拉取远程图片字节（HTML 渲染远程图片加载，Task 13 消费）。
+    /// e2e 离线模式短路返回 Err（e2e 不发网络请求，UI 层以占位框兜底）。
+    pub async fn fetch_image(&self, url: String) -> Result<Arc<[u8]>, MailError> {
+        if self.e2e_offline {
+            return Err(MailError::ImageFetchFailed(
+                "e2e 离线模式不发起远程图片请求".into(),
+            ));
+        }
+        self.images.fetch(&url).await
     }
 
     // ===== sync =====
