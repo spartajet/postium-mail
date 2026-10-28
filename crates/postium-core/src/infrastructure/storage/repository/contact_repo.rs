@@ -4,7 +4,7 @@
 //! 的数据访问，提供联系人的完整生命周期管理：
 //!
 //! - 查询：分页列表（关键词/分组/星标过滤）、按 ID / 邮箱查询单条
-//! - 写入：创建（同邮箱大小写不敏感去重）、更新
+//! - 写入：创建（同邮箱大小写不敏感去重）、更新、合并（N→1，[`merge`]）
 //! - 状态管理：星标切换
 //! - 分组管理：[`group_insert`] / [`group_rename`] / [`group_delete`] /
 //!   [`group_list`]（含 LEFT JOIN 成员计数）、[`group_set_members`]
@@ -538,6 +538,200 @@ pub async fn group_set_members(
     .await
 }
 
+/// 合并联系人（N→1）：把 `absorbed_ids` 的信息并入 `primary_id` 后物理删除 absorbed。
+///
+/// 单事务内完成（任一步失败整体回滚），成功后刷新 primary 的 `updated_at`，
+/// 返回合并后的完整 [`ContactDto`]（含分组）。
+///
+/// 合并规则：
+///
+/// - `extra_emails`：primary 与各 absorbed 的额外邮箱并集，忽略大小写与首尾
+///   空白去重（保留首次出现的原始写法），并排除 primary 主邮箱
+/// - `frequency`：求和；`last_contacted_at`：取各方最大值（全空保持 `NULL`）
+/// - 分组：并集——absorbed 的成员关系以 `INSERT OR IGNORE` 转移给 primary
+/// - `notes`：所有非空备注按 primary 在前的顺序以 `\n\n` 拼接，全空为 `NULL`
+/// - `name` / `org`：取 primary 非空值；primary 为空时取首个非空 absorbed 值
+/// - CardDAV 元数据（`dav_account_id` / `dav_uid` / `dav_href` / `dav_etag`）：
+///   primary 为 `NULL` 的字段由 absorbed（按入参顺序）的首个非空值补齐，
+///   已有值不覆盖。服务端资源删除由上层同步层负责（任务 18 墓碑表方案），
+///   本函数仅做本地字段的尽力保留
+/// - `phones` / `is_starred` / `source` / 主邮箱 / `created_at`：保持 primary 原值
+///
+/// 防御（返回 [`MailError::DatabaseError`] 且不做任何修改）：
+///
+/// - `absorbed_ids` 为空
+/// - `absorbed_ids` 包含 `primary_id`
+/// - `absorbed_ids` 含重复 ID
+/// - `primary_id` 或任一 absorbed ID 不存在
+pub async fn merge(
+    db: &DbConn,
+    primary_id: i32,
+    absorbed_ids: &[i32],
+) -> Result<ContactDto, MailError> {
+    let absorbed_ids = absorbed_ids.to_vec();
+    let outcome = db
+        .transaction(move |tx| {
+            type TxResult = Result<ContactDto, String>;
+            let fail = |message: String| -> Result<TxResult, rusqlite::Error> {
+                Ok(Err(message))
+            };
+
+            if absorbed_ids.is_empty() {
+                return fail("合并列表不能为空".to_string());
+            }
+            if absorbed_ids.contains(&primary_id) {
+                return fail(format!("合并列表不能包含主联系人: {primary_id}"));
+            }
+            let mut sorted = absorbed_ids.clone();
+            sorted.sort_unstable();
+            if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+                return fail("合并列表含重复联系人".to_string());
+            }
+
+            let select_sql = format!("SELECT {CONTACT_COLUMNS} FROM contacts WHERE id = ?1");
+            let load = |id: i32| -> rusqlite::Result<Option<ContactDto>> {
+                match tx.query_row(&select_sql, [id], map_contact) {
+                    Ok(contact) => Ok(Some(contact)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(err) => Err(err),
+                }
+            };
+
+            let primary = match load(primary_id)? {
+                Some(contact) => contact,
+                None => return fail(format!("联系人不存在: {primary_id}")),
+            };
+            let mut absorbed: Vec<ContactDto> = Vec::with_capacity(absorbed_ids.len());
+            for id in &absorbed_ids {
+                match load(*id)? {
+                    Some(contact) => absorbed.push(contact),
+                    None => return fail(format!("联系人不存在: {id}")),
+                }
+            }
+
+            // extra_emails 并集：忽略大小写/首尾空白去重，排除 primary 主邮箱
+            let mut seen: std::collections::HashSet<String> =
+                std::iter::once(primary.email.trim().to_lowercase()).collect();
+            let mut extra_emails: Vec<String> = Vec::new();
+            for email in primary
+                .extra_emails
+                .iter()
+                .chain(absorbed.iter().flat_map(|contact| contact.extra_emails.iter()))
+            {
+                let key = email.trim().to_lowercase();
+                if !key.is_empty() && seen.insert(key) {
+                    extra_emails.push(email.trim().to_string());
+                }
+            }
+            let extra_emails_json = serde_json::to_string(&extra_emails)
+                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+
+            // notes：非空备注以 "\n\n" 拼接（primary 在前）
+            let notes_parts: Vec<&str> = std::iter::once(&primary)
+                .chain(absorbed.iter())
+                .filter_map(|contact| contact.notes.as_deref())
+                .filter(|notes| !notes.trim().is_empty())
+                .collect();
+            let notes = (!notes_parts.is_empty()).then(|| notes_parts.join("\n\n"));
+
+            // name / org：primary 非空优先，否则取首个非空 absorbed 值
+            let non_empty = |value: &Option<String>| -> Option<String> {
+                value
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_string)
+            };
+            let name = non_empty(&primary.name)
+                .or_else(|| absorbed.iter().find_map(|contact| non_empty(&contact.name)));
+            let org = non_empty(&primary.org)
+                .or_else(|| absorbed.iter().find_map(|contact| non_empty(&contact.org)));
+
+            // frequency 求和；last_contacted_at 取最大值（全 NULL 保持 NULL）
+            let frequency = primary.frequency
+                + absorbed.iter().map(|contact| contact.frequency).sum::<i64>();
+            let last_contacted_at = std::iter::once(&primary)
+                .chain(absorbed.iter())
+                .filter_map(|contact| contact.last_contacted_at)
+                .max();
+
+            // dav 元数据：primary 为 NULL 的字段由 absorbed 首个非空值补齐，不覆盖已有值
+            let mut dav_account_id = primary.dav_account_id;
+            let mut dav_uid = primary.dav_uid.clone();
+            let mut dav_href = primary.dav_href.clone();
+            let mut dav_etag = primary.dav_etag.clone();
+            for contact in &absorbed {
+                if dav_account_id.is_none() {
+                    dav_account_id = contact.dav_account_id;
+                }
+                if dav_uid.is_none() {
+                    dav_uid = contact.dav_uid.clone();
+                }
+                if dav_href.is_none() {
+                    dav_href = contact.dav_href.clone();
+                }
+                if dav_etag.is_none() {
+                    dav_etag = contact.dav_etag.clone();
+                }
+            }
+
+            // 1) UPDATE primary 各字段（含 updated_at 刷新）
+            tx.execute(
+                "UPDATE contacts
+                 SET extra_emails = ?1, name = ?2, notes = ?3, org = ?4,
+                     frequency = ?5, last_contacted_at = ?6,
+                     dav_account_id = ?7, dav_uid = ?8, dav_href = ?9, dav_etag = ?10,
+                     updated_at = ?11
+                 WHERE id = ?12",
+                rusqlite::params![
+                    extra_emails_json,
+                    name,
+                    notes,
+                    org,
+                    frequency,
+                    last_contacted_at,
+                    dav_account_id,
+                    dav_uid,
+                    dav_href,
+                    dav_etag,
+                    chrono::Utc::now().timestamp(),
+                    primary_id,
+                ],
+            )?;
+
+            // 2) 分组并集：absorbed 的成员关系转移给 primary（主键冲突忽略）
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT OR IGNORE INTO contact_group_members (contact_id, group_id)
+                     SELECT ?1, group_id FROM contact_group_members WHERE contact_id = ?2",
+                )?;
+                for id in &absorbed_ids {
+                    stmt.execute(rusqlite::params![primary_id, id])?;
+                }
+            }
+
+            // 3) absorbed 物理删除（成员关系随外键级联清理）
+            tx.execute(
+                &format!(
+                    "DELETE FROM contacts WHERE id IN ({})",
+                    placeholders(absorbed_ids.len())
+                ),
+                rusqlite::params_from_iter(absorbed_ids.iter()),
+            )?;
+
+            // 事务内读回合并后的完整 DTO（含分组）
+            let mut merged = match load(primary_id)? {
+                Some(contact) => contact,
+                None => return fail(format!("联系人不存在: {primary_id}")),
+            };
+            attach_groups(tx, std::slice::from_mut(&mut merged))?;
+            Ok(Ok(merged))
+        })
+        .await?;
+
+    outcome.map_err(MailError::DatabaseError)
+}
+
 /// 自动收集管线的输入条目：从一封往来邮件中提取出的对方地址与相关信息。
 ///
 /// 由邮件收发/同步流程构造，交给 [`upsert_from_emails`] 批量并入联系人表。
@@ -994,6 +1188,312 @@ mod tests {
         assert!(groups.iter().all(|group| group.id != family_id));
         assert_eq!(groups.iter().find(|group| group.id == friend_id).unwrap().count, 1);
         assert_eq!(groups.iter().find(|group| group.id == work_id).unwrap().count, 0);
+    }
+
+    /// 断言结果是 `MailError::DatabaseError`
+    fn assert_database_error<T: std::fmt::Debug>(result: Result<T, MailError>, hint: &str) {
+        match result {
+            Err(MailError::DatabaseError(_)) => {}
+            other => panic!("{hint}应报 DatabaseError，实际: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn merge_unions_fields_and_deletes_absorbed() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let family_id = group_insert(&db, "家人").await.unwrap();
+        let work_id = group_insert(&db, "工作").await.unwrap();
+        let friend_id = group_insert(&db, "朋友").await.unwrap();
+
+        let primary_id = insert(
+            &db,
+            ContactWrite {
+                email: "primary@postium.test".into(),
+                extra_emails: Some(vec![
+                    "P.Extra@Postium.Test".into(),
+                    "shared@postium.test".into(),
+                ]),
+                name: Some("主联系人".into()),
+                phones: Some(vec!["13800000000".into()]),
+                notes: Some("主备注".into()),
+                org: Some("Postium".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let absorbed1_id = insert(
+            &db,
+            ContactWrite {
+                email: "absorbed1@postium.test".into(),
+                // SHARED 大写变体验证忽略大小写去重；primary 主邮箱混入验证排除
+                extra_emails: Some(vec![
+                    "a1.extra@postium.test".into(),
+                    "SHARED@postium.test".into(),
+                    "primary@postium.test".into(),
+                ]),
+                name: Some("被合并一".into()),
+                notes: Some("被合并一备注".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let absorbed2_id = insert(
+            &db,
+            ContactWrite {
+                email: "absorbed2@postium.test".into(),
+                name: Some("被合并二".into()),
+                notes: Some("   ".into()), // 空白备注按空处理
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // 分组：primary=家人+工作；absorbed1=工作(重叠)+朋友；absorbed2=朋友
+        group_set_members(&db, primary_id, &[family_id, work_id])
+            .await
+            .unwrap();
+        group_set_members(&db, absorbed1_id, &[work_id, friend_id])
+            .await
+            .unwrap();
+        group_set_members(&db, absorbed2_id, &[friend_id])
+            .await
+            .unwrap();
+
+        // frequency / last_contacted_at 无写入 API，SQL 夹具（updated_at 置 0 便于断言刷新）
+        db.call(move |conn| {
+            conn.execute(
+                "UPDATE contacts SET frequency = 5, last_contacted_at = 1000, updated_at = 0 WHERE id = ?1",
+                [primary_id],
+            )?;
+            conn.execute(
+                "UPDATE contacts SET frequency = 3, last_contacted_at = 2000 WHERE id = ?1",
+                [absorbed1_id],
+            )?;
+            conn.execute(
+                "UPDATE contacts SET frequency = 2, last_contacted_at = NULL WHERE id = ?1",
+                [absorbed2_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let merged = merge(&db, primary_id, &[absorbed1_id, absorbed2_id])
+            .await
+            .unwrap();
+
+        assert_eq!(merged.id, primary_id);
+        assert_eq!(merged.email, "primary@postium.test");
+
+        // extra_emails 并集去重（忽略大小写，保留首次出现的原始写法），排除主邮箱
+        let mut extras = merged.extra_emails.clone();
+        extras.sort();
+        assert_eq!(
+            extras,
+            vec![
+                "P.Extra@Postium.Test".to_string(),
+                "a1.extra@postium.test".to_string(),
+                "shared@postium.test".to_string(),
+            ],
+            "extra_emails 应为并集去重结果"
+        );
+        assert!(
+            !merged
+                .extra_emails
+                .iter()
+                .any(|email| email.eq_ignore_ascii_case("primary@postium.test")),
+            "主邮箱不得出现在 extra_emails"
+        );
+
+        assert_eq!(merged.frequency, 10, "frequency 求和 5+3+2");
+        assert_eq!(
+            merged.last_contacted_at,
+            Some(2000),
+            "last_contacted_at 取 max（NULL 不参与）"
+        );
+        assert_eq!(
+            merged.notes.as_deref(),
+            Some("主备注\n\n被合并一备注"),
+            "notes 双非空以 \\n\\n 拼接，空白备注跳过"
+        );
+        assert_eq!(merged.name.as_deref(), Some("主联系人"), "name 取 primary");
+        assert_eq!(merged.org.as_deref(), Some("Postium"), "org 取 primary");
+        assert_eq!(
+            merged.phones,
+            vec!["13800000000".to_string()],
+            "phones 不在合并规则内，保持 primary"
+        );
+
+        // 分组并集（家人+工作+朋友），attach_groups 按 id 升序
+        let mut expected_group_ids = vec![family_id, work_id, friend_id];
+        expected_group_ids.sort_unstable();
+        let group_ids: Vec<i32> = merged.groups.iter().map(|group| group.id).collect();
+        assert_eq!(group_ids, expected_group_ids, "分组应并集");
+
+        // absorbed 消失
+        assert!(get(&db, absorbed1_id).await.unwrap().is_none());
+        assert!(get(&db, absorbed2_id).await.unwrap().is_none());
+        assert_eq!(list(&db, None, None, false, 0, 20).await.unwrap().total, 1);
+
+        // 各分组计数仍为 1（成员转移到 primary）
+        let groups = group_list(&db).await.unwrap();
+        for group_id in expected_group_ids {
+            assert_eq!(
+                groups.iter().find(|group| group.id == group_id).unwrap().count,
+                1
+            );
+        }
+
+        // updated_at 已刷新（夹具置 0 → 合并后 > 0）
+        let updated_at: i64 = db
+            .call(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT updated_at FROM contacts WHERE id = ?1",
+                    [primary_id],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(updated_at > 0, "updated_at 应刷新为 now");
+    }
+
+    #[tokio::test]
+    async fn merge_defensive_rejects_invalid_lists() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let primary_id = insert(
+            &db,
+            ContactWrite { email: "p@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let absorbed_id = insert(
+            &db,
+            ContactWrite { email: "a@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        // absorbed 含 primary 自身
+        assert_database_error(
+            merge(&db, primary_id, &[absorbed_id, primary_id]).await,
+            "absorbed 含 primary",
+        );
+        // absorbed 含重复
+        assert_database_error(
+            merge(&db, primary_id, &[absorbed_id, absorbed_id]).await,
+            "absorbed 含重复",
+        );
+        // absorbed 含不存在 id
+        assert_database_error(
+            merge(&db, primary_id, &[absorbed_id, 9999]).await,
+            "absorbed 含不存在 id",
+        );
+        // primary 不存在
+        assert_database_error(merge(&db, 8888, &[absorbed_id]).await, "primary 不存在");
+        // 空列表
+        assert_database_error(merge(&db, primary_id, &[]).await, "空合并列表");
+
+        // 全部拒绝后数据原样：absorbed 未被删除、频次未变
+        assert!(get(&db, absorbed_id).await.unwrap().is_some());
+        assert_eq!(list(&db, None, None, false, 0, 20).await.unwrap().total, 2);
+        let primary = get(&db, primary_id).await.unwrap().unwrap();
+        assert_eq!(primary.frequency, 0, "防御失败不得改动 primary");
+    }
+
+    #[tokio::test]
+    async fn merge_fills_empty_name_org_and_transfers_dav_fields() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+
+        // dav_account_id 有外键约束，先建测试账号
+        let dav_account_id = db
+            .call(|conn| insert_test_account(conn))
+            .await
+            .unwrap();
+
+        // primary 无 name/org、无 dav 字段；absorbed 为 dav 条目
+        let primary_id = insert(
+            &db,
+            ContactWrite { email: "plain@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        let absorbed_id = db
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO contacts (
+                        email, name, org, frequency, source,
+                        dav_account_id, dav_uid, dav_href, dav_etag, created_at, updated_at
+                     ) VALUES ('dav@postium.test', 'Dav 名字', 'Dav 组织', 4, 'dav', ?1, 'uid-1', 'href-1', 'etag-1', 0, 0)",
+                    [dav_account_id],
+                )?;
+                Ok(conn.last_insert_rowid() as i32)
+            })
+            .await
+            .unwrap();
+
+        let merged = merge(&db, primary_id, &[absorbed_id]).await.unwrap();
+        assert_eq!(
+            merged.name.as_deref(),
+            Some("Dav 名字"),
+            "primary name 为空时取 absorbed 非空值"
+        );
+        assert_eq!(merged.org.as_deref(), Some("Dav 组织"));
+        assert_eq!(merged.frequency, 4, "primary frequency=0 + absorbed 4");
+        assert_eq!(merged.source, "local", "source 保持 primary");
+        assert_eq!(
+            merged.dav_account_id,
+            Some(dav_account_id),
+            "primary 为 NULL 的 dav 字段由 absorbed 补齐"
+        );
+        assert_eq!(merged.dav_uid.as_deref(), Some("uid-1"));
+        assert_eq!(merged.dav_href.as_deref(), Some("href-1"));
+        assert_eq!(merged.dav_etag.as_deref(), Some("etag-1"));
+
+        // 反向：primary 已有 dav 字段时不被 absorbed 覆盖
+        let primary2_id = db
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO contacts (
+                        email, source, dav_account_id, dav_uid, dav_href, dav_etag,
+                        created_at, updated_at
+                     ) VALUES ('keep@postium.test', 'dav', ?1, 'keep-uid', 'keep-href', 'keep-etag', 0, 0)",
+                    [dav_account_id],
+                )?;
+                Ok(conn.last_insert_rowid() as i32)
+            })
+            .await
+            .unwrap();
+        let absorbed2_id = insert(
+            &db,
+            ContactWrite { email: "other@postium.test".into(), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        db.call(move |conn| {
+            conn.execute(
+                "UPDATE contacts SET dav_account_id = ?1, dav_uid = 'other-uid',
+                     dav_href = 'other-href', dav_etag = 'other-etag' WHERE id = ?2",
+                rusqlite::params![dav_account_id, absorbed2_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let merged2 = merge(&db, primary2_id, &[absorbed2_id]).await.unwrap();
+        assert_eq!(
+            merged2.dav_account_id,
+            Some(dav_account_id),
+            "primary 已有 dav 字段不覆盖"
+        );
+        assert_eq!(merged2.dav_uid.as_deref(), Some("keep-uid"));
+        assert_eq!(merged2.dav_href.as_deref(), Some("keep-href"));
+        assert_eq!(merged2.dav_etag.as_deref(), Some("keep-etag"));
     }
 
     #[tokio::test]
