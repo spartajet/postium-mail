@@ -990,6 +990,70 @@ fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → 种子联系人装载 + 启动回填共存 + 星标过滤
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_seed_loaded(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+    let api_check = api.clone();
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    let _ = shell; // AppShell::new 的构造副作用（启动回填）已被下方断言覆盖
+
+    // 种子联系人在 CoreApi::init 已落库（source='local'，回填不覆盖频次）
+    let primary = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.list_contacts(None, None, false, 0, 50).await.ok() })
+            .and_then(|r| {
+                r.contacts
+                    .into_iter()
+                    .find(|c| c.email == "seed.e2e@postium.test")
+            })
+    });
+    assert_eq!(primary.name.as_deref(), Some("Primary E2E"));
+    assert_eq!(primary.frequency, 5);
+    assert!(primary.is_starred);
+    assert_eq!(primary.source, "local");
+
+    // 星标过滤：种子中仅 Primary E2E 被星标
+    let starred = wait_for(cx, |_| {
+        let r = crate::runtime::runtime()
+            .block_on(async { api_check.list_contacts(None, None, true, 0, 50).await })
+            .expect("星标过滤查询失败");
+        (r.total == 1).then_some(r)
+    });
+    assert_eq!(
+        starred.contacts[0].email, "seed.e2e@postium.test",
+        "星标过滤应仅含 Primary E2E"
+    );
+
+    // AppShell::new 的 fire-and-forget 回填已跑完：夹具邮件的收件人以
+    // collected 条目出现（仅能来自启动回填，种子不产生该地址）
+    wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.get_contact_by_email("e2e.user@postium.test".into()).await.ok() })
+            .flatten()
+            .filter(|c| c.source == "collected")
+    });
+
+    // 种子的 local 发件人与回填共存：频次保持种子值（10），仅推进往来时间
+    let sender = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.get_contact_by_email("sender.primary@postium.test".into()).await.ok() })
+            .flatten()
+    });
+    assert_eq!(sender.source, "local");
+    assert_eq!(sender.frequency, 10, "回填不得覆盖 local 条目频次");
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]

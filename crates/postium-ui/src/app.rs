@@ -306,7 +306,7 @@ impl AppShell {
             TRAY_ALIVE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        Self {
+        let shell = Self {
             api,
             sync_rx,
             accounts,
@@ -328,7 +328,16 @@ impl AppShell {
             calendar_view: None,
             workflow_view: None,
             status_bar: None,
-        }
+        };
+
+        // 启动即回填：把存量邮件的往来地址聚合进联系人表（fire-and-forget，
+        // 不阻塞首帧）。幂等且对 local/dav 条目只推进往来时间，不覆盖用户数据。
+        let backfill_api = shell.api.clone();
+        let _ = crate::runtime::spawn_tokio(async move {
+            let _ = backfill_api.backfill_contacts().await;
+        });
+
+        shell
     }
 
     fn toggle_lang(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {

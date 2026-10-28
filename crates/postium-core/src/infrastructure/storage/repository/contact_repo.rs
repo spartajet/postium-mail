@@ -752,6 +752,8 @@ pub struct IncomingContact {
 ///   展开（元素需带双引号才是合法 JSON：`,`→`","`）；展开前把 `;` 统一替换为
 ///   `,` 并去除空白。空串拼接为 `[""]`，由外层 `addr!=''` 过滤。
 /// - `is_deleted=1`（回收站）邮件与空地址不参与聚合。
+/// - token 可能是显示格式（`Name<a@x>`，空白已在 SQL 中去除）：Rust 侧并入
+///   前统一归一为裸地址（见 [`backfill_from_emails`]）。
 const BACKFILL_AGGREGATE_SQL: &str = "
 SELECT lower(addr) AS email, MAX(name) AS name, COUNT(*) AS freq, MAX(sent_at) AS last_at FROM (
   SELECT sender_email AS addr, COALESCE(sender_name,'') AS name, sent_at FROM emails WHERE is_deleted=0
@@ -889,13 +891,19 @@ pub async fn upsert_from_emails(
 /// [`BACKFILL_AGGREGATE_SQL`]），把聚合结果逐行按 [`merge_contact`] 的
 /// 覆盖规则并入联系人表（单事务）。
 ///
+/// recipient / cc 列可能存显示格式（`"Name <a@x>"`，SQL 展开后成
+/// `Name<a@x>` 单 token），因此并入前对每个 token 复用
+/// [`split_display_addresses`](crate::domain::sync::split_display_addresses)
+/// 的尖括号提取规则归一为裸地址，并跨 token 重新聚合（频次求和、时间取
+/// 最大），同一地址的裸/显示两种形态合并为一条。
+///
 /// 幂等性：`collected` 条目的 `frequency` 用聚合值**整体覆盖**（而非累加），
 /// `last_contacted_at` 只会前进；`local` / `dav` 条目仅推进 `last_contacted_at`。
 /// 因此重复执行结果稳定。
 ///
 /// # 返回
 ///
-/// 聚合并处理的联系人地址数量（不含被跳过的空地址）。
+/// 聚合并处理的联系人地址数量（归一去重后，不含被跳过的空地址）。
 pub async fn backfill_from_emails(db: &DbConn) -> Result<usize, MailError> {
     db.transaction(move |tx| {
         struct Aggregated {
@@ -918,15 +926,37 @@ pub async fn backfill_from_emails(db: &DbConn) -> Result<usize, MailError> {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
 
-        let mut count = 0;
+        // 归一再聚合：token → 裸地址后同址合并（频次求和、时间取最大、
+        // 名称取首个非空）。保留 SQL 行序（索引表），保证处理顺序确定。
+        let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut merged: Vec<(String, Option<String>, i64, i64)> = Vec::new();
         for item in &aggregated {
-            merge_contact(
-                tx,
-                &item.email,
-                item.name.as_deref(),
-                item.last_at,
-                Some(item.freq),
-            )?;
+            // SQL 展开后 token 内已无逗号/空白，归一结果至多一个地址
+            let Some(email) =
+                crate::domain::sync::split_display_addresses(&item.email).into_iter().next()
+            else {
+                continue;
+            };
+            let name = item.name.as_deref().filter(|name| !name.trim().is_empty());
+            match index.get(&email).copied() {
+                Some(i) => {
+                    let (_, merged_name, freq, last_at) = &mut merged[i];
+                    if merged_name.is_none() {
+                        *merged_name = name.map(str::to_string);
+                    }
+                    *freq += item.freq;
+                    *last_at = (*last_at).max(item.last_at);
+                }
+                None => {
+                    index.insert(email.clone(), merged.len());
+                    merged.push((email, name.map(str::to_string), item.freq, item.last_at));
+                }
+            }
+        }
+
+        let mut count = 0;
+        for (email, name, freq, last_at) in &merged {
+            merge_contact(tx, email, name.as_deref(), *last_at, Some(*freq))?;
             count += 1;
         }
         Ok(count)
@@ -1084,6 +1114,53 @@ mod tests {
         assert_eq!(alice.frequency, 2, "覆盖式回填，frequency 不因重跑而累加");
         let bob = get_by_email(&db, "b@x").await.unwrap().unwrap();
         assert_eq!(bob.frequency, 1);
+    }
+
+    /// M-1：recipient / cc 列可能存显示格式（`"Name <a@x>"`），backfill 应
+    /// 提取尖括号内的裸地址，而非把整串当邮箱落库；同一地址的裸/显示两种
+    /// 形态应合并为一条且频次求和。
+    #[tokio::test]
+    async fn backfill_extracts_display_format_addresses() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+
+        db.call(|conn| {
+            let account_id = insert_test_account(conn)?;
+            // 收件人存显示格式、抄送混合显示格式与裸地址
+            insert_email_row(
+                conn,
+                account_id,
+                1,
+                Some("Zoe"),
+                "zoe@x",
+                "Bob <b@x>",
+                Some("Carol <c@x>, d@x"),
+                100,
+            )?;
+            // b@x 再以裸地址出现一次（另一封邮件的收件人）
+            insert_email_row(conn, account_id, 2, Some("Zoe"), "zoe@x", "b@x", None, 200)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let processed = backfill_from_emails(&db).await.unwrap();
+        assert_eq!(processed, 4, "归一后应聚合出 4 个裸地址（zoe/b/c/d），显示格式不单列");
+
+        let response = list(&db, None, None, false, 0, 20).await.unwrap();
+        assert_eq!(response.total, 4);
+        let emails: Vec<&str> = response.contacts.iter().map(|c| c.email.as_str()).collect();
+        assert!(
+            emails.iter().all(|e| !e.contains('<') && !e.contains('>')),
+            "不应把显示格式整串当邮箱落库: {emails:?}"
+        );
+        for want in ["zoe@x", "b@x", "c@x", "d@x"] {
+            assert!(emails.contains(&want), "缺少裸地址 {want}: {emails:?}");
+        }
+
+        // 同一地址的显示格式 + 裸地址两次出现 → 合并为一条、频次求和
+        let bob = get_by_email(&db, "b@x").await.unwrap().unwrap();
+        assert_eq!(bob.frequency, 2, "裸/显示两种形态应合并计数");
+        assert_eq!(bob.last_contacted_at, Some(200));
     }
 
     #[tokio::test]

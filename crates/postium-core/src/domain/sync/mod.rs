@@ -174,7 +174,11 @@ pub fn next_history_before_uid(batch: &[u32], previous_before_uid: u32) -> u32 {
 /// （`"Alice <a@x.com>, b@y.com"`，多个地址以 `, ` 连接）：直接按 `,`/`;`
 /// 切分会把 `"Alice <a@x.com>"` 整串当邮箱落库，因此逐 token 提取尖括号
 /// 内的地址；无尖括号的 token 视为裸邮箱本身。空白 token 被丢弃。
-fn split_display_addresses(raw: &str) -> Vec<String> {
+///
+/// 亦被 [`crate::infrastructure::storage::repository::contact_repo::backfill_from_emails`]
+/// 复用：存量回填把聚合 SQL 产出的地址 token（cc/recipient 列可能存显示
+/// 格式）归一为裸地址后再并入联系人表。
+pub(crate) fn split_display_addresses(raw: &str) -> Vec<String> {
     raw.split([',', ';'])
         .map(str::trim)
         .filter(|token| !token.is_empty())
