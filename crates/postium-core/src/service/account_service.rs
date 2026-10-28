@@ -318,9 +318,15 @@ impl AccountService {
         tracing::info!(email = %req.email, provider = %req.provider, "创建账号");
 
         let imap_config = imap_config_from_create_request(&req)?;
-        self.imap_verifier
-            .verify(&imap_config, &req.email, &req.password)
-            .await?;
+        if let Err(e) = self.imap_verifier.verify(&imap_config, &req.email, &req.password).await {
+            tracing::warn!(
+                email = %req.email,
+                host = %imap_config.host,
+                error = %e,
+                "账号添加 IMAP 校验失败"
+            );
+            return Err(e);
+        }
 
         // 获取当前时间戳
         let now = chrono::Utc::now().timestamp();
