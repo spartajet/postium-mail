@@ -1837,6 +1837,12 @@ fn html_render_smoke(cx: &mut TestAppContext) {
                 align: Align::Center,
                 runs: vec![text("二级标题文本")],
             },
+            // 一级标题（UA 默认字号 32px，锁标题字号非正文兜底 14px）
+            Block::Heading {
+                level: 1,
+                align: Align::Left,
+                runs: vec![text("一级标题文本")],
+            },
             // 无序列表
             Block::List {
                 ordered: false,
@@ -1886,6 +1892,7 @@ fn html_render_smoke(cx: &mut TestAppContext) {
         "html-txt-容器段落文本",
         "html-txt-普通段落链接文字换行后文本",
         "html-txt-二级标题文本",
+        "html-txt-一级标题文本",
         "html-txt-列表项甲",
         "html-txt-列表项乙",
         "html-txt-引用内容文本",
@@ -1907,5 +1914,17 @@ fn html_render_smoke(cx: &mut TestAppContext) {
         std::thread::sleep(std::time::Duration::from_millis(15));
     }
     assert!(missing.is_empty(), "渲染树缺失文本探针: {missing:?}");
+
+    // 标题默认字号（评审修复 1 回归锁）：h1 文本元素行高 = 32px × 1.6 =
+    // 51.2px；若字号死样式回退为正文兜底 14px，行高仅 22.4px。
+    let h1_height = cx
+        .debug_bounds("html-txt-一级标题文本")
+        .expect("h1 文本探针应存在")
+        .size
+        .height;
+    assert!(
+        h1_height > gpui_kit::px(40.),
+        "h1 应按级别默认字号渲染（行高应 >40px），实际 {h1_height}"
+    );
     cx.run_until_parked();
 }

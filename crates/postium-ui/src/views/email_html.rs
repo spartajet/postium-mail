@@ -38,8 +38,10 @@ use postium_html::{
 #[cfg(test)]
 use gpui_kit::InteractiveElement as _;
 
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 正文基础字号（px）。邮件作者未声明字号时的兜底。
 const BASE_FONT_SIZE: f32 = 14.;
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 正文基础行高（倍数）。
 const BASE_LINE_HEIGHT: f32 = 1.6;
 
@@ -47,13 +49,17 @@ const BASE_LINE_HEIGHT: f32 = 1.6;
 #[derive(Default)]
 pub struct ImageCtx {
     /// 用户是否放行远程图片（默认拦截，spec §4.4 隐私默认）。
+    #[allow(dead_code)] // Task 13 消费
     pub enabled: bool,
     /// 已解析的远程图片缓存（键：URL；值 None 表示加载失败占位）。
+    #[allow(dead_code)] // Task 13 消费
     pub resolved: Arc<Mutex<HashMap<String, Option<Arc<RenderImage>>>>>,
     /// 内嵌附件图片（键：content-id 小写）。
+    #[allow(dead_code)] // Task 13 消费
     pub attachments: Vec<(String, Arc<RenderImage>)>,
 }
 
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 渲染期常量：主题衍生默认色板 + 主题字体，一次取齐（帧内不可变）。
 struct RenderCtx {
     dark: bool,
@@ -66,6 +72,7 @@ struct RenderCtx {
     placeholder_bg: Hsla,
 }
 
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 impl RenderCtx {
     fn new(dark: bool, cx: &App) -> Self {
         let theme = cx.theme();
@@ -95,6 +102,7 @@ impl RenderCtx {
 
 /// 块级递归的继承上下文。
 #[derive(Clone, Copy, Default)]
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 struct Inherited {
     /// 块级 `color` 继承（IR BlockStyle.color → 行内默认色）。
     color: Option<Hsla>,
@@ -107,6 +115,7 @@ struct Inherited {
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
 /// - `images`：图片上下文（Task 13 接管三源渲染）。
 /// - `on_link`：链接点击回调（Task 10 接线 `InteractiveText` hitbox）。
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 pub fn render_html_document(
     doc: &HtmlDocument,
     dark: bool,
@@ -124,6 +133,7 @@ pub fn render_html_document(
         .into_any_element()
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 块级序列 → 纵向 flex 列。
 fn render_blocks(blocks: &[Block], inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let mut col = v_flex().w_full();
@@ -133,6 +143,7 @@ fn render_blocks(blocks: &[Block], inh: Inherited, rcx: &RenderCtx) -> gpui_kit:
     col
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 单个块级元素 → GPUI 元素。
 fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     match block {
@@ -154,18 +165,37 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
                 .flex()
                 .flex_col()
                 .text_align(map_align(*align))
-                .children(render_inline_flow(runs, base_color, rcx, false))
+                .children(render_inline_flow(
+                    runs,
+                    base_color,
+                    rcx,
+                    false,
+                    BASE_FONT_SIZE,
+                ))
                 .into_any_element()
         }
         Block::Heading { level, align, runs } => {
-            // UA 近似：标题默认字号按级别、默认加粗；作者 CSS 字号已烘焙进
-            // runs（T7 裁定①），显式声明经段分组覆盖元素默认。
+            // UA 近似：标题默认字号/加粗为渲染层默认，按级别参数化传入文本
+            // 元素（文本 div 的显式 text_size 会覆盖父级级联，故不走包装层）；
+            // 作者 CSS 字号已烘焙进 runs（T7 裁定①），显式声明经段分组覆盖
+            // 该默认。
+            // 边缘（IR 限制，渲染层无修正点）：`<h1 style="font-weight:normal">`
+            // 的显式 normal 与未声明在 InlineStyle.bold: bool 上不可区分
+            // （builder parse_font_weight: normal → false，且 merge_inline 为
+            // `base.bold || over.bold` OR 语义），TextRun.font.weight 必填无
+            // "未设置"态——UA 粗体默认仍会覆盖显式 normal，需 IR 三态扩展
+            // （牵动 T7 裁定①与 T8 快照基线）方可修复，见 task-9 报告。
             map_block_style(&BlockStyle::default(), rcx.dark)
                 .flex()
                 .flex_col()
                 .text_align(map_align(*align))
-                .text_size(px(heading_size(*level)))
-                .children(render_inline_flow(runs, inh.color, rcx, true))
+                .children(render_inline_flow(
+                    runs,
+                    inh.color,
+                    rcx,
+                    true,
+                    heading_size(*level),
+                ))
                 .into_any_element()
         }
         Block::List { ordered, items } => render_list(*ordered, items, inh, rcx),
@@ -201,6 +231,7 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     }
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 列表：标记列（• / 序号）+ 内容列（项内块序列递归）。
 fn render_list(ordered: bool, items: &[Vec<Block>], inh: Inherited, rcx: &RenderCtx) -> AnyElement {
     let mut col = v_flex().w_full().pl(px(24. * (inh.depth as f32 + 1.)));
@@ -238,7 +269,13 @@ fn render_list(ordered: bool, items: &[Vec<Block>], inh: Inherited, rcx: &Render
     col.into_any_element()
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流 → 文本元素（字号分组的 [`StyledText`]）与行内图片占位的序列。
+///
+/// `default_size`：run 未声明字号时的兜底字号——由调用方按块类型传入
+/// （正文 [`BASE_FONT_SIZE`]、标题按级别 [`heading_size`]），使元素级
+/// 字号与包装层语义一致（文本 div 的显式 text_size 覆盖父级级联，
+/// 包装层 text_size 不生效，故不走级联）。
 ///
 /// 行内 img 已在树构建期提升为块级（plan Task 5），此处仅为 IR 保留
 /// 变体兜底：占位框独立成行。
@@ -247,6 +284,7 @@ fn render_inline_flow(
     base_color: Option<Hsla>,
     rcx: &RenderCtx,
     force_bold: bool,
+    default_size: f32,
 ) -> Vec<AnyElement> {
     // 1) 扁平化：同样式文本段合并（含链接内层递归与 br 折行）
     let mut segs: Vec<FlowSeg> = Vec::new();
@@ -259,7 +297,13 @@ fn render_inline_flow(
     for seg in segs {
         match seg {
             FlowSeg::Image { style, alt } => {
-                flush_text_group(std::mem::take(&mut group), base_color, rcx, &mut els);
+                flush_text_group(
+                    std::mem::take(&mut group),
+                    base_color,
+                    rcx,
+                    default_size,
+                    &mut els,
+                );
                 group_size = None;
                 els.push(image_placeholder(&style, &alt, rcx));
             }
@@ -269,17 +313,24 @@ fn render_inline_flow(
                     FlowSeg::Image { .. } => None,
                 };
                 if group_size.is_some() && group_size != Some(size) {
-                    flush_text_group(std::mem::take(&mut group), base_color, rcx, &mut els);
+                    flush_text_group(
+                        std::mem::take(&mut group),
+                        base_color,
+                        rcx,
+                        default_size,
+                        &mut els,
+                    );
                 }
                 group_size = Some(size);
                 group.push(text_seg);
             }
         }
     }
-    flush_text_group(group, base_color, rcx, &mut els);
+    flush_text_group(group, base_color, rcx, default_size, &mut els);
     els
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流中间产物。
 enum FlowSeg {
     /// 文本段（同样式段已合并；`link` 标记链接归属，Task 10 供区间注册）。
@@ -292,12 +343,19 @@ enum FlowSeg {
     Image { style: ImageStyle, alt: String },
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内 run 序列扁平化：相邻同样式段合并、链接内层加链接标记、br 折行。
 fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<FlowSeg>) {
     for run in runs {
         match run {
             InlineRun::Text { text, style } => {
                 let mut style = style.clone();
+                // UA 粗体默认（标题）。边缘：`<h1 style="font-weight:normal">`
+                // 的显式 normal 与未声明在 InlineStyle.bold: bool 上不可区分
+                // （builder parse_font_weight: normal → false；merge_inline 为
+                // OR 语义），TextRun.font.weight 必填无"未设置"态——渲染层无
+                // 修正点，需 IR 三态扩展方可落实"显式声明优先"（见 Heading
+                // 分支注释与 task-9 报告）。
                 if force_bold {
                     style.bold = true;
                 }
@@ -348,11 +406,13 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
     }
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 把积累的文本段组渲染为一个文本元素（相邻同样式段合并成单一 [`TextRun`]）。
 fn flush_text_group(
     group: Vec<FlowSeg>,
     base_color: Option<Hsla>,
     rcx: &RenderCtx,
+    default_size: f32,
     els: &mut Vec<AnyElement>,
 ) {
     // 组文本与 TextRun 序列（相邻同样式 run 合并）
@@ -374,15 +434,12 @@ fn flush_text_group(
         if size.is_none() {
             size = style.font_size;
         }
-        if let Some(last) = runs.last_mut()
-            && *last == run
-        {
-            last.len += seg_len;
-        } else {
-            runs.push(TextRun {
+        match runs.last_mut() {
+            Some(last) if same_run_style(last, &run) => last.len += seg_len,
+            _ => runs.push(TextRun {
                 len: seg_len,
                 ..run
-            });
+            }),
         }
     }
     if text.is_empty() {
@@ -391,7 +448,7 @@ fn flush_text_group(
 
     let d = div()
         .w_full()
-        .text_size(px(size.unwrap_or(BASE_FONT_SIZE)))
+        .text_size(px(size.unwrap_or(default_size)))
         .line_height(relative(BASE_LINE_HEIGHT))
         .child(StyledText::new(text.clone()).with_runs(runs));
 
@@ -405,6 +462,19 @@ fn flush_text_group(
     els.push(d.into_any_element());
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
+/// [`TextRun`] 同样式判据（比较样式字段、不含 `len`——len 是入列时回填的
+/// 字节数，参与比较会使合并判据恒假；`with_runs` 要求 run 恰好覆盖全文，
+/// 相邻同样式 run 合并保证 run 序列最简）。
+fn same_run_style(a: &TextRun, b: &TextRun) -> bool {
+    a.font == b.font
+        && a.color == b.color
+        && a.background_color == b.background_color
+        && a.underline == b.underline
+        && a.strikethrough == b.strikethrough
+}
+
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 构建单段 [`TextRun`]（字体/颜色/下划线/删除线；链接段附加链接色与下划线）。
 fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &RenderCtx) -> TextRun {
     TextRun {
@@ -429,6 +499,7 @@ fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &Ren
     }
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 图片占位框（Task 13 三源真实渲染接管）：固定高度灰框 + alt 文本，
 /// 宽度尽量取 style.width（防加载后布局跳动，spec §5）。
 fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyElement {
@@ -469,6 +540,7 @@ fn image_placeholder(style: &ImageStyle, alt: &str, rcx: &RenderCtx) -> AnyEleme
     d.child(label).into_any_element()
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// [`BlockStyle`] → GPUI div 样式映射（背景/边框/间距/宽度，spec §3 映射表）。
 ///
 /// `dark` 仅标记消费的是已适配文档（`postium_html::adapt` 产出），颜色
@@ -547,11 +619,13 @@ fn map_block_style(style: &BlockStyle, dark: bool) -> gpui_kit::Div {
     d
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// IR 颜色（RGBA 0–255）→ GPUI [`Hsla`]。
 fn ir_color(c: Rgba) -> Hsla {
     rgba(u32::from_be_bytes(c)).into()
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// IR 对齐 → GPUI 文本对齐（Justify 降级 Left：GPUI 暂无两端对齐）。
 fn map_align(a: Align) -> TextAlign {
     match a {
@@ -561,6 +635,7 @@ fn map_align(a: Align) -> TextAlign {
     }
 }
 
+#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 标题默认字号（HTML UA 近似：h1 2em → h6 0.67em，基准 16px）。
 fn heading_size(level: u8) -> f32 {
     match level {
@@ -577,6 +652,7 @@ fn heading_size(level: u8) -> f32 {
 // 测试探针（仅测试构建生效）：块级锚点与行内文本段以选择器写入渲染树，
 // e2e 经 `VisualTestContext::debug_bounds` 查询；正常构建直通零开销。
 // ---------------------------------------------------------------------------
+#[allow(dead_code)] // Task 11 接入 email_detail 前仅探针路径使用
 trait ProbeExt: Sized {
     fn when_probe(self, selector: &str) -> Self;
 }
