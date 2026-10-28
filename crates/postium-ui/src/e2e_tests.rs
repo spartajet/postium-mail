@@ -894,6 +894,66 @@ fn compose_recipient_field_chips_commit_and_remove(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
+// ---------------------------------------------------------------------------
+// contacts.e2e.js（补全子集）→ 写信收件人自动补全：输入触发候选、Enter 取第一项
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn compose_autocomplete_from_contacts(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let (compose, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        crate::views::compose::ComposeView::new(
+            crate::views::compose::ComposeMode::New,
+            api.clone(),
+            window,
+            cx,
+        )
+    });
+
+    // to 输入 "postium"（命中 seed.e2e@postium.test 与 sender.*@postium.test）
+    with_window_mut(cx, |window, app| {
+        let h = compose.read(app).to_field.input.read(app).focus_handle(app);
+        window.focus(&h, app);
+    });
+    cx.simulate_input("postium");
+
+    // 防抖 300ms 走模拟时钟：advance_clock 推进后再由 run_until_parked 驱动
+    // 防抖定时 → tokio 查询 → 候选回填（真实 I/O 跨线程唤醒）
+    cx.dispatcher.advance_clock(std::time::Duration::from_millis(400));
+
+    // 300ms 防抖 + 异步查询 → 候选非空且含 seed 联系人（星标置顶 → 第一项）
+    let sugg = wait_for(cx, |cx| with_app(cx, |app| {
+        let list = compose.read(app).to_field.suggestions.clone();
+        (!list.is_empty()).then_some(list)
+    }));
+    let first = sugg.first().map(|c| c.email.clone()).unwrap_or_default();
+    assert_eq!(
+        first, "seed.e2e@postium.test",
+        "星标 seed 联系人应排第一，实际: {:?}",
+        sugg.iter().map(|c| c.email.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        with_app(cx, |app| compose.read(app).to_field.sugg_open),
+        "候选非空时浮层应开启"
+    );
+
+    // Enter 取第一项 → chips 化（输入框清空）
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
+    assert_eq!(
+        emails,
+        vec!["seed.e2e@postium.test".to_string()],
+        "Enter 应提交第一项候选为 chip: {emails:?}"
+    );
+    let open = with_app(cx, |app| compose.read(app).to_field.sugg_open);
+    assert!(!open, "提交后浮层应关闭");
+}
+
 #[gpui_pre::test]
 fn add_account_modal_closes_on_escape(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
