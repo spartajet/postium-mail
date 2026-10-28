@@ -46,7 +46,8 @@ const BASE_LINE_HEIGHT: f32 = 1.6;
 /// 图片渲染上下文（单次渲染调用的入参快照）。
 ///
 /// 三源消费（Task 13）：`Remote` 查 [`ImageCtx::resolved`]（键为 URL），
-/// `Cid` 线性扫 [`ImageCtx::attachments`]，`DataUri` 直接解码（不占 resolved）。
+/// `Cid` 线性扫 [`ImageCtx::attachments`]，`DataUri` 经
+/// [`ImageCtx::data_uris`] 解码缓存（键为字节内容 hash）。
 pub struct ImageCtx {
     /// 用户是否放行远程图片（默认拦截，spec §4.4 隐私默认）。
     pub enabled: bool,
@@ -55,6 +56,13 @@ pub struct ImageCtx {
     pub resolved: Arc<Mutex<HashMap<String, Option<Arc<RenderImage>>>>>,
     /// 内嵌附件图片（键：content-id 小写）。
     pub attachments: Vec<(String, Arc<RenderImage>)>,
+    /// DataUri 解码缓存（键：字节内容 64 位 hash；值 None 表示解码失败也
+    /// 记账）。T13 遗留 P2：DataUri 每 GPUI 帧重解码（正文含内嵌图时每帧
+    /// 一次 PNG/JPEG 解码）——GPUI 无元素级 memo，渲染层自管。键用内容
+    /// hash 而非字节指针：文档可被缓存逐出重建，指针键有地址复用误撞面，
+    /// 内容键与缓存键（`content_key`）同口径。随 [`HtmlRenderState`] 按邮件
+    /// 维度生灭（切换邮件即重置，空间有界）。
+    pub data_uris: Arc<Mutex<HashMap<u64, Option<Arc<RenderImage>>>>>,
 }
 
 impl Default for ImageCtx {
@@ -63,6 +71,7 @@ impl Default for ImageCtx {
             enabled: false,
             resolved: Arc::new(Mutex::new(HashMap::new())),
             attachments: Vec::new(),
+            data_uris: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -81,15 +90,18 @@ pub struct HtmlRenderState {
     pub resolved: Arc<Mutex<HashMap<String, Option<Arc<RenderImage>>>>>,
     /// 内嵌附件图片（键：content-id 小写，装载期解码一次）。
     pub attachments: Vec<(String, Arc<RenderImage>)>,
+    /// DataUri 解码缓存（键：字节内容 hash，[`ImageCtx::data_uris`] 同口径）。
+    pub data_uris: Arc<Mutex<HashMap<u64, Option<Arc<RenderImage>>>>>,
 }
 
 impl HtmlRenderState {
-    /// 派生单帧渲染快照（Arc 共享 resolved、克隆附件列表——每帧廉价）。
+    /// 派生单帧渲染快照（Arc 共享 resolved/data_uris、克隆附件列表——每帧廉价）。
     pub fn to_ctx(&self) -> ImageCtx {
         ImageCtx {
             enabled: self.enabled,
             resolved: Arc::clone(&self.resolved),
             attachments: self.attachments.clone(),
+            data_uris: Arc::clone(&self.data_uris),
         }
     }
 }
@@ -235,6 +247,8 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
             // `base.bold || over.bold` OR 语义），TextRun.font.weight 必填无
             // "未设置"态——UA 粗体默认仍会覆盖显式 normal，需 IR 三态扩展
             // （牵动 T7 裁定①与 T8 快照基线）方可修复，见 task-9 报告。
+            // T14 终审裁定：维持现状，不做 IR 三态化（收益仅 font-weight:
+            // normal 显式声明的极边缘形态，不值快照基线重置）。
             map_block_style(&BlockStyle::default(), rcx.dark)
                 .flex()
                 .flex_col()
@@ -452,7 +466,8 @@ fn flatten_runs(
                 // （builder parse_font_weight: normal → false；merge_inline 为
                 // OR 语义），TextRun.font.weight 必填无"未设置"态——渲染层无
                 // 修正点，需 IR 三态扩展方可落实"显式声明优先"（见 Heading
-                // 分支注释与 task-9 报告）。
+                // 分支注释与 task-9 报告）。T14 终审裁定：维持现状，不做
+                // IR 三态化。
                 if force_bold {
                     style.bold = true;
                 }
@@ -622,15 +637,16 @@ fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &Ren
 
 /// 图片三源分发（Task 13，spec §4.4 / §5）：
 ///
-/// - `DataUri`：字节已在 [`ImageRef`] 中，直接解码显示（不占 resolved）；
-///   解码失败 → 占位框（与加载失败同形态）。
+/// - `DataUri`：字节已在 [`ImageRef`] 中，经 [`ImageCtx::data_uris`] 解码缓存
+///   显示（每帧命中缓存零重解码，T13 遗留 P2；解码失败同样记账 → 后续帧
+///   直接占位）；缓存未命中时解码并写入。
 /// - `Cid`：按 content-id 在 [`ImageCtx::attachments`] 中匹配（装载期
 ///   已由 DetailStore 解码）；未匹配 → 占位框。
 /// - `Remote`：放行且已拉取成功 → 真图；未放行 / 加载中 / 加载失败 → 占位框。
 /// - `Invalid`：来源非法（协议不在白名单）→ 占位框。
 fn render_image_ref(src: &ImageRef, alt: &str, style: &ImageStyle, rcx: &RenderCtx) -> AnyElement {
     let resolved: Option<Arc<RenderImage>> = match src {
-        ImageRef::DataUri { bytes, .. } => decode_render_image(bytes),
+        ImageRef::DataUri { bytes, .. } => decode_render_image_cached(bytes, &rcx.images.data_uris),
         ImageRef::Cid { content_id } => rcx
             .images
             .attachments
@@ -749,6 +765,34 @@ pub fn decode_render_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     }
     let buffer = image::RgbaImage::from_raw(decoded.width(), decoded.height(), raw)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])))
+}
+
+/// DataUri 解码缓存键：字节内容 64 位 hash（与 DetailStore 的 `content_key`
+/// 同为 std DefaultHasher 口径；内容键无指针地址复用误撞面，见
+/// [`ImageCtx::data_uris`] 注记）。
+fn data_uri_key(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// 带缓存的 DataUri 解码（渲染层每帧调用，命中零解码）。
+///
+/// 成功与失败（None）都入账：畸形 DataUri 的解码失败也只发生一次，后续帧
+/// 直接从缓存取占位结论。锁毒化走 `into_inner` 兜底（项目既有口径）。
+fn decode_render_image_cached(
+    bytes: &[u8],
+    cache: &Mutex<HashMap<u64, Option<Arc<RenderImage>>>>,
+) -> Option<Arc<RenderImage>> {
+    let key = data_uri_key(bytes);
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = cache.get(&key) {
+        return hit.clone();
+    }
+    let decoded = decode_render_image(bytes);
+    cache.insert(key, decoded.clone());
+    decoded
 }
 
 /// 收集文档中的远程图片 URL（去重、保序）——「加载图片」放行后逐图拉取
@@ -1067,6 +1111,44 @@ mod tests {
         assert!(decode_render_image(b"").is_none());
         // GIF 魔数在白名单内但内容残缺 → 解码失败 → None
         assert!(decode_render_image(b"GIF89a\x01\x00\x01\x00broken").is_none());
+    }
+
+    /// T13 遗留 P1（T14 落地）：DataUri 解码缓存——同字节第二帧命中缓存
+    /// （Arc 指针相同即零重解码）、解码失败同样入账不重复尝试。
+    #[test]
+    fn data_uri_decode_cache_hits_and_memoizes_failures() {
+        let png = tiny_png();
+        let cache: Mutex<HashMap<u64, Option<Arc<RenderImage>>>> = Mutex::new(HashMap::new());
+
+        let first = decode_render_image_cached(&png, &cache).expect("合法 PNG 应解码成功");
+        let second = decode_render_image_cached(&png, &cache).expect("缓存命中");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "第二次解码应命中缓存（同一 RenderImage 实例）"
+        );
+        assert_eq!(cache.lock().unwrap().len(), 1, "同字节只入账一次");
+
+        // 失败入账：畸形字节第二次调用不再解码，仍返回 None
+        let broken = b"GIF89a\x01\x00\x01\x00broken";
+        assert!(decode_render_image_cached(broken, &cache).is_none());
+        assert!(decode_render_image_cached(broken, &cache).is_none());
+        assert_eq!(
+            cache.lock().unwrap().len(),
+            2,
+            "失败结论应记账（成功 PNG + 失败 GIF 各一条）"
+        );
+
+        // 不同字节不同键：互不串缓存
+        let other = decode_render_image_cached(b"not an image at all", &cache);
+        assert!(other.is_none());
+        assert_eq!(cache.lock().unwrap().len(), 3);
+    }
+
+    /// 缓存键内容感知：同长度不同内容的字节 hash 不同（防手滑把键做成常量）。
+    #[test]
+    fn data_uri_key_distinguishes_content() {
+        assert_ne!(data_uri_key(b"alpha"), data_uri_key(b"omega"));
+        assert_eq!(data_uri_key(b"same"), data_uri_key(b"same"));
     }
 
     /// 远程 URL 收集：块级/嵌套全覆盖、去重保序、非 Remote 不收。

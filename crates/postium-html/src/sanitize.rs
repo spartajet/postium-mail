@@ -93,6 +93,10 @@ fn is_conditional_open(s: &str) -> bool {
 ///
 /// - 标签白名单 = 邮件常见结构集（spec §4.2 逐项列出）；
 /// - `class/id/style` 对所有白名单标签放行（css-inline 选择器匹配依赖）；
+/// - `s/strike/del` 放行（T14 语料审阅补）：删除线语义标签——builder 的
+///   `tag_inline_style` 以"ammonia 白名单保留它们"为前提映射呈现语义
+///   （builder.rs 文档注释明示该契约），白名单缺位使 `<s>` 在净化期被剥除、
+///   语义永远到不了树构建；纯格式标签，无属性/URL 向量；
 /// - `align` 放行：遗留呈现属性（T5：p/div/h1–h6/table 对齐兜底，style 优先），
 ///   无 URL/脚本向量；
 /// - `width` 放行（td/th，T6；table，T8 管线实证补）：遗留呈现属性
@@ -121,6 +125,7 @@ pub fn sanitize_lenient(html: &str) -> String {
         "blockquote",
         "br",
         "center",
+        "del",
         "div",
         "em",
         "font",
@@ -137,8 +142,10 @@ pub fn sanitize_lenient(html: &str) -> String {
         "ol",
         "p",
         "pre",
+        "s",
         "small",
         "span",
+        "strike",
         "strong",
         "sub",
         "sup",

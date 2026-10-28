@@ -98,3 +98,18 @@ fn pipeline_500kb_under_budget() {
     count_tables_links(&doc.blocks, &mut tables, &mut links);
     assert_eq!((tables, links), (50, 100), "合成语料应含 50 表格、100 链接");
 }
+
+/// release 预算（spec §9：500KB 全管线 < 100ms）。T14 落地：debug 断言 1s
+/// 之上，release 模式收紧到 100ms；CI release 任务自动覆盖。
+#[cfg(not(debug_assertions))]
+#[test]
+fn pipeline_500kb_release_budget() {
+    let start = std::time::Instant::now();
+    let doc = postium_html::render_pipeline(&synthetic_html()).unwrap();
+    let el = start.elapsed();
+    assert!(!doc.blocks.is_empty());
+    assert!(
+        el < std::time::Duration::from_millis(100),
+        "release 预算 100ms，实际 {el:?}"
+    );
+}

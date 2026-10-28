@@ -1,0 +1,361 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": null,
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 600.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Image": {
+              "src": {
+                "Cid": {
+                  "content_id": "header-banner-2026@postium.mail"
+                }
+              },
+              "alt": "月度账单头图",
+              "style": {
+                "width": {
+                  "Px": 600.0
+                },
+                "height": null,
+                "max_width": null
+              }
+            }
+          },
+          {
+            "Heading": {
+              "level": 2,
+              "align": "Left",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "2026 年 3 月用量账单",
+                    "style": {
+                      "color": [
+                        32,
+                        33,
+                        36,
+                        255
+                      ],
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  60,
+                  64,
+                  67,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "尊敬的客户：您 3 月的同步流量为 1.8 GB，发票已生成，详见附件。",
+                    "style": {
+                      "color": [
+                        60,
+                        64,
+                        67,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Image": {
+              "src": {
+                "Cid": {
+                  "content_id": "usage-chart@postium.mail"
+                }
+              },
+              "alt": "近六个月用量折线图",
+              "style": {
+                "width": {
+                  "Px": 480.0
+                },
+                "height": null,
+                "max_width": null
+              }
+            }
+          },
+          {
+            "Table": {
+              "style": {
+                "background_color": [
+                  232,
+                  240,
+                  254,
+                  255
+                ],
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": {
+                  "Percent": 100.0
+                },
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                23,
+                                78,
+                                166,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "账单异议请在 7 日内回复本邮件，逾期视为确认。",
+                                  "style": {
+                                    "color": [
+                                      23,
+                                      78,
+                                      166,
+                                      255
+                                    ],
+                                    "font_size": 13.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          10.0,
+                          14.0,
+                          10.0,
+                          14.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  128,
+                  134,
+                  139,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "Postium 计费中心",
+                    "style": {
+                      "color": [
+                        128,
+                        134,
+                        139,
+                        255
+                      ],
+                      "font_size": 12.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                "Br"
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Image": {
+              "src": {
+                "Cid": {
+                  "content_id": "seal@postium.mail"
+                }
+              },
+              "alt": "电子章",
+              "style": {
+                "width": {
+                  "Px": 120.0
+                },
+                "height": {
+                  "Px": 60.0
+                },
+                "max_width": null
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

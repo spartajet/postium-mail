@@ -1,0 +1,2041 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 640.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Table": {
+              "style": {
+                "background_color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": {
+                  "Px": 640.0
+                },
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Table": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": {
+                                "Percent": 100.0
+                              },
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "rows": [
+                              {
+                                "cells": [
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Heading": {
+                                          "level": 1,
+                                          "align": "Left",
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "春季硬件焕新季",
+                                                "style": {
+                                                  "color": [
+                                                    255,
+                                                    255,
+                                                    255,
+                                                    255
+                                                  ],
+                                                  "font_size": 24.0,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": [
+                                              198,
+                                              218,
+                                              252,
+                                              255
+                                            ],
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "3 月 1 日 - 3 月 31 日 · 全场满 2000 减 300",
+                                                "style": {
+                                                  "color": [
+                                                    198,
+                                                    218,
+                                                    252,
+                                                    255
+                                                  ],
+                                                  "font_size": 13.0,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "align": "Left"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 70.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Link": {
+                                                "href": {
+                                                  "Http": "https://shop.postium.example/spring"
+                                                },
+                                                "runs": [
+                                                  {
+                                                    "Text": {
+                                                      "text": "领券中心",
+                                                      "style": {
+                                                        "color": [
+                                                          255,
+                                                          255,
+                                                          255,
+                                                          255
+                                                        ],
+                                                        "font_size": null,
+                                                        "bold": false,
+                                                        "italic": false,
+                                                        "underline": false,
+                                                        "strikethrough": false
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ],
+                                          "align": "Right"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 30.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": [
+                          26,
+                          115,
+                          232,
+                          255
+                        ],
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          28.0,
+                          32.0,
+                          28.0,
+                          32.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Table": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": {
+                                "Percent": 100.0
+                              },
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "rows": [
+                              {
+                                "cells": [
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Table": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": {
+                                              "Percent": 100.0
+                                            },
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "rows": [
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Image": {
+                                                        "src": {
+                                                          "Remote": {
+                                                            "url": "https://cdn.postium.example/spring/keyboard.png"
+                                                          }
+                                                        },
+                                                        "alt": "机械键盘",
+                                                        "style": {
+                                                          "width": {
+                                                            "Px": 160.0
+                                                          },
+                                                          "height": null,
+                                                          "max_width": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            8.0,
+                                                            0.0,
+                                                            4.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "87 键机械键盘",
+                                                              "style": {
+                                                                "color": null,
+                                                                "font_size": null,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            217,
+                                                            48,
+                                                            37,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "¥399",
+                                                              "style": {
+                                                                "color": [
+                                                                  217,
+                                                                  48,
+                                                                  37,
+                                                                  255
+                                                                ],
+                                                                "font_size": 26.0,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            95,
+                                                            99,
+                                                            104,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            4.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "已售 1.2 万件",
+                                                              "style": {
+                                                                "color": [
+                                                                  95,
+                                                                  99,
+                                                                  104,
+                                                                  255
+                                                                ],
+                                                                "font_size": 12.0,
+                                                                "bold": false,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 33.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        16.0,
+                                        16.0,
+                                        16.0,
+                                        16.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_right": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_bottom": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_left": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 2.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Table": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": {
+                                              "Percent": 100.0
+                                            },
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "rows": [
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Image": {
+                                                        "src": {
+                                                          "Remote": {
+                                                            "url": "https://cdn.postium.example/spring/mouse.png"
+                                                          }
+                                                        },
+                                                        "alt": "无线鼠标",
+                                                        "style": {
+                                                          "width": {
+                                                            "Px": 160.0
+                                                          },
+                                                          "height": null,
+                                                          "max_width": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            8.0,
+                                                            0.0,
+                                                            4.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "静音无线鼠标",
+                                                              "style": {
+                                                                "color": null,
+                                                                "font_size": null,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            217,
+                                                            48,
+                                                            37,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "¥149",
+                                                              "style": {
+                                                                "color": [
+                                                                  217,
+                                                                  48,
+                                                                  37,
+                                                                  255
+                                                                ],
+                                                                "font_size": 26.0,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            95,
+                                                            99,
+                                                            104,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            4.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "已售 3.4 万件",
+                                                              "style": {
+                                                                "color": [
+                                                                  95,
+                                                                  99,
+                                                                  104,
+                                                                  255
+                                                                ],
+                                                                "font_size": 12.0,
+                                                                "bold": false,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 33.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        16.0,
+                                        16.0,
+                                        16.0,
+                                        16.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_right": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_bottom": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_left": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 2.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Table": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": {
+                                              "Percent": 100.0
+                                            },
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "rows": [
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Image": {
+                                                        "src": {
+                                                          "Remote": {
+                                                            "url": "https://cdn.postium.example/spring/dock.png"
+                                                          }
+                                                        },
+                                                        "alt": "扩展坞",
+                                                        "style": {
+                                                          "width": {
+                                                            "Px": 160.0
+                                                          },
+                                                          "height": null,
+                                                          "max_width": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            8.0,
+                                                            0.0,
+                                                            4.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "八合一扩展坞",
+                                                              "style": {
+                                                                "color": null,
+                                                                "font_size": null,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            217,
+                                                            48,
+                                                            37,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "¥269",
+                                                              "style": {
+                                                                "color": [
+                                                                  217,
+                                                                  48,
+                                                                  37,
+                                                                  255
+                                                                ],
+                                                                "font_size": 26.0,
+                                                                "bold": true,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "cells": [
+                                                {
+                                                  "blocks": [
+                                                    {
+                                                      "Paragraph": {
+                                                        "style": {
+                                                          "background_color": null,
+                                                          "color": [
+                                                            95,
+                                                            99,
+                                                            104,
+                                                            255
+                                                          ],
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            4.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
+                                                          "height": null,
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Text": {
+                                                              "text": "今日爆款",
+                                                              "style": {
+                                                                "color": [
+                                                                  95,
+                                                                  99,
+                                                                  104,
+                                                                  255
+                                                                ],
+                                                                "font_size": 12.0,
+                                                                "bold": false,
+                                                                "italic": false,
+                                                                "underline": false,
+                                                                "strikethrough": false
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "colspan": 1,
+                                                  "width": null,
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Percent": 33.0
+                                    },
+                                    "style": {
+                                      "background_color": [
+                                        255,
+                                        248,
+                                        225,
+                                        255
+                                      ],
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        16.0,
+                                        16.0,
+                                        16.0,
+                                        16.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_right": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_bottom": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "border_left": {
+                                        "width": 1.0,
+                                        "color": [
+                                          218,
+                                          220,
+                                          224,
+                                          255
+                                        ]
+                                      },
+                                      "hidden": false
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          24.0,
+                          32.0,
+                          24.0,
+                          32.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                32,
+                                33,
+                                36,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "以上价格均为限时直降价，",
+                                  "style": {
+                                    "color": [
+                                      32,
+                                      33,
+                                      36,
+                                      255
+                                    ],
+                                    "font_size": 14.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              },
+                              {
+                                "Link": {
+                                  "href": {
+                                    "Http": "https://shop.postium.example/spring/terms"
+                                  },
+                                  "runs": [
+                                    {
+                                      "Text": {
+                                        "text": "活动细则",
+                                        "style": {
+                                          "color": [
+                                            32,
+                                            33,
+                                            36,
+                                            255
+                                          ],
+                                          "font_size": 14.0,
+                                          "bold": false,
+                                          "italic": false,
+                                          "underline": false,
+                                          "strikethrough": false
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "Text": {
+                                  "text": "以结算页为准。",
+                                  "style": {
+                                    "color": [
+                                      32,
+                                      33,
+                                      36,
+                                      255
+                                    ],
+                                    "font_size": 14.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        },
+                        {
+                          "Table": {
+                            "style": {
+                              "background_color": [
+                                241,
+                                243,
+                                244,
+                                255
+                              ],
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": {
+                                "Percent": 100.0
+                              },
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "rows": [
+                              {
+                                "cells": [
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "满减可与店铺优惠券叠加 · 前台领券后 72 小时内有效",
+                                                "style": {
+                                                  "color": [
+                                                    95,
+                                                    99,
+                                                    104,
+                                                    255
+                                                  ],
+                                                  "font_size": 12.0,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "align": "Left"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 2,
+                                    "width": null,
+                                    "style": {
+                                      "background_color": null,
+                                      "color": [
+                                        95,
+                                        99,
+                                        104,
+                                        255
+                                      ],
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        12.0,
+                                        12.0,
+                                        12.0,
+                                        12.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          32.0,
+                          24.0,
+                          32.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

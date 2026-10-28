@@ -1,0 +1,883 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": null,
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 640.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Heading": {
+              "level": 1,
+              "align": "Left",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "渲染层验收清单",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": [
+                  230,
+                  244,
+                  234,
+                  255
+                ],
+                "color": [
+                  19,
+                  115,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "状态：全部通过 · 覆盖 M-A 至 M-D",
+                    "style": {
+                      "color": [
+                        19,
+                        115,
+                        51,
+                        255
+                      ],
+                      "font_size": 12.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Heading": {
+              "level": 2,
+              "align": "Center",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "块级形状",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "List": {
+              "ordered": true,
+              "items": [
+                [
+                  {
+                    "Paragraph": {
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      },
+                      "runs": [
+                        {
+                          "Text": {
+                            "text": "段落与行内样式：",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "粗体",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": true,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "斜体",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": true,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "下划线",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": true,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "删除线",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": true
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "红色文字",
+                            "style": {
+                              "color": [
+                                217,
+                                48,
+                                37,
+                                255
+                              ],
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、高亮底色。",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        }
+                      ],
+                      "align": "Left"
+                    }
+                  }
+                ],
+                [
+                  {
+                    "Paragraph": {
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      },
+                      "runs": [
+                        {
+                          "Text": {
+                            "text": "有序列表嵌套：",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        }
+                      ],
+                      "align": "Left"
+                    }
+                  },
+                  {
+                    "List": {
+                      "ordered": true,
+                      "items": [
+                        [
+                          {
+                            "Paragraph": {
+                              "style": {
+                                "background_color": null,
+                                "color": null,
+                                "text_align": null,
+                                "margin": [
+                                  0.0,
+                                  0.0,
+                                  0.0,
+                                  0.0
+                                ],
+                                "margin_auto": false,
+                                "padding": [
+                                  0.0,
+                                  0.0,
+                                  0.0,
+                                  0.0
+                                ],
+                                "width": null,
+                                "height": null,
+                                "max_width": null,
+                                "border_top": null,
+                                "border_right": null,
+                                "border_bottom": null,
+                                "border_left": null,
+                                "hidden": false
+                              },
+                              "runs": [
+                                {
+                                  "Text": {
+                                    "text": "二级有序项",
+                                    "style": {
+                                      "color": null,
+                                      "font_size": null,
+                                      "bold": false,
+                                      "italic": false,
+                                      "underline": false,
+                                      "strikethrough": false
+                                    }
+                                  }
+                                }
+                              ],
+                              "align": "Left"
+                            }
+                          }
+                        ],
+                        [
+                          {
+                            "Paragraph": {
+                              "style": {
+                                "background_color": null,
+                                "color": null,
+                                "text_align": null,
+                                "margin": [
+                                  0.0,
+                                  0.0,
+                                  0.0,
+                                  0.0
+                                ],
+                                "margin_auto": false,
+                                "padding": [
+                                  0.0,
+                                  0.0,
+                                  0.0,
+                                  0.0
+                                ],
+                                "width": null,
+                                "height": null,
+                                "max_width": null,
+                                "border_top": null,
+                                "border_right": null,
+                                "border_bottom": null,
+                                "border_left": null,
+                                "hidden": false
+                              },
+                              "runs": [
+                                {
+                                  "Text": {
+                                    "text": "二级第二项",
+                                    "style": {
+                                      "color": null,
+                                      "font_size": null,
+                                      "bold": false,
+                                      "italic": false,
+                                      "underline": false,
+                                      "strikethrough": false
+                                    }
+                                  }
+                                }
+                              ],
+                              "align": "Left"
+                            }
+                          },
+                          {
+                            "List": {
+                              "ordered": false,
+                              "items": [
+                                [
+                                  {
+                                    "Paragraph": {
+                                      "style": {
+                                        "background_color": null,
+                                        "color": null,
+                                        "text_align": null,
+                                        "margin": [
+                                          0.0,
+                                          0.0,
+                                          0.0,
+                                          0.0
+                                        ],
+                                        "margin_auto": false,
+                                        "padding": [
+                                          0.0,
+                                          0.0,
+                                          0.0,
+                                          0.0
+                                        ],
+                                        "width": null,
+                                        "height": null,
+                                        "max_width": null,
+                                        "border_top": null,
+                                        "border_right": null,
+                                        "border_bottom": null,
+                                        "border_left": null,
+                                        "hidden": false
+                                      },
+                                      "runs": [
+                                        {
+                                          "Text": {
+                                            "text": "三级无序项",
+                                            "style": {
+                                              "color": null,
+                                              "font_size": null,
+                                              "bold": false,
+                                              "italic": false,
+                                              "underline": false,
+                                              "strikethrough": false
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "align": "Left"
+                                    }
+                                  }
+                                ]
+                              ]
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                ],
+                [
+                  {
+                    "Paragraph": {
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      },
+                      "runs": [
+                        {
+                          "Text": {
+                            "text": "链接：",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Link": {
+                            "href": {
+                              "Http": "https://example.com/docs"
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "https 链接",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "、",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Link": {
+                            "href": {
+                              "Mailto": "mailto:docs@postium.example"
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "mailto 链接",
+                                  "style": {
+                                    "color": null,
+                                    "font_size": null,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "。",
+                            "style": {
+                              "color": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        }
+                      ],
+                      "align": "Left"
+                    }
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "Quote": {
+              "children": [
+                {
+                  "Paragraph": {
+                    "style": {
+                      "background_color": null,
+                      "color": [
+                        95,
+                        99,
+                        104,
+                        255
+                      ],
+                      "text_align": null,
+                      "margin": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "margin_auto": false,
+                      "padding": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0
+                      ],
+                      "width": null,
+                      "height": null,
+                      "max_width": null,
+                      "border_top": null,
+                      "border_right": null,
+                      "border_bottom": null,
+                      "border_left": null,
+                      "hidden": false
+                    },
+                    "runs": [
+                      {
+                        "Text": {
+                          "text": "引用块：解析侧不做 IO，渲染侧不接触原始 HTML。",
+                          "style": {
+                            "color": [
+                              95,
+                              99,
+                              104,
+                              255
+                            ],
+                            "font_size": null,
+                            "bold": false,
+                            "italic": false,
+                            "underline": false,
+                            "strikethrough": false
+                          }
+                        }
+                      }
+                    ],
+                    "align": "Left"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Heading": {
+              "level": 3,
+              "align": "Right",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "右对齐小节",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": "Center",
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "居中段落：",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": "大一号文字",
+                    "style": {
+                      "color": null,
+                      "font_size": 18.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": " 与 ",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": "小一号文字",
+                    "style": {
+                      "color": null,
+                      "font_size": 11.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": " 同段折行。",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Center"
+            }
+          },
+          "Hr",
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  12.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "结束行（margin 语义锁定）。",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

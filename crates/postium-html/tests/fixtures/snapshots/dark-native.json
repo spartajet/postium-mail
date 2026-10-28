@@ -1,0 +1,581 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": [
+            27,
+            27,
+            42,
+            255
+          ],
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 600.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Table": {
+              "style": {
+                "background_color": [
+                  27,
+                  27,
+                  42,
+                  255
+                ],
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": {
+                  "Px": 600.0
+                },
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                154,
+                                154,
+                                184,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "POSTIUM · 深夜构建报告",
+                                  "style": {
+                                    "color": [
+                                      154,
+                                      154,
+                                      184,
+                                      255
+                                    ],
+                                    "font_size": 12.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        },
+                        {
+                          "Heading": {
+                            "level": 1,
+                            "align": "Left",
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "第 118 次夜间构建完成",
+                                  "style": {
+                                    "color": [
+                                      240,
+                                      240,
+                                      250,
+                                      255
+                                    ],
+                                    "font_size": 22.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": [
+                          16,
+                          16,
+                          26,
+                          255
+                        ],
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          20.0,
+                          28.0,
+                          20.0,
+                          28.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                208,
+                                208,
+                                226,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "构建耗时 4 分 12 秒，较昨日下降 8%。测试 103 项全部通过，快照基线无漂移。",
+                                  "style": {
+                                    "color": [
+                                      208,
+                                      208,
+                                      226,
+                                      255
+                                    ],
+                                    "font_size": 14.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        },
+                        {
+                          "Table": {
+                            "style": {
+                              "background_color": [
+                                35,
+                                34,
+                                56,
+                                255
+                              ],
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": {
+                                "Percent": 100.0
+                              },
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "rows": [
+                              {
+                                "cells": [
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": [
+                                              185,
+                                              185,
+                                              212,
+                                              255
+                                            ],
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "警告 0 · 新增 0 · 回归 0",
+                                                "style": {
+                                                  "color": [
+                                                    185,
+                                                    185,
+                                                    212,
+                                                    255
+                                                  ],
+                                                  "font_size": 13.0,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "align": "Left"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": null,
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        12.0,
+                                        12.0,
+                                        12.0,
+                                        12.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Link": {
+                                                "href": {
+                                                  "Http": "https://ci.postium.example/builds/118"
+                                                },
+                                                "runs": [
+                                                  {
+                                                    "Text": {
+                                                      "text": "查看构建",
+                                                      "style": {
+                                                        "color": [
+                                                          255,
+                                                          255,
+                                                          255,
+                                                          255
+                                                        ],
+                                                        "font_size": 13.0,
+                                                        "bold": false,
+                                                        "italic": false,
+                                                        "underline": false,
+                                                        "strikethrough": false
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ],
+                                          "align": "Center"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": null,
+                                    "style": {
+                                      "background_color": [
+                                        124,
+                                        58,
+                                        237,
+                                        255
+                                      ],
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        12.0,
+                                        12.0,
+                                        12.0,
+                                        12.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                138,
+                                138,
+                                168,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "该邮件为深色底原生设计，深色模式下无需再做亮度反转。",
+                                  "style": {
+                                    "color": [
+                                      138,
+                                      138,
+                                      168,
+                                      255
+                                    ],
+                                    "font_size": 12.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          20.0,
+                          28.0,
+                          20.0,
+                          28.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
