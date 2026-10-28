@@ -28,6 +28,7 @@ use crate::service::{
         EmailDetail,
         EmailListResponse,
         EmailService,
+        ImportReport,
         ReloadEmailResult,
         SaveDraftRequest,
         SaveDraftResponse,
@@ -461,5 +462,35 @@ impl CoreApi {
 
     pub async fn set_contact_group_members(&self, contact_id: i32, group_ids: Vec<i32>) -> Result<(), MailError> {
         self.contacts.group_set_members(contact_id, &group_ids).await
+    }
+
+    pub async fn import_contacts_vcard(&self, text: String) -> Result<ImportReport, MailError> {
+        self.contacts.import_contacts_vcard(text).await
+    }
+
+    pub async fn export_contacts_vcard(
+        &self,
+        query: Option<String>,
+        group_id: Option<i32>,
+        starred_only: bool,
+    ) -> Result<String, MailError> {
+        self.contacts
+            .export_contacts_vcard(query, group_id, starred_only)
+            .await
+    }
+
+    pub async fn import_contacts_csv(&self, text: String) -> Result<ImportReport, MailError> {
+        self.contacts.import_contacts_csv(text).await
+    }
+
+    pub async fn export_contacts_csv(
+        &self,
+        query: Option<String>,
+        group_id: Option<i32>,
+        starred_only: bool,
+    ) -> Result<String, MailError> {
+        self.contacts
+            .export_contacts_csv(query, group_id, starred_only)
+            .await
     }
 }

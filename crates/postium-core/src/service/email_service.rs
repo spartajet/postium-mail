@@ -218,6 +218,23 @@ pub struct EmailListResponse {
     pub limit: usize,
 }
 
+/// 联系人导入结果报告（vCard / CSV 导入共用）
+///
+/// # 字段说明
+///
+/// - `imported`: 成功导入的联系人数量
+/// - `skipped`: 被跳过的条目数量（邮箱已存在 / 条目缺邮箱等）
+/// - `errors`: 每个被跳过或失败条目的原因描述（与 `skipped` 对应）
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ImportReport {
+    /// 成功导入的联系人数量
+    pub imported: usize,
+    /// 被跳过的条目数量
+    pub skipped: usize,
+    /// 每个被跳过条目的原因描述
+    pub errors: Vec<String>,
+}
+
 /// 发送邮件请求
 ///
 /// 前端调用发送邮件 API 时传递的参数。

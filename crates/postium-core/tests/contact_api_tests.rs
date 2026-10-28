@@ -217,3 +217,52 @@ async fn contact_facade_backfill_and_email_lookup() {
 
     assert_eq!(api.list_contacts(None, None, false, 1, 20).await.unwrap().total, 3);
 }
+
+#[tokio::test]
+async fn contact_facade_vcard_and_csv_import_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
+
+    // ===== vCard 导入 / 重复跳过 =====
+    let vcard_text = concat!(
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:门面测试\r\n",
+        "EMAIL;TYPE=INTERNET:facade@postium.test\r\n",
+        "TEL:13800000004\r\n",
+        "CATEGORIES:门面组\r\n",
+        "END:VCARD\r\n",
+    );
+    let report = api.import_contacts_vcard(vcard_text.to_string()).await.unwrap();
+    assert_eq!((report.imported, report.skipped), (1, 0));
+    let dup = api.import_contacts_vcard(vcard_text.to_string()).await.unwrap();
+    assert_eq!((dup.imported, dup.skipped), (0, 1), "重复邮箱应跳过");
+
+    let contact = api
+        .get_contact_by_email("facade@postium.test".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(contact.name.as_deref(), Some("门面测试"));
+    assert_eq!(contact.phones, vec!["13800000004"]);
+    assert_eq!(
+        contact.groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+        vec!["门面组"],
+        "CATEGORIES 应建组并挂成员"
+    );
+
+    // ===== vCard 导出（含过滤）=====
+    let exported = api.export_contacts_vcard(None, None, false).await.unwrap();
+    assert!(exported.contains("BEGIN:VCARD"));
+    assert!(exported.contains("facade@postium.test"));
+    assert!(api.export_contacts_vcard(None, None, true).await.unwrap().is_empty(), "无星标时导出为空");
+
+    // ===== CSV 导入 / BOM 导出 =====
+    let csv_text = "name,email,phone,group\r\n王五,wang@postium.test,13800000005,重要\r\n";
+    let report = api.import_contacts_csv(csv_text.to_string()).await.unwrap();
+    assert_eq!((report.imported, report.skipped), (1, 0));
+
+    let csv_out = api.export_contacts_csv(None, None, false).await.unwrap();
+    assert!(csv_out.starts_with('\u{feff}'), "CSV 导出应带 UTF-8 BOM");
+    assert!(csv_out.contains("name,email,extra_emails,phone,phones_extra,org,notes,groups,starred,frequency"));
+    assert!(csv_out.contains("wang@postium.test"));
+    assert!(csv_out.contains("facade@postium.test"));
+}
