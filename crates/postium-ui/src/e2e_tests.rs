@@ -1766,6 +1766,8 @@ fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
 // ---------------------------------------------------------------------------
 struct HtmlRenderProbe {
     doc: postium_html::HtmlDocument,
+    /// 链接点击回调（Task 10：e2e 注入捕获闭包断言 SafeUrl 通路）。
+    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + 'static>,
 }
 
 impl gpui_kit::Render for HtmlRenderProbe {
@@ -1775,11 +1777,14 @@ impl gpui_kit::Render for HtmlRenderProbe {
         cx: &mut gpui_kit::Context<Self>,
     ) -> impl gpui_kit::IntoElement {
         use gpui_kit::{ParentElement as _, Styled as _};
+        // Arc<dyn Fn> 不直接满足 impl Fn 泛型界（无 Arc<dyn> 的 Fn 覆盖实现），
+        // 经闭包解引用调用（call 位点自动 deref 到 &dyn Fn）。
+        let on_link = self.on_link.clone();
         let element = crate::views::email_html::render_html_document(
             &self.doc,
             false,
             crate::views::email_html::ImageCtx::default(),
-            |_| {},
+            move |url: &postium_html::SafeUrl| on_link(url),
             cx,
         );
         gpui_kit::div().size_full().overflow_hidden().child(element)
@@ -1879,7 +1884,10 @@ fn html_render_smoke(cx: &mut TestAppContext) {
 
     let (probe, cx) = cx.add_window_view(|_window, cx| {
         setup(cx);
-        HtmlRenderProbe { doc }
+        HtmlRenderProbe {
+            doc,
+            on_link: Arc::new(|_: &postium_html::SafeUrl| {}),
+        }
     });
     let _ = &probe;
 
@@ -1927,4 +1935,129 @@ fn html_render_smoke(cx: &mut TestAppContext) {
         "h1 应按级别默认字号渲染（行高应 >40px），实际 {h1_height}"
     );
     cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 10：表格 flex 模拟 + 链接交互——两列表格 + colspan 链接行渲染不 panic、
+// 单元格文本探针可见、点击链接 on_link 回调收到 SafeUrl::Http
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_render_table_and_link(cx: &mut TestAppContext) {
+    use std::sync::Mutex as StdMutex;
+
+    use postium_html::{
+        Align, Block, BlockStyle, HtmlDocument, InlineRun, InlineStyle, SafeUrl, TableCell,
+        TableRow,
+    };
+
+    fn text(t: &str) -> InlineRun {
+        InlineRun::Text {
+            text: t.into(),
+            style: InlineStyle::default(),
+        }
+    }
+    fn para(runs: Vec<InlineRun>) -> Block {
+        Block::Paragraph {
+            style: BlockStyle::default(),
+            runs,
+            align: Align::Left,
+        }
+    }
+
+    let doc = HtmlDocument {
+        blocks: vec![Block::Table {
+            style: BlockStyle::default(),
+            rows: vec![
+                // 两列表格：上排两个等权单元格
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("单元格甲")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("单元格乙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
+                },
+                // colspan=2 行：单元格内链接（交互断言载体）
+                TableRow {
+                    cells: vec![TableCell {
+                        blocks: vec![para(vec![InlineRun::Link {
+                            href: SafeUrl::Http("https://example.com/table".into()),
+                            runs: vec![text("表格链接文字")],
+                        }])],
+                        colspan: 2,
+                        width: None,
+                        style: BlockStyle::default(),
+                    }],
+                },
+            ],
+        }],
+    };
+
+    let clicks: Arc<StdMutex<Vec<SafeUrl>>> = Arc::new(StdMutex::new(Vec::new()));
+    let sink = clicks.clone();
+    let (probe, cx) = cx.add_window_view(|_window, cx| {
+        setup(cx);
+        HtmlRenderProbe {
+            doc,
+            on_link: Arc::new(move |url: &postium_html::SafeUrl| {
+                sink.lock().unwrap().push(url.clone())
+            }),
+        }
+    });
+    let _ = &probe;
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+
+    // 表格渲染不塌陷：单元格文本以探针键出现在渲染树
+    let keys = [
+        "html-txt-单元格甲",
+        "html-txt-单元格乙",
+        "html-txt-表格链接文字",
+    ];
+    let mut missing = keys.to_vec();
+    for _ in 0..200 {
+        cx.run_until_parked();
+        missing.retain(|k| {
+            cx.debug_bounds(k).is_none_or(|b| {
+                b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.)
+            })
+        });
+        if missing.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    assert!(
+        missing.is_empty(),
+        "渲染树缺失表格单元格文本探针: {missing:?}"
+    );
+
+    // 点击链接 → on_link 回调捕获 SafeUrl::Http（探针 div 全宽，链接文本起于左缘）
+    let bounds = cx
+        .debug_bounds("html-txt-表格链接文字")
+        .expect("链接文本探针应存在");
+    cx.simulate_click(
+        gpui_pre::point(
+            bounds.origin.x + gpui_kit::px(4.),
+            bounds.origin.y + bounds.size.height / 2.,
+        ),
+        gpui_pre::Modifiers::default(),
+    );
+    cx.run_until_parked();
+
+    let got = clicks.lock().unwrap();
+    assert_eq!(got.len(), 1, "点击链接应恰好触发一次 on_link: {got:?}");
+    assert_eq!(
+        got.first(),
+        Some(&SafeUrl::Http("https://example.com/table".into())),
+        "on_link 应收到 SafeUrl::Http"
+    );
 }

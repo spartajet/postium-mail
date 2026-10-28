@@ -1,7 +1,7 @@
 //! GPUI 邮件 HTML 渲染层：[`HtmlDocument`] 中间表示 → GPUI 元素。
 //!
-//! Task 9 上半：块级（Container/Paragraph/Heading/List/Quote/Hr）与行内
-//! run 序列（同样式段合并）；表格 flex 模拟与链接点击接线归 Task 10，
+//! 块级（Container/Paragraph/Heading/List/Quote/Hr/Table）与行内 run 序列
+//! （同样式段合并）、表格 flex 模拟与链接 InteractiveText 点击接线；
 //! 图片三源真实渲染归 Task 13（本任务一律占位框）。
 //!
 //! # 行内 run 选型（实现记录）
@@ -20,19 +20,21 @@
 //! `postium_html::adapt_document` 产出的已适配文档（spec §6），本层
 //! 一律按字面映射 IR 颜色；`dark` 仅标记消费口径。
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, FontStyle, FontWeight, Hsla, IntoElement as _, ParentElement as _,
-    RenderImage, SharedString, StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun,
-    UnderlineStyle, div, font as base_font, px, relative, rgba,
+    AnyElement, App, ElementId, FontStyle, FontWeight, Hsla, InteractiveText, IntoElement as _,
+    ParentElement as _, RenderImage, SharedString, StrikethroughStyle, Styled as _, StyledText,
+    TextAlign, TextRun, UnderlineStyle, div, font as base_font, px, relative, rgba,
 };
 use postium_html::{
     Align, Block, BlockStyle, HtmlDocument, ImageStyle, InlineRun, InlineStyle, Rgba, SafeUrl,
-    Width,
+    TableCell, TableRow, Width,
 };
 
 #[cfg(test)]
@@ -60,7 +62,7 @@ pub struct ImageCtx {
 }
 
 #[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
-/// 渲染期常量：主题衍生默认色板 + 主题字体，一次取齐（帧内不可变）。
+/// 渲染期常量：主题衍生默认色板 + 主题字体 + 链接回调，一次取齐（帧内不可变）。
 struct RenderCtx {
     dark: bool,
     font_family: SharedString,
@@ -70,11 +72,16 @@ struct RenderCtx {
     border: Hsla,
     /// 图片/表格占位底色（主题 secondary）。
     placeholder_bg: Hsla,
+    /// 链接点击回调（InteractiveText hitbox → 调用方 open_url / 状态栏预览）。
+    on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+    /// 链接元素 id 序号（InteractiveText::new 需唯一 ElementId；每次渲染
+    /// 从 0 起算，树结构不变则 id 帧间稳定，元素状态不串）。
+    link_ix: Cell<usize>,
 }
 
 #[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 impl RenderCtx {
-    fn new(dark: bool, cx: &App) -> Self {
+    fn new(dark: bool, on_link: Arc<dyn Fn(&SafeUrl) + 'static>, cx: &App) -> Self {
         let theme = cx.theme();
         Self {
             dark,
@@ -84,6 +91,8 @@ impl RenderCtx {
             link: theme.link,
             border: theme.border,
             placeholder_bg: theme.secondary,
+            on_link,
+            link_ix: Cell::new(0),
         }
     }
 
@@ -97,6 +106,13 @@ impl RenderCtx {
             f.style = FontStyle::Italic;
         }
         f
+    }
+
+    /// 下一个链接元素 id（渲染树内唯一）。
+    fn next_link_id(&self) -> ElementId {
+        let ix = self.link_ix.get();
+        self.link_ix.set(ix + 1);
+        ElementId::named_usize("html-link", ix)
     }
 }
 
@@ -114,7 +130,8 @@ struct Inherited {
 ///
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
 /// - `images`：图片上下文（Task 13 接管三源渲染）。
-/// - `on_link`：链接点击回调（Task 10 接线 `InteractiveText` hitbox）。
+/// - `on_link`：链接点击回调（InteractiveText hitbox 命中链接区间时以
+///   [`SafeUrl`] 调用；email_detail 侧 http/mailto → `cx.open_url`）。
 #[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 pub fn render_html_document(
     doc: &HtmlDocument,
@@ -123,11 +140,10 @@ pub fn render_html_document(
     on_link: impl Fn(&SafeUrl) + 'static,
     cx: &mut App,
 ) -> AnyElement {
-    // Task 10：链接 run 区间注册 InteractiveText hitbox 并调用本回调；
     // Task 13：按 ImageCtx.enabled / attachments / resolved 渲染三源图片。
-    let _ = (images, on_link);
+    let _ = images;
 
-    let rcx = RenderCtx::new(dark, cx);
+    let rcx = RenderCtx::new(dark, Arc::new(on_link), cx);
     render_blocks(&doc.blocks, Inherited::default(), &rcx)
         .when_probe("html-root")
         .into_any_element()
@@ -206,16 +222,17 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
             .pl(px(12.))
             .child(render_blocks(children, inh, rcx))
             .into_any_element(),
-        Block::Table { .. } => {
-            // Task 10 接管：Table→v_flex、Row→h_flex、Cell→容器
-            // （colspan → flex_grow 权重、cell.width → flex-basis）。
-            div()
-                .w_full()
-                .h(px(24.))
-                .rounded_sm()
-                .bg(rcx.placeholder_bg)
-                .border_1()
-                .border_color(rcx.border)
+        Block::Table { style, rows } => {
+            let child_inh = Inherited {
+                color: style.color.map(ir_color).or(inh.color),
+                depth: inh.depth,
+            };
+            // 表格 flex 模拟（spec §5）：Table→v_flex，行→h_flex。
+            map_block_style(style, rcx.dark)
+                .flex()
+                .flex_col()
+                .when_some(style.text_align, |d, a| d.text_align(map_align(a)))
+                .children(rows.iter().map(|row| render_table_row(row, child_inh, rcx)))
                 .into_any_element()
         }
         Block::Image { src, alt, style } => {
@@ -269,6 +286,46 @@ fn render_list(ordered: bool, items: &[Vec<Block>], inh: Inherited, rcx: &Render
     col.into_any_element()
 }
 
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
+/// 表格行 → 横向 flex（cells 沿主轴排布，交叉轴拉伸等高——UA 行高 = 最高单元格）。
+fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
+    let mut r = h_flex().w_full().items_stretch();
+    for cell in &row.cells {
+        r = r.child(render_table_cell(cell, inh, rcx));
+    }
+    r
+}
+
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
+/// 表格单元格 → 容器（colspan → flex_grow 权重、width → 固定宽/百分比宽、
+/// cell.style → map_block_style；嵌套块递归 [`render_blocks`]，空单元格占
+/// 最小行高防塌陷）。
+fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
+    let child_inh = Inherited {
+        color: cell.style.color.map(ir_color).or(inh.color),
+        depth: inh.depth,
+    };
+    // colspan 权重 = colspan 值（IR 保证 ≥1；max(1.) 防 0 权重塌陷）。
+    // 固定/百分比宽作为 flex-basis：flex 项的显式宽度即 basis，colspan 权重
+    // 决定剩余空间的瓜分比例——对应 UA 自动表格布局的"声明宽 + 自动扩展"。
+    let mut c = map_block_style(&cell.style, rcx.dark)
+        .flex()
+        .flex_col()
+        .flex_grow(f32::from(cell.colspan).max(1.))
+        .when_some(cell.style.text_align, |d, a| d.text_align(map_align(a)));
+    match cell.width {
+        Some(Width::Px(v)) => c = c.w(px(v)),
+        Some(Width::Percent(p)) => c = c.w(relative((p / 100.).clamp(0., 1.))),
+        None => {}
+    }
+    if cell.blocks.is_empty() {
+        c = c.min_h(px(BASE_FONT_SIZE * BASE_LINE_HEIGHT));
+    } else {
+        c = c.child(render_blocks(&cell.blocks, child_inh, rcx));
+    }
+    c
+}
+
 #[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流 → 文本元素（字号分组的 [`StyledText`]）与行内图片占位的序列。
 ///
@@ -288,7 +345,7 @@ fn render_inline_flow(
 ) -> Vec<AnyElement> {
     // 1) 扁平化：同样式文本段合并（含链接内层递归与 br 折行）
     let mut segs: Vec<FlowSeg> = Vec::new();
-    flatten_runs(runs, false, force_bold, &mut segs);
+    flatten_runs(runs, None, force_bold, &mut segs);
 
     // 2) 连续文本段按字号分组为单个 StyledText（组内相邻同样式 run 再合并）
     let mut els: Vec<AnyElement> = Vec::new();
@@ -333,19 +390,25 @@ fn render_inline_flow(
 #[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 行内流中间产物。
 enum FlowSeg {
-    /// 文本段（同样式段已合并；`link` 标记链接归属，Task 10 供区间注册）。
+    /// 文本段（同样式段已合并；`link` 携带归属链接的 [`SafeUrl`]，Task 10
+    /// 供 InteractiveText 区间注册——不同 href 的相邻段不合并）。
     Text {
         text: String,
         style: InlineStyle,
-        link: bool,
+        link: Option<SafeUrl>,
     },
     /// 行内图片占位（Task 13 接管）。
     Image { style: ImageStyle, alt: String },
 }
 
-#[allow(dead_code)] // Task 11 接入 email_detail 正文分支
-/// 行内 run 序列扁平化：相邻同样式段合并、链接内层加链接标记、br 折行。
-fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<FlowSeg>) {
+#[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
+/// 行内 run 序列扁平化：相邻同样式段合并、链接内层携带 href、br 折行。
+fn flatten_runs(
+    runs: &[InlineRun],
+    link: Option<&SafeUrl>,
+    force_bold: bool,
+    out: &mut Vec<FlowSeg>,
+) {
     for run in runs {
         match run {
             InlineRun::Text { text, style } => {
@@ -367,7 +430,7 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
                     style: ls,
                     link: ll,
                 }) = out.last_mut()
-                    && *ll == link
+                    && ll.as_ref() == link
                     && *ls == style
                 {
                     last.push_str(text);
@@ -375,14 +438,14 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
                     out.push(FlowSeg::Text {
                         text: text.clone(),
                         style,
-                        link,
+                        link: link.cloned(),
                     });
                 }
             }
-            InlineRun::Link { runs, .. } => flatten_runs(runs, true, force_bold, out),
+            InlineRun::Link { runs, href } => flatten_runs(runs, Some(href), force_bold, out),
             InlineRun::Br => {
                 // 折行归并进前段；但不得并入链接段（换行符带下划线会画出线尾）
-                let joins_last = matches!(out.last(), Some(FlowSeg::Text { link: false, .. }));
+                let joins_last = matches!(out.last(), Some(FlowSeg::Text { link: None, .. }));
                 if joins_last {
                     if let Some(FlowSeg::Text { text, .. }) = out.last_mut() {
                         text.push('\n');
@@ -391,7 +454,7 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
                     out.push(FlowSeg::Text {
                         text: "\n".into(),
                         style: InlineStyle::default(),
-                        link: false,
+                        link: None,
                     });
                 }
             }
@@ -408,6 +471,10 @@ fn flatten_runs(runs: &[InlineRun], link: bool, force_bold: bool, out: &mut Vec<
 
 #[allow(dead_code)] // Task 11 接入 email_detail 正文分支
 /// 把积累的文本段组渲染为一个文本元素（相邻同样式段合并成单一 [`TextRun`]）。
+///
+/// 组内含链接段时以 [`InteractiveText`] 承载：链接段按 seg 级标记 + 段长
+/// 累加为字节区间（`TextRun.len` / `index_for_position` 均以字节计）注册
+/// clickable range，命中即以段归属的 [`SafeUrl`] 调用 `on_link`。
 fn flush_text_group(
     group: Vec<FlowSeg>,
     base_color: Option<Hsla>,
@@ -415,9 +482,10 @@ fn flush_text_group(
     default_size: f32,
     els: &mut Vec<AnyElement>,
 ) {
-    // 组文本与 TextRun 序列（相邻同样式 run 合并）
+    // 组文本、TextRun 序列（相邻同样式 run 合并）与链接字节区间
     let mut text = String::new();
     let mut runs: Vec<TextRun> = Vec::new();
+    let mut links: Vec<(Range<usize>, SafeUrl)> = Vec::new();
     let mut size: Option<f32> = None;
     for seg in &group {
         let FlowSeg::Text {
@@ -428,8 +496,9 @@ fn flush_text_group(
         else {
             continue;
         };
-        let run = text_run(style, *link, base_color, rcx);
+        let run = text_run(style, link.is_some(), base_color, rcx);
         let seg_len = seg_text.len();
+        let seg_start = text.len();
         text.push_str(seg_text);
         if size.is_none() {
             size = style.font_size;
@@ -441,6 +510,9 @@ fn flush_text_group(
                 ..run
             }),
         }
+        if let Some(url) = link {
+            links.push((seg_start..text.len(), url.clone()));
+        }
     }
     if text.is_empty() {
         return;
@@ -449,8 +521,26 @@ fn flush_text_group(
     let d = div()
         .w_full()
         .text_size(px(size.unwrap_or(default_size)))
-        .line_height(relative(BASE_LINE_HEIGHT))
-        .child(StyledText::new(text.clone()).with_runs(runs));
+        .line_height(relative(BASE_LINE_HEIGHT));
+
+    let d = if links.is_empty() {
+        d.child(StyledText::new(text.clone()).with_runs(runs))
+    } else {
+        let ranges: Vec<Range<usize>> = links.iter().map(|(r, _)| r.clone()).collect();
+        let urls: Vec<SafeUrl> = links.into_iter().map(|(_, u)| u).collect();
+        let on_link = Arc::clone(&rcx.on_link);
+        d.child(
+            InteractiveText::new(
+                rcx.next_link_id(),
+                StyledText::new(text.clone()).with_runs(runs),
+            )
+            .on_click(ranges, move |range_ix, _window, _cx| {
+                if let Some(url) = urls.get(range_ix) {
+                    on_link(url);
+                }
+            }),
+        )
+    };
 
     // 文本探针（仅测试构建）：以内容前缀为键记录渲染树，
     // e2e 经 `VisualTestContext::debug_bounds` 查询文本可见性。
@@ -679,5 +769,42 @@ fn text_probe_key(text: &str) -> String {
         .filter(|c| c.is_alphanumeric())
         .take(16)
         .collect();
-    format!("html-txt-{key}")
+    if key.is_empty() {
+        // 纯空白/符号文本（br 独立成组、符号分隔线等）：字母数字前缀为空，
+        // 多组会碰撞出同键 → 内容 hash 兜底保证键唯一（T9 交接）。
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        format!("html-txt-sym-{:016x}", hasher.finish())
+    } else {
+        format!("html-txt-{key}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_probe_key;
+
+    /// T9 交接：纯空白/符号文本的字母数字前缀为空，旧实现一律退化为
+    /// "html-txt-"——br 独立成组（"\n"）、符号分隔线等组互相碰撞同键，
+    /// e2e debug_bounds 查询会命中错误元素。现走内容 hash 兜底，键唯一。
+    #[test]
+    fn probe_key_symbol_only_groups_are_unique() {
+        let nl = text_probe_key("\n");
+        let dashes = text_probe_key("--- ··· ---");
+        let equals = text_probe_key("==========");
+        for k in [&nl, &dashes, &equals] {
+            assert!(
+                k.starts_with("html-txt-sym-"),
+                "符号文本应走 hash 兜底: {k}"
+            );
+        }
+        assert_ne!(nl, dashes, "不同符号文本键不得碰撞");
+        assert_ne!(dashes, equals, "不同符号文本键不得碰撞");
+        assert_ne!(nl, equals, "不同符号文本键不得碰撞");
+
+        // 常规文本路径不受影响：字母数字前缀键保持原语义
+        assert_eq!(text_probe_key("普通文本ABC"), "html-txt-普通文本ABC");
+        assert_ne!(text_probe_key("甲"), text_probe_key("乙"));
+    }
 }
