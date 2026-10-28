@@ -298,16 +298,20 @@ fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit
 
 #[allow(dead_code)] // T11 接入 email_detail 前无生产调用方
 /// 表格单元格 → 容器（colspan → flex_grow 权重、width → 固定宽/百分比宽、
-/// cell.style → map_block_style；嵌套块递归 [`render_blocks`]，空单元格占
-/// 最小行高防塌陷）。
+/// 无显式宽 basis 归零交 grow 相位分配、cell.style → map_block_style；
+/// 嵌套块递归 [`render_blocks`]，空单元格占最小行高防塌陷）。
 fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let child_inh = Inherited {
         color: cell.style.color.map(ir_color).or(inh.color),
         depth: inh.depth,
     };
     // colspan 权重 = colspan 值（IR 保证 ≥1；max(1.) 防 0 权重塌陷）。
-    // 固定/百分比宽作为 flex-basis：flex 项的显式宽度即 basis，colspan 权重
-    // 决定剩余空间的瓜分比例——对应 UA 自动表格布局的"声明宽 + 自动扩展"。
+    // 无显式宽的单元格 flex_basis 归零（评审修复）：map_block_style 的
+    // w_full 会把每格 basis 顶到行宽 100%，Σbasis 溢行使 taffy 恒走 shrink
+    // 相位（按 basis 比例收缩）且自由空间归零——grow 相位从不被咨询，
+    // colspan 权重失效（[1,2] 行渲染成 50/50）。basis 归零后 shrink 无从
+    // 发生，grow 相位按权重接管分配。有显式 width 的格保持 width→
+    // flex-basis（声明宽 + 自动扩展）。
     let mut c = map_block_style(&cell.style, rcx.dark)
         .flex()
         .flex_col()
@@ -316,7 +320,7 @@ fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_
     match cell.width {
         Some(Width::Px(v)) => c = c.w(px(v)),
         Some(Width::Percent(p)) => c = c.w(relative((p / 100.).clamp(0., 1.))),
-        None => {}
+        None => c = c.flex_basis(px(0.)),
     }
     if cell.blocks.is_empty() {
         c = c.min_h(px(BASE_FONT_SIZE * BASE_LINE_HEIGHT));

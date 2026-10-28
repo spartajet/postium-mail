@@ -1985,17 +1985,49 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         },
                     ],
                 },
-                // colspan=2 行：单元格内链接（交互断言载体）
+                // colspan [1,2] 行：colspan 权重生效断言载体（1:2 分布），
+                // 第二格含链接（交互断言载体）
                 TableRow {
-                    cells: vec![TableCell {
-                        blocks: vec![para(vec![InlineRun::Link {
-                            href: SafeUrl::Http("https://example.com/table".into()),
-                            runs: vec![text("表格链接文字")],
-                        }])],
-                        colspan: 2,
-                        width: None,
-                        style: BlockStyle::default(),
-                    }],
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("跨列前段")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![InlineRun::Link {
+                                href: SafeUrl::Http("https://example.com/table".into()),
+                                runs: vec![text("表格链接文字")],
+                            }])],
+                            colspan: 2,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
+                },
+                // [1,1,1] 三等分对照行
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分甲")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分乙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分丙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
                 },
             ],
         }],
@@ -2020,7 +2052,11 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
     let keys = [
         "html-txt-单元格甲",
         "html-txt-单元格乙",
+        "html-txt-跨列前段",
         "html-txt-表格链接文字",
+        "html-txt-三等分甲",
+        "html-txt-三等分乙",
+        "html-txt-三等分丙",
     ];
     let mut missing = keys.to_vec();
     for _ in 0..200 {
@@ -2039,6 +2075,35 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
         missing.is_empty(),
         "渲染树缺失表格单元格文本探针: {missing:?}"
     );
+
+    // colspan 权重生效（评审加固）：[1,2] 行宽度比 1:2（±5%）。探针 div 为
+    // 单元格内 w_full 文本元素，宽度即单元格宽。
+    let mut cell_w = |key: &'static str| {
+        cx.debug_bounds(key)
+            .unwrap_or_else(|| panic!("探针 {key} 应存在"))
+            .size
+            .width
+    };
+    let ratio = cell_w("html-txt-跨列前段") / cell_w("html-txt-表格链接文字");
+    assert!(
+        (0.475..=0.525).contains(&ratio),
+        "[1,2] 行应按 colspan 权重 1:2 分布（±5%），实测 {ratio:.3}——\
+         若回退为 50/50 说明 flex_basis 归零修复失效"
+    );
+    // [1,1,1] 三等分对照：三格两两差 ≤5%
+    let thirds = [
+        cell_w("html-txt-三等分甲"),
+        cell_w("html-txt-三等分乙"),
+        cell_w("html-txt-三等分丙"),
+    ];
+    let (min_w, max_w) = thirds.iter().fold((thirds[0], thirds[0]), |(lo, hi), &w| {
+        (lo.min(w), hi.max(w))
+    });
+    assert!(
+        max_w / min_w <= 1.05,
+        "[1,1,1] 行应三等分（±5%），实测 {thirds:?}"
+    );
+    drop(cell_w);
 
     // 点击链接 → on_link 回调捕获 SafeUrl::Http（探针 div 全宽，链接文本起于左缘）
     let bounds = cx
