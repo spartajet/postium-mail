@@ -143,3 +143,53 @@ CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN
     INSERT INTO emails_fts(rowid, subject, sender_email, preview)
     VALUES (new.id, new.subject, new.sender_email, new.preview);
 END;
+
+CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    extra_emails TEXT,
+    name TEXT,
+    phones TEXT,
+    notes TEXT,
+    org TEXT,
+    is_starred INTEGER NOT NULL DEFAULT 0,
+    frequency INTEGER NOT NULL DEFAULT 0,
+    last_contacted_at INTEGER,
+    source TEXT NOT NULL DEFAULT 'local',
+    dav_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    dav_uid TEXT,
+    dav_href TEXT,
+    dav_etag TEXT,
+    raw_vcard TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_email ON contacts(lower(email));
+CREATE TABLE IF NOT EXISTS contact_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT
+);
+CREATE TABLE IF NOT EXISTS contact_group_members (
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (contact_id, group_id)
+);
+CREATE TABLE IF NOT EXISTS dav_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    username TEXT NOT NULL,
+    addressbook_href TEXT,
+    sync_token TEXT,
+    last_sync_at INTEGER
+);
+-- 本地删除的 CardDAV 条目墓碑：同步推送阶段据此向服务器发 DELETE，
+-- 服务端确认后清除。`deleted_at` 为同步游标（仅推上次同步之后的删除）。
+CREATE TABLE IF NOT EXISTS dav_deletes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    href TEXT NOT NULL,
+    deleted_at INTEGER NOT NULL,
+    UNIQUE(account_id, href)
+);

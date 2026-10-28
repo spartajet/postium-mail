@@ -7,12 +7,14 @@
 //!
 //! - [`account_repo`] - 账号数据访问
 //! - [`attachment_repo`] - 附件数据访问
+//! - [`contact_repo`] - 联系人数据访问
 //! - [`email_repo`] - 邮件数据访问
 //! - [`label_repo`] - 标签数据访问
 //! - [`sync_repo`] - 同步状态数据访问
 
 pub mod account_repo;
 pub mod attachment_repo;
+pub mod contact_repo;
 pub mod email_repo;
 pub mod label_repo;
 pub mod sync_repo;

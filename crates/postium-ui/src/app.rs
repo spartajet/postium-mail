@@ -118,8 +118,11 @@ pub struct AppShell {
     list_nav_version: u64,
     /// 已同步到的数据版本（list_version；原位更新行，不重置滚动）
     list_data_version: u64,
-    detail_view: Option<gpui_kit::Entity<EmailDetailView>>,
+    pub(crate) detail_view: Option<gpui_kit::Entity<EmailDetailView>>,
     detail_build_version: u32,
+    /// 邮件详情「联系人」联动传递的待选邮箱：切到联系人页后由渲染期消费
+    /// （视图可能尚未懒建，选中须等 store 首装完成）
+    pub(crate) contacts_pending_email: Option<String>,
     /// 顶栏搜索
     search_input: gpui_kit::Entity<InputState>,
     /// 搜索防抖代数（每次变更 +1，超时后比对决定是否执行）
@@ -132,6 +135,7 @@ pub struct AppShell {
     /// 托盘句柄（保持存活）
     _tray: Option<tray_icon::TrayIcon>,
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
+    pub(crate) contacts_view: Option<gpui_kit::Entity<crate::views::contacts::ContactsView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     /// 主窗口句柄：选中邮件时更新窗口标题用
     pub(crate) window_handle: gpui_kit::AnyWindowHandle,
@@ -365,7 +369,7 @@ impl AppShell {
             TRAY_ALIVE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        Self {
+        let shell = Self {
             api,
             sync_rx,
             accounts,
@@ -378,6 +382,7 @@ impl AppShell {
             list_data_version: 0,
             detail_view: None,
             detail_build_version: 0,
+            contacts_pending_email: None,
             search_input,
             search_gen: 0,
             nav: NavTarget::AllInbox,
@@ -385,12 +390,22 @@ impl AppShell {
             _appearance_sub: appearance_sub,
             _tray,
             calendar_view: None,
+            contacts_view: None,
             workflow_view: None,
             status_bar: None,
             window_handle: window.window_handle(),
             sync_refresh_at: None,
             sync_refresh_pending: false,
-        }
+        };
+
+        // 启动即回填：把存量邮件的往来地址聚合进联系人表（fire-and-forget，
+        // 不阻塞首帧）。幂等且对 local/dav 条目只推进往来时间，不覆盖用户数据。
+        let backfill_api = shell.api.clone();
+        let _ = crate::runtime::spawn_tokio(async move {
+            let _ = backfill_api.backfill_contacts().await;
+        });
+
+        shell
     }
 
     /// 同步进行中的节流刷新（SyncEvent::Progress 驱动）：
@@ -504,6 +519,7 @@ impl Render for AppShell {
             NavTarget::Label(id) => format!("标签 #{id}").into(),
             NavTarget::Calendar => i18n::t("sidebar.calendar"),
             NavTarget::Workflow => i18n::t("sidebar.workflow"),
+            NavTarget::Contacts => i18n::t("sidebar.contacts"),
             NavTarget::Settings => i18n::t("settings.title"),
         };
 
@@ -522,6 +538,26 @@ impl Render for AppShell {
                     self.workflow_view = Some(cx.new(|cx| crate::views::workflow::WorkflowView::new(api, cx)));
                 }
                 self.workflow_view.clone().unwrap().into_any_element()
+            }
+            NavTarget::Contacts => {
+                if self.contacts_view.is_none() {
+                    let api = self.api.clone();
+                    self.contacts_view =
+                        Some(cx.new(|cx| crate::views::contacts::ContactsView::new(api, window, cx)));
+                }
+                // 邮件详情联动传递的待选邮箱：视图就绪后定向选中
+                // （store 清过滤全量重载，装载完成按邮箱命中即选中）
+                if let Some(email) = self.contacts_pending_email.take() {
+                    let api = self.api.clone();
+                    if let Some(view) = self.contacts_view.clone() {
+                        view.update(cx, |view, cx| {
+                            view.store.update(cx, |store, cx| {
+                                store.select_by_email(&email, &api, cx);
+                            });
+                        });
+                    }
+                }
+                self.contacts_view.clone().unwrap().into_any_element()
             }
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
             _ => h_resizable("mail-columns")

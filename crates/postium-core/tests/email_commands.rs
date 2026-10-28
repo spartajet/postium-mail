@@ -12,6 +12,7 @@ use postium_core::infrastructure::protocols::types::{
     AttachmentInfo, FetchedBodySection, WholeEmailDto,
 };
 use postium_core::infrastructure::storage::models::accounts;
+use postium_core::infrastructure::storage::repository::contact_repo;
 use postium_core::infrastructure::storage::repository::sync_repo;
 use postium_core::service::account_connection::NoopImapConnectionVerifier;
 use postium_core::service::account_service::AccountService;
@@ -1026,6 +1027,26 @@ async fn send_email_writes_local_sent_and_archives_remote() {
         sent_email_count(&svc, account_id).await,
         1,
         "SMTP 成功后应写入本地 Sent"
+    );
+
+    // Task 7: 发送成功后应自动收集收件人 / 抄送人到 contacts 表
+    let recipient_contact = contact_repo::get_by_email(&svc.db, "recipient@example.com")
+        .await
+        .unwrap();
+    assert!(
+        recipient_contact.is_some(),
+        "发送成功后应自动收集收件人联系人"
+    );
+    assert_eq!(
+        recipient_contact.expect("收件人联系人应存在").source,
+        "collected"
+    );
+    let cc_contact = contact_repo::get_by_email(&svc.db, "copy@example.com")
+        .await
+        .unwrap();
+    assert!(
+        cc_contact.is_some(),
+        "发送成功后应自动收集抄送人联系人"
     );
 }
 

@@ -896,6 +896,66 @@ fn compose_recipient_field_chips_commit_and_remove(cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
+// ---------------------------------------------------------------------------
+// contacts.e2e.js（补全子集）→ 写信收件人自动补全：输入触发候选、Enter 取第一项
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn compose_autocomplete_from_contacts(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let (compose, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        crate::views::compose::ComposeView::new(
+            crate::views::compose::ComposeMode::New,
+            api.clone(),
+            window,
+            cx,
+        )
+    });
+
+    // to 输入 "postium"（命中 seed.e2e@postium.test 与 sender.*@postium.test）
+    with_window_mut(cx, |window, app| {
+        let h = compose.read(app).to_field.input.read(app).focus_handle(app);
+        window.focus(&h, app);
+    });
+    cx.simulate_input("postium");
+
+    // 防抖 300ms 走模拟时钟：advance_clock 推进后再由 run_until_parked 驱动
+    // 防抖定时 → tokio 查询 → 候选回填（真实 I/O 跨线程唤醒）
+    cx.dispatcher.advance_clock(std::time::Duration::from_millis(400));
+
+    // 300ms 防抖 + 异步查询 → 候选非空且含 seed 联系人（星标置顶 → 第一项）
+    let sugg = wait_for(cx, |cx| with_app(cx, |app| {
+        let list = compose.read(app).to_field.suggestions.clone();
+        (!list.is_empty()).then_some(list)
+    }));
+    let first = sugg.first().map(|c| c.email.clone()).unwrap_or_default();
+    assert_eq!(
+        first, "seed.e2e@postium.test",
+        "星标 seed 联系人应排第一，实际: {:?}",
+        sugg.iter().map(|c| c.email.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        with_app(cx, |app| compose.read(app).to_field.sugg_open),
+        "候选非空时浮层应开启"
+    );
+
+    // Enter 取第一项 → chips 化（输入框清空）
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
+    assert_eq!(
+        emails,
+        vec!["seed.e2e@postium.test".to_string()],
+        "Enter 应提交第一项候选为 chip: {emails:?}"
+    );
+    let open = with_app(cx, |app| compose.read(app).to_field.sugg_open);
+    assert!(!open, "提交后浮层应关闭");
+}
+
 #[gpui_pre::test]
 fn add_account_modal_closes_on_escape(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
@@ -993,6 +1053,602 @@ fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → 种子联系人装载 + 启动回填共存 + 星标过滤
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_seed_loaded(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+    let api_check = api.clone();
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    let _ = shell; // AppShell::new 的构造副作用（启动回填）已被下方断言覆盖
+
+    // 种子联系人在 CoreApi::init 已落库（source='local'，回填不覆盖频次）
+    let primary = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.list_contacts(None, None, false, 0, 50).await.ok() })
+            .and_then(|r| {
+                r.contacts
+                    .into_iter()
+                    .find(|c| c.email == "seed.e2e@postium.test")
+            })
+    });
+    assert_eq!(primary.name.as_deref(), Some("Primary E2E"));
+    assert_eq!(primary.frequency, 5);
+    assert!(primary.is_starred);
+    assert_eq!(primary.source, "local");
+
+    // 星标过滤：种子中仅 Primary E2E 被星标
+    let starred = wait_for(cx, |_| {
+        let r = crate::runtime::runtime()
+            .block_on(async { api_check.list_contacts(None, None, true, 0, 50).await })
+            .expect("星标过滤查询失败");
+        (r.total == 1).then_some(r)
+    });
+    assert_eq!(
+        starred.contacts[0].email, "seed.e2e@postium.test",
+        "星标过滤应仅含 Primary E2E"
+    );
+
+    // AppShell::new 的 fire-and-forget 回填已跑完：夹具邮件的收件人以
+    // collected 条目出现（仅能来自启动回填，种子不产生该地址）
+    wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.get_contact_by_email("e2e.user@postium.test".into()).await.ok() })
+            .flatten()
+            .filter(|c| c.source == "collected")
+    });
+
+    // 种子的 local 发件人与回填共存：频次保持种子值（10），仅推进往来时间
+    let sender = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api_check.get_contact_by_email("sender.primary@postium.test".into()).await.ok() })
+            .flatten()
+    });
+    assert_eq!(sender.source, "local");
+    assert_eq!(sender.frequency, 10, "回填不得覆盖 local 条目频次");
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → 导航入口：nav=Contacts 切换主区（占位渲染不 panic）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn navigate_to_contacts_shows_title(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 侧栏点击同款路径：nav=Contacts → 主区渲染占位（run_until_parked 隐式覆盖不 panic）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        with_app(cx, |app| shell.read(app).nav.clone()),
+        NavTarget::Contacts,
+        "nav 应切换到联系人"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → ContactsView 三栏交互：导航懒建/装载/星标反转/刷新/搜索过滤
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_view_interactions(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+
+    // 种子联系人应已在 store（含 Primary E2E，初始为星标）
+    let primary = contacts
+        .iter()
+        .find(|c| c.email == "seed.e2e@postium.test")
+        .expect("store 联系人应含种子 Primary E2E");
+    assert_eq!(primary.name.as_deref(), Some("Primary E2E"));
+    assert!(primary.is_starred, "种子 Primary E2E 初始应为星标");
+    let primary_id = primary.id;
+
+    // 直驱星标路径（列表行 ★ 点击同款 store 方法）：乐观反转
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.toggle_starred(primary_id, &api, cx));
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let flipped = store
+                .contacts
+                .iter()
+                .find(|c| c.id == primary_id)
+                .filter(|c| !c.is_starred)
+                .is_some();
+            flipped.then_some(())
+        })
+    });
+
+    // 落库确认（异步写入：轮询直至持久化）
+    wait_for(cx, |_| {
+        let c = crate::runtime::runtime()
+            .block_on(async { api.get_contact(primary_id).await })
+            .expect("联系人查询失败")
+            .expect("联系人应存在");
+        (!c.is_starred).then_some(())
+    });
+
+    // store 刷新：装载完成后 DB 状态保持（仍为非星标）
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.load(&api, cx));
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version >= 2 && !store.loading)
+                .then(|| {
+                    store.contacts.iter().find(|c| c.id == primary_id).cloned()
+                })
+                .flatten()
+                .filter(|c| !c.is_starred)
+                .is_some()
+                .then_some(())
+        })
+    });
+
+    // 搜索过滤（工具条搜索输入防抖直达的 store 方法）：唯一词只命中种子联系人
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| store.set_query("seed.e2e", &api, cx));
+        });
+    });
+    let filtered = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.query == "seed.e2e" && store.contacts.len() == 1 && !store.loading)
+                .then(|| store.contacts.clone())
+        })
+    });
+    assert_eq!(
+        filtered[0].email, "seed.e2e@postium.test",
+        "搜索 seed.e2e 应只命中种子联系人"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → 星标写操作与在途 load 的竞态：陈旧快照不得覆盖乐观态，
+// 写完成后补跑 load 最终一致（write_gen 代数防护回归）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_star_write_race_converges(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+
+    // 目标：种子中未星标的联系人（写操作会翻转其状态）
+    let target = contacts
+        .iter()
+        .find(|c| c.email == "sender.secondary@postium.test")
+        .expect("store 应含种子 sender.secondary");
+    let id = target.id;
+    let expected = !target.is_starred;
+
+    // 同一 UI 帧内：先发起 load（改查询触发在途装载），紧接着乐观星标写入。
+    // 完成回调只能在 UI 线程跑（必然晚于本帧），装载快照在写之后才回到
+    // UI 线程 —— 陈旧快照覆盖乐观态的竞态场景。
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.set_query("postium.test", &api, cx); // 触发在途 load
+                store.toggle_starred(id, &api, cx); // 写路径：乐观翻转 + write_gen++
+            });
+        });
+    });
+
+    // 最终一致：装载全部收尾后，本地列表中该联系人保持翻转后的星标态
+    // （陈旧快照被 write_gen 拦截，写完成后的补跑 load 收敛到 DB 真值）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let settled = !store.loading
+                && store
+                    .contacts
+                    .iter()
+                    .any(|c| c.id == id && c.is_starred == expected);
+            settled.then_some(())
+        })
+    });
+
+    // DB 同步收敛为同一真值
+    wait_for(cx, |_| {
+        let c = crate::runtime::runtime()
+            .block_on(async { api.get_contact(id).await })
+            .expect("联系人查询失败")
+            .expect("联系人应存在");
+        (c.is_starred == expected).then_some(())
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → Task 11: 合并交互 + 邮件详情联动
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contact_merge_and_detail_add(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    // 注册主壳全局弱引用（生产由 open_main_window 注册；e2e 直接建壳需手动补）
+    with_app_mut(cx, |app| {
+        app.set_global(crate::app::MainShell(shell.downgrade()));
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // ── Part A：合并（行首复选多选 → 工具条「合并」，primary = 最后选中）──
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+    let primary_id = contacts
+        .iter()
+        .find(|c| c.email == "seed.e2e@postium.test")
+        .expect("store 应含种子 seed.e2e")
+        .id;
+    let absorbed_id = contacts
+        .iter()
+        .find(|c| c.email == "sender.primary@postium.test")
+        .expect("store 应含种子 sender.primary")
+        .id;
+
+    // 复选两枚（先点 absorbed 后点 primary）→ 直驱合并：sender.primary 并入 seed.e2e
+    with_app_mut(cx, |app| {
+        view.update(app, |v, cx| {
+            v.toggle_merge_pick(absorbed_id, cx);
+            v.toggle_merge_pick(primary_id, cx);
+            v.merge_selected(cx);
+        });
+    });
+
+    // 合并后补跑装载收敛：absorbed 从列表消失，primary 保留
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let gone = !store.contacts.iter().any(|c| c.id == absorbed_id);
+            let kept = store.contacts.iter().any(|c| c.id == primary_id);
+            (!store.loading && gone && kept).then_some(())
+        })
+    });
+    // DB 层：absorbed 已删除（邮箱转入 primary 的 extra_emails）
+    wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api.get_contact(absorbed_id).await })
+            .ok()
+            .flatten()
+            .is_none()
+            .then_some(())
+    });
+
+    // ── Part B：邮件详情「联系人」联动 ──
+    // 切回邮件视图，选中发件人为 sender.primary 的种子邮件（该联系人已被合并
+    // 删除，其邮箱不再是任何联系人的主邮箱 → 走「不存在则创建」分支）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::AllInbox;
+            cx.notify();
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
+    let email_id = with_app(cx, |app| {
+        shell.read(app)
+            .emails
+            .read(app)
+            .emails
+            .iter()
+            .find(|e| e.sender_email == "sender.primary@postium.test")
+            .map(|e| e.id)
+            .expect("收件箱应含 sender.primary 发出的种子邮件")
+    });
+    // 行选中同款事件：SelectionChanged → 详情装载 + 详情视图重建
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(email_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(email_id));
+                cx.notify();
+            });
+        });
+    });
+    let detail_view = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == email_id).then_some(view)
+        })
+    });
+
+    // 联动处理器（第一驱）：联系人不存在 → 创建分支
+    with_window_mut(cx, |window, app| {
+        detail_view.update(app, |view, cx| {
+            view.add_contact(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    let created = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async {
+                api.get_contact_by_email("sender.primary@postium.test".into())
+                    .await
+            })
+            .ok()
+            .flatten()
+    });
+
+    // 联动处理器（第二驱）：联系人已存在 → 切 Contacts 并按邮箱选中
+    with_window_mut(cx, |window, app| {
+        detail_view.update(app, |view, cx| {
+            view.add_contact(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).nav == NavTarget::Contacts).then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.selected == Some(created.id)).then_some(())
+        })
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → Task 15: 导入导出 UI 入口
+//（store 导入路径：vCard/CSV 文本 → api 导入 → 列表刷新；工具条按钮存在性）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contacts_import_export_entry(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 导航 Contacts → 视图懒建 + store 首次装载
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let before = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.len())
+        })
+    });
+
+    // ── 工具条按钮存在于渲染树（debug_selector 在绘制帧记录 bounds）──
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("contacts-import-btn")
+            .zip(cx.debug_bounds("contacts-export-btn"))
+            .map(|_| ())
+    });
+
+    // ── 导入路径（按钮文件 IO 后的直达 store 方法）：vCard 两有效卡 + 一缺邮箱卡 ──
+    const TWO_CARDS_PLUS_NO_EMAIL: &str = concat!(
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:Alice Import\r\n",
+        "EMAIL;TYPE=INTERNET:alice.import@postium.test\r\n",
+        "END:VCARD\r\n",
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:Bob Import\r\n",
+        "EMAIL;TYPE=INTERNET:bob.import@postium.test\r\n",
+        "END:VCARD\r\n",
+        "BEGIN:VCARD\r\n",
+        "VERSION:3.0\r\n",
+        "FN:NoEmail\r\n",
+        "TEL:13811111111\r\n",
+        "END:VCARD\r\n",
+    );
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.import_contacts_vcard_text(TWO_CARDS_PLUS_NO_EMAIL.to_string(), &api, cx)
+            });
+        });
+    });
+    // store 刷新后列表多出两枚（缺邮箱卡计入跳过，不进列表）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let alice = store.contacts.iter().any(|c| c.email == "alice.import@postium.test");
+            let bob = store.contacts.iter().any(|c| c.email == "bob.import@postium.test");
+            (!store.loading && store.contacts.len() == before + 2 && alice && bob)
+                .then_some(())
+        })
+    });
+    // DB 层：两卡已入库（toast 在无 Root 防护下不 panic，见 notify.rs）
+    let db_emails = wait_for(cx, |_| {
+        crate::runtime::runtime().block_on(async {
+            let a = api
+                .get_contact_by_email("alice.import@postium.test".into())
+                .await
+                .ok()
+                .flatten();
+            let b = api
+                .get_contact_by_email("bob.import@postium.test".into())
+                .await
+                .ok()
+                .flatten();
+            (a.is_some() && b.is_some()).then(|| (a.unwrap().id, b.unwrap().id))
+        })
+    });
+    assert_ne!(db_emails.0, db_emails.1);
+
+    // ── CSV 导入路径（同款 store 方法）：通用方言单行 ──
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        view.update(app, |v, cx| {
+            v.store.update(cx, |store, cx| {
+                store.import_contacts_csv_text(
+                    "name,email\r\nCarol Import,carol.import@postium.test\r\n".to_string(),
+                    &api,
+                    cx,
+                )
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (!store.loading
+                && store
+                    .contacts
+                    .iter()
+                    .any(|c| c.email == "carol.import@postium.test"))
+            .then_some(())
+        })
+    });
+
+    // ── 导出冒烟（按钮接线层直调 api：CoreApi 层等价性已在 T14 测过）──
+    let exported = crate::runtime::runtime().block_on(async {
+        api.export_contacts_vcard(None, None, false).await
+    })
+    .expect("导出 vCard 不应失败");
+    assert!(exported.contains("BEGIN:VCARD"), "导出应为 vCard 文本");
+    assert!(
+        exported.contains("alice.import@postium.test"),
+        "导出应含刚导入的联系人"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
@@ -1031,5 +1687,78 @@ fn settings_sections_navigate(cx: &mut TestAppContext) {
             want
         );
     }
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → CardDAV：e2e 离线短路（同步空报告/发现空列表）+ 配置弹窗开闭
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn dav_offline_short_circuit(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    // e2e 模式（非真连库）：同步入口短路 → Ok 空报告（无网络调用）
+    let report = crate::runtime::runtime()
+        .block_on(async { api.sync_contacts(999).await })
+        .expect("e2e 模式 sync_contacts 应短路成功");
+    assert_eq!(
+        (report.pulled, report.pushed, report.deleted, report.conflicts),
+        (0, 0, 0, 0),
+        "短路报告应为全零: {report:?}"
+    );
+    assert!(report.errors.is_empty());
+
+    // discover 同样短路 → 空列表
+    let books = crate::runtime::runtime()
+        .block_on(async {
+            api.discover_addressbooks(
+                "https://dav.example/".into(),
+                "user".into(),
+                "pass".into(),
+            )
+            .await
+        })
+        .expect("e2e 模式 discover_addressbooks 应短路成功");
+    assert!(books.is_empty(), "短路发现应为空列表");
+}
+
+#[gpui_pre::test]
+fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let api_for_view = api.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        crate::views::contacts::ContactsView::new(api_for_view.clone(), window, cx)
+    });
+
+    // 打开 CardDAV 配置弹窗（焦点落弹窗）
+    with_window_mut(cx, |window, app| {
+        view.update(app, |v, cx| {
+            v.open_dav_modal(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    // 等绑定/账号装载收敛（loading=false）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            view.read(app)
+                .dav
+                .as_ref()
+                .filter(|d| !d.loading)
+                .map(|_| ())
+        })
+    });
+
+    // ESC → 弹窗关闭
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    let open = with_app(cx, |app| view.read(app).dav.is_some());
+    assert!(!open, "ESC 应关闭 CardDAV 配置弹窗");
     cx.run_until_parked();
 }

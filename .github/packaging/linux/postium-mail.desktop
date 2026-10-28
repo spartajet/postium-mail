@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Postium Mail
+Comment=GPUI-based desktop email client
+Comment[zh_CN]=基于 GPUI 的桌面邮件客户端
+Exec=postium-mail
+Icon=postium-mail
+Terminal=false
+Categories=Network;Email;
+StartupWMClass=postium-mail

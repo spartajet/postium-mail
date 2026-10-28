@@ -17,7 +17,9 @@ pub fn setup(window: &gpui_kit::Window, cx: &mut App) {
             let Some(handle) = MAIN_WINDOW.get().copied() else { continue };
             cx.update(|cx| {
                 let _ = handle.update(cx, |_, window, cx| {
-                    window.push_notification(msg.clone(), cx);
+                    if has_notification_layer(window) {
+                        window.push_notification(msg.clone(), cx);
+                    }
                 });
             });
         }
@@ -34,4 +36,10 @@ pub fn toast(msg: impl Into<SharedString>) {
     if let Some(tx) = TX.get() {
         let _ = tx.try_send(msg);
     }
+}
+
+/// 该窗口是否挂了 gpui-base Root（即 gpui_kit::open_window 打开的主窗口）。
+/// e2e headless 直接建壳的窗口没有组件通知层，推送会 panic——跳过。
+fn has_notification_layer(window: &gpui_kit::Window) -> bool {
+    matches!(window.root::<gpui_kit::base::Root>(), Some(Some(_)))
 }

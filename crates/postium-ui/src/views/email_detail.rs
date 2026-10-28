@@ -13,8 +13,10 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
+use postium_core::service::email_service::ContactWrite;
 
 use crate::i18n::{t, t_format};
+use crate::nav::NavTarget;
 use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
 
@@ -248,6 +250,66 @@ impl EmailDetailView {
                 let _ = open::that(&file);
             }
         }
+    }
+
+    /// 操作行「联系人」联动：按发件人邮箱查联系人——已存在则经 MainShell
+    /// 全局注册表切主窗口到联系人页并按邮箱选中（视图未建时由壳渲染期
+    /// 消费待选邮箱）；不存在则一步创建 + toast「已添加」。
+    pub(crate) fn add_contact(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(detail) = self.store.read(cx).detail.clone() else { return };
+        let sender = detail.email.sender_email.trim().to_string();
+        if sender.is_empty() {
+            return;
+        }
+        let sender_name = detail
+            .email
+            .sender_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string);
+        let api = self.api.clone();
+        let sender_link = sender.clone();
+        let rx = spawn_tokio(async move {
+            // 查 → 无则建：一条异步链完成判定，UI 侧只消费结果
+            match api.get_contact_by_email(sender.clone()).await {
+                Ok(Some(_)) => Ok(false),
+                Ok(None) => api
+                    .create_contact(ContactWrite {
+                        email: sender,
+                        extra_emails: None,
+                        name: sender_name,
+                        phones: None,
+                        notes: None,
+                        org: None,
+                    })
+                    .await
+                    .map(|_| true),
+                Err(e) => Err(e),
+            }
+        });
+        cx.spawn(async move |_, cx| {
+            let Ok(Ok(created)) = rx.recv().await else { return };
+            if created {
+                crate::notify::toast(t("contacts.added"));
+            } else {
+                // 已存在：经全局弱注册表切联系人页，待选邮箱由壳渲染期消费
+                cx.update(|cx| {
+                    let Some(shell) = cx
+                        .try_global::<crate::app::MainShell>()
+                        .and_then(|g| g.0.upgrade())
+                    else {
+                        return;
+                    };
+                    shell.update(cx, |shell, cx| {
+                        shell.nav = NavTarget::Contacts;
+                        shell.contacts_pending_email = Some(sender_link.clone());
+                        cx.notify();
+                    });
+                });
+            }
+        })
+        .detach();
     }
 }
 
@@ -488,6 +550,15 @@ impl Render for EmailDetailView {
                                     .xsmall()
                                     .label("浏览器打开")
                                     .on_click(cx.listener(Self::open_in_browser)),
+                            )
+                            .child(separator(cx))
+                            .child(
+                                Button::new("contact-link")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Contact)
+                                    .label(t("contacts.link"))
+                                    .on_click(cx.listener(Self::add_contact)),
                             ),
                     )
                     .child(

@@ -23,7 +23,7 @@ use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
 use crate::domain::sync::folder_sync_full::fetch_emails_body;
 use crate::domain::sync::{
     FolderStat, HISTORY_UID_BATCH_SIZE, InitialSyncRange, SyncProgress, SyncStage,
-    history_exhausted_before_uid, next_history_before_uid,
+    headers_to_contacts, history_exhausted_before_uid, next_history_before_uid,
 };
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
@@ -525,6 +525,8 @@ impl SyncService {
                     &email_headers,
                 )
                 .await? as u64;
+                // Task 7: 落库成功后把发件人 / 收件人 / 抄送并入联系人表（失败不阻断同步）
+                headers_to_contacts(&self.db, &email_headers).await;
             }
             fetch_emails_body(self.db.clone(), account_id, folder, &uids, &mut client).await?;
             updated_emails += uids.len() as u64;

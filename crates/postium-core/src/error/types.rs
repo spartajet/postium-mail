@@ -50,6 +50,9 @@ pub enum MailError {
     #[error("文件系统错误: {0}")]
     FileSystemError(String),
 
+    #[error("CardDAV 同步失败: {0}")]
+    CardDavError(String),
+
     #[error("文件夹不存在: {0}")]
     FolderNotFound(String),
 

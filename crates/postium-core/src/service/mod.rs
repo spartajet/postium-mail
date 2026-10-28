@@ -57,6 +57,28 @@ pub mod mail_draft;
 pub mod mail_operation;
 pub mod mail_send;
 
+/// 联系人服务模块
+///
+/// 职责：
+/// - 联系人的分页查询、按 ID / 邮箱查询、增删改
+/// - 星标切换与联系人合并（N→1）
+/// - 联系人分组管理与成员关系维护
+/// - 存量邮件的联系人回填
+///
+/// 主要类型：
+/// - ContactService: 联系人服务实现（DTO 复用 contact_repo 中的定义）
+pub mod contact_service;
+
+/// CardDAV 双向同步引擎
+///
+/// 职责：
+/// - 单账号拉取（REPORT + multiget）/ 推送（PUT + If-Match）/ 删除（墓碑）
+/// - 412 冲突 last-write-wins 裁决（服务端 REV vs 本地 updated_at）
+///
+/// 主要类型：
+/// - DavSyncReport: 同步结果报告
+pub mod contact_sync;
+
 /// 标签服务模块
 ///
 /// 职责：
@@ -97,6 +119,12 @@ pub use account_service::{AccountDto, AccountService, CreateAccountRequest, Upda
 
 /// 附件相关导出
 pub use attachment_service::{AttachmentDto, AttachmentService, InlineAttachmentDto};
+
+/// 联系人相关导出
+///
+/// - ContactService: 联系人服务实例（DTO 复用 contact_repo / email_service 中的定义）
+pub use contact_service::ContactService;
+pub use contact_sync::DavSyncReport;
 
 /// 标签相关导出
 ///

@@ -36,3 +36,18 @@ tempfile = "3"
 
 [build-dependencies]
 winresource = "0.1"
+
+# cargo-deb 打包元数据（Linux .deb；主二进制自动收录）
+[package.metadata.deb]
+maintainer = "spartajet <guoxiaozhong1990@outlook.com>"
+copyright = "MIT"
+extended-description = "GPUI-based desktop email client (IMAP/SMTP)."
+section = "mail"
+depends = "libgtk-3-0, libx11-6, libxkbcommon0, libxkbcommon-x11-0, libxcb1, libvulkan1, libasound2t64 | libasound2, libwayland-client0, libfontconfig1, libfreetype6"
+# 注意：定义 assets 会替代默认二进制收录，二进制必须显式列出；
+# cargo-deb 在 --target 交叉时会把 target/release/ 自动改写为实际三元组目录
+assets = [
+    ["target/release/postium-mail", "usr/bin/", "755"],
+    ["../../.github/packaging/linux/postium-mail.desktop", "usr/share/applications/", "644"],
+    ["icons/icon.png", "usr/share/icons/hicolor/128x128/apps/postium-mail.png", "644"],
+]

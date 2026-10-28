@@ -404,3 +404,23 @@ fn migrate_email_uid_unique_index(conn: &mut rusqlite::Connection) -> rusqlite::
     )?;
     tx.commit()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::DbConn;
+
+    #[tokio::test]
+    async fn contacts_schema_creates_four_tables() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let tables: Vec<String> = db
+            .call(|conn| {
+                Ok(conn
+                    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('contacts','contact_groups','contact_group_members','dav_bindings')")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(tables.len(), 4, "联系人四表应存在: {tables:?}");
+    }
+}
