@@ -179,7 +179,8 @@ impl AddFlow {
             use_password: false,
             email: input("you@example.com", window, cx),
             display_name: input(&t("account.displayName"), window, cx),
-            password: input("", window, cx),
+            // 密码掩码显示（mask_toggle 眼睛按钮在渲染处开启）
+            password: cx.new(|cx| InputState::new(window, cx).masked(true)),
             imap_host: input("imap.example.com", window, cx),
             imap_port: port("993", window, cx),
             imap_ssl: SslMode::Tls,
@@ -268,7 +269,8 @@ impl SettingsView {
         )]);
         let edit_name = input(cx);
         let edit_display = input(cx);
-        let edit_password = input(cx);
+        // 改密码：掩码显示 + 眼睛切换
+        let edit_password = cx.new(|cx| InputState::new(window, cx).masked(true));
         // 设置窗口同样跟随系统外观（偏好为 system 时）
         let weak = cx.entity().downgrade();
         let appearance_sub = window.observe_window_appearance(move |window, cx| {
@@ -1023,7 +1025,7 @@ impl Render for SettingsView {
                         .border_color(theme.border)
                         .rounded(theme.radius)
                         .child(div().w(px(80.)).text_size(px(12.)).child(t("account.password")))
-                        .child(div().flex_1().child(Input::new(&self.edit_password)))
+                        .child(div().flex_1().child(Input::new(&self.edit_password).mask_toggle()))
                         .child(
                             Button::new("save-pw")
                                 .primary()
@@ -1376,13 +1378,22 @@ fn render_step_select(add: &AddFlow, cx: &mut Context<SettingsView>) -> impl Int
 }
 
 /// 表单字段块（label 上置 + 输入行）。
+///
+/// `mask_toggle` = true 时输入框右侧带显示/隐藏密码的眼睛按钮。
 fn field_block(
     key: &str,
     label: SharedString,
     input: &Entity<InputState>,
     trailing: Option<impl IntoElement>,
+    mask_toggle: bool,
 ) -> impl IntoElement {
-    let mut row = h_flex().flex_1().gap_2().items_center().child(Input::new(input));
+    let mut row = h_flex().flex_1().gap_2().items_center();
+    let input_el = if mask_toggle {
+        Input::new(input).mask_toggle()
+    } else {
+        Input::new(input)
+    };
+    row = row.child(input_el);
     if let Some(extra) = trailing {
         row = row.child(extra);
     }
@@ -1460,6 +1471,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
                 .label(t("account.detected"))
                 .on_click(cx.listener(SettingsView::detect_provider)),
         ),
+        false,
     );
     let detect_hint = add.detected.clone().map(|d| {
         div()
@@ -1472,7 +1484,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
             .child(d)
     });
 
-    let display_block = field_block("display", t("account.displayName"), &add.display_name, None::<Button>);
+    let display_block = field_block("display", t("account.displayName"), &add.display_name, None::<Button>, false);
 
     // 错误提示：独占整行（在 footer 上方），自动换行不溢出模态框。
     // 不能内嵌进 footer 的 h_flex——与按钮争宽时长消息会单向溢出。
@@ -1595,7 +1607,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
         // 切换后显示密码表单
         if add.use_password {
             body = body
-                .child(field_block("password", t("account.password"), &add.password, None::<Button>))
+                .child(field_block("password", t("account.password"), &add.password, None::<Button>, true))
                 .when_some(error_block, |this, e| this.child(e))
                 .child(footer);
         } else {
@@ -1608,7 +1620,7 @@ fn render_step_credentials(view: &mut SettingsView, cx: &mut Context<SettingsVie
             .child(email_block)
             .when_some(detect_hint, |this, h| this.child(h))
             .child(display_block)
-            .child(field_block("password", t("account.password"), &add.password, None::<Button>));
+            .child(field_block("password", t("account.password"), &add.password, None::<Button>, true));
 
         if manual {
             body = body.child(manual_server_block(add, cx));
