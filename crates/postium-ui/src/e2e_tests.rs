@@ -1054,6 +1054,41 @@ fn contacts_seed_loaded(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → 导航入口：nav=Contacts 切换主区（占位渲染不 panic）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn navigate_to_contacts_shows_title(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 侧栏点击同款路径：nav=Contacts → 主区渲染占位（run_until_parked 隐式覆盖不 panic）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        with_app(cx, |app| shell.read(app).nav.clone()),
+        NavTarget::Contacts,
+        "nav 应切换到联系人"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]

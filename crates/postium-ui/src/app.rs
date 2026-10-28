@@ -407,6 +407,7 @@ impl Render for AppShell {
             NavTarget::Label(id) => format!("标签 #{id}").into(),
             NavTarget::Calendar => i18n::t("sidebar.calendar"),
             NavTarget::Workflow => i18n::t("sidebar.workflow"),
+            NavTarget::Contacts => i18n::t("sidebar.contacts"),
             NavTarget::Settings => i18n::t("settings.title"),
         };
 
@@ -426,6 +427,7 @@ impl Render for AppShell {
                 }
                 self.workflow_view.clone().unwrap().into_any_element()
             }
+            NavTarget::Contacts => placeholder_pane(&i18n::t("sidebar.contacts"), cx).into_any_element(),
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
             _ => h_flex()
                 .flex_1()
