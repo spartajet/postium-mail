@@ -7,6 +7,7 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
+    resizable::{h_resizable, resizable_panel},
     v_flex,
 };
 use gpui_kit::*;
@@ -418,36 +419,46 @@ impl Render for AppShell {
                 self.workflow_view.clone().unwrap().into_any_element()
             }
             NavTarget::Settings => placeholder_pane(&i18n::t("settings.title"), cx).into_any_element(),
-            _ => h_flex()
-                .flex_1()
-                .size_full()
-                .overflow_hidden()
-                .child(match &self.email_list {
-                    Some(list) => div().flex_1().size_full().child(list.clone()).into_any_element(),
-                    None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
-                })
+            _ => h_resizable("mail-columns")
                 .child(
-                    match self.detail_view.clone() {
-                        Some(view) => view.into_any_element(),
-                        None => {
-                            // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
-                            let view = cx.new(|_| EmailDetailView {
-                                store: self.detail.clone(),
-                                api: self.api.clone(),
-                                emails: self.emails.downgrade(),
-                                recipients_expanded: false,
-                            });
-                            self.detail_view = Some(view.clone());
-                            view.into_any_element()
-                        }
-                    },
+                    resizable_panel()
+                        .size(px(420.))
+                        .size_range(px(280.)..px(720.))
+                        .child(match &self.email_list {
+                            Some(list) => list.clone().into_any_element(),
+                            None => placeholder_pane(&i18n::t("email.loading"), cx).into_any_element(),
+                        }),
+                )
+                .child(
+                    resizable_panel().child(
+                        match self.detail_view.clone() {
+                            Some(view) => view.into_any_element(),
+                            None => {
+                                // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
+                                let view = cx.new(|_| EmailDetailView {
+                                    store: self.detail.clone(),
+                                    api: self.api.clone(),
+                                    emails: self.emails.downgrade(),
+                                    recipients_expanded: false,
+                                });
+                                self.detail_view = Some(view.clone());
+                                view.into_any_element()
+                            }
+                        },
+                    ),
                 )
                 .into_any_element(),
         };
 
-        h_flex()
-            .size_full()
-            .child(self.sidebar.clone())
+        // 根布局：侧栏（fixed 面板，拖把手可调宽）+ 内容列
+        h_resizable("root-columns")
+            .child(
+                resizable_panel()
+                    .size(px(220.))
+                    .size_range(px(170.)..px(420.))
+                    .fixed()
+                    .child(self.sidebar.clone()),
+            )
             .child(
                 v_flex()
                     .relative()
@@ -511,7 +522,8 @@ impl Render for AppShell {
                             self.status_bar = Some(bar.clone());
                             bar.into_any_element()
                         }
-                    }),
+                    })
+                    .into_any_element(),
             )
     }
 }

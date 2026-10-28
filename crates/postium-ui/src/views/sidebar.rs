@@ -46,7 +46,7 @@ impl Sidebar {
     ) -> impl IntoElement {
         let selected = self.current == target;
         let row_id = id.to_string();
-        let mut row = div()
+        let mut row = h_flex()
             .h(px(30.))
             .px_2()
             .rounded(cx.theme().radius)
@@ -66,12 +66,15 @@ impl Sidebar {
             })
             .child(
                 h_flex()
-                    .size_full()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .gap_2()
+                    .overflow_hidden()
                     .child(
                         gpui_kit::component::Icon::new(icon)
                             .size_4()
+                            .flex_none()
                             .map(|i| {
                                 if selected {
                                     i.text_color(cx.theme().accent_foreground)
@@ -83,6 +86,7 @@ impl Sidebar {
                     .child(
                         div()
                             .text_size(px(13.))
+                            .min_w_0()
                             .when(selected, |d| {
                                 d.text_color(cx.theme().accent_foreground)
                             })
@@ -95,7 +99,7 @@ impl Sidebar {
         if let Some(n) = unread.filter(|n| *n > 0) {
             row = row.child(
                 div()
-                    .ml_auto()
+                    .flex_none()
                     .px(px(6.))
                     .py(px(1.))
                     .rounded(px(8.))
@@ -226,23 +230,12 @@ impl Render for Sidebar {
             }
         }
 
-        // 侧栏骨架：标题 + 写信按钮 + 滚动导航 + 固定底部设置
+        // 侧栏骨架：写信按钮 + 滚动导航 + 固定底部设置（应用名在窗口标题栏，不在侧栏重复）
         v_flex()
-            .w(px(220.))
-            .flex_none()
+            .w_full()
             .h_full()
-            .border_r_1()
-            .border_color(theme.border)
             .p_2()
             .gap_1()
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(t("app.name")),
-            )
             .child({
                 let on_compose = cx.listener(|_: &mut Self, _, _, cx| {
                     cx.emit(SidebarEvent::Compose);
