@@ -204,6 +204,13 @@ impl ContactsStore {
         self.finish_import(rx, api_late, cx);
     }
 
+    /// 外部写操作（CardDAV 同步等视图侧发起的写）后的统一刷新：
+    /// 写代数推进使在途 load 的陈旧快照失效 + 补跑装载收敛。
+    pub fn refresh_after_write(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.write_gen += 1;
+        self.load(api, cx);
+    }
+
     /// 导入完成链（vCard/CSV 共用）：成功推进写代数 + 补跑装载收敛 +
     /// toast「成功 N 跳过 M」；失败 toast 错误（列表不动）。
     fn finish_import(

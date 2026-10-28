@@ -13,11 +13,14 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
+    Disableable as _,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
+use postium_core::infrastructure::storage::repository::contact_repo::DavBindingDto;
+use postium_core::service::DavSyncReport;
 use postium_core::service::email_service::{ContactDto, ContactWrite};
 
 use crate::i18n::{t, t_format};
@@ -29,6 +32,60 @@ use crate::stores::contacts::{init_contacts_store, ContactsStore};
 pub(crate) enum EditTarget {
     New,
     Existing(i32),
+}
+
+/// CardDAV 绑定行（附账号邮箱展示，列表用）。
+#[derive(Clone, Debug)]
+pub(crate) struct DavBindingRow {
+    pub account_id: i32,
+    pub email: String,
+    pub url: String,
+    pub addressbook_href: Option<String>,
+    pub last_sync_at: Option<i64>,
+}
+
+/// CardDAV 配置弹窗状态：绑定列表（上半）+ 新建表单（下半）。
+pub(crate) struct DavFlow {
+    /// 已有绑定
+    pub bindings: Vec<DavBindingRow>,
+    /// 账号下拉数据 (id, email)
+    pub accounts: Vec<(i32, String)>,
+    /// 表单所选本地账号
+    pub account_id: Option<i32>,
+    pub url: Entity<InputState>,
+    pub username: Entity<InputState>,
+    pub password: Entity<InputState>,
+    /// 「发现通讯录」结果 (href, name)
+    pub addressbooks: Vec<(String, String)>,
+    /// 已选中的通讯录 href
+    pub chosen_ab: Option<String>,
+    pub discovering: bool,
+    pub saving: bool,
+    pub loading: bool,
+    /// 表单/请求错误行
+    pub error: SharedString,
+}
+
+impl DavFlow {
+    fn new(window: &mut Window, cx: &mut Context<ContactsView>) -> Self {
+        let input = |ph: &str, window: &mut Window, cx: &mut Context<ContactsView>| {
+            cx.new(|cx| InputState::new(window, cx).placeholder(ph.to_string()))
+        };
+        Self {
+            bindings: Vec::new(),
+            accounts: Vec::new(),
+            account_id: None,
+            url: input(&t("contacts.davUrl"), window, cx),
+            username: input(&t("contacts.davUsername"), window, cx),
+            password: input(&t("contacts.davPassword"), window, cx),
+            addressbooks: Vec::new(),
+            chosen_ab: None,
+            discovering: false,
+            saving: false,
+            loading: true,
+            error: " ".into(),
+        }
+    }
 }
 
 pub struct ContactsView {
@@ -56,6 +113,12 @@ pub struct ContactsView {
     edit_groups: Vec<i32>,
     /// 状态/错误行（编辑卡底部）
     status: SharedString,
+    /// CardDAV 配置弹窗（Some = 打开）
+    pub(crate) dav: Option<DavFlow>,
+    /// CardDAV 弹窗焦点句柄（ESC 关闭 / 焦点圈定）
+    dav_modal_focus: gpui_kit::FocusHandle,
+    /// 「同步」进行中（防重入）
+    syncing: bool,
 }
 
 impl ContactsView {
@@ -108,6 +171,14 @@ impl ContactsView {
         })
         .detach();
 
+        // ESC 关闭 CardDAV 配置弹窗（对齐设置页向导模式）
+        let dav_modal_focus = cx.focus_handle();
+        cx.bind_keys([gpui_kit::KeyBinding::new(
+            "escape",
+            gpui_kit::base::actions::Cancel,
+            Some("CardDavModal"),
+        )]);
+
         Self {
             api,
             store,
@@ -125,6 +196,9 @@ impl ContactsView {
             edit_notes,
             edit_groups: Vec::new(),
             status: " ".into(),
+            dav: None,
+            dav_modal_focus,
+            syncing: false,
         }
     }
 
@@ -510,14 +584,270 @@ impl ContactsView {
         })
         .detach();
     }
+    // ── CardDAV 配置与同步 ──────────────────────────────────────────────
+
+    /// 工具条「同步」：顺序同步全部绑定账号，聚合报告 toast（防重入）。
+    fn sync_contacts_now(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.syncing {
+            return;
+        }
+        self.syncing = true;
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move {
+            let mut report = DavSyncReport::default();
+            let mut errors: Vec<String> = Vec::new();
+            match api.list_dav_bindings().await {
+                Ok(bindings) => {
+                    for b in bindings {
+                        match api.sync_contacts(b.account_id).await {
+                            Ok(r) => {
+                                report.pulled += r.pulled;
+                                report.pushed += r.pushed;
+                                report.deleted += r.deleted;
+                                report.conflicts += r.conflicts;
+                                errors.extend(r.errors);
+                            }
+                            Err(e) => errors.push(e.to_string()),
+                        }
+                    }
+                }
+                Err(e) => errors.push(e.to_string()),
+            }
+            (report, errors)
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok((report, errors)) = rx.recv().await else { return };
+            this.update(cx, |view, cx| {
+                view.syncing = false;
+                if errors.is_empty() {
+                    let pulled = report.pulled.to_string();
+                    let pushed = report.pushed.to_string();
+                    let deleted = report.deleted.to_string();
+                    let conflicts = report.conflicts.to_string();
+                    crate::notify::toast(t_format(
+                        "contacts.syncDone",
+                        &[
+                            ("pulled", &pulled),
+                            ("pushed", &pushed),
+                            ("deleted", &deleted),
+                            ("conflicts", &conflicts),
+                        ],
+                    ));
+                } else {
+                    let joined = errors.join("；");
+                    crate::notify::toast(t_format("contacts.syncFailed", &[("error", &joined)]));
+                }
+                // 同步可能改动联系人：统一刷新收敛
+                let api = view.api.clone();
+                view.store.update(cx, |store, cx| store.refresh_after_write(&api, cx));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// 打开 CardDAV 配置弹窗并装载绑定 + 账号数据。
+    pub(crate) fn open_dav_modal(
+        &mut self,
+        _: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dav = Some(DavFlow::new(window, cx));
+        let focus = self.dav_modal_focus.clone();
+        window.focus(&focus, cx);
+        self.dav_reload_data(cx);
+        cx.notify();
+    }
+
+    /// 关闭 CardDAV 配置弹窗（X / 背景点击 / ESC）。
+    pub(crate) fn close_dav_modal(
+        &mut self,
+        _: &ClickEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dav = None;
+        cx.notify();
+    }
+
+    /// 装载绑定列表（附账号邮箱展示）+ 账号下拉数据。
+    fn dav_reload_data(&mut self, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move {
+            let bindings = api.list_dav_bindings().await;
+            let accounts = api.list_accounts().await;
+            (bindings, accounts)
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok((bindings, accounts)) = rx.recv().await else { return };
+            this.update(cx, |view, cx| {
+                let Some(dav) = view.dav.as_mut() else { return };
+                let account_list = accounts.unwrap_or_default();
+                let email_of: std::collections::HashMap<i32, String> = account_list
+                    .iter()
+                    .map(|a| (a.id, a.email.clone()))
+                    .collect();
+                dav.accounts = account_list.into_iter().map(|a| (a.id, a.email)).collect();
+                dav.bindings = bindings
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|b: DavBindingDto| DavBindingRow {
+                        account_id: b.account_id,
+                        email: email_of
+                            .get(&b.account_id)
+                            .cloned()
+                            .unwrap_or_else(|| b.account_id.to_string()),
+                        url: b.url,
+                        addressbook_href: b.addressbook_href,
+                        last_sync_at: b.last_sync_at,
+                    })
+                    .collect();
+                dav.loading = false;
+                if dav.account_id.is_none() {
+                    dav.account_id = dav.accounts.first().map(|(id, _)| *id);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 「发现通讯录」：读表单 → 临时 client 直连发现链（e2e 离线短路）。
+    fn dav_discover(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(dav) = self.dav.as_ref() else { return };
+        if dav.discovering {
+            return;
+        }
+        let url = Self::value(&dav.url, cx).trim().to_string();
+        let username = Self::value(&dav.username, cx).trim().to_string();
+        let password = Self::value(&dav.password, cx);
+        if url.is_empty() || username.is_empty() || password.is_empty() {
+            return;
+        }
+        let api = self.api.clone();
+        if let Some(dav) = self.dav.as_mut() {
+            dav.discovering = true;
+            dav.addressbooks.clear();
+            dav.chosen_ab = None;
+            dav.error = " ".into();
+        }
+        let rx = spawn_tokio(async move { api.discover_addressbooks(url, username, password).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = rx.recv().await else { return };
+            this.update(cx, |view, cx| {
+                let Some(dav) = view.dav.as_mut() else { return };
+                dav.discovering = false;
+                match result {
+                    Ok(list) => dav.addressbooks = list,
+                    Err(e) => {
+                        dav.error =
+                            t_format("contacts.davDiscoverFailed", &[("error", &format!("{e}"))]);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// 表单选择本地账号。
+    pub(crate) fn dav_pick_account(&mut self, id: i32, cx: &mut Context<Self>) {
+        if let Some(dav) = self.dav.as_mut() {
+            dav.account_id = Some(id);
+        }
+        cx.notify();
+    }
+
+    /// 选择发现到的通讯录。
+    pub(crate) fn dav_pick_addressbook(&mut self, href: String, cx: &mut Context<Self>) {
+        if let Some(dav) = self.dav.as_mut() {
+            dav.chosen_ab = Some(href);
+        }
+        cx.notify();
+    }
+
+    /// 保存绑定：密码经 AuthManager 托管 + binding 落库 → 刷新列表并清表单。
+    fn dav_save(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(dav) = self.dav.as_ref() else { return };
+        let Some(account_id) = dav.account_id else { return };
+        let Some(ab) = dav.chosen_ab.clone() else { return };
+        let url = Self::value(&dav.url, cx).trim().to_string();
+        let username = Self::value(&dav.username, cx).trim().to_string();
+        let password = Self::value(&dav.password, cx);
+        if url.is_empty() || username.is_empty() || password.is_empty() || dav.saving {
+            return;
+        }
+        if let Some(dav) = self.dav.as_mut() {
+            dav.saving = true;
+            dav.error = " ".into();
+        }
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move {
+            api.save_dav_binding(account_id, url, username, password, Some(ab))
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = rx.recv().await else { return };
+            this.update(cx, |view, cx| {
+                match result {
+                    Ok(()) => {
+                        crate::notify::toast(t("contacts.davSaved"));
+                        // 表单保留 URL/用户名便于连续添加；仅清发现结果
+                        if let Some(dav) = view.dav.as_mut() {
+                            dav.saving = false;
+                            dav.addressbooks.clear();
+                            dav.chosen_ab = None;
+                        }
+                        view.dav_reload_data(cx);
+                    }
+                    Err(e) => {
+                        if let Some(dav) = view.dav.as_mut() {
+                            dav.saving = false;
+                            dav.error = t_format(
+                                "contacts.davSaveFailed",
+                                &[("error", &format!("{e}"))],
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// 删除绑定（密码一并清除）。
+    pub(crate) fn dav_delete_binding(&mut self, account_id: i32, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move { api.delete_dav_binding(account_id).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(_) = rx.recv().await else { return };
+            this.update(cx, |view, cx| {
+                view.dav_reload_data(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 渲染
 // ─────────────────────────────────────────────────────────────────────────────
 
+
 impl Render for ContactsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let (contacts, groups, selected_id, active_group, starred_only, loading, total) = {
             let s = self.store.read(cx);
@@ -595,6 +925,33 @@ impl Render for ContactsView {
                             .icon(IconName::FileDown)
                             .label(t("contacts.export"))
                             .on_click(cx.listener(Self::export_contacts)),
+                    ),
+            )
+            // CardDAV 同步：顺序同步全部绑定账号（进行中 loading 态防重入）
+            .child(
+                div()
+                    .debug_selector(|| "contacts-sync-btn".to_string())
+                    .child(
+                        Button::new("contact-sync")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::RefreshCw)
+                            .label(t("contacts.sync"))
+                            .loading(self.syncing)
+                            .on_click(cx.listener(Self::sync_contacts_now)),
+                    ),
+            )
+            // CardDAV 账号配置弹窗入口
+            .child(
+                div()
+                    .debug_selector(|| "contacts-dav-btn".to_string())
+                    .child(
+                        Button::new("contact-dav")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Globe)
+                            .label(t("contacts.davTitle"))
+                            .on_click(cx.listener(Self::open_dav_modal)),
                     ),
             )
             .child(
@@ -812,6 +1169,7 @@ impl Render for ContactsView {
 
         v_flex()
             .size_full()
+            .relative()
             .p_2()
             .child(toolbar)
             .child(
@@ -823,6 +1181,9 @@ impl Render for ContactsView {
                     .child(list_col)
                     .child(detail_col),
             )
+            .when(self.dav.is_some(), |this| {
+                this.child(render_dav_modal(self, window, cx))
+            })
     }
 }
 
@@ -1300,6 +1661,294 @@ fn sniff_is_vcard(text: &str) -> bool {
     const PREFIX: &[u8] = b"BEGIN:VCARD";
     let head = text.trim_start_matches('\u{feff}').trim_start();
     head.len() >= PREFIX.len() && head.as_bytes()[..PREFIX.len()].eq_ignore_ascii_case(PREFIX)
+}
+
+// ── CardDAV 配置弹窗（复用设置页向导的 backdrop/ESC/焦点圈定模式）──────────
+
+fn render_dav_modal(
+    view: &mut ContactsView,
+    _window: &mut Window,
+    cx: &mut Context<ContactsView>,
+) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let dav = view.dav.as_ref().expect("render_dav_modal 无弹窗状态");
+
+    // 上半：绑定列表
+    let mut binding_rows = v_flex().gap_1();
+    if dav.loading {
+        binding_rows = binding_rows.child(
+            h_flex()
+                .items_center()
+                .gap_2()
+                .py_2()
+                .child(
+                    gpui_kit::component::Icon::new(IconName::LoaderCircle)
+                        .size_4()
+                        .text_color(theme.muted_foreground),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.muted_foreground)
+                        .child(t("email.loading")),
+                ),
+        );
+    } else if dav.bindings.is_empty() {
+        binding_rows = binding_rows.child(
+            div()
+                .py_2()
+                .text_size(px(12.))
+                .text_color(theme.muted_foreground)
+                .child(t("contacts.davNone")),
+        );
+    } else {
+        for b in &dav.bindings {
+            let last_sync = match b.last_sync_at {
+                None => t("contacts.davNever").to_string(),
+                Some(ts) => chrono::DateTime::from_timestamp(ts, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| ts.to_string()),
+            };
+            let last_sync_line = t_format("contacts.davLastSync", &[("time", &last_sync)]);
+            let mut subtitle = b.url.clone();
+            if let Some(href) = &b.addressbook_href {
+                subtitle.push_str(&format!(" · {href}"));
+            }
+            subtitle.push_str(&format!(" · {last_sync_line}"));
+            let account_id = b.account_id;
+            binding_rows = binding_rows.child(
+                h_flex()
+                    .id(ElementId::Name(format!("dav-binding-{account_id}").into()))
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(6.))
+                    .px_2()
+                    .py_1()
+                    .bg(theme.muted)
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .truncate()
+                                    .child(b.email.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(theme.muted_foreground)
+                                    .truncate()
+                                    .child(subtitle),
+                            ),
+                    )
+                    .child(
+                        Button::new(ElementId::Name(format!("dav-del-{account_id}").into()))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Trash)
+                            .on_click(cx.listener(move |v: &mut ContactsView, _, _, cx| {
+                                v.dav_delete_binding(account_id, cx);
+                            })),
+                    ),
+            );
+        }
+    }
+
+    // 下半：新建表单（账号选择 + 地址/凭证 + 发现 + 通讯录单选 + 保存）
+    let account_rows = dav.accounts.iter().map(|(id, email)| {
+        let id = *id;
+        let chosen = dav.account_id == Some(id);
+        h_flex()
+            .id(ElementId::Name(format!("dav-account-{id}").into()))
+            .items_center()
+            .gap_2()
+            .rounded(px(6.))
+            .px_2()
+            .py_1()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.muted))
+            .when(chosen, |d| d.bg(theme.accent.opacity(0.12)))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |v: &mut ContactsView, _, _, cx| {
+                v.dav_pick_account(id, cx);
+            }))
+            .child(
+                gpui_kit::component::Icon::new(if chosen { IconName::CircleCheck } else { IconName::UserRound })
+                    .size_3p5()
+                    .text_color(if chosen { theme.accent } else { theme.muted_foreground }),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(if chosen { theme.accent } else { theme.foreground })
+                    .truncate()
+                    .child(email.clone()),
+            )
+    });
+
+    let ab_rows = dav.addressbooks.iter().map(|(href, name)| {
+        let href = href.clone();
+        let chosen = dav.chosen_ab.as_deref() == Some(href.as_str());
+        let label = if name.trim().is_empty() { href.clone() } else { format!("{name} ({href})") };
+        h_flex()
+            .id(ElementId::Name(format!("dav-ab-{}", href.replace('/', "_")).into()))
+            .items_center()
+            .gap_2()
+            .rounded(px(6.))
+            .px_2()
+            .py_1()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.muted))
+            .when(chosen, |d| d.bg(theme.accent.opacity(0.12)))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |v: &mut ContactsView, _, _, cx| {
+                v.dav_pick_addressbook(href.clone(), cx);
+            }))
+            .child(
+                gpui_kit::component::Icon::new(if chosen { IconName::CircleCheck } else { IconName::Folder })
+                    .size_3p5()
+                    .text_color(if chosen { theme.accent } else { theme.muted_foreground }),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(if chosen { theme.accent } else { theme.foreground })
+                    .truncate()
+                    .child(label),
+            )
+    });
+
+    let can_save = dav.account_id.is_some()
+        && dav.chosen_ab.is_some()
+        && !dav.url.read(cx).value().trim().is_empty()
+        && !dav.username.read(cx).value().trim().is_empty()
+        && !dav.password.read(cx).value().is_empty();
+
+    let header = h_flex()
+        .items_center()
+        .px_5()
+        .py_3()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(15.))
+                .font_weight(FontWeight::BOLD)
+                .child(t("contacts.davTitle")),
+        )
+        .child(
+            Button::new("dav-close")
+                .ghost()
+                .icon(IconName::X)
+                .on_click(cx.listener(ContactsView::close_dav_modal)),
+        );
+
+    let card = v_flex()
+        .id("dav-modal")
+        .w(px(520.))
+        .max_h(px(560.))
+        .overflow_y_scroll()
+        .rounded(px(12.))
+        .bg(theme.background)
+        .border_1()
+        .border_color(theme.border)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation();
+        })
+        .child(header)
+        .child(v_flex().px_5().py_3().gap_2().child(binding_rows))
+        .child(div().border_t_1().border_color(theme.border))
+        .child(
+            v_flex()
+                .px_5()
+                .py_3()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.muted_foreground)
+                        .child(t("contacts.davAccount")),
+                )
+                .children(account_rows)
+                .child(Input::new(&dav.url))
+                .child(Input::new(&dav.username))
+                .child(Input::new(&dav.password))
+                .child(
+                    Button::new("dav-discover")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Search)
+                        .label(if dav.discovering {
+                            t("contacts.davDiscovering")
+                        } else {
+                            t("contacts.davDiscover")
+                        })
+                        .loading(dav.discovering)
+                        .on_click(cx.listener(ContactsView::dav_discover)),
+                )
+                .when(!dav.addressbooks.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.muted_foreground)
+                            .child(t("contacts.davChoose")),
+                    )
+                    .children(ab_rows)
+                })
+                .when(!dav.error.trim().is_empty(), |this| {
+                    this.child(
+                        div()
+                            .text_size(px(11.5))
+                            .text_color(gpui_kit::rgb(0xf43f5e))
+                            .line_clamp(3)
+                            .child(dav.error.clone()),
+                    )
+                })
+                .child(
+                    Button::new("dav-save")
+                        .primary()
+                        .xsmall()
+                        .icon(IconName::Check)
+                        .label(t("common.confirm"))
+                        .loading(dav.saving)
+                        .disabled(!can_save)
+                        .on_click(cx.listener(ContactsView::dav_save)),
+                ),
+        );
+
+    let modal_focus = view.dav_modal_focus.clone();
+    gpui_kit::base::FocusTrapElement::focus_trap(
+        div()
+            .id("dav-backdrop")
+            .absolute()
+            .size_full()
+            .top_0()
+            .left_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui_kit::black().opacity(0.5))
+            .track_focus(&modal_focus)
+            .key_context("CardDavModal")
+            .on_action(
+                cx.listener(|v: &mut ContactsView, _: &gpui_kit::base::actions::Cancel, w, cx| {
+                    if v.dav.is_some() {
+                        v.close_dav_modal(&gpui_kit::ClickEvent::default(), w, cx);
+                    }
+                }),
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .child(card),
+        "dav-modal-trap",
+        &modal_focus,
+    )
 }
 
 #[cfg(test)]

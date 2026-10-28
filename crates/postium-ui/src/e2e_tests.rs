@@ -1685,3 +1685,76 @@ fn settings_sections_navigate(cx: &mut TestAppContext) {
     }
     cx.run_until_parked();
 }
+
+// ---------------------------------------------------------------------------
+// contacts.e2e → CardDAV：e2e 离线短路（同步空报告/发现空列表）+ 配置弹窗开闭
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn dav_offline_short_circuit(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    // e2e 模式（非真连库）：同步入口短路 → Ok 空报告（无网络调用）
+    let report = crate::runtime::runtime()
+        .block_on(async { api.sync_contacts(999).await })
+        .expect("e2e 模式 sync_contacts 应短路成功");
+    assert_eq!(
+        (report.pulled, report.pushed, report.deleted, report.conflicts),
+        (0, 0, 0, 0),
+        "短路报告应为全零: {report:?}"
+    );
+    assert!(report.errors.is_empty());
+
+    // discover 同样短路 → 空列表
+    let books = crate::runtime::runtime()
+        .block_on(async {
+            api.discover_addressbooks(
+                "https://dav.example/".into(),
+                "user".into(),
+                "pass".into(),
+            )
+            .await
+        })
+        .expect("e2e 模式 discover_addressbooks 应短路成功");
+    assert!(books.is_empty(), "短路发现应为空列表");
+}
+
+#[gpui_pre::test]
+fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, _sync_rx) = boot(dir.path());
+
+    let api_for_view = api.clone();
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        crate::views::contacts::ContactsView::new(api_for_view.clone(), window, cx)
+    });
+
+    // 打开 CardDAV 配置弹窗（焦点落弹窗）
+    with_window_mut(cx, |window, app| {
+        view.update(app, |v, cx| {
+            v.open_dav_modal(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    // 等绑定/账号装载收敛（loading=false）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            view.read(app)
+                .dav
+                .as_ref()
+                .filter(|d| !d.loading)
+                .map(|_| ())
+        })
+    });
+
+    // ESC → 弹窗关闭
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    let open = with_app(cx, |app| view.read(app).dav.is_some());
+    assert!(!open, "ESC 应关闭 CardDAV 配置弹窗");
+    cx.run_until_parked();
+}
