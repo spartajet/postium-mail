@@ -122,6 +122,8 @@ struct PendingSession {
     pkce_verifier: Option<PkceCodeVerifier>,
     /// 本地回调监听端口
     port: u16,
+    /// 授权时使用的重定向 URI（code 换 token 必须原样携带）
+    redirect_uri: String,
     /// 提供商标识（如 "gmail"、"outlook"）
     provider_id: String,
     /// 用户邮箱
@@ -241,24 +243,37 @@ impl OAuth2Manager {
         })?;
         ensure_credentials(provider_id, &config)?;
 
-        // 回调使用固定端口与路径——服务商开发者后台注册的重定向 URI 必须与此
-        // 完全一致（见 .env.example 的注册指引：http://localhost:36279/callback）
-        const CALLBACK_PORT: u16 = 36279;
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
+        // 重定向 URI：优先用配置（MICROSOFT_REDIRECT_URI 等，须与服务商
+        // 后台注册值完全一致），默认 http://localhost:36279/callback。
+        // 应用解析其端口/路径并在此监听回调。
+        let redirect_str = config
+            .redirect_uri
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "http://localhost:36279/callback".to_string());
+        let redirect_parsed = url::Url::parse(&redirect_str)
+            .map_err(|e| MailError::OAuth2Error(format!("无效 redirect_uri: {e}")))?;
+        let port = redirect_parsed
+            .port()
+            .ok_or_else(|| {
+                MailError::OAuth2Error(format!(
+                    "redirect_uri 缺少端口（应用需要在本机端口监听回调）: {redirect_str}"
+                ))
+            })?;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
             .map_err(|e| {
                 MailError::OAuth2Error(format!(
-                    "OAuth2 回调端口 {CALLBACK_PORT} 被占用: {e}（释放该端口后重试）"
+                    "OAuth2 回调端口 {port} 被占用: {e}（释放该端口后重试）"
                 ))
             })?;
-        let port = CALLBACK_PORT;
-        tracing::info!("使用本地端口 {port} 作为 OAuth2 回调端口");
+        tracing::info!("使用本地端口 {port} 作为 OAuth2 回调端口（redirect: {redirect_str}）");
 
         let auth_url = AuthUrl::new(config.auth_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 auth_url: {e}")))?;
         let token_url = TokenUrl::new(config.token_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 token_url: {e}")))?;
-        let redirect_url = RedirectUrl::new(format!("http://localhost:{port}/callback"))
+        let redirect_url = RedirectUrl::new(redirect_str.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 redirect_url: {e}")))?;
 
         let client_id = ClientId::new(config.client_id.clone());
@@ -298,6 +313,7 @@ impl OAuth2Manager {
                 PendingSession {
                     pkce_verifier: Some(pkce_verifier),
                     port,
+                    redirect_uri: redirect_str.clone(),
                     provider_id: provider_id.to_string(),
                     email: email.to_string(),
                     display_name: display_name.map(|s| s.to_string()),
@@ -624,11 +640,8 @@ async fn do_token_exchange(
         AuthUrl::new(config.auth_url.clone()).map_err(|e| format!("无效 auth_url: {e}"))?;
     let token_url =
         TokenUrl::new(config.token_url.clone()).map_err(|e| format!("无效 token_url: {e}"))?;
-    let redirect_url = RedirectUrl::new(format!(
-        "http://localhost:{}/callback",
-        session.port
-    ))
-    .map_err(|e| format!("无效 redirect_url: {e}"))?;
+    let redirect_url = RedirectUrl::new(session.redirect_uri.clone())
+        .map_err(|e| format!("无效 redirect_url: {e}"))?;
 
     let client_id = ClientId::new(config.client_id.clone());
     let mut client_builder = BasicClient::new(client_id);

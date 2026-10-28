@@ -78,6 +78,9 @@ impl MailProvider for GmailProvider {
             ],
             pkce_enabled: true,
             tenant_id: None,
+            redirect_uri: option_env!("GOOGLE_REDIRECT_URI")
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty()),
         })
     }
 
