@@ -1,0 +1,13 @@
+[package]
+name = "postium-html"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Postium Mail 邮件 HTML 渲染预处理：MSO 剥离 / 宽松净化 / 样式内联 / 中间表示树构建"
+
+[dependencies]
+ammonia = "4.2.4"
+serde = { workspace = true, features = ["rc"] }
+thiserror.workspace = true
+
+[dev-dependencies]

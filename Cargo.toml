@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/postium-core", "crates/postium-editor", "crates/postium-ui"]
+members = ["crates/postium-core", "crates/postium-editor", "crates/postium-ui", "crates/postium-html"]
 exclude = ["src-tauri", "e2e"]
 
 [workspace.package]
