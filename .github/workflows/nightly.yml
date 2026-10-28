@@ -69,27 +69,27 @@ jobs:
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: postium-mail-nightly-windows-x86_64.zip
+            pattern: postium-mail_*_x64_setup.exe
           - name: windows-arm64
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
-            artifact: postium-mail-nightly-windows-arm64.zip
+            pattern: postium-mail_*_arm64_setup.exe
           - name: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
-            artifact: postium-mail-nightly-macos-x86_64.tar.gz
+            pattern: postium-mail_*_x64.dmg
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            artifact: postium-mail-nightly-macos-arm64.tar.gz
+            pattern: postium-mail_*_arm64.dmg
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: postium-mail-nightly-linux-x86_64.tar.gz
+            pattern: postium-mail_*_amd64.deb
           - name: linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact: postium-mail-nightly-linux-arm64.tar.gz
+            pattern: postium-mail_*_arm64.deb
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout source
@@ -121,24 +121,45 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p postium-ui
 
-      - name: Package (Windows)
+      # ── 打包为原生安装包（版本号取自 workspace Cargo.toml）──
+      - name: Resolve version
+        shell: bash
+        run: echo "APP_VER=$(grep -m1 '^version' Cargo.toml | sed 's/[^0-9.]*//g')" >> "$GITHUB_ENV"
+
+      - name: Package installer (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cd "target/${{ matrix.target }}/release"
-          7z a "${{ github.workspace }}/${{ matrix.artifact }}" postium-mail.exe
+          curl -L -sSf -o is-installer.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          # 经 PowerShell Start-Process -Wait 静默安装（bash 直跑 GUI 安装器会因
+          # 提升进程持有管道句柄而永久挂起）
+          powershell -NoProfile -Command "Start-Process -FilePath './is-installer.exe' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait"
+          export MSYS_NO_PATHCONV=1  # 防 Git Bash 把 /D /F 开关转换成 Windows 路径
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [[ -f "$ISCC" ]] || ISCC="/c/Program Files/Inno Setup 6/ISCC.exe"
+          ARCH_ALLOWED=x64compatible
+          ARCH_OUT=x64
+          [[ "${{ matrix.target }}" == aarch64* ]] && { ARCH_ALLOWED=arm64; ARCH_OUT=arm64; }
+          "$ISCC" /DAppVer="$APP_VER" /DArchAllowed="$ARCH_ALLOWED"             /DSourceExe="$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/postium-mail.exe"             /F"postium-mail_${APP_VER}_${ARCH_OUT}_setup"             .github/packaging/windows/postium.iss
+          mv ".github/packaging/windows/postium-mail_${APP_VER}_${ARCH_OUT}_setup.exe" .
 
-      - name: Package (Linux)
+      - name: Package .deb (Linux)
         if: runner.os == 'Linux'
         run: |
-          cd "target/${{ matrix.target }}/release"
-          tar czf "${{ github.workspace }}/${{ matrix.artifact }}" postium-mail
+          cargo install cargo-deb --locked
+          cargo deb -p postium-ui --target ${{ matrix.target }} --no-build             --output "postium-mail_${APP_VER}-1_$(dpkg --print-architecture).deb"
 
-      - name: Package (macOS)
+      - name: Package .dmg (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd "target/${{ matrix.target }}/release"
-          tar czf "${{ github.workspace }}/${{ matrix.artifact }}" postium-mail
+          APP="Postium Mail.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/postium-mail" "$APP/Contents/MacOS/"
+          sed "s/APP_VER/$APP_VER/g" .github/packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          cp crates/postium-ui/icons/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+          ARCH_OUT=arm64
+          [[ "${{ matrix.target }}" == x86_64* ]] && ARCH_OUT=x64
+          hdiutil create -volname "Postium Mail" -srcfolder "$APP" -ov -format UDZO             "postium-mail_${APP_VER}_${ARCH_OUT}.dmg"
 
       - name: Upload to nightly release
         env:
@@ -146,4 +167,5 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare-nightly.outputs.release_tag }}
         shell: bash
         run: |
-          gh release upload "${RELEASE_TAG}" "${{ matrix.artifact }}" --clobber
+          shopt -s nullglob
+          gh release upload "${RELEASE_TAG}" ${{ matrix.pattern }} --clobber

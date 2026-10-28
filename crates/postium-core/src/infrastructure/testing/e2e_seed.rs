@@ -1,7 +1,8 @@
 //! E2E 端到端测试的确定性数据播种器。
 //!
 //! 本模块为 Playwright/前端 E2E 测试提供**确定性**（可预测、可重复）的夹具数据：
-//! 在数据库中插入 2 个测试账号以及约 40 封分布在不同文件夹的夹具邮件。
+//! 在数据库中插入 2 个测试账号、约 40 封分布在不同文件夹的夹具邮件
+//! 以及 3 个种子联系人。
 //! 所有邮件的 subject、UID、时间戳均按固定规则生成，便于 E2E 测试精确断言。
 //!
 //! # 触发方式
@@ -52,6 +53,21 @@
 //! | Archive | 201 | 1 | 已读 | 星标 | `BASE_TS - 1201` |
 //! | Drafts | 301 | 1 | 已读 | 无 | `BASE_TS - 1301` |
 //!
+//! ## 联系人（[`seed_contacts`]），联系模块 e2e 断言锚点
+//!
+//! 三条均 `source='local'`（启动回填只推进 `last_contacted_at`，
+//! 不覆盖 local 条目的 `frequency` / `name` / 星标）：
+//!
+//! | 邮箱 | 名称 | frequency | 星标 |
+//! |------|------|-----------|------|
+//! | `seed.e2e@postium.test` | `Primary E2E` | 5 | 是 |
+//! | `sender.primary@postium.test` | — | 10 | 否 |
+//! | `sender.secondary@postium.test` | — | 3 | 否 |
+//!
+//! 其中两个 `sender.*` 与夹具邮件发件人同址，验证种子与启动回填共存。
+//! 回填产生的 `collected` 条目（如收件人 `e2e.user@postium.test`）由
+//! 启动流程触发，不在种子里。
+//!
 //! # 布尔标记规律
 //!
 //! - `is_draft` —— 仅当文件夹为 `Drafts` 时为真。
@@ -76,9 +92,10 @@ const SECONDARY_EMAIL: &str = "secondary.e2e@postium.test";
 /// 主账号 UID 段偏移直接取 UID；副账号在 UID 上额外偏移 1000。
 const BASE_TS: i64 = 1_779_936_000;
 
-/// 向数据库写入 E2E 确定性夹具数据（2 个账号 + 约 40 封邮件）。
+/// 向数据库写入 E2E 确定性夹具数据（2 个账号 + 约 40 封邮件 + 3 个联系人）。
 ///
-/// 在单个事务中先插入两个测试账号，再为每个账号生成夹具邮件并批量写入。
+/// 在单个事务中先插入两个测试账号，再为每个账号生成夹具邮件并批量写入，
+/// 最后写入种子联系人（[`seed_contacts`]）。
 /// 所有写入使用 `INSERT OR IGNORE`，因此重复播种是幂等的（不会报唯一约束错误）。
 ///
 /// # 参数
@@ -169,9 +186,42 @@ pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
             insert_email(&mut stmt, fixture)?;
         }
 
+        seed_contacts(tx)?;
+
         Ok(())
     })
     .await
+}
+
+/// 种子联系人夹具（契约见[模块文档](self)）。
+///
+/// `INSERT OR IGNORE` 后跟强制 `UPDATE`：首次播种走 INSERT 分支；
+/// 重复播种（同一数据库重启应用）时 IGNORE 跳过已存在行，UPDATE 把
+/// `frequency` / 星标 / 名称拉回夹具值，保证任意次数播种结果确定。
+/// 两步均按邮箱（小写唯一索引）寻址，与 [`contact_repo`] 的写入约定一致。
+fn seed_contacts(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+    /// (邮箱, 名称, frequency, is_starred)
+    const CONTACT_FIXTURES: [(&str, Option<&str>, i64, i64); 3] = [
+        ("seed.e2e@postium.test", Some("Primary E2E"), 5, 1),
+        ("sender.primary@postium.test", None, 10, 0),
+        ("sender.secondary@postium.test", None, 3, 0),
+    ];
+
+    for (email, name, frequency, is_starred) in CONTACT_FIXTURES {
+        tx.execute(
+            "INSERT OR IGNORE INTO contacts (
+                email, name, frequency, is_starred, source, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, 'local', ?5, ?5)",
+            rusqlite::params![email, name, frequency, is_starred, BASE_TS],
+        )?;
+        tx.execute(
+            "UPDATE contacts
+             SET name = ?2, frequency = ?3, is_starred = ?4, updated_at = ?5
+             WHERE email = ?1",
+            rusqlite::params![email, name, frequency, is_starred, BASE_TS],
+        )?;
+    }
+    Ok(())
 }
 
 /// 测试账号的写入模型，字段一一对应 `accounts` 表的列。

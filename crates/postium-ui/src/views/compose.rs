@@ -104,6 +104,8 @@ pub struct ComposeView {
     bcc_visible: bool,
     /// 发件账号 ID（点击工具条账号按钮循环切换）
     pub(crate) selected_account: Option<(i32, String)>,
+    /// 收件人自动补全防抖代数（三字段共用；每次输入变更 +1，超时后比对丢弃过期查询）
+    sugg_gen: u64,
     close_handle: Option<gpui_kit::AnyWindowHandle>,
 }
 
@@ -163,10 +165,12 @@ impl ComposeView {
             cc_visible: false,
             bcc_visible: false,
             selected_account: None,
+            sugg_gen: 0,
             close_handle: None,
         };
 
-        // 收件人字段：回车提交 chips（对齐旧版 RecipientField）
+        // 收件人字段：回车提交 chips（浮层开时先取第一项候选）；
+        // 输入变更 300ms 防抖查联系人回填候选（对齐顶栏/联系人页搜索的代数模式）
         for which in [0usize, 1, 2] {
             let input = match which {
                 0 => this.to_field.input.clone(),
@@ -174,15 +178,137 @@ impl ComposeView {
                 _ => this.bcc_field.input.clone(),
             };
             cx.subscribe(&input, move |this: &mut Self, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    let handle = this.window_ref;
-                    let _ = handle.update(cx, |_, window, cx| {
-                        match which {
-                            0 => this.to_field.commit(window, cx),
-                            1 => this.cc_field.commit(window, cx),
-                            _ => this.bcc_field.commit(window, cx),
+                match event {
+                    InputEvent::PressEnter { .. } => {
+                        // 提交后输入清空：作废在途防抖查询，防止迟到结果重开浮层
+                        this.sugg_gen += 1;
+                        let handle = this.window_ref;
+                        // 空输入 Enter（防抖窗口内候选尚挂旧值）：不取候选直接收浮层，
+                        // 避免把陈旧候选提交成 chip（T12 遗留边缘）
+                        let input_empty = match which {
+                            0 => this.to_field.input.read(cx).value().trim().is_empty(),
+                            1 => this.cc_field.input.read(cx).value().trim().is_empty(),
+                            _ => this.bcc_field.input.read(cx).value().trim().is_empty(),
+                        };
+                        if input_empty {
+                            match which {
+                                0 => this.to_field.close_suggestions(),
+                                1 => this.cc_field.close_suggestions(),
+                                _ => this.bcc_field.close_suggestions(),
+                            }
                         }
-                    });
+                        let pick_first = if input_empty {
+                            String::new()
+                        } else {
+                            match which {
+                                // 浮层开且有候选 → Enter 取第一项（set_value 后 commit）
+                                0 if this.to_field.sugg_open
+                                    && !this.to_field.suggestions.is_empty() =>
+                                {
+                                    this.to_field.suggestions[0].email.clone()
+                                }
+                                1 if this.cc_field.sugg_open
+                                    && !this.cc_field.suggestions.is_empty() =>
+                                {
+                                    this.cc_field.suggestions[0].email.clone()
+                                }
+                                _ if which == 2
+                                    && this.bcc_field.sugg_open
+                                    && !this.bcc_field.suggestions.is_empty() =>
+                                {
+                                    this.bcc_field.suggestions[0].email.clone()
+                                }
+                                _ => String::new(),
+                            }
+                        };
+                        let _ = handle.update(cx, |_, window, cx| {
+                            if !pick_first.is_empty() {
+                                match which {
+                                    0 => this.to_field.input.update(cx, |s, cx| {
+                                        s.set_value(pick_first.clone(), window, cx)
+                                    }),
+                                    1 => this.cc_field.input.update(cx, |s, cx| {
+                                        s.set_value(pick_first.clone(), window, cx)
+                                    }),
+                                    _ => this.bcc_field.input.update(cx, |s, cx| {
+                                        s.set_value(pick_first.clone(), window, cx)
+                                    }),
+                                };
+                            }
+                            match which {
+                                0 => this.to_field.commit(window, cx),
+                                1 => this.cc_field.commit(window, cx),
+                                _ => this.bcc_field.commit(window, cx),
+                            }
+                        });
+                    }
+                    InputEvent::Change => {
+                        this.sugg_gen += 1;
+                        let debounce_gen = this.sugg_gen;
+                        let api = this.api.clone();
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(300))
+                                .await;
+                            let q = this.update(cx, |view, cx| {
+                                // 后续输入已接管 → 丢弃过期查询
+                                if view.sugg_gen != debounce_gen {
+                                    return None;
+                                }
+                                let (value, field_is_open) = match which {
+                                    0 => (
+                                        view.to_field.input.read(cx).value().to_string(),
+                                        view.to_field.sugg_open,
+                                    ),
+                                    1 => (
+                                        view.cc_field.input.read(cx).value().to_string(),
+                                        view.cc_field.sugg_open,
+                                    ),
+                                    _ => (
+                                        view.bcc_field.input.read(cx).value().to_string(),
+                                        view.bcc_field.sugg_open,
+                                    ),
+                                };
+                                if value.trim().is_empty() {
+                                    // 输入清空 → 关浮层清候选
+                                    match which {
+                                        0 => view.to_field.close_suggestions(),
+                                        1 => view.cc_field.close_suggestions(),
+                                        _ => view.bcc_field.close_suggestions(),
+                                    }
+                                    if field_is_open {
+                                        cx.notify();
+                                    }
+                                    return None;
+                                }
+                                Some(value)
+                            })
+                            .ok()
+                            .flatten();
+                            let Some(q) = q else { return };
+                            let rx = spawn_tokio(async move {
+                                api.list_contacts(Some(q), None, false, 0, 8)
+                                    .await
+                                    .map(|resp| resp.contacts)
+                            });
+                            if let Ok(Ok(list)) = rx.recv().await {
+                                this.update(cx, |view, cx| {
+                                    if view.sugg_gen != debounce_gen {
+                                        return; // 查询期间输入又变了，丢弃
+                                    }
+                                    match which {
+                                        0 => view.to_field.set_suggestions(list),
+                                        1 => view.cc_field.set_suggestions(list),
+                                        _ => view.bcc_field.set_suggestions(list),
+                                    }
+                                    cx.notify();
+                                })
+                                .ok();
+                            }
+                        })
+                        .detach();
+                    }
+                    _ => {}
                 }
             })
             .detach();
@@ -258,6 +384,47 @@ impl ComposeView {
                     _ => view.bcc_field.remove_by_email(&email),
                 }
                 cx.notify();
+            });
+        })
+    }
+
+    /// 候选浮层点击路由：which 0/1/2 → 对应字段 set_value(email) + commit。
+    /// 点击回调只有 &mut App，经窗口句柄 update 拿 &mut Window（同 PressEnter 模式）。
+    fn make_suggestion_picker(
+        which: usize,
+        handle: gpui_kit::AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) -> std::rc::Rc<dyn Fn(usize, &ClickEvent, &mut Window, &mut App)> {
+        let weak = cx.entity().downgrade();
+        std::rc::Rc::new(move |idx: usize, _, _, cx: &mut App| {
+            let _ = handle.update(cx, |_, window, cx| {
+                let _ = weak.update(cx, |view: &mut Self, cx| {
+                    let email = match which {
+                        0 => view.to_field.suggestions.get(idx).map(|c| c.email.clone()),
+                        1 => view.cc_field.suggestions.get(idx).map(|c| c.email.clone()),
+                        _ => view.bcc_field.suggestions.get(idx).map(|c| c.email.clone()),
+                    };
+                    let Some(email) = email else { return };
+                    // 作废在途防抖查询（与 PressEnter 提交一致）
+                    view.sugg_gen += 1;
+                    match which {
+                        0 => view.to_field.input.update(cx, |s, cx| {
+                            s.set_value(email, window, cx)
+                        }),
+                        1 => view.cc_field.input.update(cx, |s, cx| {
+                            s.set_value(email, window, cx)
+                        }),
+                        _ => view.bcc_field.input.update(cx, |s, cx| {
+                            s.set_value(email, window, cx)
+                        }),
+                    }
+                    match which {
+                        0 => view.to_field.commit(window, cx),
+                        1 => view.cc_field.commit(window, cx),
+                        _ => view.bcc_field.commit(window, cx),
+                    }
+                    cx.notify();
+                });
             });
         })
     }
@@ -502,6 +669,11 @@ impl Render for ComposeView {
         };
 
         let _ = window;
+        // 浮层候选点击需要经窗口句柄取 &mut Window（set_value + commit）
+        let window_handle = window.window_handle();
+        let pick = |which: usize, cx: &mut Context<Self>| {
+            Self::make_suggestion_picker(which, window_handle, cx)
+        };
         let send_label: SharedString = if self.sending {
             format!("{}...", t("email.send")).into()
         } else {
@@ -559,7 +731,7 @@ impl Render for ComposeView {
             // 字段区
             .child(h_flex().gap_2().items_center()
                 .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(t("email.to").to_string()))
-                .child(div().flex_1().child(self.to_field.render(Self::make_chip_remover(0, cx), &theme)))
+                .child(div().flex_1().child(self.to_field.render(Self::make_chip_remover(0, cx), pick(0, cx), &theme)))
                 // 收起的抄送/密送以小按钮渐进展开（对齐旧版）
                 .when(!self.cc_visible, |this| {
                     this.child(
@@ -588,12 +760,12 @@ impl Render for ComposeView {
             .when(self.cc_visible, |this| this.child(
                 h_flex().gap_2().items_center()
                     .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(muted_fg).child(t("email.cc").to_string()))
-                    .child(div().flex_1().child(self.cc_field.render(Self::make_chip_remover(1, cx), &theme)))
+                    .child(div().flex_1().child(self.cc_field.render(Self::make_chip_remover(1, cx), pick(1, cx), &theme)))
             ))
             .when(self.bcc_visible, |this| this.child(
                 h_flex().gap_2().items_center()
                     .child(div().w(px(48.)).flex_none().text_size(px(12.)).text_color(muted_fg).child(t("email.bcc").to_string()))
-                    .child(div().flex_1().child(self.bcc_field.render(Self::make_chip_remover(2, cx), &theme)))
+                    .child(div().flex_1().child(self.bcc_field.render(Self::make_chip_remover(2, cx), pick(2, cx), &theme)))
             ))
             .child(field(&t("email.subject"), &self.subject))
             .child(
