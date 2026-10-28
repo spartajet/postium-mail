@@ -55,7 +55,7 @@ impl RenderOnce for EmailRow {
         let email_rc = self.email.clone();
         let time = chrono::DateTime::from_timestamp(self.email.sent_at, 0)
             .map(|dt| {
-                
+
                 let now = chrono::Utc::now();
                 if dt.date_naive() == now.date_naive() {
                     dt.format("%H:%M").to_string()
@@ -64,8 +64,16 @@ impl RenderOnce for EmailRow {
                 }
             })
             .unwrap_or_default();
+        let preview = self.email.preview.clone().unwrap_or_default();
 
-        let row = self.base.py_2().px_3().child(
+        let row = self
+            .base
+            .py_2()
+            .px_3()
+            // 行间分隔线（最后一行也带，视觉上与“加载更多”区隔开）
+            .border_b_1()
+            .border_color(cx.theme().border.opacity(0.6))
+            .child(
             v_flex()
                 .flex_1()
                 .overflow_hidden()
@@ -121,13 +129,15 @@ impl RenderOnce for EmailRow {
                                 .unwrap_or_else(|| "（无主题）".into()),
                         ),
                 )
-                .child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .line_clamp(1)
-                        .child(self.email.preview.clone().unwrap_or_default()),
-                ),
+                .when(!preview.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .line_clamp(1)
+                            .child(preview),
+                    )
+                }),
         );
 
         // 右键菜单（对齐旧版 EmailContextMenu；旧版"更多操作"为占位未复刻）
