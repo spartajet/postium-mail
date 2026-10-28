@@ -16,10 +16,10 @@ pub struct SyncStore {
 }
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum SyncEvent {
-    Started,
-    Idle,
+    /// 收到同步进度事件（文件夹粒度）。订阅方据此节流刷新邮件列表/徽章，
+    /// 实现「边同步边更新 UI」。
+    Progress,
 }
 
 impl EventEmitter<SyncEvent> for SyncStore {}
@@ -34,7 +34,7 @@ impl SyncStore {
         cx.spawn(async move |_, cx| {
             while let Ok(event) = rx.recv().await {
                 this.update(cx, |store, cx| {
-                    store.apply(event);
+                    store.apply(event, cx);
                     cx.notify();
                 })
                 .ok();
@@ -43,7 +43,7 @@ impl SyncStore {
         .detach();
     }
 
-    pub(crate) fn apply(&mut self, event: SyncProgressEvent) {
+    pub(crate) fn apply(&mut self, event: SyncProgressEvent, cx: &mut Context<Self>) {
         let p = &event.progress;
         let text = if p.total > 0 {
             format!("{}/{}", p.current, p.total)
@@ -57,6 +57,7 @@ impl SyncStore {
             self.progress.insert(p.account_id, text);
         }
         self.syncing = !self.progress.is_empty();
+        cx.emit(SyncEvent::Progress);
     }
 
     /// 手动同步全部账号。

@@ -727,7 +727,7 @@ impl SettingsView {
             // 进度事件逐条转发给状态栏（SyncStore::apply 内含 Completed 收尾）
             while let Ok(event) = rx.recv().await {
                 let _ = sync_store.update(cx, |store, cx| {
-                    store.apply(event);
+                    store.apply(event, cx);
                     cx.notify();
                 });
             }

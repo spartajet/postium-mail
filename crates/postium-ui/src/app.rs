@@ -131,6 +131,9 @@ pub struct AppShell {
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     /// 主窗口句柄：选中邮件时更新窗口标题用
     window_handle: gpui_kit::AnyWindowHandle,
+    /// 同步中节流刷新：上次刷新时刻 / 到期未刷标记
+    sync_refresh_at: Option<std::time::Instant>,
+    sync_refresh_pending: bool,
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
 
@@ -219,6 +222,15 @@ impl AppShell {
             scheduler.start();
             std::mem::forget(scheduler); // 调度器随进程存活（Drop 会停止）
         }
+
+        // 同步进行中：节流刷新邮件列表与侧栏徽章（边同步边更新 UI）
+        cx.subscribe(&sync_store, |this: &mut Self, _, event: &crate::stores::sync::SyncEvent, cx| {
+            if matches!(event, crate::stores::sync::SyncEvent::Progress) {
+                this.refresh_lists_throttled(cx);
+            }
+        })
+        .detach();
+
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(i18n::t("email.search"))
         });
@@ -372,13 +384,62 @@ impl AppShell {
             workflow_view: None,
             status_bar: None,
             window_handle: window.window_handle(),
+            sync_refresh_at: None,
+            sync_refresh_pending: false,
         }
+    }
+
+    /// 同步进行中的节流刷新（SyncEvent::Progress 驱动）：
+    /// 距上次刷新 ≥2s 立即刷；否则标记 pending、1.5s 后补刷一次，
+    /// 避免高频事件拖垮列表重绘，同时保证收尾必有最后一次刷新。
+    fn refresh_lists_throttled(&mut self, cx: &mut Context<Self>) {
+        const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+        const DEFER: std::time::Duration = std::time::Duration::from_millis(1500);
+        let now = std::time::Instant::now();
+        let due = self
+            .sync_refresh_at
+            .map_or(true, |t| now.duration_since(t) >= MIN_INTERVAL);
+        if due {
+            self.sync_refresh_at = Some(now);
+            self.sync_refresh_pending = false;
+            self.refresh_lists_now(cx);
+            return;
+        }
+        if self.sync_refresh_pending {
+            return;
+        }
+        self.sync_refresh_pending = true;
+        let weak = cx.entity().downgrade();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(DEFER).await;
+            this.update(cx, |this, cx| {
+                if !this.sync_refresh_pending {
+                    return;
+                }
+                this.sync_refresh_pending = false;
+                this.sync_refresh_at = Some(std::time::Instant::now());
+                this.refresh_lists_now(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 立即刷新邮件列表与侧栏徽章（文件夹统计）。
+    fn refresh_lists_now(&mut self, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        self.emails.update(cx, |store, cx| {
+            store.refresh_now(&api, cx);
+        });
+        self.accounts.update(cx, |store, cx| {
+            store.reload(&api, cx);
+        });
+        cx.notify();
     }
 
     /// 更新窗口标题：选中邮件时显示「邮件主题 — Postium Mail」，
     /// 无选中（详情空）时恢复默认标题。
-    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {
-        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
+    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
         // 这里 notify 触发重绘；系统窗口标题（任务栏显示）同步更新。
         cx.notify();
         let title = window_title_for(self.detail.read(cx).detail.as_ref());
