@@ -7,7 +7,7 @@ use crate::error::MailError;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::attachment_repo::AttachmentWrite;
 use crate::infrastructure::storage::repository::{
-    account_repo, attachment_repo, email_repo, sync_repo,
+    account_repo, attachment_repo, contact_repo, email_repo, sync_repo,
 };
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
@@ -1035,6 +1035,30 @@ impl EmailService {
             message_id = %built.message_id,
             "邮件发送成功"
         );
+
+        // Task 7: 发送成功后把收件人 / 抄送并入联系人表（失败只记日志，不影响发送结果）
+        let contact_items: Vec<contact_repo::IncomingContact> = req
+            .to
+            .iter()
+            .chain(req.cc.iter())
+            .map(|addr| addr.trim())
+            .filter(|addr| !addr.is_empty())
+            .map(|addr| contact_repo::IncomingContact {
+                email: addr.to_string(),
+                name: None,
+                contacted_at: now,
+            })
+            .collect();
+        if !contact_items.is_empty() {
+            if let Err(error) = contact_repo::upsert_from_emails(&self.db, &contact_items).await {
+                tracing::warn!(
+                    error = %error,
+                    account_id = req.account_id,
+                    "发送路径联系人自动收集失败（不影响发送结果）"
+                );
+            }
+        }
+
         Ok(SendEmailResponse {
             message_id: built.message_id,
             local_email_id: sent_model.id,

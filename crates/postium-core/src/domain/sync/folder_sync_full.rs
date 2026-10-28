@@ -1,6 +1,7 @@
 use crate::{
-    domain::sync::SyncResult,
-    domain::sync::SyncWindow,
+    domain::sync::{
+        SyncResult, SyncWindow, headers_to_contacts,
+    },
     error::MailError,
     infrastructure::{
         protocols::{imap::ImapClient, utils::unix_seconds_to_imap_date},
@@ -130,7 +131,9 @@ pub async fn sync_folder_full(
         // mail_header_list.extend(email_headers);
         tracing::debug!("已获取邮件头: {}", email_headers.len());
         email_repo::save_batch_email_headers(&db, account_id, folder, &email_headers).await?;
-        tracing::debug!("保存邮件头: {}", email_headers.len())
+        tracing::debug!("保存邮件头: {}", email_headers.len());
+        // Task 7: 落库成功后把发件人 / 收件人 / 抄送并入联系人表（失败不阻断同步）
+        headers_to_contacts(&db, &email_headers).await;
     }
 
     let max_uid = last_sync_uid_for_full_sync(&uids, uidnext);
