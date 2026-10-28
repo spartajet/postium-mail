@@ -85,8 +85,12 @@ impl MailProvider for Microsoft365Provider {
             ],
             pkce_enabled: true,
             tenant_id: None,
-            redirect_uri: option_env!("MICROSOFT_REDIRECT_URI")
-                .map(|s| s.to_string())
+            // 默认对齐 Azure Entra 公共客户端惯例：http://localhost/oauth/callback
+            //（Azure 对 localhost 回跳支持端口通配，应用监听任意端口均可匹配）
+            redirect_uri: Some("http://localhost/oauth/callback".to_string())
+                .into_iter()
+                .chain(option_env!("MICROSOFT_REDIRECT_URI").map(|s| s.to_string()).into_iter())
+                .last()
                 .filter(|s| !s.trim().is_empty()),
         })
     }
