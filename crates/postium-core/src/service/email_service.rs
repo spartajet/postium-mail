@@ -1053,15 +1053,16 @@ impl EmailService {
             "邮件发送成功"
         );
 
-        // Task 7: 发送成功后把收件人 / 抄送并入联系人表（失败只记日志，不影响发送结果）
+        // Task 7: 发送成功后把收件人 / 抄送并入联系人表（失败只记日志，不影响发送结果）。
+        // 地址可能是显示格式（`Bob <b@x>`，收件人栏 chips 之外的输入兜底）——
+        // 先归一为裸地址再入库（终审 I-2，与同步/回填路径同一规则）。
         let contact_items: Vec<contact_repo::IncomingContact> = req
             .to
             .iter()
             .chain(req.cc.iter())
-            .map(|addr| addr.trim())
-            .filter(|addr| !addr.is_empty())
+            .flat_map(|raw| crate::domain::sync::split_display_addresses(raw))
             .map(|addr| contact_repo::IncomingContact {
-                email: addr.to_string(),
+                email: addr,
                 name: None,
                 contacted_at: now,
             })

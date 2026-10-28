@@ -728,6 +728,30 @@ pub async fn merge(
                 }
             }
 
+            // 2.5) 被吸收行若带 CardDAV 归属，写墓碑供同步向服务器补发 DELETE
+            //（终审 C-1：bulk DELETE 绕过 delete() 会漏墓碑，服务端卡片残留
+            // 会被下轮拉取当作孤儿覆盖合并结果）。身份已转移给 primary 的
+            // 条目除外——primary 仍指向该卡，服务器端不能删。
+            {
+                let now = chrono::Utc::now().timestamp();
+                for contact in &absorbed {
+                    if let (Some(account_id), Some(href)) =
+                        (contact.dav_account_id, contact.dav_href.as_deref())
+                    {
+                        let inherited =
+                            dav_account_id == Some(account_id) && dav_href.as_deref() == Some(href);
+                        if inherited {
+                            continue;
+                        }
+                        tx.execute(
+                            "INSERT INTO dav_deletes (account_id, href, deleted_at) VALUES (?1, ?2, ?3)
+                             ON CONFLICT(account_id, href) DO UPDATE SET deleted_at = excluded.deleted_at",
+                            rusqlite::params![account_id, href, now],
+                        )?;
+                    }
+                }
+            }
+
             // 3) absorbed 物理删除（成员关系随外键级联清理）
             tx.execute(
                 &format!(
@@ -1361,6 +1385,20 @@ pub async fn group_ensure(db: &DbConn, name: &str) -> Result<i32, MailError> {
             .ok_or(MailError::DatabaseError(message)),
         Err(err) => Err(err),
     }
+}
+
+/// 刷新联系人的 `updated_at`（用户可见写操作的游标推进；CardDAV 推送
+/// 脏判定依赖它。同步引擎落库不走这里——落库写的是同步游标）。
+pub async fn touch_updated_at(db: &DbConn, id: i32) -> Result<(), MailError> {
+    let now = chrono::Utc::now().timestamp();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE contacts SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, id],
+        )?;
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(test)]

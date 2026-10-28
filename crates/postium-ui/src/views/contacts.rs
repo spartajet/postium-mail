@@ -113,6 +113,8 @@ pub struct ContactsView {
     edit_groups: Vec<i32>,
     /// 状态/错误行（编辑卡底部）
     status: SharedString,
+    /// status 是否为错误（错误红显；loading 类提示用中性色，终审缓期项 T10）
+    status_error: bool,
     /// CardDAV 配置弹窗（Some = 打开）
     pub(crate) dav: Option<DavFlow>,
     /// CardDAV 弹窗焦点句柄（ESC 关闭 / 焦点圈定）
@@ -196,6 +198,7 @@ impl ContactsView {
             edit_notes,
             edit_groups: Vec::new(),
             status: " ".into(),
+            status_error: false,
             dav: None,
             dav_modal_focus,
             syncing: false,
@@ -313,6 +316,7 @@ impl ContactsView {
     fn cancel_edit(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
         self.status = " ".into();
+        self.status_error = false;
         cx.notify();
     }
 
@@ -324,6 +328,7 @@ impl ContactsView {
         let email = Self::value(&self.edit_email, cx).trim().to_string();
         if email.is_empty() {
             self.status = format!("{}: {}", t("common.error"), t("contacts.email")).into();
+            self.status_error = true;
             cx.notify();
             return;
         }
@@ -350,6 +355,7 @@ impl ContactsView {
                 Ok(id)
             });
         self.status = t("email.loading");
+        self.status_error = false;
         cx.notify();
         cx.spawn(async move |this, cx| {
             match rx.recv().await {
@@ -374,6 +380,7 @@ impl ContactsView {
                     // 主体或分组设置失败：中断保存，保留编辑态与错误提示
                     this.update(cx, |view, cx| {
                         view.status = format!("{e}").into();
+                        view.status_error = true;
                         cx.notify();
                     })
                     .ok();
@@ -1160,7 +1167,11 @@ impl Render for ContactsView {
                     this.child(
                         div()
                             .text_size(px(11.5))
-                            .text_color(gpui_kit::rgb(0xf43f5e))
+                            .text_color(if self.status_error {
+                                gpui_kit::rgb(0xf43f5e).into()
+                            } else {
+                                theme.muted_foreground
+                            })
                             .line_clamp(2)
                             .child(self.status.clone()),
                     )

@@ -75,6 +75,9 @@ pub async fn sync_account(
     let local = contact_repo::dav_contacts_for_account(db, account_id).await?;
     let dirty = contact_repo::list_dav_dirty(db, account_id, since).await?;
     let dirty_ids: HashSet<i32> = dirty.iter().map(|d| d.contact.id).collect();
+    // 本地已删待服务器确认的条目：拉取阶段跳过（终审 C-1 收尾——否则合并/
+    // 删除后的服务端卡会在删除阶段之前被当作新卡拉回，复活已删联系人）
+    let tombstones = contact_repo::dav_tombstones(db, account_id, since).await?;
 
     // ── 阶段 1：拉取变化集 ──────────────────────────────────────────────
     let by_href: HashMap<&str, &ContactDto> = local
@@ -83,6 +86,9 @@ pub async fn sync_account(
         .collect();
     let mut fetch: Vec<String> = Vec::new();
     for (href, etag) in &entries {
+        if tombstones.iter().any(|t| t == href) {
+            continue;
+        }
         let stale = match by_href.get(href.as_str()) {
             Some(local_contact) => local_contact.dav_etag.as_deref() != Some(etag.as_str()),
             None => true,
@@ -99,7 +105,7 @@ pub async fn sync_account(
     if !fetch.is_empty() {
         for (href, text) in client.multiget(&ab_href, &fetch).await? {
             let etag = etag_of.get(href.as_str()).copied().unwrap_or("");
-            match apply_pulled_card(db, account_id, &href, etag, &text, since).await {
+            match apply_pulled_card(db, account_id, &href, etag, &text, since, &dirty_ids).await {
                 Ok(true) => report.pulled += 1,
                 Ok(false) => {}
                 Err(err) => report.errors.push(format!("拉取 {href}: {err}")),
@@ -181,7 +187,7 @@ pub async fn sync_account(
     }
 
     // ── 阶段 3：推送本地删除（墓碑） ────────────────────────────────────
-    for href in contact_repo::dav_tombstones(db, account_id, since).await? {
+    for href in tombstones {
         match client.delete(&href).await {
             Ok(()) => {
                 contact_repo::dav_tombstone_remove(db, account_id, &href).await?;
@@ -266,6 +272,7 @@ async fn apply_pulled_card(
     etag: &str,
     text: &str,
     sync_ts: i64,
+    dirty_ids: &HashSet<i32>,
 ) -> Result<bool, MailError> {
     let data = vcard::parse(text)?;
     let Some((write, groups)) = card_to_parts(&data) else {
@@ -278,6 +285,9 @@ async fn apply_pulled_card(
         .unwrap_or_else(|| uid_from_href(href));
 
     if let Some(existing) = contact_repo::find_by_uid(db, account_id, &uid).await? {
+        if dirty_ids.contains(&existing.id) {
+            return Ok(false); // 本地已改：留给推送阶段裁决，不拉取覆盖
+        }
         contact_repo::dav_pull_apply(db, existing.id, &write, account_id, &uid, href, etag, text, sync_ts)
             .await?;
         let existing_groups: Vec<String> = existing.groups.iter().map(|g| g.name.clone()).collect();
@@ -294,6 +304,9 @@ async fn apply_pulled_card(
                 "邮箱 {} 已归属其他 CardDAV 条目，跳过并入",
                 write.email
             )));
+        }
+        if dirty_ids.contains(&existing.id) {
+            return Ok(false); // 本地已改的同邮箱条目：留给推送阶段，不静默覆盖
         }
         contact_repo::dav_pull_apply(db, existing.id, &write, account_id, &uid, href, etag, text, sync_ts)
             .await?;
@@ -725,5 +738,121 @@ mod tests {
         let c = contact_repo::get_by_email(&db, "y@x.test").await.unwrap().unwrap();
         assert_eq!(c.name.as_deref(), Some("本地新版"), "本地内容应保留");
         assert_eq!(c.dav_etag.as_deref(), Some("\"srv-2\""));
+    }
+
+    #[tokio::test]
+    async fn merge_absorbed_dav_row_tombstones_and_server_delete() {
+        // 终审 C-1：合并吸收 dav 条目必须写墓碑，同步阶段向服务器补发 DELETE；
+        // 否则服务端孤儿卡会被下轮拉取当作同邮箱条目覆盖合并结果。
+        let server = MockServer::start().await;
+        let (db, auth) = seed_fixture(&server).await;
+
+        let raw_m = "BEGIN:VCARD
+VERSION:3.0
+UID:u-m
+FN:主卡
+EMAIL:m@x.test
+END:VCARD
+";
+        let raw_a = "BEGIN:VCARD
+VERSION:3.0
+UID:u-a
+FN:吸收卡
+EMAIL:a@x.test
+END:VCARD
+";
+        db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO contacts (email, name, source, dav_account_id, dav_uid, dav_href, dav_etag, raw_vcard, created_at, updated_at)
+                 VALUES ('m@x.test', '主卡', 'dav', 1, 'u-m', '/ab/m.vcf', ?2, ?1, 100, 100)",
+                rusqlite::params![raw_m, "\"m\""])?;
+            conn.execute(
+                "INSERT INTO contacts (email, name, source, dav_account_id, dav_uid, dav_href, dav_etag, raw_vcard, created_at, updated_at)
+                 VALUES ('a@x.test', '吸收卡', 'dav', 1, 'u-a', '/ab/a.vcf', ?2, ?1, 100, 100)",
+                rusqlite::params![raw_a, "\"a\""])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let primary_id = contact_repo::get_by_email(&db, "m@x.test").await.unwrap().unwrap().id;
+        let absorbed_id = contact_repo::get_by_email(&db, "a@x.test").await.unwrap().unwrap().id;
+
+        // 服务器两张卡都在；吸收卡将被删除（DELETE mock 期望恰好一次）
+        query_mock(
+            &server,
+            multistatus(&format!(
+                "{}{}",
+                entry("/ab/m.vcf", "\"m\""),
+                entry("/ab/a.vcf", "\"a\"")
+            )),
+        )
+        .await;
+        Mock::given(method("DELETE"))
+            .and(path("/ab/a.vcf"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // 主卡 updated_at 被 merge 推进 → 脏 → If-Match 推送合并内容
+        Mock::given(method("PUT"))
+            .and(path("/ab/m.vcf"))
+            .and(header("If-Match", "\"m\""))
+            .respond_with(ResponseTemplate::new(204).insert_header("ETag", "\"m-2\""))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        contact_repo::merge(&db, primary_id, &[absorbed_id]).await.unwrap();
+
+        // 合并后本地只剩主卡；吸收卡身份未转移给主卡（主卡自有 dav 归属）→ 墓碑
+        let tombstones = contact_repo::dav_tombstones(&db, 1, 0).await.unwrap();
+        assert!(
+            tombstones.iter().any(|href| href == "/ab/a.vcf"),
+            "吸收的 dav 行应写墓碑: {tombstones:?}"
+        );
+
+        let report = sync_account(&db, &auth, 1).await.unwrap();
+        assert_eq!(report.deleted, 1, "墓碑应触发服务器 DELETE: {:?}", report.errors);
+        assert_eq!(report.pushed, 1, "合并后的主卡内容应推送: {:?}", report.errors);
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+    }
+
+    #[tokio::test]
+    async fn pull_does_not_overwrite_dirty_local_same_email() {
+        // 终审 I-1：本地脏条目（同邮箱未绑定 dav）不得被拉取静默覆盖，
+        // 应留给推送阶段生成自己的服务器卡。
+        let server = MockServer::start().await;
+        let (db, auth) = seed_fixture(&server).await;
+
+        query_mock(&server, multistatus(&card_entry(
+            "/ab/z.vcf", "\"ez\"",
+            &vcard_text("u-z", "服务器版", "z@x.test"),
+        )))
+        .await;
+        multiget_mock(&server, None, multistatus(&card_entry(
+            "/ab/z.vcf", "\"ez\"",
+            &vcard_text("u-z", "服务器版", "z@x.test"),
+        )))
+        .await;
+        // 本地脏条目会推送自己的新卡（无 If-Match）
+        Mock::given(method("PUT"))
+            .and(body_string_contains("UID:postium-"))
+            .respond_with(ResponseTemplate::new(201).insert_header("ETag", "\"srv-z\""))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        contact_repo::insert(
+            &db,
+            ContactWrite { email: "z@x.test".into(), name: Some("本地改动".into()), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        let report = sync_account(&db, &auth, 1).await.unwrap();
+        assert_eq!(report.pulled, 0, "脏条目不应被拉取覆盖: {:?}", report.errors);
+        assert_eq!(report.pushed, 1, "脏条目应照常推送");
+        let c = contact_repo::get_by_email(&db, "z@x.test").await.unwrap().unwrap();
+        assert_eq!(c.name.as_deref(), Some("本地改动"), "本地内容应保留");
     }
 }

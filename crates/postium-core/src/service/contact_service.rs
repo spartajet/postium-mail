@@ -159,13 +159,17 @@ impl ContactService {
 
     /// 全量替换联系人的分组成员关系
     ///
-    /// 单事务内执行；传空切片等效于把联系人移出所有分组。
+    /// 单事务内执行；传空切片等效于把联系人移出所有分组。成功后刷新
+    /// `updated_at`（终审 I-3：分组编辑是用户写操作，不推进游标会让
+    /// CardDAV 推送阶段漏推 CATEGORIES 变更；同步引擎的拉取落库直调
+    /// repo 层，不经过这里，无自推自拉回环）。
     pub async fn group_set_members(
         &self,
         contact_id: i32,
         group_ids: &[i32],
     ) -> Result<(), MailError> {
-        contact_repo::group_set_members(&self.db, contact_id, group_ids).await
+        contact_repo::group_set_members(&self.db, contact_id, group_ids).await?;
+        contact_repo::touch_updated_at(&self.db, contact_id).await
     }
 
     // ===== 导入 / 导出（vCard / CSV）=====
