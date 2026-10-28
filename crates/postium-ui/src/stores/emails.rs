@@ -43,6 +43,8 @@ pub enum EmailsEvent {
     Reloaded,
     /// 选中邮件变化（详情据此装载）
     SelectionChanged(i32),
+    /// 未读状态变化（标已读/未读后，侧栏徽章据此刷新文件夹统计）
+    UnreadChanged,
 }
 
 impl EventEmitter<EmailsEvent> for EmailsStore {}

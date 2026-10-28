@@ -212,12 +212,19 @@ fn act_on_email(
             RowAction::Delete => api.delete_emails(vec![id]).await.map(|_| ()),
         }
     });
+    let unread_changed = matches!(action_label, "MarkRead");
     cx.spawn(async move |cx| {
         match rx.recv().await {
             Ok(Ok(())) => {
                 if let Some(store) = store.upgrade() {
                     let _ = cx.update(|cx: &mut App| {
-                        store.update(cx, |s, cx| s.refresh_now(&api_keep, cx));
+                        store.update(cx, |s, cx| {
+                            s.refresh_now(&api_keep, cx);
+                            // 标已读/未读：通知宿主刷新侧栏未读徽章
+                            if unread_changed {
+                                cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                            }
+                        });
                     });
                 }
             }
@@ -416,7 +423,7 @@ impl ListDelegate for EmailListDelegate {
                 }
             });
 
-            // 异步标记已读：完成后原位更新行内 is_read 标记
+            // 异步标记已读：完成后原位更新行内 is_read 标记 + 通知侧栏刷新徽章
             if let Some((id, _unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
                 let api = self.api.clone();
                 let rx = spawn_tokio(async move { api.mark_as_read(id, true).await });
@@ -435,6 +442,10 @@ impl ListDelegate for EmailListDelegate {
                             cx.notify();
                         })
                         .ok();
+                        // 通知宿主刷新文件夹统计（侧栏未读徽章）
+                        store.update(cx, |_, cx| {
+                            cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                        });
                     }
                 })
                 .detach();
@@ -582,6 +593,7 @@ impl EmailListView {
         let api = self.api.clone();
         let api_keep = self.api.clone();
         let store = self.store.clone();
+        let unread_changed = matches!(action, SelectedAction::ToggleRead(_));
         let rx = spawn_tokio(async move {
             match action {
                 SelectedAction::Star => api.toggle_star(id).await.map(|_| ()),
@@ -596,6 +608,10 @@ impl EmailListView {
                 let _ = result;
                 store.update(cx, |store, cx| {
                     store.refresh_now(&api_keep, cx);
+                    // 标已读/未读：通知宿主刷新侧栏未读徽章
+                    if unread_changed {
+                        cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                    }
                 });
                 this.update(cx, |_, cx| cx.notify()).ok();
             }

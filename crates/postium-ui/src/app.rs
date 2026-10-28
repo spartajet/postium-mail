@@ -261,18 +261,27 @@ impl AppShell {
 
         // 选中邮件 → 装载详情（视图按选中版本重建，保住展开态/滚动）
         cx.subscribe(&emails, |this: &mut Self, _, event: &EmailsEvent, cx| {
-            if let EmailsEvent::SelectionChanged(id) = event {
-                this.detail.update(cx, |store, cx| {
-                    store.load(*id, &this.api, cx);
-                });
-                this.detail_view = Some(cx.new(|_| EmailDetailView {
-                    store: this.detail.clone(),
-                    api: this.api.clone(),
-                    emails: this.emails.downgrade(),
-                    recipients_expanded: false,
-                }));
-                this.detail_build_version = this.emails.read(cx).selected_version;
-                cx.notify();
+            match event {
+                EmailsEvent::SelectionChanged(id) => {
+                    this.detail.update(cx, |store, cx| {
+                        store.load(*id, &this.api, cx);
+                    });
+                    this.detail_view = Some(cx.new(|_| EmailDetailView {
+                        store: this.detail.clone(),
+                        api: this.api.clone(),
+                        emails: this.emails.downgrade(),
+                        recipients_expanded: false,
+                    }));
+                    this.detail_build_version = this.emails.read(cx).selected_version;
+                    cx.notify();
+                }
+                // 标已读/未读后刷新文件夹统计（侧栏未读徽章）
+                EmailsEvent::UnreadChanged => {
+                    this.accounts.update(cx, |store, cx| {
+                        store.reload(&this.api, cx);
+                    });
+                }
+                EmailsEvent::Reloaded => {}
             }
         })
         .detach();
