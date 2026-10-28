@@ -1,15 +1,20 @@
 //!
-//! # 渲染管线（spec §4，对应 crate 文档注释中的阶段图）
+//! # 渲染管线（spec §4，阶段顺序经裁定修正：内联先于净化）
 //!
-//! [`render_pipeline`] 串联全部预处理阶段：
+//! [`render_pipeline`] 串联全部阶段：
 //!
 //! 1. 字节数检查：超过 [`Limits::max_bytes`] 直接 [`HtmlError::TooLarge`]（调用方降级纯文本）；
 //! 2. [`strip_mso_comments`]：MSO 条件注释整体删除；
-//! 3. [`sanitize_lenient`]：ammonia 宽松净化；
-//! 4. [`inline_css`]：css-inline 把 `<style>` 规则内联为元素 `style` 属性；
+//! 3. [`inline_css`]：css-inline 把 `<style>` 规则内联为元素 `style` 属性；
+//! 4. [`sanitize_lenient`]：ammonia 宽松净化；
 //! 5. [`build_document`](crate::builder::build_document)：解析为中间表示（Task 4 接管）。
 //!
-//! 单独暴露 [`inline_css`] 供测试与后续阶段复用。
+//! ## 为什么内联在净化之前
+//!
+//! ammonia 净化会把 `<style>` 块连同内容整体删除（默认 `clean_content_tags`），
+//! 内联放在净化之后将永远无事可做。css-inline 在未净化 HTML 上只读 `<style>`
+//! 块、只写元素 `style` 属性，不引入新的攻击面；script/iframe 等危险元素仍由
+//! 后置 [`sanitize_lenient`] 全量拦截（远程样式表已禁用，见 [`inliner`]）。
 
 use crate::builder;
 use crate::error::HtmlError;
@@ -37,6 +42,16 @@ pub fn inline_css(html: &str) -> String {
     inliner().inline(html).unwrap_or_else(|_| html.to_string())
 }
 
+/// 管线预处理：剥 MSO → 内联样式 → 宽松净化，返回预处理后 HTML。
+///
+/// 独立成函数供测试断言中间产物（管线级内联 + 净化兜底一次锁定），
+/// [`render_pipeline`] 与之共用同一实现。
+pub(crate) fn preprocess(html: &str) -> String {
+    let no_mso = strip_mso_comments(html);
+    let inlined = inline_css(&no_mso);
+    sanitize_lenient(&inlined)
+}
+
 /// 完整渲染管线：原始 HTML → [`HtmlDocument`] 中间表示。
 ///
 /// 顺序见模块文档；超限错误（[`HtmlError::TooLarge`]）由调用方捕获并降级为纯文本。
@@ -45,10 +60,8 @@ pub fn render_pipeline(html: &str) -> Result<HtmlDocument, HtmlError> {
     if html.len() > limits.max_bytes {
         return Err(HtmlError::TooLarge(html.len()));
     }
-    let no_mso = strip_mso_comments(html);
-    let clean = sanitize_lenient(&no_mso);
-    let inlined = inline_css(&clean);
-    builder::build_document(&inlined, &limits)
+    let preprocessed = preprocess(html);
+    builder::build_document(&preprocessed, &limits)
 }
 
 #[cfg(test)]
@@ -70,5 +83,14 @@ mod tests {
     fn oversized_input_rejected() {
         let big = format!("<div>{}</div>", "x".repeat(1024 * 1024 + 10));
         assert!(matches!(render_pipeline(&big), Err(HtmlError::TooLarge(_))));
+    }
+    #[test]
+    fn preprocess_inlines_styles_and_strips_scripts() {
+        let html = "<style>h1{color:#ff0000}</style><h1>标题</h1><script>alert(1)</script>";
+        let out = preprocess(html);
+        // 管线级内联：规则值出现在元素 style 属性中（内联先于净化才可能发生）。
+        assert!(out.contains("style=") && out.contains("ff0000"));
+        // 净化兜底：script 标签与内容剔除，`<style>` 块不再残留。
+        assert!(!out.contains("<style>") && !out.contains("script"));
     }
 }
