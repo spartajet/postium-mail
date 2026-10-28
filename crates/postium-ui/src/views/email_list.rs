@@ -337,7 +337,8 @@ fn build_row_menu(
         PopupMenuItem::new(if unread { "标为已读".to_string() } else { "标为未读".to_string() })
             .icon(IconName::MailOpen)
             .on_click(move |_, _, cx| {
-                act_on_email(api.clone(), store.clone(), id, RowAction::MarkRead(!unread), cx);
+                // unread 即目标已读状态：未读(true)→标已读(true)、已读(false)→标未读(false)
+                act_on_email(api.clone(), store.clone(), id, RowAction::MarkRead(unread), cx);
             })
     };
     let delete_item = {
@@ -710,7 +711,8 @@ impl Render for EmailListView {
                         .xsmall()
                         .label(if selected_unread { "标已读" } else { "标未读" })
                         .on_click(cx.listener(move |this: &mut Self, _, _, cx| {
-                            this.act_on_selected(SelectedAction::ToggleRead(!selected_unread), cx);
+                            // selected_unread 即目标已读状态（切换语义）
+                            this.act_on_selected(SelectedAction::ToggleRead(selected_unread), cx);
                         })),
                 )
                 .child(
