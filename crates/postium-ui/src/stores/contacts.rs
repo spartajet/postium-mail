@@ -1,5 +1,6 @@
 //! 联系人状态（模式同 accounts.rs）：过滤列表（搜索/分组/星标）+ 分组
-//! （含成员计数）+ 选中项；星标走局部乐观更新，失败回滚。
+//! （含成员计数）+ 选中项；星标走局部乐观更新，失败回滚；合并走写后
+//! 重载（完成时推进 `write_gen` 丢弃在途陈旧快照）。
 //! 竞态防护：写操作推进 `write_gen`，在途 load 的完成回调比对代数，
 //! 陈旧快照（装载期间发生过写）不覆盖本地列表；星标写完成后自行补跑
 //! load 收敛到数据库最新状态。
@@ -34,6 +35,9 @@ pub struct ContactsStore {
     pub active_group: Option<i32>,
     /// 数据版本：每次列表装载完成 +1（视图/e2e 等待用）
     pub list_version: u64,
+    /// 邮件详情联动待选中的联系人邮箱（`select_by_email` 写入；
+    /// 每次装载完成后比对命中即选中，未命中保留待下次装载）
+    pub pending_select_email: Option<String>,
     /// 写操作代数：乐观星标等写路径 +1；在途 load 完成时比对，
     /// 不一致则丢弃陈旧快照（参照 emails.rs 的 load_gen 模式）
     write_gen: u64,
@@ -53,6 +57,7 @@ impl ContactsStore {
             starred_only: false,
             active_group: None,
             list_version: 0,
+            pending_select_email: None,
             write_gen: 0,
             pending_reload: false,
         }
@@ -109,6 +114,16 @@ impl ContactsStore {
                     if let Ok(g) = groups {
                         store.groups = g;
                     }
+                    // 邮件详情联动的待选邮箱：命中即选中（未命中保留待下次装载）
+                    if let Some(email) = store.pending_select_email.clone()
+                        && let Some(c) = store
+                            .contacts
+                            .iter()
+                            .find(|c| c.email.eq_ignore_ascii_case(&email))
+                    {
+                        store.pending_select_email = None;
+                        store.selected = Some(c.id);
+                    }
                 }
                 cx.notify();
             })
@@ -149,6 +164,53 @@ impl ContactsStore {
     pub fn select(&mut self, id: i32, cx: &mut Context<Self>) {
         self.selected = Some(id);
         cx.notify();
+    }
+
+    /// 按邮箱选中联系人（邮件详情「联系人」联动入口）：清过滤全量装载，
+    /// 装载完成后按邮箱命中即选中（见 load 完成回调的待选比对）。
+    pub fn select_by_email(&mut self, email: &str, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        self.pending_select_email = Some(email.trim().to_lowercase());
+        self.query.clear();
+        self.active_group = None;
+        self.starred_only = false;
+        self.load(api, cx);
+    }
+
+    /// 合并联系人（工具条「合并」，absorbed 并入 primary 后删除）。
+    /// 写路径（write_gen 模式）：完成时推进写代数使在途 load 的陈旧快照
+    /// 失效，随后补跑 load 收敛到合并后的库状态；选中若落在被吸收者上
+    /// 则清空。失败仅告警（列表不动，多选由视图侧保留）。
+    pub fn merge(
+        &mut self,
+        primary_id: i32,
+        absorbed_ids: Vec<i32>,
+        api: &Arc<CoreApi>,
+        cx: &mut Context<Self>,
+    ) {
+        if absorbed_ids.is_empty() || absorbed_ids.contains(&primary_id) {
+            return;
+        }
+        let api = api.clone();
+        let api_late = api.clone();
+        let rx = spawn_tokio(async move { api.merge_contacts(primary_id, absorbed_ids).await });
+        cx.spawn(async move |this, cx| {
+            match rx.recv().await {
+                Ok(Ok(merged)) => {
+                    this.update(cx, |store, cx| {
+                        store.write_gen += 1; // 在途 load 的快照已过期：完成时不得覆盖
+                        if store.selected.is_some_and(|id| id != merged.id) {
+                            store.selected = None; // 选中落在被吸收者上：清空
+                        }
+                        store.load(&api_late, cx); // 读后于写提交，收敛到合并后状态
+                    })
+                    .ok();
+                    crate::notify::toast(crate::i18n::t("contacts.merged"));
+                }
+                Ok(Err(e)) => tracing::warn!("联系人合并失败: {e}"),
+                Err(_) => {}
+            }
+        })
+        .detach();
     }
 
     /// 乐观星标反转（列表行 ★ 点击）：本地立即翻转 + write_gen 失效在途快照，

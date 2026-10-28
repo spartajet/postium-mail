@@ -1290,6 +1290,164 @@ fn contacts_star_write_race_converges(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// contacts.e2e → Task 11: 合并交互 + 邮件详情联动
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn contact_merge_and_detail_add(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    // 注册主壳全局弱引用（生产由 open_main_window 注册；e2e 直接建壳需手动补）
+    with_app_mut(cx, |app| {
+        app.set_global(crate::app::MainShell(shell.downgrade()));
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // ── Part A：合并（行首复选多选 → 工具条「合并」，primary = 最后选中）──
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::Contacts;
+            cx.notify();
+        });
+    });
+    let view = wait_for(cx, |cx| {
+        with_app(cx, |app| shell.read(app).contacts_view.clone())
+    });
+    let contacts = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.list_version > 0 && !store.loading).then(|| store.contacts.clone())
+        })
+    });
+    let primary_id = contacts
+        .iter()
+        .find(|c| c.email == "seed.e2e@postium.test")
+        .expect("store 应含种子 seed.e2e")
+        .id;
+    let absorbed_id = contacts
+        .iter()
+        .find(|c| c.email == "sender.primary@postium.test")
+        .expect("store 应含种子 sender.primary")
+        .id;
+
+    // 复选两枚（先点 absorbed 后点 primary）→ 直驱合并：sender.primary 并入 seed.e2e
+    with_app_mut(cx, |app| {
+        view.update(app, |v, cx| {
+            v.toggle_merge_pick(absorbed_id, cx);
+            v.toggle_merge_pick(primary_id, cx);
+            v.merge_selected(cx);
+        });
+    });
+
+    // 合并后补跑装载收敛：absorbed 从列表消失，primary 保留
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            let gone = !store.contacts.iter().any(|c| c.id == absorbed_id);
+            let kept = store.contacts.iter().any(|c| c.id == primary_id);
+            (!store.loading && gone && kept).then_some(())
+        })
+    });
+    // DB 层：absorbed 已删除（邮箱转入 primary 的 extra_emails）
+    wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async { api.get_contact(absorbed_id).await })
+            .ok()
+            .flatten()
+            .is_none()
+            .then_some(())
+    });
+
+    // ── Part B：邮件详情「联系人」联动 ──
+    // 切回邮件视图，选中发件人为 sender.primary 的种子邮件（该联系人已被合并
+    // 删除，其邮箱不再是任何联系人的主邮箱 → 走「不存在则创建」分支）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.nav = NavTarget::AllInbox;
+            cx.notify();
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
+    let email_id = with_app(cx, |app| {
+        shell.read(app)
+            .emails
+            .read(app)
+            .emails
+            .iter()
+            .find(|e| e.sender_email == "sender.primary@postium.test")
+            .map(|e| e.id)
+            .expect("收件箱应含 sender.primary 发出的种子邮件")
+    });
+    // 行选中同款事件：SelectionChanged → 详情装载 + 详情视图重建
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(email_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(email_id));
+                cx.notify();
+            });
+        });
+    });
+    let detail_view = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == email_id).then_some(view)
+        })
+    });
+
+    // 联动处理器（第一驱）：联系人不存在 → 创建分支
+    with_window_mut(cx, |window, app| {
+        detail_view.update(app, |view, cx| {
+            view.add_contact(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    let created = wait_for(cx, |_| {
+        crate::runtime::runtime()
+            .block_on(async {
+                api.get_contact_by_email("sender.primary@postium.test".into())
+                    .await
+            })
+            .ok()
+            .flatten()
+    });
+
+    // 联动处理器（第二驱）：联系人已存在 → 切 Contacts 并按邮箱选中
+    with_window_mut(cx, |window, app| {
+        detail_view.update(app, |view, cx| {
+            view.add_contact(&gpui_pre::ClickEvent::default(), window, cx);
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).nav == NavTarget::Contacts).then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = view.read(app).store.read(app);
+            (store.selected == Some(created.id)).then_some(())
+        })
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
 // settings.e2e → 左侧三区导航（通用/外观/账户）切换
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]

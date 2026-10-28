@@ -43,6 +43,8 @@ pub struct ContactsView {
     new_group_input: Entity<InputState>,
     /// 详情卡编辑态（None = 查看态）
     pub(crate) editing: Option<EditTarget>,
+    /// 合并多选（行首复选框）：按点选顺序记录 id，末位 = 合并主联系人
+    merge_picks: Vec<i32>,
     // 编辑表单
     edit_name: Entity<InputState>,
     edit_email: Entity<InputState>,
@@ -114,6 +116,7 @@ impl ContactsView {
             new_group_open: false,
             new_group_input,
             editing: None,
+            merge_picks: Vec::new(),
             edit_name,
             edit_email,
             edit_extra,
@@ -155,6 +158,31 @@ impl ContactsView {
     pub(crate) fn pick_starred(&mut self, cx: &mut Context<Self>) {
         let api = self.api.clone();
         self.store.update(cx, |store, cx| store.select_starred(&api, cx));
+    }
+
+    /// 合并多选复选框（行首勾选；确认弹层省略，末位选中 = 主联系人）。
+    pub(crate) fn toggle_merge_pick(&mut self, id: i32, cx: &mut Context<Self>) {
+        if let Some(pos) = self.merge_picks.iter().position(|&x| x == id) {
+            self.merge_picks.remove(pos);
+        } else {
+            self.merge_picks.push(id);
+        }
+        cx.notify();
+    }
+
+    /// 工具条「合并」：≥2 枚选中时可用；末位选中为主联系人，其余并入。
+    /// 写入与收敛由 store.merge 承担（write_gen 竞态防护），此处清空多选。
+    pub(crate) fn merge_selected(&mut self, cx: &mut Context<Self>) {
+        if self.merge_picks.len() < 2 {
+            return;
+        }
+        let primary = *self.merge_picks.last().expect("长度已校验 >= 2");
+        let absorbed = self.merge_picks[..self.merge_picks.len() - 1].to_vec();
+        let api = self.api.clone();
+        self.store.update(cx, |store, cx| {
+            store.merge(primary, absorbed, &api, cx);
+        });
+        self.merge_picks.clear();
         cx.notify();
     }
 
@@ -397,6 +425,19 @@ impl Render for ContactsView {
                     .label(t("contacts.new"))
                     .on_click(cx.listener(Self::start_new)),
             )
+            // 合并入口：多选 ≥2 枚时出现（primary = 最后勾选）
+            .when(self.merge_picks.len() >= 2, |this| {
+                this.child(
+                    Button::new("contact-merge")
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::Combine)
+                        .label(t("contacts.merge"))
+                        .on_click(cx.listener(|view: &mut Self, _, _, cx| {
+                            view.merge_selected(cx);
+                        })),
+                )
+            })
             .child(
                 div()
                     .ml_auto()
@@ -551,7 +592,12 @@ impl Render for ContactsView {
                 .min_h_0()
                 .overflow_y_scroll();
             for c in &contacts {
-                rows = rows.child(render_contact_row(c, selected_id == Some(c.id), cx));
+                rows = rows.child(render_contact_row(
+                    c,
+                    selected_id == Some(c.id),
+                    self.merge_picks.contains(&c.id),
+                    cx,
+                ));
             }
             list_col = list_col.child(rows);
         }
@@ -671,10 +717,11 @@ fn nav_item(
         .on_click(on_click)
 }
 
-/// 联系人行：首字头像 + 名称/邮箱 + 频次徽标 + 星标。
+/// 联系人行：合并复选框 + 首字头像 + 名称/邮箱 + 频次徽标 + 星标。
 fn render_contact_row(
     c: &ContactDto,
     selected: bool,
+    merge_checked: bool,
     cx: &mut Context<ContactsView>,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
@@ -707,6 +754,31 @@ fn render_contact_row(
                 .border_color(gpui_kit::transparent_black())
                 .hover(|s| s.bg(theme.accent.opacity(0.08)))
         })
+        // 行首合并复选框（吞掉点击避免触发行选中）
+        .child(
+            div()
+                .id(format!("contact-merge-{id}"))
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .w(px(15.))
+                .h(px(15.))
+                .rounded(px(4.))
+                .border_1()
+                .border_color(if merge_checked { theme.accent } else { theme.border.opacity(0.7) })
+                .when(merge_checked, |d| {
+                    d.bg(theme.accent).child(
+                        gpui_kit::component::Icon::new(IconName::Check)
+                            .size_3()
+                            .text_color(theme.accent_foreground),
+                    )
+                })
+                .on_click(cx.listener(move |view: &mut ContactsView, _, _, cx| {
+                    cx.stop_propagation();
+                    view.toggle_merge_pick(id, cx);
+                })),
+        )
         // 首字圆形头像（accent 淡底，对齐设置页账号卡）
         .child(
             div()
