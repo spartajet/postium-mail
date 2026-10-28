@@ -27,6 +27,7 @@ rfd = "0.17"
 tray-icon = "0.26"
 png = "0.17"
 base64 = "0.22"
+regex = "1"
 
 [dev-dependencies]
 gpui-pre = { version = "0.3.9", package = "gpui-pre", features = ["test-support"] }

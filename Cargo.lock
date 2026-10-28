@@ -5925,6 +5925,7 @@ dependencies = [
  "png 0.17.16",
  "postium-core",
  "postium-editor",
+ "regex",
  "rfd",
  "serde",
  "serde_json",
