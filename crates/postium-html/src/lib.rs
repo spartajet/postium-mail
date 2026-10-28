@@ -21,12 +21,14 @@ pub mod builder;
 pub mod error;
 pub mod pipeline;
 pub mod sanitize;
+pub mod style;
 pub mod types;
 
 pub use builder::build_document;
 pub use error::HtmlError;
 pub use pipeline::{inline_css, render_pipeline};
 pub use sanitize::{sanitize_lenient, strip_mso_comments};
+pub use style::{merge_inline, parse_block_style, parse_color, parse_inline_style};
 pub use types::{
     Align, Block, BlockStyle, Border, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle,
     Limits, Rgba, SafeUrl, Spacing, TableCell, TableRow, Width,
