@@ -17,7 +17,7 @@ use postium_core::api::{CoreApi, SyncEventRx};
 use crate::i18n::{self, Lang};
 use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
-use crate::stores::detail::DetailStore;
+use crate::stores::detail::{DetailEvent, DetailStore};
 use crate::stores::sync::SyncStore;
 use crate::stores::emails::{EmailsEvent, EmailsStore};
 use crate::views::email_detail::EmailDetailView;
@@ -58,6 +58,20 @@ pub fn set_theme_pref(pref: &str, cx: &mut App) {
 }
 
 /// 打开主窗口（应用启动时调用一次）。
+/// 主窗口默认标题。
+pub const MAIN_WINDOW_TITLE: &str = "Postium Mail";
+
+/// 由详情状态推导窗口标题：有详情显示「主题 — Postium Mail」，无则默认。
+fn window_title_for(detail: Option<&postium_core::service::email_service::EmailDetail>) -> String {
+    let subject = detail
+        .and_then(|d| d.email.subject.clone())
+        .filter(|s| !s.trim().is_empty());
+    match subject {
+        Some(s) => format!("{s} — {MAIN_WINDOW_TITLE}"),
+        None => MAIN_WINDOW_TITLE.to_string(),
+    }
+}
+
 pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
     let options = match crate::window_state::saved_bounds() {
         Some(bounds) => WindowOptions {
@@ -108,6 +122,8 @@ pub struct AppShell {
     _tray: Option<tray_icon::TrayIcon>,
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
+    /// 主窗口句柄：选中邮件时更新窗口标题用
+    window_handle: gpui_kit::AnyWindowHandle,
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
 
@@ -212,6 +228,7 @@ impl AppShell {
                     this.detail.update(cx, |store, cx| {
                         store.clear(cx);
                     });
+                    this.update_window_title(cx);
                     this.detail_view = None;
                     this.email_list = None; // 等 Reloaded 重建
                     cx.notify();
@@ -251,6 +268,14 @@ impl AppShell {
                 }));
                 this.detail_build_version = this.emails.read(cx).selected_version;
                 cx.notify();
+            }
+        })
+        .detach();
+
+        // 详情装载完成 → 窗口标题显示邮件主题（无详情时恢复默认）
+        cx.subscribe(&detail, |this: &mut Self, _, event: &DetailEvent, cx| {
+            if matches!(event, DetailEvent::Loaded) {
+                this.update_window_title(cx);
             }
         })
         .detach();
@@ -329,7 +354,17 @@ impl AppShell {
             calendar_view: None,
             workflow_view: None,
             status_bar: None,
+            window_handle: window.window_handle(),
         }
+    }
+
+    /// 更新窗口标题：选中邮件时显示「邮件主题 — Postium Mail」，
+    /// 无选中（详情空）时恢复默认标题。
+    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {
+        let title = window_title_for(self.detail.read(cx).detail.as_ref());
+        let _ = self.window_handle.update(cx, |_, window, _| {
+            window.set_window_title(&title);
+        });
     }
 
     fn toggle_lang(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {

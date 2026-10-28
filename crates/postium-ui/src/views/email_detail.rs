@@ -63,6 +63,8 @@ impl EmailDetailView {
                         s.html = None;
                         cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
                     if let Some(list) = emails.upgrade() {
                         list.update(cx, |s, cx| {
                             s.refresh_now(&api_keep, cx);
@@ -91,6 +93,8 @@ impl EmailDetailView {
                         s.html = None;
                         cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
                     if let Some(list) = emails.upgrade() {
                         list.update(cx, |s, cx| {
                             s.refresh_now(&api_keep, cx);
@@ -143,6 +147,8 @@ impl EmailDetailView {
                         s.html = None;
                         cx.notify();
                     });
+                    // 详情清空后主窗口标题恢复默认（此路径不发 Loaded 事件）
+                    restore_window_title(cx);
                     if let Some(list) = emails.upgrade() {
                         list.update(cx, |s, cx| {
                             s.refresh_now(&api_keep, cx);
@@ -247,6 +253,18 @@ impl EmailDetailView {
 
 fn spawn_tokok_delete(api: Arc<CoreApi>, id: i32) -> smol::channel::Receiver<Result<usize, postium_core::error::MailError>> {
     spawn_tokio(async move { api.delete_emails(vec![id]).await })
+}
+
+/// 详情面板被操作清空（归档/删除/标未读）后恢复主窗口默认标题。
+/// 这些路径不经过 DetailStore::load，不会发 DetailEvent::Loaded。
+fn restore_window_title(cx: &mut gpui_kit::AsyncApp) {
+    let _ = cx.update(|app| {
+        if let Some(main) = app.try_global::<crate::app::MainShell>()
+            && let Some(shell) = main.0.upgrade()
+        {
+            let _ = shell.update(app, |shell, cx| shell.update_window_title(cx));
+        }
+    });
 }
 
 /// 邮件正文 TextView 样式。
