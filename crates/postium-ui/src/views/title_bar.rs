@@ -17,6 +17,38 @@ use gpui_kit_assets::IconName;
 /// 标题栏高度（px）。
 pub const TITLE_BAR_HEIGHT: f32 = 32.;
 
+/// 最大化/还原切换。
+///
+/// gpui-pre Windows 的 `zoom_window()` 只会 `SW_MAXIMIZE`、不还原，
+/// 这里经 raw-window-handle 拿 HWND 直接调 `ShowWindowAsync` 切换；
+/// 其他平台回落 `zoom_window()`（macOS 的 zoom 本身就是切换语义）。
+fn toggle_maximize(window: &Window) {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        // Window 的固有 window_handle() 返回 GPUI 句柄，显式走 trait 拿原生句柄
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
+            && let RawWindowHandle::Win32(win) = handle.as_raw()
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                SW_MAXIMIZE, SW_RESTORE, ShowWindowAsync,
+            };
+            let cmd = if window.is_maximized() { SW_RESTORE } else { SW_MAXIMIZE };
+            unsafe { ShowWindowAsync(win.hwnd.get(), cmd) };
+            return;
+        }
+    }
+    window.zoom_window();
+}
+
+/// 标题栏空白区鼠标按下：单击拖动窗口，双击切换最大化。
+fn on_title_bar_mouse_down(event: &MouseDownEvent, window: &mut Window) {
+    match event.click_count {
+        1 => window.start_window_move(),
+        _ => toggle_maximize(window),
+    }
+}
+
 /// 渲染主窗口标题栏。
 pub fn render(
     shell: &crate::app::AppShell,
@@ -65,14 +97,14 @@ pub fn render(
                 .text_color(muted_fg)
                 .child(crate::app::MAIN_WINDOW_TITLE),
         )
-        // 中：邮件主题居中（整块可拖动窗口）；无选中时为空白拖动区
+        // 中：邮件主题居中（整块可拖动/双击最大化）；无选中时为空白拖动区
         .child(
             div()
                 .flex_1()
                 .h_full()
                 .overflow_hidden()
-                .on_mouse_down(MouseButton::Left, |_, window, _| {
-                    window.start_window_move();
+                .on_mouse_down(MouseButton::Left, |event, window, _| {
+                    on_title_bar_mouse_down(event, window);
                 })
                 .when_some(subject, |this, s| {
                     this.child(
@@ -98,7 +130,7 @@ pub fn render(
             window.minimize_window();
         }))
         .child(ctrl_btn("win-maximize", IconName::Square, |window, _| {
-            window.zoom_window();
+            toggle_maximize(window);
         }))
         .child(ctrl_btn("win-close", IconName::X, |window, _| {
             // 与原生关闭行为对齐既有设计：保存状态后最小化（退出走托盘菜单）

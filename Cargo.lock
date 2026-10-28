@@ -5925,6 +5925,7 @@ dependencies = [
  "png 0.17.16",
  "postium-core",
  "postium-editor",
+ "raw-window-handle",
  "regex",
  "rfd",
  "serde",
@@ -5934,6 +5935,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tray-icon",
+ "windows-sys 0.48.0",
  "winresource",
 ]
 
