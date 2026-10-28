@@ -24,7 +24,7 @@ use crate::i18n::{t, t_format};
 use crate::runtime::spawn_tokio;
 use crate::stores::accounts::AccountsStore;
 
-/// 打开设置窗口（居中 760×560，参照旧 open_settings_window）。
+/// 打开设置窗口（居中 980×640：180 导航 + 最宽 768 面板 + 边距，内容不再被裁切）。
 pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>, cx: &mut App) {
     let accounts = accounts.clone();
     let api = api.clone();
@@ -32,7 +32,7 @@ pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(760.), px(560.)),
+                size(px(980.), px(640.)),
                 cx,
             ))),
             ..Default::default()
@@ -884,7 +884,8 @@ impl Render for SettingsView {
             SettingsSection::General => v_flex()
                 .p_5()
                 .gap_2()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
@@ -911,7 +912,8 @@ impl Render for SettingsView {
             SettingsSection::Appearance => v_flex()
                 .p_5()
                 .gap_3()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
@@ -937,7 +939,8 @@ impl Render for SettingsView {
             SettingsSection::Accounts => v_flex()
                 .p_5()
                 .gap_3()
-                .w(px(640.))
+                .w_full()
+                .max_w(px(768.))
                 .border_1()
                 .border_color(theme.border)
                 .rounded(theme.radius)
