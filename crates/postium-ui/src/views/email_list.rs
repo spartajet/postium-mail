@@ -19,6 +19,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::component::Disableable as _;
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::{EmailCategory, EmailDto};
@@ -354,6 +355,8 @@ pub struct EmailListDelegate {
     selected_email: Option<i32>,
     store: gpui_kit::WeakEntity<EmailsStore>,
     api: Arc<postium_core::api::CoreApi>,
+    /// 「加载更早邮件」服务器同步中（防重复触发；footer 按钮显示态）
+    older_syncing: bool,
 }
 
 impl EmailListDelegate {
@@ -455,13 +458,113 @@ impl ListDelegate for EmailListDelegate {
             store: Some(self.store.clone()),
         })
     }
+
+    /// 列表末尾的加载按钮（合并「加载更多」/「加载更早邮件」）。
+    ///
+    /// 作为 section footer 物理位于列表末尾——滚到底才可见，列表
+    /// 不满一屏（邮件少）时自然显示，无需滚动监听。
+    fn render_section_footer(
+        &mut self,
+        _: usize,
+        _: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Option<impl IntoElement> {
+        let store_entity = self.store.upgrade()?;
+        let can_more = {
+            let store = store_entity.read(cx);
+            (store.emails.len() as u64) < store.total
+        };
+        let label = if self.older_syncing {
+            t("email.syncingOlder")
+        } else if can_more {
+            t("email.loadMore")
+        } else {
+            t("email.syncOlder")
+        };
+
+        let store = self.store.clone();
+        let api = self.api.clone();
+        let state = cx.weak_entity();
+        let mut btn = Button::new("list-load-footer").ghost().xsmall();
+        if self.older_syncing {
+            btn = btn.disabled(true);
+        } else {
+            btn = btn.on_click(move |_, _, cx| {
+                if can_more {
+                    let _ = store.update(cx, |s, cx| s.load_more(&api, cx));
+                } else if let Some(state) = state.upgrade() {
+                    let _ = state.update(cx, |state, cx| state.delegate_mut().start_sync_older(cx));
+                }
+            });
+        }
+        btn = btn.label(label.to_string());
+
+        Some(
+            h_flex()
+                .w_full()
+                .justify_center()
+                .py_2()
+                .child(btn),
+        )
+    }
+}
+
+impl EmailListDelegate {
+    /// 从服务器同步更早邮件（本地数据到底后 footer 按钮触发）。
+    fn start_sync_older(&mut self, cx: &mut Context<ListState<Self>>) {
+        if self.older_syncing {
+            return;
+        }
+        self.older_syncing = true;
+        cx.notify();
+        let nav = self.store.upgrade().map(|s| s.read(cx).nav.clone());
+        let api = self.api.clone();
+        let api_keep = self.api.clone();
+        let store = self.store.clone();
+        let rx = spawn_tokio(async move {
+            match &nav {
+                Some(NavTarget::AccountFolder { account_id, .. }) => {
+                    api.sync_older_emails(*account_id, EmailCategory::Inbox).await.map(|_| ())
+                }
+                Some(NavTarget::Category(c)) => {
+                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    for a in accounts {
+                        let _ = api.sync_older_emails(a.id, c.clone()).await;
+                    }
+                    Ok(())
+                }
+                // 全部收件箱：对全部账号同步收件箱更早邮件
+                Some(NavTarget::AllInbox) => {
+                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    for a in accounts {
+                        let _ = api.sync_older_emails(a.id, EmailCategory::Inbox).await;
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            if rx.recv().await.is_ok() && let Some(store) = store.upgrade() {
+                store.update(cx, |s, cx| {
+                    s.refresh_now(&api_keep, cx);
+                });
+            }
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |state, cx| {
+                    state.delegate_mut().older_syncing = false;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
 }
 
 pub struct EmailListView {
     pub state: Entity<ListState<EmailListDelegate>>,
     pub store: Entity<EmailsStore>,
     pub api: Arc<CoreApi>,
-    pub older_syncing: bool,
 }
 
 enum SelectedAction {
@@ -495,63 +598,6 @@ impl EmailListView {
                     store.refresh_now(&api_keep, cx);
                 });
                 this.update(cx, |_, cx| cx.notify()).ok();
-            }
-        })
-        .detach();
-    }
-
-    fn load_more(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let api = self.api.clone();
-        self.store.update(cx, |store, cx| {
-            store.load_more(&api, cx);
-        });
-        cx.notify();
-    }
-
-    /// 加载更早邮件（sync_older_emails，对当前范围账号）。
-    fn sync_older(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.older_syncing {
-            return;
-        }
-        self.older_syncing = true;
-        cx.notify();
-        let api = self.api.clone();
-        let nav = self.store.read(cx).nav.clone();
-        let rx = spawn_tokio(async move {
-            match &nav {
-                NavTarget::AccountFolder { account_id, .. } => {
-                    api.sync_older_emails(*account_id, EmailCategory::Inbox).await.map(|_| ())
-                }
-                NavTarget::Category(c) => {
-                    let accounts = api.list_accounts().await.unwrap_or_default();
-                    for a in accounts {
-                        let _ = api.sync_older_emails(a.id, c.clone()).await;
-                    }
-                    Ok(())
-                }
-                // 全部收件箱：对全部账号同步收件箱更早邮件
-                NavTarget::AllInbox => {
-                    let accounts = api.list_accounts().await.unwrap_or_default();
-                    for a in accounts {
-                        let _ = api.sync_older_emails(a.id, EmailCategory::Inbox).await;
-                    }
-                    Ok(())
-                }
-                _ => Ok(()),
-            }
-        });
-        let store = self.store.clone();
-        let api2 = self.api.clone();
-        cx.spawn(async move |this, cx| {
-            if rx.recv().await.is_ok() {
-                store.update(cx, |store, cx| {
-                    store.refresh_now(&api2, cx);
-                });
-                this.update(cx, |view, cx| {
-                    view.older_syncing = false;
-                    cx.notify();
-                })
-                .ok();
             }
         })
         .detach();
@@ -611,8 +657,6 @@ impl Render for EmailListView {
             .find(|e| Some(e.id) == store.selected)
             .map(|e| !e.is_read)
             .unwrap_or(false);
-        let can_more = (store.emails.len() as u64) < store.total;
-
         let mut toolbar = h_flex()
             .gap_1()
             .items_center()
@@ -691,38 +735,13 @@ impl Render for EmailListView {
                 );
         }
 
+        // 加载按钮在列表末尾（delegate render_section_footer）：滚到底才可见
         v_flex()
             .size_full()
             .p_2()
             .gap_2()
             .child(toolbar)
             .child(List::new(&self.state).flex_1())
-            .child(
-                h_flex()
-                    .flex_none()
-                    .gap_2()
-                    .justify_center()
-                    .when(can_more, |this| {
-                        this.child(
-                            Button::new("load-more")
-                                .ghost()
-                                .xsmall()
-                                .label(t("email.loadMore"))
-                                .on_click(cx.listener(Self::load_more)),
-                        )
-                    })
-                    .child(
-                        Button::new("sync-older")
-                            .ghost()
-                            .xsmall()
-                            .label(if self.older_syncing {
-                                t("email.syncingOlder")
-                            } else {
-                                t("email.syncOlder")
-                            })
-                            .on_click(cx.listener(Self::sync_older)),
-                    ),
-            )
     }
 }
 
@@ -749,6 +768,7 @@ pub fn rebuild_list_state(
                 selected_email: selected,
                 store: weak,
                 api: api.clone(),
+                older_syncing: false,
             },
             window,
             cx,

@@ -372,7 +372,6 @@ impl Render for AppShell {
                 state,
                 store: self.emails.clone(),
                 api,
-                older_syncing: false,
             }));
             self.list_nav_version = nav_v;
             self.list_data_version = data_v;
