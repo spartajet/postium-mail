@@ -78,6 +78,13 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: SyncEventRx, cx: &mut App) {
         },
         None => WindowOptions::default(),
     };
+    // 原生标题栏深浅只随系统外观（Windows 上无法应用内切换），改为透明 +
+    // 应用自绘标题栏（views::title_bar，背景跟随主题 title_bar 色）
+    let mut options = options;
+    options.titlebar = Some(TitlebarOptions {
+        appears_transparent: true,
+        ..Default::default()
+    });
     let (_handle, shell_view) = gpui_kit::open_window(
         options,
         cx,
@@ -468,8 +475,17 @@ impl Render for AppShell {
                 .into_any_element(),
         };
 
-        // 根布局：侧栏（fixed 面板，拖把手可调宽）+ 内容列
-        h_resizable("root-columns")
+        // 根布局：自定义标题栏（跟随主题深浅）+ 侧栏/内容列（拖把手可调宽）
+        v_flex()
+            .size_full()
+            .child(crate::views::title_bar::render(window, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(
+                        h_resizable("root-columns")
             .child(
                 resizable_panel()
                     .size(px(220.))
@@ -525,6 +541,8 @@ impl Render for AppShell {
                         }
                     })
                     .into_any_element(),
+            ),
+                    ),
             )
     }
 }
