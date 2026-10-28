@@ -243,8 +243,9 @@ impl AppShell {
                 SidebarEvent::Settings => {
                     let api = this.api.clone();
                     let accounts = this.accounts.clone();
+                    let sync = this.sync_store.clone();
                     cx.defer(move |cx| {
-                        crate::views::settings::open_settings_window(&accounts, &api, cx);
+                        crate::views::settings::open_settings_window(&accounts, &sync, &api, cx);
                     });
                 }
                 SidebarEvent::Compose => {

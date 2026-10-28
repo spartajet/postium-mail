@@ -43,7 +43,7 @@ impl SyncStore {
         .detach();
     }
 
-    fn apply(&mut self, event: SyncProgressEvent) {
+    pub(crate) fn apply(&mut self, event: SyncProgressEvent) {
         let p = &event.progress;
         let text = if p.total > 0 {
             format!("{}/{}", p.current, p.total)

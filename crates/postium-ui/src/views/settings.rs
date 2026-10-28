@@ -25,8 +25,14 @@ use crate::runtime::spawn_tokio;
 use crate::stores::accounts::AccountsStore;
 
 /// 打开设置窗口（居中 980×640：180 导航 + 最宽 768 面板 + 边距，内容不再被裁切）。
-pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>, cx: &mut App) {
+pub fn open_settings_window(
+    accounts: &Entity<AccountsStore>,
+    sync: &Entity<crate::stores::sync::SyncStore>,
+    api: &Arc<CoreApi>,
+    cx: &mut App,
+) {
     let accounts = accounts.clone();
+    let sync = sync.clone();
     let api = api.clone();
     gpui_kit::open_window(
         WindowOptions {
@@ -38,7 +44,9 @@ pub fn open_settings_window(accounts: &Entity<AccountsStore>, api: &Arc<CoreApi>
             ..Default::default()
         },
         cx,
-        move |window, cx| cx.new(|cx| SettingsView::new(accounts.clone(), api.clone(), window, cx)),
+        move |window, cx| {
+            cx.new(|cx| SettingsView::new(accounts.clone(), sync.clone(), api.clone(), window, cx))
+        },
     )
     .expect("打开设置窗口失败");
     cx.activate(true);
@@ -234,6 +242,8 @@ pub struct SettingsView {
     /// 当前分区
     pub(crate) active_section: SettingsSection,
     pub(crate) accounts: Entity<AccountsStore>,
+    /// 同步状态（添加账号后的首同步进度转发到这里，状态栏展示）
+    pub(crate) sync: Entity<crate::stores::sync::SyncStore>,
     api: Arc<CoreApi>,
     /// 主题偏好（dark | light | system）
     pub(crate) theme_pref: String,
@@ -255,6 +265,7 @@ pub struct SettingsView {
 impl SettingsView {
     pub(crate) fn new(
         accounts: Entity<AccountsStore>,
+        sync: Entity<crate::stores::sync::SyncStore>,
         api: Arc<CoreApi>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -285,6 +296,7 @@ impl SettingsView {
         Self {
             active_section: SettingsSection::General,
             accounts,
+            sync,
             api,
             theme_pref: crate::ui_state::load().theme.unwrap_or_else(|| "dark".into()),
             _appearance_sub: appearance_sub,
@@ -669,7 +681,8 @@ impl SettingsView {
     }
 
     /// 触发后台首次同步并刷新账号列表（不关窗；供向导与测试复用）。
-    /// 消费进度事件至完成（保活通道）；完成后刷新账号列表与主窗口邮件列表。
+    /// 进度事件转发到 SyncStore（主窗口状态栏展示）；完成后刷新账号列表
+    /// 与主窗口邮件列表。
     pub(crate) fn begin_sync(&mut self, cx: &mut Context<Self>) {
         let Some(add) = self.add.as_ref() else { return };
         let Some(id) = add.pending_sync else { return };
@@ -679,12 +692,31 @@ impl SettingsView {
         let api_keep = self.api.clone();
         let accounts_store = self.accounts.clone();
         let accounts_store_late = self.accounts.clone();
+        let sync_store = self.sync.clone();
         let (tx, rx) = smol::channel::bounded(256);
+        // 即时反馈：事件尚未到达前状态栏先进入同步态
+        sync_store.update(cx, |store, cx| {
+            store.syncing = true;
+            store.progress.insert(id, "准备同步...".into());
+            cx.notify();
+        });
         let _ = spawn_tokio(async move {
             let _ = api_sync.sync_account_with_range(tx, id, range).await;
         });
         cx.spawn(async move |_, cx| {
-            while rx.recv().await.is_ok() {}
+            // 进度事件逐条转发给状态栏（SyncStore::apply 内含 Completed 收尾）
+            while let Ok(event) = rx.recv().await {
+                let _ = sync_store.update(cx, |store, cx| {
+                    store.apply(event);
+                    cx.notify();
+                });
+            }
+            // 通道关闭（同步结束）：兜底复位状态，防止 Completed 事件丢失时卡在同步态
+            let _ = sync_store.update(cx, |store, cx| {
+                store.progress.remove(&id);
+                store.syncing = !store.progress.is_empty();
+                cx.notify();
+            });
             let _ = accounts_store_late.update(cx, |store, cx| {
                 store.reload(&api_keep, cx);
             });
