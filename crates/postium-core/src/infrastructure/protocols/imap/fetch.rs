@@ -146,10 +146,9 @@ impl ImapClient {
 
         let fetches = self
             .session
-            .uid_fetch(
-                uid_set,
-                "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER] BODYSTRUCTURE UID)",
-            )
+            // 不请求 BODYSTRUCTURE（非标准服务器会让解析中断）；骨架同步
+            // 本就不含正文，附件元数据由增量/详情阶段的全文解析补全
+            .uid_fetch(uid_set, "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER] UID)")
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
@@ -182,10 +181,8 @@ impl ImapClient {
 
             if let Some(raw) = raw_header {
                 if let Some(parsed) = parser::parse_headers_from_raw(raw, now_ts) {
-                    let attachments = fetch
-                        .bodystructure()
-                        .map(|bs| parser::extract_attachments(bs, ""))
-                        .unwrap_or_default();
+                    // 骨架同步无正文，无法解析附件；列表暂空，增量/详情阶段补全
+                    let attachments = Vec::new();
 
                     tracing::trace!(uid, attachment_count = attachments.len(), "解析附件完成");
 
@@ -531,14 +528,14 @@ impl ImapClient {
 
         tracing::trace!("批量获取完整邮件: folder={}, uid_set={}", folder, uid_set);
 
-        // 批量 FETCH：FLAGS + BODYSTRUCTURE + BODY.PEEK[] + INTERNALDATE + UID
-        // 不再使用 ENVELOPE，所有邮件头通过 mail_parser 从 BODY.PEEK[] 解析
+        // 批量 FETCH：FLAGS + BODY.PEEK[] + INTERNALDATE + UID
+        // 不使用 ENVELOPE（头部从 BODY.PEEK[] 解析）；
+        // 不请求 BODYSTRUCTURE——网易等服务器会返回非标准 BODYSTRUCTURE
+        // （如 ("filename" NIL)），imap-proto 解析失败会让整个 FETCH 中断，
+        // 附件元数据改为从邮件原文自解析（见 parser::extract_attachments_from_raw）
         let fetches = self
             .session
-            .uid_fetch(
-                uid_set,
-                "(FLAGS INTERNALDATE BODYSTRUCTURE BODY.PEEK[] UID)",
-            )
+            .uid_fetch(uid_set, "(FLAGS INTERNALDATE BODY.PEEK[] UID)")
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?
             .try_collect::<Vec<async_imap::types::Fetch>>()
@@ -593,10 +590,10 @@ impl ImapClient {
                 .map(|d| d.with_timezone(&chrono::Utc))
                 .unwrap_or_else(chrono::Utc::now);
 
-            // ─── BODYSTRUCTURE → 附件 ───
+            // ─── 邮件原文 → 附件元数据（含 IMAP section 编号） ───
             let attachments = fetch
-                .bodystructure()
-                .map(|bs| parser::extract_attachments(bs, ""))
+                .body()
+                .map(parser::extract_attachments_from_raw)
                 .unwrap_or_default();
 
             tracing::trace!(uid, attachment_count = attachments.len(), "解析附件完成");
@@ -716,10 +713,8 @@ impl ImapClient {
         let query = uid.to_string();
         let mut fetches = self
             .session
-            .uid_fetch(
-                &query,
-                "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[] BODYSTRUCTURE UID)",
-            )
+            // 不请求 BODYSTRUCTURE：见 fetch_whole_emails_by_uid_set 同款说明
+            .uid_fetch(&query, "(FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[] UID)")
             .await
             .map_err(|e| MailError::ImapError(e.to_string()))?;
 
@@ -760,10 +755,7 @@ impl ImapClient {
         let preview = body_text
             .as_ref()
             .map(|text| text.chars().take(200).collect());
-        let attachments = fetch
-            .bodystructure()
-            .map(|bs| parser::extract_attachments(bs, ""))
-            .unwrap_or_default();
+        let attachments = parser::extract_attachments_from_raw(raw_body);
         let received_at = fetch
             .internal_date()
             .map(|date| date.timestamp())
