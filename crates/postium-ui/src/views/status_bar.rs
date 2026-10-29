@@ -46,6 +46,7 @@ impl Render for StatusBar {
             .border_color(cx.theme().border)
             .text_size(px(11.5))
             .text_color(cx.theme().muted_foreground)
+            .debug_selector(|| "app-status-bar".to_string())
             .child(
                 gpui_kit::component::Icon::new(if store.syncing {
                     IconName::LoaderCircle

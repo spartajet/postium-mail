@@ -567,6 +567,11 @@ impl Render for EmailDetailView {
         v_flex()
             .flex_1()
             .size_full()
+            // 显式 min_h_0：正文滚动区之上最后一级列容器——HTML 正文超视口时
+            // min-content 高度沿祖先链上泄（滚动区的 min_h_0 只封自己），把
+            // 主内容列撑满整窗、底部状态栏挤出窗口（线上反馈：显示邮件时
+            // 状态栏消失）
+            .min_h_0()
             .min_w(px(380.))
             .border_l_1()
             .border_color(cx.theme().border)

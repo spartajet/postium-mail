@@ -2623,6 +2623,151 @@ fn html_cache_same_id_new_content_renders(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// 线上反馈（状态栏消失）：显示 HTML 邮件（图文混排导航 + border 表格）后，
+// 底部状态栏不可见。回归锚点：打开邮件前后状态栏探针 bounds 恒在窗口内
+// 且高度 > 0。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_display_keeps_status_bar(cx: &mut TestAppContext) {
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    force_e2e_data_dir();
+    let (api, sync_rx) = boot(dir.path());
+
+    // 用户实测窗口尺寸（window-state.json：1636×847）——布局敏感回归按真实
+    // 尺寸复现（add_window_view 默认最大化尺寸，宽高差异即漏报面）
+    let (shell, cx) = {
+        let handle = cx.open_window(
+            gpui_kit::size(gpui_kit::px(1636.), gpui_kit::px(847.)),
+            |window, cx| {
+                setup(cx);
+                AppShell::new(api.clone(), sync_rx, window, cx)
+            },
+        );
+        let shell = handle.root(cx).expect("窗口根视图应可获取");
+        let cx = gpui_pre::VisualTestContext::from_window(handle.into(), cx).into_mut();
+        (shell, cx)
+    };
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 打开邮件前：状态栏可见（height > 0）
+    cx.refresh().expect("测试窗口重绘调度失败");
+    let bar_before = cx
+        .debug_bounds("app-status-bar")
+        .expect("无邮件时状态栏应在渲染树中");
+    assert!(
+        bar_before.size.height > gpui_kit::px(0.),
+        "无邮件时状态栏高度应 > 0，实际 {:?}",
+        bar_before.size
+    );
+
+    // 用户实测邮件原文（本地 DB 提取的阿里云续费通知——状态栏消失的实际
+    // 复现载体：inline-block 导航 + 分隔图 + border 表格 + 百分比布局样式。
+    // e2e 草稿远端固定 UID 同账号仅一封，直接用最复杂形态）
+    let real_body = include_str!("e2e_fixtures/aliyun_renewal.html");
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Status Bar Probe".into(),
+            body_text: "状态栏回归探针正文".into(),
+            body_html: real_body.to_string(),
+            attachments: vec![],
+        };
+        let save_api = api.clone();
+        crate::runtime::runtime()
+            .block_on(async move { save_api.save_draft(req).await })
+            .expect("草稿应保存成功")
+            .draft_id
+    };
+
+    for id in [draft_id] {
+        with_app_mut(cx, |app| {
+            shell.update(app, |shell, cx| {
+                shell.emails.update(cx, |store, cx| {
+                    store.selected = Some(id);
+                    store.selected_version += 1;
+                    cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(id));
+                    cx.notify();
+                });
+            });
+        });
+        wait_for(cx, |cx| {
+            with_app(cx, |app| {
+                let view = shell.read(app).detail_view.clone()?;
+                let detail = view.read(app).store.read(app).detail.clone()?;
+                (detail.email.id == id).then_some(())
+            })
+        });
+        cx.run_until_parked();
+        cx.refresh().expect("测试窗口重绘调度失败");
+
+        let bar = cx
+            .debug_bounds("app-status-bar")
+            .unwrap_or_else(|| panic!("打开邮件 {id} 后状态栏应仍在渲染树中"));
+        assert!(
+            bar.size.height > gpui_kit::px(0.),
+            "邮件 {id}：状态栏高度应 > 0，实际 {:?}",
+            bar.size
+        );
+        // 在窗口可视范围内（被挤出窗口底部 = 用户看到的现象）
+        let window_h = cx.update(|window, _| window.bounds().size.height);
+        assert!(
+            bar.origin.y + bar.size.height <= window_h,
+            "邮件 {id}：状态栏应完整落在窗口内（y={:?}, h={:?}, 窗口高 {window_h:?}）",
+            bar.origin.y,
+            bar.size.height
+        );
+
+        // ---- 放行 + 已加载真图形态（用户实测状态：发件人白名单记忆后自动放行）----
+        with_app_mut(cx, |app| {
+            shell.update(app, |shell, cx| {
+                shell.detail.update(cx, |store, cx| {
+                    let html = store.html.clone().unwrap_or_default();
+                    let doc = store.cached_doc(id, &html, false).expect("文档应可解析");
+                    let urls = crate::views::email_html::collect_remote_image_urls(&doc);
+                    store.allow_remote_images(urls.clone(), &api, cx);
+                    let mut resolved = store.images.resolved.lock().unwrap();
+                    for (ix, url) in urls.into_iter().enumerate() {
+                        // 首图按真实 logo 尺寸 212×48，其余 600×200 横幅
+                        let (w, h) = if ix == 0 { (212, 48) } else { (600, 200) };
+                        resolved.insert(url, Some(synthetic_render_image(w, h)));
+                    }
+                });
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        cx.refresh().expect("测试窗口重绘调度失败");
+        let bar = cx
+            .debug_bounds("app-status-bar")
+            .expect("真图形态下状态栏应在渲染树中");
+        assert!(
+            bar.size.height > gpui_kit::px(0.),
+            "真图形态：状态栏高度应 > 0，实际 {:?}",
+            bar.size
+        );
+    }
+    cx.run_until_parked();
+}
+
+/// 合成固定尺寸的已解码图片（wrap-flow 真图形态的布局压力载体）。
+fn synthetic_render_image(w: u32, h: u32) -> Arc<gpui_kit::RenderImage> {
+    let buffer = image::RgbaImage::from_pixel(w, h, image::Rgba([120, 120, 220, 255]));
+    Arc::new(gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)]))
+}
+
+// ---------------------------------------------------------------------------
 // Task 13：图片管线 UI——含远程图邮件打开后默认拦截（占位框出现、无已加载
 // 真图、「加载图片」条可见）；点击加载按钮 → images_enabled 翻转；e2e_offline
 // 下 fetch_image 短路 Err → resolved 记录失败（None）→ 占位框保留（无网络

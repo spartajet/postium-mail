@@ -615,6 +615,7 @@ impl Render for AppShell {
                     .relative()
                     .flex_1()
                     .size_full()
+                    .min_h_0()
                     .p_2()
                     .gap_2()
                     // 顶栏：搜索 + 当前视图标题 + 语言/主题
