@@ -10,4 +10,4 @@ pub use transport::{ImapSession, RealSession};
 pub mod factory;
 pub mod pool;
 pub use factory::{RealSessionFactory, SessionFactory};
-pub use pool::{PooledSession, PoolConnect};
+pub use pool::{ConnectionPool, PooledSession, PoolConnect};
