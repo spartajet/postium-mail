@@ -12,11 +12,13 @@ pub struct CapabilitySet {
 }
 
 impl CapabilitySet {
-    /// 从 CAPABILITY 响应行构建（每行一个能力名，如 "IMAP4REV1"、"QRESYNC"）。
+    /// 从 CAPABILITY 响应构建（接收整行或行内能力名列表，内部按空白切分，
+    /// 如 "* CAPABILITY IMAP4rev1 IDLE QRESYNC" 或单个 "QRESYNC"）。
     pub fn parse(responses: &[String]) -> Self {
         Self {
             caps: responses
                 .iter()
+                .flat_map(|line| line.split_whitespace())
                 .map(|c| c.trim().trim_matches('"').to_ascii_uppercase())
                 .filter(|c| !c.is_empty())
                 .collect(),
@@ -73,6 +75,11 @@ mod tests {
         assert!(caps.qresync());
         assert!(caps.idle());
         assert!(!caps.supports("CONDSTORE"));
+
+        // 整行传入：按空白切分，前缀 "*" 与 "CAPABILITY" 不影响能力判断
+        let line = CapabilitySet::parse(&["* CAPABILITY IMAP4rev1 IDLE QRESYNC".into()]);
+        assert!(line.supports("IDLE"));
+        assert!(line.qresync());
     }
 
     #[test]
