@@ -758,7 +758,18 @@ pub fn decode_render_image(bytes: &[u8]) -> Option<Arc<RenderImage>> {
     ) {
         return None;
     }
-    let decoded = reader.decode().ok()?;
+    // 像素尺寸上限（终审裁定）：10MB 下载上限不约束解压后尺寸（PNG 炸弹
+    // 可膨胀至数十 GB 分配），解码前按头部声明尺寸拒绝（into_dimensions
+    // 消耗 reader，尺寸通过后按已知格式重建）
+    const MAX_PIXELS: u64 = 64 * 1024 * 1024; // 64MP ≈ 8K×8K
+    let format = reader.format()?;
+    let (w, h) = reader.into_dimensions().ok()?;
+    if w == 0 || h == 0 || u64::from(w) * u64::from(h) > MAX_PIXELS {
+        return None;
+    }
+    let decoded = image::ImageReader::with_format(std::io::Cursor::new(bytes), format)
+        .decode()
+        .ok()?;
     let mut raw = decoded.to_rgba8().into_raw();
     for [r, _, b, _] in raw.as_chunks_mut::<4>().0 {
         std::mem::swap(r, b); // RGBA → BGRA
