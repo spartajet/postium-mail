@@ -3,3 +3,6 @@
 
 pub mod capabilities;
 pub use capabilities::CapabilitySet;
+
+pub mod transport;
+pub use transport::{ImapSession, RealSession};

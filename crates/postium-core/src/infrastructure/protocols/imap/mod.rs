@@ -455,6 +455,14 @@ impl ImapClient {
         Ok(())
     }
 
+    /// 发送任意命令并检查 OK（引擎 ENABLE 用）。
+    pub async fn run_command_and_check_ok(&mut self, cmd: &str) -> Result<(), MailError> {
+        self.session
+            .run_command_and_check_ok(cmd)
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("命令 {cmd} 失败: {e}")))
+    }
+
     /// 获取服务器能力列表
     ///
     /// # 返回
