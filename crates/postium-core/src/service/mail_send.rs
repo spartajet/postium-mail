@@ -112,12 +112,15 @@ impl SentArchiveWriter for RealSentArchiveWriter {
         let handle = self.engine.imap_engine(&req.account).await?;
         let email = String::from_utf8(req.raw)
             .map_err(|e| MailError::InvalidParam(format!("邮件原文不是有效 UTF-8: {e}")))?;
+        // message_id 传 None：旧 Sent 路径不需要 UID，APPEND 成功即归档成功。
+        // 若传 Some 会额外 SEARCH 确认，服务器延迟/Message-ID 缺失时会把
+        // "追加成功"误报成整封发送失败（ImapSearchFailed）。
         handle
             .request(|reply| EngineCommand::Append {
                 folder: req.folder.clone(),
                 email,
                 flags: vec!["\\Seen".to_string()],
-                message_id: Some(req.message_id.clone()),
+                message_id: None,
                 reply,
             })
             .await

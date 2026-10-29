@@ -118,6 +118,10 @@ impl DraftRemoteWriter for RealDraftRemoteWriter {
         folder: &str,
         uid: u32,
     ) -> Result<(), MailError> {
+        // 注意：走引擎 Delete 命令 = \Deleted + EXPUNGE，而 EXPUNGE 作用于
+        // 整个文件夹（async-imap 0.11 无 UID EXPUNGE）——同文件夹内其他客户端
+        // 已标 \Deleted 的邮件会被一并物理清除。风险说明见 engine/transport.rs
+        // `ImapSession::delete` 文档；当前仅用于草稿删除，可接受。
         let handle = self.engine.imap_engine(account).await?;
         let folder = folder.to_string();
         handle
