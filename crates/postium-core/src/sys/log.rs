@@ -27,8 +27,11 @@ pub fn setup_logging() {
             // - tao：窗口系统事件；globset：构建 glob 集合
             // - html5ever/markup5ever：HTML 解析器逐 tag 的 tree_builder 调试
             //   （邮件正文解析时每封上千行）
+            // - selectors：css-inline 类名匹配的 DEBUG 会把整个文档 DOM
+            //   Debug 转储进单条日志（MB 级/条 × 每元素每选择器）——渲染线程
+            //   同步写终端直接卡死应用（日志目标文件 selectors/matching.rs）
             EnvFilter::new(
-                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper-util=warn,html5ever=warn,markup5ever=warn",
+                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper-util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
             )
         }
         #[cfg(not(debug_assertions))]
