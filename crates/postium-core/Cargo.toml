@@ -31,7 +31,6 @@ tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 base64 = "0.22"
 dirs = "6"
-keyring = "3"
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
 rfc2047-decoder = "1"
@@ -40,6 +39,16 @@ utf7-imap = "0.3"
 uuid = { version = "1", features = ["v4"] }
 open = "5"
 moka = { version = "0.12.16", features = ["future"] }
+
+# keyring 平台原生后端（裸依赖会静默落入 mock 凭据库，密码根本不落盘）
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3"

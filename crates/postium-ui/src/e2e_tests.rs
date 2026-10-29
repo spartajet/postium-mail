@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use chrono::Datelike as _;
+use gpui_kit::AppContext as _;
 use gpui_pre::{Focusable as _, TestAppContext, VisualTestContext};
 use postium_core::api::CoreApi;
 
@@ -772,8 +773,9 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
     let api_for_view = api.clone();
     let (settings, cx) = cx.add_window_view(|window, cx| {
         setup(cx);
+        let sync_store = cx.new(|cx| crate::stores::sync::SyncStore::new(cx));
         let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
-        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+        crate::views::settings::SettingsView::new(accounts, sync_store.clone(), api_for_view.clone(), window, cx)
     });
 
     // 等初始账号列表装载完成（settle 后台任务，保证确定性）
@@ -1074,8 +1076,9 @@ fn add_account_modal_closes_on_escape(cx: &mut TestAppContext) {
     let api_for_view = api.clone();
     let (settings, cx) = cx.add_window_view(|window, cx| {
         setup(cx);
+        let sync_store = cx.new(|cx| crate::stores::sync::SyncStore::new(cx));
         let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
-        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+        crate::views::settings::SettingsView::new(accounts, sync_store.clone(), api_for_view.clone(), window, cx)
     });
 
     // 打开向导并等服务商装载（焦点已落在弹窗）
@@ -1792,8 +1795,9 @@ fn settings_sections_navigate(cx: &mut TestAppContext) {
     let api_for_view = api.clone();
     let (settings, cx) = cx.add_window_view(|window, cx| {
         setup(cx);
+        let sync_store = cx.new(|cx| crate::stores::sync::SyncStore::new(cx));
         let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
-        crate::views::settings::SettingsView::new(accounts, api_for_view.clone(), window, cx)
+        crate::views::settings::SettingsView::new(accounts, sync_store.clone(), api_for_view.clone(), window, cx)
     });
 
     // 默认落在"通用"分区（对齐旧版 activeSection 初始值）

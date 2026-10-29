@@ -78,6 +78,16 @@ pub fn set_lang(lang: Lang, cx: &mut App) {
     cx.set_global(I18nGlobal { lang });
 }
 
+/// 中/英互切并持久化偏好（顶栏与状态栏按钮共用）。调用方负责触发重绘。
+pub fn toggle_language(cx: &mut App) {
+    let current = cx.global::<I18nGlobal>().lang;
+    let next = if current == Lang::Zh { Lang::En } else { Lang::Zh };
+    set_lang(next, cx);
+    let mut ui = crate::ui_state::load();
+    ui.lang = Some(match next { Lang::Zh => "zh".into(), Lang::En => "en".into() });
+    crate::ui_state::save(&ui);
+}
+
 /// 当前语言（无上下文读取，供渲染层分段控件等使用）。
 pub fn current_lang() -> Lang {
     Lang::from_u8(CURRENT.load(Ordering::Relaxed))

@@ -351,7 +351,7 @@ fn draft_preview(req: &SaveDraftRequest) -> String {
     } else {
         req.body_text.trim()
     };
-    preview.chars().take(200).collect()
+    crate::infrastructure::protocols::imap::parser::normalize_preview(preview)
 }
 
 fn join_addresses(values: &[String]) -> String {

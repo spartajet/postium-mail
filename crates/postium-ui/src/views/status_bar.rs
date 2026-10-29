@@ -72,8 +72,57 @@ impl Render for StatusBar {
                         }
                     }),
             )
-            // 右侧：上次同步时间
-            .child(div().ml_auto().child(last_sync_text(self.accounts.read(cx))))
+            // 右侧：语言/主题切换（图标）+ 上次同步时间
+            .child(
+                h_flex()
+                    .ml_auto()
+                    .gap_1()
+                    .child(
+                        Button::new("status-lang")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::Languages)
+                            .tooltip("切换中/英文")
+                            .on_click({
+                                let this = cx.entity().downgrade();
+                                move |_, _, cx| {
+                                    crate::i18n::toggle_language(cx);
+                                    refresh_after_pref(&this, cx);
+                                }
+                            }),
+                    )
+                    .child(
+                        // 图标随当前主题：暗色显示太阳（点击转浅色），浅色显示月亮
+                        Button::new("status-theme")
+                            .ghost()
+                            .xsmall()
+                            .icon(if cx.theme().mode == gpui_kit::component::ThemeMode::Dark {
+                                IconName::Sun
+                            } else {
+                                IconName::Moon
+                            })
+                            .tooltip("切换深浅主题")
+                            .on_click({
+                                let this = cx.entity().downgrade();
+                                move |_, _, cx| {
+                                    crate::theme::toggle_theme_mode(cx);
+                                    refresh_after_pref(&this, cx);
+                                }
+                            }),
+                    )
+                    .child(div().child(last_sync_text(self.accounts.read(cx)))),
+            )
+    }
+}
+
+/// 偏好（语言/主题）切换后刷新主窗口树与状态栏自身。
+/// 语言切换不经过任何实体事件，必须显式 notify 才能重绘新文案。
+fn refresh_after_pref(this: &gpui_kit::WeakEntity<StatusBar>, cx: &mut App) {
+    if let Some(main) = cx.try_global::<crate::app::MainShell>() {
+        cx.notify(main.0.entity_id());
+    }
+    if let Some(this) = this.upgrade() {
+        cx.notify(this.entity_id());
     }
 }
 

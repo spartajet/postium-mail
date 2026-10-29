@@ -46,6 +46,6 @@ fn main() {
             gpui_kit::init(cx);
             postium_editor::init(cx);
             cx.set_global(i18n::I18nGlobal { lang: i18n::Lang::Zh });
-            app::open_main_window(api, sync_rx, cx);
+            app::open_main_window(api, Some(sync_rx), cx);
         });
 }

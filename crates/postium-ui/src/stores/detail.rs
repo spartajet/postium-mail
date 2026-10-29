@@ -116,10 +116,16 @@ impl DetailStore {
                     if store.email_id != Some(email_id) {
                         return;
                     }
-                    if let Ok(detail) = detail {
-                        store.html = Some(detail.body_html.clone().unwrap_or_default());
-                        store.detail = Some(detail);
-                        store.images.attachments = attachments;
+                    match detail {
+                        Ok(detail) => {
+                            // 正文 HTML 原文透传（图片三源由渲染层按 ImageRef 消费）
+                            store.html = Some(detail.body_html.clone().unwrap_or_default());
+                            store.detail = Some(detail);
+                            store.images.attachments = attachments;
+                        }
+                        Err(e) => {
+                            tracing::warn!(target: "postium::ui", email_id, "加载邮件详情失败: {e}")
+                        }
                     }
                     store.loading = false;
                     cx.emit(DetailEvent::Loaded);

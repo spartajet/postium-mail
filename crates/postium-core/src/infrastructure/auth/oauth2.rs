@@ -44,6 +44,33 @@ use tokio::sync::Mutex;
 
 // static REDIRECT_URI: &str = "http://localhost:{port}/oauth/callback";
 
+/// 按提供商标识解析 OAuth2 凭据的查找键：
+/// 返回（环境变量前缀，配置文件键名）。
+fn credential_keys(provider_id: &str) -> (&'static str, &'static str) {
+    let id = provider_id.to_ascii_lowercase();
+    if id.contains("microsoft") || id.contains("outlook") {
+        ("MICROSOFT", "microsoft_client_id")
+    } else {
+        ("GOOGLE", "google_client_id")
+    }
+}
+
+/// 校验 OAuth2 凭据已配置，未配置时返回带指引的错误。
+///
+/// 凭据由构建脚本从工作区根 `.env` 编译期注入（见 postium-core/build.rs）：
+/// 构建时没有 `.env` 或其中缺少键，`option_env!` 结果为空串，
+/// 授权 URL 会缺 `client_id`（微软报 AADSTS900144）——这里提前拦截。
+fn ensure_credentials(provider_id: &str, config: &crate::domain::providers::OAuthConfig) -> Result<(), MailError> {
+    if config.client_id.trim().is_empty() {
+        let (env_prefix, _) = credential_keys(provider_id);
+        return Err(MailError::OAuth2Error(format!(
+            "未配置 OAuth2 客户端 ID：请在工作区根目录创建 .env 文件，\
+             写入 {env_prefix}_CLIENT_ID=你的客户端ID 后重新构建"
+        )));
+    }
+    Ok(())
+}
+
 /// OAuth2 授权 URL 结果
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OAuth2AuthUrl {
@@ -95,6 +122,8 @@ struct PendingSession {
     pkce_verifier: Option<PkceCodeVerifier>,
     /// 本地回调监听端口
     port: u16,
+    /// 授权时使用的重定向 URI（code 换 token 必须原样携带）
+    redirect_uri: String,
     /// 提供商标识（如 "gmail"、"outlook"）
     provider_id: String,
     /// 用户邮箱
@@ -212,22 +241,71 @@ impl OAuth2Manager {
         let config = provider.oauth_config().ok_or_else(|| {
             MailError::OAuth2Error(format!("provider {provider_id} 不支持 OAuth2"))
         })?;
+        ensure_credentials(provider_id, &config)?;
 
-        // 绑定临时端口用于回调
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| MailError::OAuth2Error(format!("绑定回调端口失败: {e}")))?;
+        // 重定向 URI：Outlook 默认对齐 Azure 公共客户端注册惯例
+        // （http://localhost/oauth/callback，见 .env.example），也可用
+        // MICROSOFT_REDIRECT_URI 等环境变量覆盖。请求 URI 必须与后台
+        // 注册值匹配——Azure 对 localhost 回跳忽略端口差异。
+        let redirect_str = config
+            .redirect_uri
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "http://localhost:36279/callback".to_string());
+        let parsed = url::Url::parse(&redirect_str)
+            .map_err(|e| MailError::OAuth2Error(format!("无效 redirect_uri: {e}")))?;
+
+        // 监听端口：URI 显式带端口时精确绑定（redirect 原样携带）；
+        // localhost 无端口（Azure 端口通配惯例）时优先 36279、占用则系统
+        // 分配，并在请求的 redirect_uri 上带上实际端口
+        let (listener, request_redirect) = match parsed.port() {
+            Some(port) => {
+                let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+                    .await
+                    .map_err(|e| {
+                        MailError::OAuth2Error(format!(
+                            "OAuth2 回调端口 {port} 被占用: {e}（释放该端口后重试）"
+                        ))
+                    })?;
+                (listener, redirect_str.clone())
+            }
+            None if parsed.scheme() == "http"
+                && matches!(parsed.host_str(), Some("localhost") | Some("127.0.0.1")) =>
+            {
+                const PREFERRED: u16 = 36279;
+                let listener = match tokio::net::TcpListener::bind(("127.0.0.1", PREFERRED)).await {
+                    Ok(l) => l,
+                    Err(_) => tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                        .await
+                        .map_err(|e| MailError::OAuth2Error(format!("绑定回调端口失败: {e}")))?,
+                };
+                let port = listener
+                    .local_addr()
+                    .map_err(|e| MailError::OAuth2Error(format!("获取本地地址失败: {e}")))?
+                    .port();
+                let mut with_port = parsed.clone();
+                with_port
+                    .set_port(Some(port))
+                    .map_err(|_| MailError::OAuth2Error("redirect_uri 不支持端口".into()))?;
+                (listener, with_port.to_string())
+            }
+            None => {
+                return Err(MailError::OAuth2Error(format!(
+                    "redirect_uri 缺少端口，且仅支持本机 http 回调: {redirect_str}"
+                )));
+            }
+        };
         let port = listener
             .local_addr()
             .map_err(|e| MailError::OAuth2Error(format!("获取本地地址失败: {e}")))?
             .port();
-        tracing::info!("使用本地端口 {port} 作为 OAuth2 回调端口");
+        tracing::info!("使用本地端口 {port} 作为 OAuth2 回调端口（redirect: {request_redirect}）");
 
         let auth_url = AuthUrl::new(config.auth_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 auth_url: {e}")))?;
         let token_url = TokenUrl::new(config.token_url.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 token_url: {e}")))?;
-        let redirect_url = RedirectUrl::new(format!("http://localhost:{port}/oauth/callback"))
+        let redirect_url = RedirectUrl::new(request_redirect.clone())
             .map_err(|e| MailError::OAuth2Error(format!("无效 redirect_url: {e}")))?;
 
         let client_id = ClientId::new(config.client_id.clone());
@@ -267,6 +345,7 @@ impl OAuth2Manager {
                 PendingSession {
                     pkce_verifier: Some(pkce_verifier),
                     port,
+                    redirect_uri: request_redirect.clone(),
                     provider_id: provider_id.to_string(),
                     email: email.to_string(),
                     display_name: display_name.map(|s| s.to_string()),
@@ -593,9 +672,8 @@ async fn do_token_exchange(
         AuthUrl::new(config.auth_url.clone()).map_err(|e| format!("无效 auth_url: {e}"))?;
     let token_url =
         TokenUrl::new(config.token_url.clone()).map_err(|e| format!("无效 token_url: {e}"))?;
-    let redirect_url =
-        RedirectUrl::new(format!("http://localhost:{}/oauth/callback", session.port))
-            .map_err(|e| format!("无效 redirect_url: {e}"))?;
+    let redirect_url = RedirectUrl::new(session.redirect_uri.clone())
+        .map_err(|e| format!("无效 redirect_url: {e}"))?;
 
     let client_id = ClientId::new(config.client_id.clone());
     let mut client_builder = BasicClient::new(client_id);

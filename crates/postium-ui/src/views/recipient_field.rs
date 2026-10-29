@@ -79,9 +79,16 @@ impl RecipientField {
                         self.chips.push(addr);
                     }
                 }
-                self.error = resp.invalid.first().map(|i| format!("{}：{}", i.raw, i.reason));
+                if let Some(invalid) = resp.invalid.first() {
+                    let msg = format!("{}：{}", invalid.raw, invalid.reason);
+                    tracing::warn!(target: "postium::ui", "收件人地址无效: {msg}");
+                    self.error = Some(msg);
+                } else {
+                    self.error = None;
+                }
             }
             Err(e) => {
+                tracing::warn!(target: "postium::ui", "收件人解析失败: {e}");
                 self.error = Some(format!("{e}"));
             }
         }
@@ -242,6 +249,7 @@ impl RecipientField {
         if let Some(err) = &self.error {
             row = row.child(
                 div()
+                    .max_w(px(240.))
                     .text_size(px(11.))
                     .text_color(gpui_kit::rgb(0xf43e5e))
                     .line_clamp(1)

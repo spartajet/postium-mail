@@ -88,9 +88,21 @@ fn setup_tray_inner(
                 match id {
                     "show" => {
                         cx.update(|cx| {
-                            if let Some(handle) = cx.active_window() {
-                                let _ = handle.update(cx, |_, window, _| {
-                                    window.activate_window();
+                            // 主窗口存活 → 激活置前；已关闭（X）→ 重建主窗口
+                            let shell_alive = cx
+                                .try_global::<crate::app::MainShell>()
+                                .and_then(|main| main.0.upgrade())
+                                .is_some();
+                            if shell_alive {
+                                if let Some(handle) = cx.active_window() {
+                                    let _ = handle.update(cx, |_, window, _| {
+                                        window.activate_window();
+                                    });
+                                }
+                            } else {
+                                let api = api.clone();
+                                cx.defer(move |cx| {
+                                    crate::app::open_main_window(api, None, cx);
                                 });
                             }
                         });
@@ -117,9 +129,14 @@ fn setup_tray_inner(
                     }
                     "quit" => {
                         cx.update(|cx| {
-                            if let Some(handle) = cx.active_window() {
-                                let _ = handle.update(cx, |_, window, _| {
-                                    crate::window_state::save(window);
+                            // 仅主窗口存活时保存其状态（走 MainShell 定位窗口）
+                            if let Some(main) = cx.try_global::<crate::app::MainShell>()
+                                && let Some(shell) = main.0.upgrade()
+                            {
+                                let _ = shell.update(cx, |shell, cx| {
+                                    let _ = shell.window_handle.update(cx, |_, window, _| {
+                                        crate::window_state::save(window);
+                                    });
                                 });
                             }
                             cx.quit();

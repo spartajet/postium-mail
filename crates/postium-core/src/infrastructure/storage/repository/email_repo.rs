@@ -1573,7 +1573,7 @@ pub(crate) async fn update_body(
     body_text: String,
     body_html: String,
 ) -> Result<(), MailError> {
-    let preview: Option<String> = Some(body_text.chars().take(200).collect());
+    let preview: Option<String> = Some(crate::infrastructure::protocols::imap::parser::normalize_preview(&body_text));
     let now = chrono::Utc::now().timestamp();
     let folder = folder.to_string();
 

@@ -36,6 +36,10 @@ pub fn saved_bounds() -> Option<Bounds<Pixels>> {
 /// 保存当前窗口状态。
 pub fn save(window: &Window) {
     let bounds = window.bounds();
+    // 最小化时 Windows 返回 -32000 系坐标，写入会毁掉已记忆的位置
+    if f32::from(bounds.origin.x) < -10000.0 || f32::from(bounds.origin.y) < -10000.0 {
+        return;
+    }
     let state = WindowState {
         x: f32::from(bounds.origin.x) as i32,
         y: f32::from(bounds.origin.y) as i32,

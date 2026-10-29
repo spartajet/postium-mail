@@ -321,7 +321,15 @@ impl ComposeView {
             | ComposeMode::Forward { account_id, .. } => Some(*account_id),
             ComposeMode::New => None,
         };
-        let rx = spawn_tokio(async move { api.list_accounts().await.unwrap_or_default() });
+        let rx = spawn_tokio(async move {
+            match api.list_accounts().await {
+                Ok(accs) => accs,
+                Err(e) => {
+                    tracing::warn!(target: "postium::ui", "写信窗口加载账号列表失败: {e}");
+                    Vec::new()
+                }
+            }
+        });
         cx.spawn(async move |this, cx| {
             if let Ok(accounts) = rx.recv().await {
                 let _ = this.update(cx, |view, cx| {
@@ -437,7 +445,15 @@ impl ComposeView {
     fn cycle_account(&mut self, cx: &mut Context<Self>) {
         let api = self.api.clone();
         let current = self.selected_account.clone();
-        let rx = spawn_tokio(async move { api.list_accounts().await.unwrap_or_default() });
+        let rx = spawn_tokio(async move {
+            match api.list_accounts().await {
+                Ok(accs) => accs,
+                Err(e) => {
+                    tracing::warn!(target: "postium::ui", "切换发件账号失败（加载账号列表）: {e}");
+                    Vec::new()
+                }
+            }
+        });
         cx.spawn(async move |this, cx| {
             if let Ok(accounts) = rx.recv().await
                 && accounts.len() > 1
@@ -548,19 +564,25 @@ impl ComposeView {
         }
         let to = self.collect_recipients(cx);
         if to.is_empty() {
-            self.status = t("email.sendRequiresRecipient");
+            let msg = t("email.sendRequiresRecipient");
+            tracing::info!(target: "postium::ui", "发送校验未通过: {msg}");
+            self.status = msg;
             cx.notify();
             return;
         }
         let subject = Self::value_of(&self.subject, cx);
         if subject.trim().is_empty() {
-            self.status = t("email.sendRequiresSubject");
+            let msg = t("email.sendRequiresSubject");
+            tracing::info!(target: "postium::ui", "发送校验未通过: {msg}");
+            self.status = msg;
             cx.notify();
             return;
         }
         let body_html = self.editor.read(cx).html(cx);
         if body_html.trim().is_empty() {
-            self.status = t("email.sendRequiresBody").to_string().into();
+            let msg: SharedString = t("email.sendRequiresBody").to_string().into();
+            tracing::info!(target: "postium::ui", "发送校验未通过: {msg}");
+            self.status = msg;
             cx.notify();
             return;
         }
@@ -582,6 +604,7 @@ impl ComposeView {
 
         self.sending = true;
         self.status = format!("{}...", t("email.send")).into();
+        tracing::info!(target: "postium::ui", subject = %subject, "开始发送邮件");
         cx.notify();
 
         let preferred_account = self.selected_account.clone();
@@ -591,7 +614,10 @@ impl ComposeView {
             let account_id = match preferred_account {
                 Some((id, _)) => id,
                 None => {
-                    let accounts = api.list_accounts().await.unwrap_or_default();
+                    let accounts = api.list_accounts().await.unwrap_or_else(|e| {
+                        tracing::warn!(target: "postium::ui", "发送前加载账号列表失败: {e}");
+                        Vec::new()
+                    });
                     let Some(account) = accounts.first() else {
                         return Err(postium_core::error::MailError::AccountNotFound(0));
                     };
@@ -632,6 +658,7 @@ impl ComposeView {
                     .ok();
                 }
                 Ok(Err(e)) => {
+                    tracing::warn!(target: "postium::ui", "邮件发送失败: {e}");
                     this.update(cx, |view, cx| {
                         view.sending = false;
                         view.status = format!("{e}").into();
@@ -721,10 +748,14 @@ impl Render for ComposeView {
                             .label(t("email.attach"))
                             .on_click(cx.listener(Self::add_attachment)),
                     )
+                    // 发送失败等长错误文本：占据剩余宽度并自动换行，不溢出窗口
                     .child(
                         div()
+                            .flex_1()
+                            .min_w(px(0.))
                             .text_size(px(12.))
                             .text_color(cx.theme().muted_foreground)
+                            .line_clamp(3)
                             .child(self.status.clone()),
                     ),
             )

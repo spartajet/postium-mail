@@ -38,10 +38,16 @@ impl CalendarView {
         let rx = spawn_tokio({
             let api = api.clone();
             async move {
-                api.list_emails_by_category_for_all_accounts(EmailCategory::Inbox, 0, 200, false)
+                match api
+                    .list_emails_by_category_for_all_accounts(EmailCategory::Inbox, 0, 200, false)
                     .await
-                    .map(|r| r.emails)
-                    .unwrap_or_default()
+                {
+                    Ok(r) => r.emails,
+                    Err(e) => {
+                        tracing::warn!(target: "postium::ui", "日历视图加载邮件失败: {e}");
+                        Vec::new()
+                    }
+                }
             }
         });
         cx.spawn(async move |this, cx| {

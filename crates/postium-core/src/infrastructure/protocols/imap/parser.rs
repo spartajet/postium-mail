@@ -11,7 +11,7 @@ use async_imap::imap_proto;
 use base64::Engine;
 use encoding_rs::GB18030;
 
-use mail_parser::{Encoding, MessageParser, PartType};
+use mail_parser::{Encoding, HeaderName, HeaderValue, Message, MessageParser, MessagePart, PartType};
 use std::borrow::Cow;
 
 // ──────────────────────────────────────────────
@@ -718,11 +718,297 @@ pub fn build_attachment_info(
     }
 }
 
+// ─── 从原始邮件解析附件（不依赖服务器 BODYSTRUCTURE） ───
+
+/// 规范化列表预览文本：压平换行与连续空白、trim、截断到 200 字符。
+///
+/// 列表行的预览是单行展示（对齐 Tauri 版 CSS truncate 效果），
+/// 正文里天然的换行必须压平，否则行高参差。
+pub fn normalize_preview(text: &str) -> String {
+    let mut out = String::with_capacity(text.len().min(400));
+    let mut last_was_space = false;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            if !last_was_space {
+                out.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            out.push(c);
+            last_was_space = false;
+        }
+        if out.chars().count() >= 200 {
+            break;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// 从原始 RFC822 邮件全文解析附件元数据，并计算 IMAP section 编号。
+///
+/// 为何不依赖 BODYSTRUCTURE：网易（Coremail）等服务器会在 BODYSTRUCTURE
+/// 扩展字段里发出非标准语法（如 `("filename" NIL)`、嵌套 list 参数），
+/// imap-proto 解析失败会让整个 FETCH 流报错、同步中断。而附件元数据
+/// 完全可以从已下载的邮件原文自解析，section 编号按 RFC 3501 的
+/// MIME 树规则自行计算，与服务器 BODY.PEEK[<section>] 的编号一致。
+pub fn extract_attachments_from_raw(raw: &[u8]) -> Vec<AttachmentInfo> {
+    let Some(msg) = MessageParser::default().parse(raw) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    walk_part(&msg, 0, "", &mut out);
+    out
+}
+
+/// 深度优先遍历 MIME 树（mail_parser 的 parts 平铺数组 + PartType 树关系），
+/// 生成与 IMAP BODY.PEEK 编号一致的 section 路径。
+fn walk_part(msg: &Message, part_id: u32, section: &str, out: &mut Vec<AttachmentInfo>) {
+    let Some(part) = msg.parts.get(part_id as usize) else {
+        return;
+    };
+    match &part.body {
+        PartType::Multipart(children) => {
+            for (i, &child) in children.iter().enumerate() {
+                let sub = if section.is_empty() {
+                    (i + 1).to_string()
+                } else {
+                    format!("{section}.{}", i + 1)
+                };
+                walk_part(msg, child, &sub, out);
+            }
+        }
+        // message/rfc822：内层消息接管当前编号（其子部件为 section.1, section.2...）
+        PartType::Message(inner) => {
+            if is_attachment_part(part) {
+                out.push(build_attachment_info_from_part(part, section));
+            }
+            walk_message_root(inner, section, out);
+        }
+        _ => {
+            if is_attachment_part(part) {
+                out.push(build_attachment_info_from_part(part, section));
+            }
+        }
+    }
+}
+
+/// 进入嵌套 message/rfc822 的内层消息：以 part 0 为根继续遍历。
+fn walk_message_root(inner: &Message, section: &str, out: &mut Vec<AttachmentInfo>) {
+    if !inner.parts.is_empty() {
+        walk_part(inner, 0, section, out);
+    }
+}
+
+/// 附件判定（与 BODYSTRUCTURE 版 [`is_attachment`] 规则一致）：
+/// 1. Content-Disposition 为 attachment
+/// 2. Content-Disposition 带 filename 参数
+/// 3. Content-Type 带 name 参数
+/// 4. image/* 且带 Content-ID（HTML 内嵌图）
+fn is_attachment_part(part: &MessagePart) -> bool {
+    let ct = part_header_content_type(part, HeaderName::ContentType);
+    let disp = part_header_content_type(part, HeaderName::ContentDisposition);
+
+    if let Some(d) = &disp {
+        if d.c_type.eq_ignore_ascii_case("attachment") {
+            return true;
+        }
+        if has_param(d.attributes.as_deref(), "filename") {
+            return true;
+        }
+    }
+    if has_param(ct.as_ref().and_then(|c| c.attributes.as_deref()), "name") {
+        return true;
+    }
+    if let Some(c) = &ct
+        && c.c_type.eq_ignore_ascii_case("image")
+        && part_header_text(part, HeaderName::ContentId).is_some()
+    {
+        return true;
+    }
+    false
+}
+
+fn build_attachment_info_from_part(part: &MessagePart, section: &str) -> AttachmentInfo {
+    let ct = part_header_content_type(part, HeaderName::ContentType);
+    let disp = part_header_content_type(part, HeaderName::ContentDisposition);
+
+    let content_type = match ct {
+        Some(c) => match &c.c_subtype {
+            Some(sub) => format!("{}/{sub}", c.c_type),
+            None => c.c_type.to_string(),
+        },
+        None => "application/octet-stream".to_string(),
+    };
+
+    let filename = disp
+        .as_ref()
+        .and_then(|d| find_param(d.attributes.as_deref(), "filename"))
+        .or_else(|| {
+            ct.as_ref()
+                .and_then(|c| find_param(c.attributes.as_deref(), "name"))
+        });
+
+    // offset 区间 = 该 part 编码后的字节长度，与 BODYSTRUCTURE 的 octets 语义一致
+    let size = part.offset_end.saturating_sub(part.offset_body);
+
+    AttachmentInfo {
+        filename,
+        content_type,
+        size,
+        section_path: section.to_string(),
+        disposition: disp.map(|d| d.c_type.to_string()),
+        content_id: part_header_text(part, HeaderName::ContentId).map(|s| s.to_string()),
+    }
+}
+
+/// 取指定 MIME 头的 ContentType 结构（Content-Type / Content-Disposition 共用）。
+fn part_header_content_type<'a>(
+    part: &'a MessagePart,
+    name: HeaderName,
+) -> Option<&'a mail_parser::ContentType<'a>> {
+    part.headers.iter().find_map(|h| {
+        if h.name != name {
+            return None;
+        }
+        match &h.value {
+            HeaderValue::ContentType(ct) => Some(ct),
+            _ => None,
+        }
+    })
+}
+
+fn part_header_text<'a>(part: &'a MessagePart, name: HeaderName) -> Option<&'a str> {
+    part.headers.iter().find_map(|h| {
+        if h.name != name {
+            return None;
+        }
+        match &h.value {
+            HeaderValue::Text(t) => Some(t.as_ref()),
+            _ => None,
+        }
+    })
+}
+
+fn has_param(
+    attributes: Option<&[mail_parser::Attribute]>,
+    key: &str,
+) -> bool {
+    attributes.is_some_and(|attrs| {
+        attrs
+            .iter()
+            .any(|a| a.name.eq_ignore_ascii_case(key))
+    })
+}
+
+fn find_param(
+    attributes: Option<&[mail_parser::Attribute]>,
+    key: &str,
+) -> Option<String> {
+    attributes.and_then(|attrs| {
+        attrs
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(key))
+            .map(|a| a.value.to_string())
+    })
+}
+
 // ─── 测试模块 ───
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── extract_attachments_from_raw：真实 MIME 邮件 → 附件 + section 编号 ───
+
+    /// multipart/mixed：
+    /// 1 = text/plain（正文，非附件）
+    /// 2 = image/gif + Content-ID（内联 CID 图 → 附件，编号 "2"）
+    /// 3 = application/pdf + filename（普通附件，编号 "3"）
+    /// 4 = multipart/alternative（非附件容器）→ 4.1 text/plain、4.2 text/html
+    #[test]
+    fn extracts_attachments_from_raw_with_section_paths() {
+        let raw = b"From: a@163.com\r\nSubject: t\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"OUTER\"\r\n\r\n\
+--OUTER\r\n\
+Content-Type: text/plain; charset=UTF-8\r\n\r\n\
+body\r\n\
+--OUTER\r\n\
+Content-Type: image/gif\r\nContent-ID: <img1@163.com>\r\nContent-Transfer-Encoding: base64\r\n\r\n\
+RklGRg==\r\n\
+--OUTER\r\n\
+Content-Type: application/pdf; name=\"doc.pdf\"\r\n\
+Content-Disposition: attachment; filename=\"doc.pdf\"\r\n\r\n\
+%PDF-1.4\r\n\
+--OUTER\r\n\
+Content-Type: multipart/alternative; boundary=\"INNER\"\r\n\r\n\
+--INNER\r\n\
+Content-Type: text/plain\r\n\r\n\
+alt-text\r\n\
+--INNER\r\n\
+Content-Type: text/html\r\n\r\n\
+<p>alt-html</p>\r\n\
+--INNER--\r\n\
+--OUTER--\r\n";
+
+        let attachments = extract_attachments_from_raw(raw);
+        let paths: Vec<&str> = attachments.iter().map(|a| a.section_path.as_str()).collect();
+
+        // 正文与容器不算附件；CID 内联图与带 filename 的 pdf 是附件
+        assert_eq!(paths, vec!["2", "3"], "实际: {attachments:?}");
+
+        let cid_img = &attachments[0];
+        assert_eq!(cid_img.content_type, "image/gif");
+        assert!(cid_img.filename.is_none());
+        // mail_parser 解析 Content-ID 时已剥尖括号；下游 cid 匹配统一再 trim，两种形态等价
+        assert_eq!(cid_img.content_id.as_deref(), Some("img1@163.com"));
+
+        let pdf = &attachments[1];
+        assert_eq!(pdf.filename.as_deref(), Some("doc.pdf"));
+        assert_eq!(pdf.disposition.as_deref(), Some("attachment"));
+        assert_eq!(pdf.content_type, "application/pdf");
+        assert!(pdf.size > 0);
+    }
+
+    /// 嵌套 message/rfc822：内层附件的 section 编号带点分前缀
+    #[test]
+    fn extracts_nested_message_attachment_with_dotted_section() {
+        let raw = b"From: a@163.com\r\nSubject: fwd\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"OUT\"\r\n\r\n\
+--OUT\r\n\
+Content-Type: text/plain\r\n\r\n\
+see attached\r\n\
+--OUT\r\n\
+Content-Type: message/rfc822\r\n\r\n\
+From: b@163.com\r\nContent-Type: multipart/mixed; boundary=\"IN\"\r\n\r\n\
+--IN\r\n\
+Content-Type: application/octet-stream; name=\"a.zip\"\r\n\
+Content-Disposition: attachment; filename=\"a.zip\"\r\n\r\n\
+PK\r\n\
+--IN--\r\n\
+--OUT--\r\n";
+
+        let attachments = extract_attachments_from_raw(raw);
+        assert_eq!(attachments.len(), 1, "实际: {attachments:?}");
+        // message/rfc822 位于 part 2，内层第一个部件 = 2.1
+        assert_eq!(attachments[0].section_path, "2.1");
+        assert_eq!(attachments[0].filename.as_deref(), Some("a.zip"));
+    }
+
+    /// 预览规范化：换行压平、连续空白合一、trim、200 字符截断
+    #[test]
+    fn normalize_preview_flattens_newlines_and_truncates() {
+        let text = "第一行\r\n第二行\n\n  第三行\t结束  ";
+        assert_eq!(
+            normalize_preview(text),
+            "第一行 第二行 第三行 结束"
+        );
+
+        let long = "ab".repeat(500);
+        assert_eq!(normalize_preview(&long).chars().count(), 200);
+
+        assert_eq!(normalize_preview("   "), "");
+        assert_eq!(normalize_preview(""), "");
+    }
 
     /// 测试检测无文件名的内联 CID 图片为附件
     #[test]
