@@ -35,9 +35,10 @@
 //! 4. 行内扁平化（Task 5）：行内元素样式经 [`parse_inline_style`] 解析、
 //!    [`merge_inline`] 逐层叠加为 run 样式；`<a>` → [`InlineRun::Link`]（href
 //!    经 [`classify_url`] 终审白名单，不合格链接整体丢弃、内容降级纯文字）；
-//!    `img` → 图片（src 经 [`classify_image_src`] 终审白名单）；段级上下文中
-//!    行内 img 提升为 [`Block::Image`]（链接内的 img 保留为 [`InlineRun::Image`]，
-//!    无法越级提升）；同样式相邻 Text 合并；
+//!    `img` → 图片（src 经 [`classify_image_src`] 终审白名单）。行内 img 保留
+//!    在段落 runs 内（线上反馈③第二波：提升为块级会把「链接 + 行内小图」
+//!    混排的横向菜单切成逐项竖排；渲染层 wrap-flow 消费同段内的 Image run）；
+//!    同样式相邻 Text 合并；
 //! 5. 空白折叠（Task 5，HTML 块级上下文语义）：连续空白（空格/制表/换行）折叠
 //!    为单空格，段首/段尾与强制换行边界的空白删除；`pre` 例外（内容原样保留）；
 //!    `&nbsp;`（U+00A0）属内容空白，不折叠不删除；
@@ -375,17 +376,13 @@ impl<'a> TreeBuilder<'a> {
             }],
             BlockKind::Paragraph => {
                 let runs = self.collect_runs_normalized(node, depth + 1, &child_base, Ws::Fold)?;
-                if runs.is_empty() {
-                    // 空 p 保留（邮件中以空段落做间距的惯用法）
-                    vec![Block::Paragraph {
-                        runs,
-                        align: own_align,
-                        style,
-                    }]
-                } else {
-                    // 非空段落同样携带自身样式（T7 评审发现修复，见 split_image_blocks）
-                    split_image_blocks(runs, own_align, style)
-                }
+                // 空 p 保留（邮件中以空段落做间距的惯用法）；行内图片保留在
+                // runs 内（线上反馈③第二波——提升切分会拆散横向菜单混排流）
+                vec![Block::Paragraph {
+                    runs,
+                    align: own_align,
+                    style,
+                }]
             }
             BlockKind::Heading(level) => vec![Block::Heading {
                 level,
@@ -913,6 +910,59 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
         }
     }
 
+    // 内容权重列宽协调（线上反馈②第二波）：渲染层逐行独立 flex，无声明宽度
+    // 的列走等分 grow + min-content 钳制——每行按"本行内容最小宽"起算，行间
+    // 列宽漂移（表头窄、数据行宽、竖线累积错位）。构建期按各列最大内容宽度
+    // 的比例直接分配百分比，行间共线。跳过两种形态：全列已声明（无自由空间
+    // 可分）、含跨列格（跨列格的 grow 权重语义保留）。
+    let has_colspan_cell = placed_rows
+        .iter()
+        .flatten()
+        .any(|p| p.cell.colspan > 1);
+    let all_declared = n_cols > 0 && col_widths.iter().all(Option::is_some);
+    if !has_colspan_cell && !all_declared && n_cols > 1 {
+        // 各列权重 = 该列所有单元格内容估宽的最大值（占位格空内容走下限）
+        const MIN_COL_WEIGHT_PX: f32 = 28.0;
+        let mut weights = vec![MIN_COL_WEIGHT_PX; n_cols];
+        for row in &placed_rows {
+            let mut col = 0usize;
+            for p in row {
+                if p.cell.colspan == 1 {
+                    weights[col] = weights[col].max(estimate_cell_width_px(&p.cell));
+                }
+                col += p.cell.colspan as usize;
+            }
+        }
+        // 已声明列锁定其实际宽度，未声明列按权重分剩余百分比
+        let declared_pct: f32 = col_widths
+            .iter()
+            .filter_map(|w| match w {
+                Some(Width::Percent(p)) => Some(*p),
+                _ => None,
+            })
+            .sum();
+        let free_pct = (100.0 - declared_pct).max(0.0);
+        let undeclared_weight: f32 = col_widths
+            .iter()
+            .zip(&weights)
+            .filter(|(w, _)| w.is_none())
+            .map(|(_, weight)| *weight)
+            .sum();
+        if undeclared_weight > 0.0 {
+            for row in &mut placed_rows {
+                let mut col = 0usize;
+                for p in row {
+                    // 已声明列经传播阶段已赋值（width 非 None），此处只落未声明列
+                    if p.cell.colspan == 1 && p.cell.width.is_none() {
+                        p.cell.width =
+                            Some(Width::Percent(free_pct * weights[col] / undeclared_weight));
+                    }
+                    col += p.cell.colspan as usize;
+                }
+            }
+        }
+    }
+
     // 网格线 + cellpadding（占位单元格按 span 语义：不画 span 内部的横线，
     // 只在 span 边界与表格外缘画线，跨行区域不被横线切开）
     let line = grid
@@ -992,6 +1042,88 @@ impl PlacedCell {
             row_end: 0,
             span_col: Some(span_col),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 内容宽度估算（表格列宽内容权重的输入，浏览器 auto 表布局的近似）：
+// 只求列间相对比例，绝对精度不敏感。ASCII/半角按 0.6em、其余（CJK/全角等）
+// 按 1.0em，em 取 run 字号（兜底 14px——渲染层 BASE_FONT_SIZE 同值）。
+// ---------------------------------------------------------------------------
+
+/// 估算单元格内容的显示宽度（px）：内容最宽块 + 左右内边距。
+fn estimate_cell_width_px(cell: &TableCell) -> f32 {
+    let [_, pr, _, pl] = cell.style.padding;
+    blocks_max_width(&cell.blocks) + pr + pl
+}
+
+/// 块序列的最宽块（多块垂直堆叠，宽度由最宽者决定）。
+fn blocks_max_width(blocks: &[Block]) -> f32 {
+    blocks.iter().map(estimate_block_width).fold(0.0, f32::max)
+}
+
+/// 单块的内容宽度估算（px）：内容宽 + 左右内边距。
+fn estimate_block_width(block: &Block) -> f32 {
+    let (content, pad_lr) = match block {
+        Block::Paragraph { runs, style, .. } => {
+            (runs_max_width(runs), style.padding[1] + style.padding[3])
+        }
+        Block::Heading { runs, .. } => (runs_max_width(runs), 0.0),
+        Block::Container { style, children } => {
+            (blocks_max_width(children), style.padding[1] + style.padding[3])
+        }
+        Block::Quote { children } => (blocks_max_width(children), 0.0),
+        Block::List { items, .. } => (
+            items
+                .iter()
+                .map(|item| blocks_max_width(item))
+                .fold(0.0, f32::max),
+            0.0,
+        ),
+        // 嵌套表格：首行各列估宽求和（嵌套表自身另有归一化，此处只需量级）
+        Block::Table { rows, .. } => (
+            rows.first().map_or(0.0, |row| {
+                row.cells.iter().map(estimate_cell_width_px).sum()
+            }),
+            0.0,
+        ),
+        Block::Image { style, .. } => (image_width_or_default(style), 0.0),
+        Block::Hr => (0.0, 0.0),
+    };
+    content + pad_lr
+}
+
+/// 行内 run 序列的宽度估算：Br 分段（折行语义）取最长段。
+fn runs_max_width(runs: &[InlineRun]) -> f32 {
+    let (mut cur, mut max) = (0.0f32, 0.0f32);
+    let bump = |cur: &mut f32, max: &mut f32| {
+        *max = max.max(*cur);
+        *cur = 0.0;
+    };
+    for run in runs {
+        match run {
+            InlineRun::Text { text, style } => {
+                let size = style.font_size.unwrap_or(14.0);
+                cur += text
+                    .chars()
+                    .map(|c| if c.is_ascii() { 0.6 } else { 1.0 })
+                    .sum::<f32>()
+                    * size;
+            }
+            InlineRun::Image { style, .. } => cur += image_width_or_default(style),
+            InlineRun::Link { runs, .. } => cur += runs_max_width(runs),
+            InlineRun::Br => bump(&mut cur, &mut max),
+        }
+    }
+    bump(&mut cur, &mut max);
+    max
+}
+
+/// 图片宽度：声明宽（px）优先，无声明按占位框典型宽 96px。
+fn image_width_or_default(style: &ImageStyle) -> f32 {
+    match style.width {
+        Some(Width::Px(v)) => v,
+        _ => 96.0,
     }
 }
 
@@ -1122,45 +1254,9 @@ fn parse_colspan(value: &str) -> Option<u8> {
 }
 
 /// 用行内 run 物化段落（`style` 为段落自身 BlockStyle；聚合内容无自身样式时
-/// 由调用方传 [`BlockStyle::default`]，对齐继承父容器）。
+/// 由调用方传 [`BlockStyle::default()`，对齐继承父容器）。
 fn paragraph(runs: Vec<InlineRun>, align: Align, style: BlockStyle) -> Block {
     Block::Paragraph { style, runs, align }
-}
-
-/// 行内 run 序列按图片切分为 `[段落, Image, 段落, …]`——行内 img 一律提升为
-/// 块级图片（plan Task 5：简化布局）；非空 run 物化为段落并携带 `style`
-/// （T7 评审发现修复：此前经本路径物化的非空段落被换成默认样式，`<p>` 自身的
-/// margin/background 等声明丢失；空段占位行为本就保留 style，不变），顺序保持。
-fn split_image_blocks(runs: Vec<InlineRun>, align: Align, style: BlockStyle) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    let mut current: Vec<InlineRun> = Vec::new();
-    for run in runs {
-        match run {
-            InlineRun::Image {
-                src,
-                alt,
-                style: image,
-            } => {
-                if !current.is_empty() {
-                    blocks.push(paragraph(
-                        std::mem::take(&mut current),
-                        align,
-                        style.clone(),
-                    ));
-                }
-                blocks.push(Block::Image {
-                    src,
-                    alt,
-                    style: image,
-                });
-            }
-            other => current.push(other),
-        }
-    }
-    if !current.is_empty() {
-        blocks.push(paragraph(current, align, style));
-    }
-    blocks
 }
 
 /// HTML 可折叠空白字符（空格/制表/换行/回车/换页）。`&nbsp;`（U+00A0）是内容
@@ -1339,18 +1435,15 @@ impl InlineBuffer {
         runs
     }
 
-    /// 物化为块序列：折叠语义下按图片切分为 `[段落, Image, 段落, …]`（行内 img
-    /// 提升为块级，简化布局）；pre 语义下整段原样物化。聚合内容无自身块级元素，
-    /// 段落样式取默认（对齐继承父容器）。
+    /// 物化为块序列：聚合内容整体物化为单一段落（行内图片保留在 runs 内，
+    /// 渲染层 wrap-flow 横向消费）；pre 语义下整段原样物化。聚合内容无自身
+    /// 块级元素，段落样式取默认（对齐继承父容器）。
     fn flush_blocks(&mut self, align: Align) -> Vec<Block> {
         let runs = self.finish();
         if runs.is_empty() {
             return Vec::new();
         }
-        if self.ws == Ws::Preserve {
-            return vec![paragraph(runs, align, BlockStyle::default())];
-        }
-        split_image_blocks(runs, align, BlockStyle::default())
+        vec![paragraph(runs, align, BlockStyle::default())]
     }
 }
 
@@ -1478,8 +1571,12 @@ mod tests {
     fn data_text_image_rejected_but_text_kept() {
         let doc = doc(r#"<img src="data:text/html,<b>x</b>" alt="替代文字">"#);
         assert_eq!(doc.blocks.len(), 1);
-        let Block::Image { src, alt, .. } = &doc.blocks[0] else {
-            panic!("img 应提升为块级图片")
+        // 行内图片保留在段落 runs 内（线上反馈③第二波：块级提升拆散图文混排流）
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应保留为段落内行内 run")
+        };
+        let [InlineRun::Image { src, alt, .. }] = runs.as_slice() else {
+            panic!("应为单一 Image run")
         };
         assert_eq!(*src, ImageRef::Invalid);
         assert_eq!(alt, "替代文字");
@@ -1489,19 +1586,24 @@ mod tests {
     fn cid_and_data_image_preserved() {
         let doc =
             doc(r#"<img src="cid:Image001@ABC"><img src="data:image/png;base64,iVBORw0KGgo=">"#);
-        assert_eq!(doc.blocks.len(), 2);
-        let Block::Image {
+        // 两枚行内图并入同一段落（wrap-flow 横向消费），不再逐图成块
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(runs.len(), 2);
+        let InlineRun::Image {
             src: ImageRef::Cid { content_id },
             ..
-        } = &doc.blocks[0]
+        } = &runs[0]
         else {
             panic!("应为 Cid")
         };
         assert_eq!(content_id, "image001@abc"); // content_id 小写化
-        let Block::Image {
+        let InlineRun::Image {
             src: ImageRef::DataUri { mime, bytes },
             ..
-        } = &doc.blocks[1]
+        } = &runs[1]
         else {
             panic!("应为 DataUri")
         };
@@ -2042,6 +2144,81 @@ mod tests {
     }
 
     #[test]
+    fn content_weighted_column_widths_align_rows() {
+        // 线上反馈②第二波：无声明宽度的表按各列最大内容宽度比例分配百分比，
+        // 表头行与数据行同列同宽（渲染层逐行独立 flex，无协调则竖线错位）
+        let doc = doc(
+            "<table><tr><td>域名</td><td>赎回开始时间</td></tr>\
+             <tr><td>ddyoudan.com</td><td>2026-11-23 10:22:37</td></tr></table>",
+        );
+        let Block::Table { rows, .. } = &doc.blocks[0] else {
+            panic!("应为 Table")
+        };
+        let pct = |w| match w {
+            Some(Width::Percent(p)) => p,
+            other => panic!("未声明列应分得百分比宽度，实际 {other:?}"),
+        };
+        let (h0, h1) = (pct(rows[0].cells[0].width), pct(rows[0].cells[1].width));
+        // 行间共线：同列同宽
+        assert_eq!(rows[1].cells[0].width, rows[0].cells[0].width);
+        assert_eq!(rows[1].cells[1].width, rows[0].cells[1].width);
+        // 比例按内容：col0 权重 = max(2×14, 12×0.6×14) = 100.8；
+        // col1 = max(6×14, 19×0.6×14) = 159.6 → 38.7% / 61.3%（±0.5）
+        assert!((h0 - 38.7).abs() < 0.5, "col0 应约 38.7%，实际 {h0}");
+        assert!((h1 - 61.3).abs() < 0.5, "col1 应约 61.3%，实际 {h1}");
+        assert!((h0 + h1 - 100.0).abs() < 0.01, "自由空间应全部分配");
+    }
+
+    #[test]
+    fn content_weights_yield_to_declared_and_colspan() {
+        // 已声明列宽锁定（声明值传播，估权不覆盖）
+        let declared = doc(
+            r#"<table><tr><td width="30%">域名</td><td>日期</td></tr><tr><td width="30%">x.com</td><td>2026-11-23</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &declared.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[0].cells[0].width, Some(Width::Percent(30.0)));
+        let Some(Width::Percent(free)) = rows[0].cells[1].width else {
+            panic!("未声明列应分得剩余百分比")
+        };
+        assert_eq!(free, 70.0, "已声明 30% 后剩余 70% 全归未声明列");
+
+        // 含跨列格的表跳过估权（跨列格 grow 权重语义保留，未声明列不产百分比）
+        let spanned = doc(
+            r#"<table><tr><td colspan="2">跨列头</td></tr><tr><td>a</td><td>b</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &spanned.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[1].cells[0].width, None, "含 colspan 的表不做估权分配");
+    }
+
+    #[test]
+    fn inline_images_stay_in_paragraph_runs() {
+        // 线上反馈③第二波（banner 竖排的真因）：行内图片与文字/链接同段，
+        // 不再提升为块级——「链接 + 分隔小图」混排的横向菜单保持单一流
+        let doc = doc(
+            r#"<div><a href="https://e/a">产品</a><img src="https://e/s.gif" width="5" height="28" alt=""><a href="https://e/b">定价</a></div>"#,
+        );
+        let Block::Container { children, .. } = &doc.blocks[0] else {
+            panic!("应为 Container")
+        };
+        let [Block::Paragraph { runs, .. }] = &children[..] else {
+            panic!("图文混排应物化为单一段落，实际块数 {}", children.len())
+        };
+        let kinds: Vec<&str> = runs
+            .iter()
+            .map(|run| match run {
+                InlineRun::Link { .. } => "link",
+                InlineRun::Image { .. } => "img",
+                _ => "text",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["link", "img", "link"]);
+    }
+
+    #[test]
     fn inline_block_div_joins_inline_flow() {
         // 线上反馈③：块级标签 + display:inline-block（邮件横向菜单主流写法）
         // 按行内透传并入父级行内流——同一物化段落、链接保持可点，不再逐项竖排
@@ -2128,7 +2305,9 @@ mod tests {
         let cells = &rows[0].cells;
         assert_eq!(cells[0].width, Some(Width::Px(300.0)));
         assert_eq!(cells[1].width, Some(Width::Percent(50.0)));
-        assert_eq!(cells[2].width, None);
+        // NaN 属性不入声明集；估权阶段未声明列按内容权重分剩余百分比
+        //（50% 已声明 → 剩余 50% 全归该列）
+        assert_eq!(cells[2].width, Some(Width::Percent(50.0)));
     }
 
     #[test]
@@ -2169,21 +2348,20 @@ mod tests {
         };
         assert_eq!(style.background_color, Some([238, 238, 238, 255]));
         assert!(style.margin_auto);
-        // 图片切分路径：切分出的各段均携带自身样式
-        let split = build_document(
+        // 图片混排路径：图文保留在同一段落（wrap-flow 横向消费，线上反馈③
+        // 第二波——此前按图片切分为 [段,Image,段]，图文混排被拆散竖排）
+        let mixed = build_document(
             r#"<p style="background-color:#eeeeee">a<img src="cid:x" alt="i">b</p>"#,
             &Limits::default(),
         )
         .unwrap();
-        assert_eq!(split.blocks.len(), 3);
-        let Block::Paragraph { style, .. } = &split.blocks[0] else {
+        assert_eq!(mixed.blocks.len(), 1);
+        let Block::Paragraph { style, runs, .. } = &mixed.blocks[0] else {
             panic!("应为 Paragraph")
         };
         assert_eq!(style.background_color, Some([238, 238, 238, 255]));
-        let Block::Paragraph { style, .. } = &split.blocks[2] else {
-            panic!("应为 Paragraph")
-        };
-        assert_eq!(style.background_color, Some([238, 238, 238, 255]));
+        assert_eq!(runs.len(), 3, "文本-图片-文本共 3 个 run");
+        assert!(matches!(runs[1], InlineRun::Image { .. }));
     }
 
     #[test]
@@ -2344,16 +2522,19 @@ mod tests {
         assert_eq!(text_of(&rows[1].cells[0].blocks[0]), "kept2");
     }
 
-    // ---- 图片（提升为块级 / 样式）----
+    // ---- 图片（行内保留 / 样式）----
 
     #[test]
-    fn inline_image_promoted_to_block() {
-        // 行内 img 提升为块级：段落被图片切分，顺序保持
+    fn inline_image_stays_in_paragraph() {
+        // 线上反馈③第二波：行内 img 不再提升切块——图文同段（wrap-flow 横排）
         let doc = doc(r#"<p>before<img src="https://e/i.png" alt="a">after</p>"#);
-        assert_eq!(doc.blocks.len(), 3);
-        assert_eq!(text_of(&doc.blocks[0]), "before");
-        let Block::Image { src, alt, .. } = &doc.blocks[1] else {
-            panic!("img 应提升为块级")
+        assert_eq!(doc.blocks.len(), 1);
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        assert_eq!(run_text(runs), "beforeafter");
+        let InlineRun::Image { src, alt, .. } = &runs[1] else {
+            panic!("runs[1] 应为 Image")
         };
         assert_eq!(
             *src,
@@ -2362,14 +2543,17 @@ mod tests {
             }
         );
         assert_eq!(alt, "a");
-        assert_eq!(text_of(&doc.blocks[2]), "after");
     }
 
     #[test]
-    fn bare_image_between_paragraphs_promoted() {
+    fn bare_image_between_paragraphs_flushes_as_flow() {
+        // 裸 img 在块级边界间物化为独立段落（runs 内单 Image，wrap-flow 消费）
         let doc = doc(r#"<p>a</p><img src="http://e/i.png"><p>b</p>"#);
         assert_eq!(doc.blocks.len(), 3);
-        assert!(matches!(&doc.blocks[1], Block::Image { .. }));
+        let Block::Paragraph { runs, .. } = &doc.blocks[1] else {
+            panic!("裸 img 应物化为段落")
+        };
+        assert!(matches!(&runs[0], InlineRun::Image { .. }));
     }
 
     #[test]
@@ -2392,11 +2576,14 @@ mod tests {
 
     #[test]
     fn img_dimensions_style_priority_and_attr_fallback() {
-        // style 优先、width/height 属性兜底
+        // style 优先、width/height 属性兜底（行内 run 形态承载）
         let doc =
             doc(r#"<img src="cid:x" width="600" height="50%" style="width:300px;max-width:100%">"#);
-        let Block::Image { style, .. } = &doc.blocks[0] else {
-            panic!("应为 Image")
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image { style, .. } = &runs[0] else {
+            panic!("应为 Image run")
         };
         assert_eq!(
             *style,
@@ -2407,9 +2594,12 @@ mod tests {
             }
         );
         // 无 style 时属性兜底生效
-        let doc = build_document(r#"<img src="cid:x" width="600">"#, &Limits::default()).unwrap();
-        let Block::Image { style, .. } = &doc.blocks[0] else {
-            panic!("应为 Image")
+        let fallback = build_document(r#"<img src="cid:x" width="600">"#, &Limits::default()).unwrap();
+        let Block::Paragraph { runs, .. } = &fallback.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image { style, .. } = &runs[0] else {
+            panic!("应为 Image run")
         };
         assert_eq!(style.width, Some(Width::Px(600.0)));
         assert_eq!(style.height, None);

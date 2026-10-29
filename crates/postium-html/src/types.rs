@@ -170,7 +170,9 @@ pub enum Block {
         /// 子块序列。
         children: Vec<Block>,
     },
-    /// 块级图片（行内 img 也提升为块级，简化布局，plan Task 5）。
+    /// 块级图片（直构文档/兼容保留变体；builder 产出的行内图片保留在
+    /// 段落 runs 内——`InlineRun::Image`，渲染层 wrap-flow 横向消费，
+    /// 线上反馈③第二波：块级提升会把图文混排的横向菜单拆成竖排）。
     Image {
         /// 图片来源（终审白名单后）。
         src: ImageRef,
@@ -224,7 +226,8 @@ pub enum InlineRun {
         /// 链接内 run 序列。
         runs: Vec<InlineRun>,
     },
-    /// 行内图片。
+    /// 行内图片（图文同段，渲染层 wrap-flow 横向消费——线上反馈③第二波，
+    /// 不再提升为块级拆散混排流）。
     Image {
         /// 图片来源（终审白名单后）。
         src: ImageRef,

@@ -323,20 +323,20 @@
                       "strikethrough": false
                     }
                   }
+                },
+                {
+                  "Image": {
+                    "src": "Invalid",
+                    "alt": "伪图片",
+                    "style": {
+                      "width": null,
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
                 }
               ],
               "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": "Invalid",
-              "alt": "伪图片",
-              "style": {
-                "width": null,
-                "height": null,
-                "max_width": null
-              }
             }
           },
           {
@@ -380,20 +380,20 @@
                       "strikethrough": false
                     }
                   }
+                },
+                {
+                  "Image": {
+                    "src": "Invalid",
+                    "alt": "本地文件",
+                    "style": {
+                      "width": null,
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
                 }
               ],
               "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": "Invalid",
-              "alt": "本地文件",
-              "style": {
-                "width": null,
-                "height": null,
-                "max_width": null
-              }
             }
           },
           {
@@ -511,18 +511,51 @@
             }
           },
           {
-            "Image": {
-              "src": {
-                "Cid": {
-                  "content_id": "not-attached@nowhere.example"
-                }
-              },
-              "alt": "未随附的 cid",
+            "Paragraph": {
               "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
                 "width": null,
                 "height": null,
-                "max_width": null
-              }
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Image": {
+                    "src": {
+                      "Cid": {
+                        "content_id": "not-attached@nowhere.example"
+                      }
+                    },
+                    "alt": "未随附的 cid",
+                    "style": {
+                      "width": null,
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
             }
           }
         ]

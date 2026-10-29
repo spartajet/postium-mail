@@ -234,6 +234,7 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
                     rcx,
                     false,
                     BASE_FONT_SIZE,
+                    *align,
                 ))
                 .into_any_element()
         }
@@ -260,6 +261,7 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
                     rcx,
                     true,
                     heading_size(*level),
+                    *align,
                 ))
                 .into_any_element()
         }
@@ -346,6 +348,11 @@ fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit
 ///
 /// 内容垂直居中（线上反馈②）：浏览器 td 默认 `valign=middle`，单元格内容
 /// 在行高内垂直居中——flex_col 主轴 justify_center 对齐该语义。
+///
+/// `min_w(0)`（线上反馈②第二波）：taffy 对 flex 子项有 `min-width:auto`
+/// （= min-content）钳制——每行按"本行内容最小宽"起算列宽，行间内容不同
+/// 则竖线漂移错位。解除钳制后列宽完全由构建期统一下发的 width/basis 决定，
+/// 行间共线（窄列内容自然折行，与浏览器一致）。
 fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let child_inh = Inherited {
         color: cell.style.color.map(ir_color).or(inh.color),
@@ -358,11 +365,12 @@ fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_
     // colspan 权重失效（[1,2] 行渲染成 50/50）。basis 归零后 shrink 无从
     // 发生，grow 相位按权重接管分配。有显式 width 的格保持 width→
     // flex-basis（声明宽 + 自动扩展）；列宽的跨行协调由 builder 网格
-    // 归一化传播到各行同列（逐行独立 flex 下对齐竖线的前提）。
+    // 归一化统一下发到各行同列（逐行独立 flex 下对齐竖线的前提）。
     let mut c = map_block_style(&cell.style, rcx.dark)
         .flex()
         .flex_col()
         .justify_center()
+        .min_w(px(0.))
         .flex_grow(f32::from(cell.colspan).max(1.))
         .when_some(cell.style.text_align, |d, a| d.text_align(map_align(a)));
     match cell.width {
@@ -378,40 +386,52 @@ fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_
     c
 }
 
-/// 行内流 → 文本元素（字号分组的 [`StyledText`]）与行内图片占位的序列。
+/// 行内流 → 文本元素序列。两种形态：
+///
+/// - **纯文本流**（无图片）：按字号分组的 [`StyledText`] 逐组纵排（既有行为，
+///   单组段落视觉不变）；
+/// - **图文混排**（线上反馈③第二波）：单一带换行的横向 flex（wrap-flow），
+///   文本组与图片按序横排、行满换行——浏览器行内流的近似。此前行内图片
+///   在构建期被提升为块级，把「链接 + 分隔小图」混排的横向菜单切成逐项
+///   竖排（分隔图独占整行高）；现在图片留在段落 runs 内，此处横向消费。
 ///
 /// `default_size`：run 未声明字号时的兜底字号——由调用方按块类型传入
 /// （正文 [`BASE_FONT_SIZE`]、标题按级别 [`heading_size`]），使元素级
 /// 字号与包装层语义一致（文本 div 的显式 text_size 覆盖父级级联，
-/// 包装层 text_size 不生效，故不走级联）。
-///
-/// 行内 img 已在树构建期提升为块级（plan Task 5），此处仅为 IR 保留
-/// 变体兜底：占位框独立成行。
+/// 包装层 text_size 不生效，故不走级联）。`align` 供 wrap-flow 的
+/// 行内水平对齐（justify）消费。
 fn render_inline_flow(
     runs: &[InlineRun],
     base_color: Option<Hsla>,
     rcx: &RenderCtx,
     force_bold: bool,
     default_size: f32,
+    align: Align,
 ) -> Vec<AnyElement> {
     // 1) 扁平化：同样式文本段合并（含链接内层递归与 br 折行）
     let mut segs: Vec<FlowSeg> = Vec::new();
     flatten_runs(runs, None, force_bold, &mut segs);
+    let has_image = segs.iter().any(|s| matches!(s, FlowSeg::Image { .. }));
 
-    // 2) 连续文本段按字号分组为单个 StyledText（组内相邻同样式 run 再合并）
+    // 2) 连续文本段按字号分组为单个 StyledText（组内相邻同样式 run 再合并）；
+    //    图文混排时组走 inline 形态（max_w_full 而非占满整行），与图片同容器
     let mut els: Vec<AnyElement> = Vec::new();
     let mut group: Vec<FlowSeg> = Vec::new();
     let mut group_size: Option<Option<f32>> = None;
+    let flush = |group: &mut Vec<FlowSeg>, els: &mut Vec<AnyElement>| {
+        flush_text_group(
+            std::mem::take(group),
+            base_color,
+            rcx,
+            default_size,
+            has_image,
+            els,
+        );
+    };
     for seg in segs {
         match seg {
             FlowSeg::Image { src, style, alt } => {
-                flush_text_group(
-                    std::mem::take(&mut group),
-                    base_color,
-                    rcx,
-                    default_size,
-                    &mut els,
-                );
+                flush(&mut group, &mut els);
                 group_size = None;
                 els.push(render_image_ref(&src, &alt, &style, rcx));
             }
@@ -421,21 +441,30 @@ fn render_inline_flow(
                     FlowSeg::Image { .. } => None,
                 };
                 if group_size.is_some() && group_size != Some(size) {
-                    flush_text_group(
-                        std::mem::take(&mut group),
-                        base_color,
-                        rcx,
-                        default_size,
-                        &mut els,
-                    );
+                    flush(&mut group, &mut els);
                 }
                 group_size = Some(size);
                 group.push(text_seg);
             }
         }
     }
-    flush_text_group(group, base_color, rcx, default_size, &mut els);
-    els
+    flush(&mut group, &mut els);
+
+    // 3) 图文混排：全部子元素并入单一 wrap-flow 容器（横排 + 行满换行）；
+    //    纯文本流保持逐组块级纵排
+    if !has_image {
+        return els;
+    }
+    let mut flow = h_flex().flex_wrap().items_baseline().w_full();
+    match align {
+        Align::Center => flow = flow.justify_center(),
+        Align::Right => flow = flow.justify_end(),
+        Align::Left | Align::Justify => {}
+    }
+    for el in els {
+        flow = flow.child(el);
+    }
+    vec![flow.into_any_element()]
 }
 
 /// 行内流中间产物。
@@ -526,14 +555,20 @@ fn flatten_runs(
 
 /// 把积累的文本段组渲染为一个文本元素（相邻同样式段合并成单一 [`TextRun`]）。
 ///
+/// `inline`（wrap-flow 内的文本组）：宽度取内容自适应（max_w_full 防单组
+/// 溢出行宽，组内文本在钳制宽内自然折行），与图片同线横排；块级形态
+/// （纯文本流）保持占满整行。
+///
 /// 组内含链接段时以 [`InteractiveText`] 承载：链接段按 seg 级标记 + 段长
 /// 累加为字节区间（`TextRun.len` / `index_for_position` 均以字节计）注册
 /// clickable range，命中即以段归属的 [`SafeUrl`] 调用 `on_link`。
+#[allow(clippy::too_many_arguments)]
 fn flush_text_group(
     group: Vec<FlowSeg>,
     base_color: Option<Hsla>,
     rcx: &RenderCtx,
     default_size: f32,
+    inline: bool,
     els: &mut Vec<AnyElement>,
 ) {
     // 组文本、TextRun 序列（相邻同样式 run 合并）与链接字节区间
@@ -572,10 +607,15 @@ fn flush_text_group(
         return;
     }
 
-    let d = div()
-        .w_full()
-        .text_size(px(size.unwrap_or(default_size)))
-        .line_height(relative(BASE_LINE_HEIGHT));
+    let d = if inline {
+        // wrap-flow 内的文本组：宽度自适应内容、上钳行宽（组内折行），
+        // 不占满整行——与图片同线横排的前提
+        div().max_w_full()
+    } else {
+        div().w_full()
+    }
+    .text_size(px(size.unwrap_or(default_size)))
+    .line_height(relative(BASE_LINE_HEIGHT));
 
     let d = if links.is_empty() {
         d.child(StyledText::new(text.clone()).with_runs(runs))

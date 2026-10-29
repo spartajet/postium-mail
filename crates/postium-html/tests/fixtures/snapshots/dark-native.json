@@ -355,7 +355,9 @@
                                     ],
                                     "colspan": 1,
                                     "rowspan": 1,
-                                    "width": null,
+                                    "width": {
+                                      "Percent": 73.04965
+                                    },
                                     "style": {
                                       "background_color": null,
                                       "color": null,
@@ -448,7 +450,9 @@
                                     ],
                                     "colspan": 1,
                                     "rowspan": 1,
-                                    "width": null,
+                                    "width": {
+                                      "Percent": 26.950356
+                                    },
                                     "style": {
                                       "background_color": [
                                         124,

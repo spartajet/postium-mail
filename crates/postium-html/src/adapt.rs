@@ -393,17 +393,29 @@ mod tests {
     }
 
     fn data_uri_bytes(blocks: &[Block]) -> &Arc<[u8]> {
+        // 行内图片保留在段落 runs 内（线上反馈③第二波），块级与行内两形态都收
         fn walk(blocks: &[Block]) -> Option<&Arc<[u8]>> {
             blocks.iter().find_map(|block| match block {
                 Block::Image {
                     src: ImageRef::DataUri { bytes, .. },
                     ..
                 } => Some(bytes),
+                Block::Paragraph { runs, .. } | Block::Heading { runs, .. } => walk_runs(runs),
                 Block::Container { children, .. } | Block::Quote { children } => walk(children),
                 Block::List { items, .. } => items.iter().find_map(|item| walk(item)),
                 Block::Table { rows, .. } => rows
                     .iter()
                     .find_map(|row| row.cells.iter().find_map(|cell| walk(&cell.blocks))),
+                _ => None,
+            })
+        }
+        fn walk_runs(runs: &[InlineRun]) -> Option<&Arc<[u8]>> {
+            runs.iter().find_map(|run| match run {
+                InlineRun::Image {
+                    src: ImageRef::DataUri { bytes, .. },
+                    ..
+                } => Some(bytes),
+                InlineRun::Link { runs, .. } => walk_runs(runs),
                 _ => None,
             })
         }
@@ -692,8 +704,12 @@ mod tests {
             data_uri_bytes(&doc.blocks),
             data_uri_bytes(&adapted.blocks)
         ));
-        let Block::Image { alt, .. } = &children[5] else {
-            panic!("应为 Image")
+        // 行内图片保留在段落 runs 内（线上反馈③第二波）
+        let Block::Paragraph { runs, .. } = &children[5] else {
+            panic!("应为图片段落")
+        };
+        let InlineRun::Image { alt, .. } = &runs[0] else {
+            panic!("应为 Image run")
         };
         assert_eq!(alt, "图表");
         // 空段落（间距惯用法）：自身 style 背景经块级适配通道

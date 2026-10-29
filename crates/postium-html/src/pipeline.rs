@@ -158,15 +158,19 @@ mod tests {
     #[test]
     fn pipeline_cid_image_reaches_builder() {
         // T5 评审裁定修复：cid: img src 经 sanitize 精细放行 → ImageRef::Cid
-        // 端到端可达（此前被 ammonia 默认 scheme 白名单剥成 Invalid 占位）
-        use crate::types::{Block, ImageRef};
+        // 端到端可达（此前被 ammonia 默认 scheme 白名单剥成 Invalid 占位）；
+        // 行内 run 形态（线上反馈③第二波：图片留在段落流内）
+        use crate::types::{Block, ImageRef, InlineRun};
         let doc = render_pipeline(r#"<img src="cid:Image001@ABC" alt="签章">"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
-        let Block::Image {
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image {
             src: ImageRef::Cid { content_id },
             alt,
             ..
-        } = &doc.blocks[0]
+        } = &runs[0]
         else {
             panic!("cid: 图片应以内嵌附件形态到达树构建")
         };
@@ -176,13 +180,16 @@ mod tests {
 
     #[test]
     fn pipeline_data_image_reaches_builder() {
-        use crate::types::{Block, ImageRef};
+        use crate::types::{Block, ImageRef, InlineRun};
         let doc = render_pipeline(r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
-        let Block::Image {
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image {
             src: ImageRef::DataUri { mime, bytes },
             ..
-        } = &doc.blocks[0]
+        } = &runs[0]
         else {
             panic!("data:image 图片应以 DataUri 形态到达树构建")
         };

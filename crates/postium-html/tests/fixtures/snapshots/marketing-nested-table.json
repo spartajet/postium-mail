@@ -439,20 +439,53 @@
                                                 {
                                                   "blocks": [
                                                     {
-                                                      "Image": {
-                                                        "src": {
-                                                          "Remote": {
-                                                            "url": "https://cdn.postium.example/spring/keyboard.png"
-                                                          }
-                                                        },
-                                                        "alt": "机械键盘",
+                                                      "Paragraph": {
                                                         "style": {
-                                                          "width": {
-                                                            "Px": 160.0
-                                                          },
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
                                                           "height": null,
-                                                          "max_width": null
-                                                        }
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Image": {
+                                                              "src": {
+                                                                "Remote": {
+                                                                  "url": "https://cdn.postium.example/spring/keyboard.png"
+                                                                }
+                                                              },
+                                                              "alt": "机械键盘",
+                                                              "style": {
+                                                                "width": {
+                                                                  "Px": 160.0
+                                                                },
+                                                                "height": null,
+                                                                "max_width": null
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
                                                       }
                                                     }
                                                   ],
@@ -897,20 +930,53 @@
                                                 {
                                                   "blocks": [
                                                     {
-                                                      "Image": {
-                                                        "src": {
-                                                          "Remote": {
-                                                            "url": "https://cdn.postium.example/spring/mouse.png"
-                                                          }
-                                                        },
-                                                        "alt": "无线鼠标",
+                                                      "Paragraph": {
                                                         "style": {
-                                                          "width": {
-                                                            "Px": 160.0
-                                                          },
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
                                                           "height": null,
-                                                          "max_width": null
-                                                        }
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Image": {
+                                                              "src": {
+                                                                "Remote": {
+                                                                  "url": "https://cdn.postium.example/spring/mouse.png"
+                                                                }
+                                                              },
+                                                              "alt": "无线鼠标",
+                                                              "style": {
+                                                                "width": {
+                                                                  "Px": 160.0
+                                                                },
+                                                                "height": null,
+                                                                "max_width": null
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
                                                       }
                                                     }
                                                   ],
@@ -1355,20 +1421,53 @@
                                                 {
                                                   "blocks": [
                                                     {
-                                                      "Image": {
-                                                        "src": {
-                                                          "Remote": {
-                                                            "url": "https://cdn.postium.example/spring/dock.png"
-                                                          }
-                                                        },
-                                                        "alt": "扩展坞",
+                                                      "Paragraph": {
                                                         "style": {
-                                                          "width": {
-                                                            "Px": 160.0
-                                                          },
+                                                          "background_color": null,
+                                                          "color": null,
+                                                          "text_align": null,
+                                                          "margin": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "margin_auto": false,
+                                                          "padding": [
+                                                            0.0,
+                                                            0.0,
+                                                            0.0,
+                                                            0.0
+                                                          ],
+                                                          "width": null,
                                                           "height": null,
-                                                          "max_width": null
-                                                        }
+                                                          "max_width": null,
+                                                          "border_top": null,
+                                                          "border_right": null,
+                                                          "border_bottom": null,
+                                                          "border_left": null,
+                                                          "hidden": false
+                                                        },
+                                                        "runs": [
+                                                          {
+                                                            "Image": {
+                                                              "src": {
+                                                                "Remote": {
+                                                                  "url": "https://cdn.postium.example/spring/dock.png"
+                                                                }
+                                                              },
+                                                              "alt": "扩展坞",
+                                                              "style": {
+                                                                "width": {
+                                                                  "Px": 160.0
+                                                                },
+                                                                "height": null,
+                                                                "max_width": null
+                                                              }
+                                                            }
+                                                          }
+                                                        ],
+                                                        "align": "Center"
                                                       }
                                                     }
                                                   ],

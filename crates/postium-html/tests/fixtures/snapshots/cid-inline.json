@@ -32,20 +32,53 @@
         },
         "children": [
           {
-            "Image": {
-              "src": {
-                "Cid": {
-                  "content_id": "header-banner-2026@postium.mail"
-                }
-              },
-              "alt": "月度账单头图",
+            "Paragraph": {
               "style": {
-                "width": {
-                  "Px": 600.0
-                },
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
                 "height": null,
-                "max_width": null
-              }
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Image": {
+                    "src": {
+                      "Cid": {
+                        "content_id": "header-banner-2026@postium.mail"
+                      }
+                    },
+                    "alt": "月度账单头图",
+                    "style": {
+                      "width": {
+                        "Px": 600.0
+                      },
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
             }
           },
           {
@@ -131,20 +164,53 @@
             }
           },
           {
-            "Image": {
-              "src": {
-                "Cid": {
-                  "content_id": "usage-chart@postium.mail"
-                }
-              },
-              "alt": "近六个月用量折线图",
+            "Paragraph": {
               "style": {
-                "width": {
-                  "Px": 480.0
-                },
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
                 "height": null,
-                "max_width": null
-              }
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Image": {
+                    "src": {
+                      "Cid": {
+                        "content_id": "usage-chart@postium.mail"
+                      }
+                    },
+                    "alt": "近六个月用量折线图",
+                    "style": {
+                      "width": {
+                        "Px": 480.0
+                      },
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
             }
           },
           {
@@ -331,28 +397,28 @@
                     }
                   }
                 },
-                "Br"
+                "Br",
+                {
+                  "Image": {
+                    "src": {
+                      "Cid": {
+                        "content_id": "seal@postium.mail"
+                      }
+                    },
+                    "alt": "电子章",
+                    "style": {
+                      "width": {
+                        "Px": 120.0
+                      },
+                      "height": {
+                        "Px": 60.0
+                      },
+                      "max_width": null
+                    }
+                  }
+                }
               ],
               "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": {
-                "Cid": {
-                  "content_id": "seal@postium.mail"
-                }
-              },
-              "alt": "电子章",
-              "style": {
-                "width": {
-                  "Px": 120.0
-                },
-                "height": {
-                  "Px": 60.0
-                },
-                "max_width": null
-              }
             }
           }
         ]
