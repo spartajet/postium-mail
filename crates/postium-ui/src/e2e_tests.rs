@@ -16,9 +16,11 @@ use crate::app::AppShell;
 use crate::nav::NavTarget;
 
 fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx) {
-    crate::runtime::runtime()
-        .block_on(async { CoreApi::init(dir, true, false).await })
-        .expect("核心服务初始化失败")
+    let (sync_tx, sync_rx) = smol::channel::bounded(256);
+    let api = crate::runtime::runtime()
+        .block_on(async { CoreApi::init(dir, true, false, sync_tx).await })
+        .expect("核心服务初始化失败");
+    (api, sync_rx)
 }
 
 /// 进程级一次初始化的 E2E 数据目录（POSTIUM_E2E=1 + POSTIUM_DATA_DIR）。

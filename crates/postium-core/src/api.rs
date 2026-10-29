@@ -59,6 +59,8 @@ pub struct CoreApi {
     pub images: ImageFetchService,
     pub oauth2: Arc<OAuth2Manager>,
     pub data_dir: std::path::PathBuf,
+    /// 同步进度事件发送端（IMAP 引擎复用，状态栏/节流刷新共用链路）
+    pub sync_tx: crate::domain::sync::SyncEventTx,
     /// e2e 离线模式（e2e=true 且非真连库）：同步入口短路，保证测试确定性。
     e2e_offline: bool,
 }
@@ -66,9 +68,14 @@ pub struct CoreApi {
 impl CoreApi {
     /// 完整装配：初始化数据库、provider 池、认证与服务层。
     ///
-    /// 返回 `(CoreApi, 事件接收端)`；接收端交给 UI 的同步状态模块消费，
-    /// 其克隆出的发送端用于手动同步与后台调度器。
-    pub async fn init(data_dir: &Path, e2e: bool, e2e_truth: bool) -> Result<(Arc<Self>, SyncEventRx), MailError> {
+    /// 事件通道由调用方创建：`sync_tx` 存入门面（IMAP 引擎与后续同步路径复用），
+    /// 配对的 rx 由 UI 侧消费（`open_main_window` 的同步状态模块）。
+    pub async fn init(
+        data_dir: &Path,
+        e2e: bool,
+        e2e_truth: bool,
+        sync_tx: crate::domain::sync::SyncEventTx,
+    ) -> Result<Arc<Self>, MailError> {
         std::fs::create_dir_all(data_dir)
             .map_err(|e| MailError::FileSystemError(e.to_string()))?;
         tracing::info!("数据目录: {}", data_dir.display());
@@ -110,31 +117,42 @@ impl CoreApi {
         let oauth2 = Arc::new(OAuth2Manager::new(auth.clone(), db.clone())?);
         auth.set_oauth2_manager(oauth2.clone());
 
-        let (_tx, rx) = smol::channel::bounded::<SyncProgressEvent>(256);
-
-        Ok((
-            Arc::new(Self {
-                db,
-                auth,
-                provider_pool,
-                accounts,
-                emails,
-                sync,
-                labels,
-                contacts,
-                attachments,
-                images: ImageFetchService::new(),
-                oauth2,
-                data_dir: data_dir.to_path_buf(),
-                e2e_offline: e2e && !e2e_truth,
-            }),
-            rx,
-        ))
+        Ok(Arc::new(Self {
+            db,
+            auth,
+            provider_pool,
+            accounts,
+            emails,
+            sync,
+            labels,
+            contacts,
+            attachments,
+            images: ImageFetchService::new(),
+            oauth2,
+            data_dir: data_dir.to_path_buf(),
+            sync_tx,
+            e2e_offline: e2e && !e2e_truth,
+        }))
     }
 
     /// 创建同步进度事件通道（UI 消费 rx，把 tx 传给 sync_*/scheduler）。
     pub fn sync_event_channel() -> (SyncEventTx, SyncEventRx) {
         smol::channel::bounded(256)
+    }
+
+    /// 确保账号 IMAP 引擎运行并返回句柄（操作类命令走引擎连接池）。
+    pub async fn imap_engine(
+        &self,
+        account: &crate::infrastructure::storage::models::accounts::Model,
+    ) -> Result<crate::engine::EngineHandle, MailError> {
+        crate::engine::registry::ensure_engine(
+            account,
+            Arc::new(crate::engine::factory::RealSessionFactory {
+                auth: self.auth.clone(),
+                account: account.clone(),
+            }),
+            self.sync_tx.clone(),
+        )
     }
 
     // ===== account =====

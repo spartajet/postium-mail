@@ -12,6 +12,8 @@ pub mod pool;
 
 pub mod commands;
 pub mod actor;
+pub mod registry;
+pub use registry::ensure_engine;
 pub use factory::{RealSessionFactory, SessionFactory};
 pub use pool::{ConnectionPool, PooledSession, PoolConnect};
 pub use actor::{AccountEngine, EngineHandle};

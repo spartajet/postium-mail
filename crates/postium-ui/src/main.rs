@@ -35,9 +35,14 @@ fn main() {
     let e2e = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
     let e2e_truth = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
 
-    // 核心服务在 tokio 上装配完成后进入 UI（仅启动期一次）
-    let (api, sync_rx) = runtime::runtime()
-        .block_on(async { postium_core::api::CoreApi::init(&data_dir, e2e, e2e_truth).await })
+    // 核心服务在 tokio 上装配完成后进入 UI（仅启动期一次）。
+    // 事件通道由入口创建：tx 存入 CoreApi（IMAP 引擎复用），rx 交给主窗口消费。
+    let (sync_tx, sync_rx) =
+        smol::channel::bounded::<postium_core::domain::sync::SyncProgressEvent>(256);
+    let api = runtime::runtime()
+        .block_on(async {
+            postium_core::api::CoreApi::init(&data_dir, e2e, e2e_truth, sync_tx).await
+        })
         .expect("核心服务初始化失败");
 
     gpui_kit::application()

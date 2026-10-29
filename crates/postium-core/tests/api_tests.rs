@@ -5,7 +5,8 @@ use postium_core::api::CoreApi;
 #[tokio::test]
 async fn core_api_boots_and_lists_accounts() {
     let dir = tempfile::tempdir().unwrap();
-    let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
+    let (sync_tx, _sync_rx) = CoreApi::sync_event_channel();
+    let api = CoreApi::init(dir.path(), false, false, sync_tx).await.unwrap();
 
     // 空库：账号列表为空
     let accounts = api.list_accounts().await.unwrap();
