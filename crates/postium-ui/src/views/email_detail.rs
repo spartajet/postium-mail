@@ -857,3 +857,41 @@ fn separator(cx: &gpui_kit::App) -> impl IntoElement {
         .mx_1()
         .bg(gpui_kit::black().opacity(0.15))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::collapse_empty_blocks;
+
+    #[test]
+    fn collapses_empty_paragraphs_and_divs() {
+        let src = r#"<p style="margin:0">正文一</p><p style="margin:0">&nbsp;</p><p>正文二</p><div></div><div><br></div>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(out.contains("正文一"));
+        assert!(out.contains("正文二"));
+        assert!(!out.contains("&nbsp;"));
+        assert!(!out.contains("<div>"), "空 div 应被折叠: {out}");
+    }
+
+    #[test]
+    fn collapses_nested_empty_blocks_and_mso_tags() {
+        let src = r#"<div><p><span>&nbsp;</span></p></div><o:p></o:p><p>内容</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(!out.contains("<div>"));
+        assert!(!out.contains("o:p"));
+        assert!(out.contains("内容"));
+    }
+
+    #[test]
+    fn keeps_non_empty_blocks_untouched() {
+        let src = r#"<p style="color:#0067b8">新应用有权访问你的数据</p><p>onedriver 已连接。</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert_eq!(out, src, "无空块时原样返回");
+    }
+
+    #[test]
+    fn keeps_comments_and_real_content_inside_blocks() {
+        let src = r#"<p><!--[if mso]><o:p>&nbsp;</o:p><![endif]--><br>真实文本</p>"#;
+        let out = collapse_empty_blocks(src);
+        assert!(out.contains("真实文本"), "含真实文本的块不能删: {out}");
+    }
+}

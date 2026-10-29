@@ -28,6 +28,7 @@ rfd = "0.17"
 tray-icon = "0.26"
 png = "0.17"
 base64 = "0.22"
+regex = "1"
 # HTML 邮件图片解码（Task 13）：default-features 关闭（exr/tiff/ravif 等编解码器
 # 邮件场景用不到），只留 png/jpeg/gif/webp 解码。注意 gpui-pre 已带 image
 # 默认全家桶，feature 统一后实际编译集为并集——此处声明的是本 crate 自身

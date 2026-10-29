@@ -120,8 +120,6 @@ pub enum OAuth2PollResult {
 struct PendingSession {
     /// PKCE 验证器，code 换 token 时使用，使用后置空防止重复消费
     pkce_verifier: Option<PkceCodeVerifier>,
-    /// 本地回调监听端口
-    port: u16,
     /// 授权时使用的重定向 URI（code 换 token 必须原样携带）
     redirect_uri: String,
     /// 提供商标识（如 "gmail"、"outlook"）
@@ -344,7 +342,6 @@ impl OAuth2Manager {
                 state_str.clone(),
                 PendingSession {
                     pkce_verifier: Some(pkce_verifier),
-                    port,
                     redirect_uri: request_redirect.clone(),
                     provider_id: provider_id.to_string(),
                     email: email.to_string(),
