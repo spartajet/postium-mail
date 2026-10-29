@@ -31,11 +31,17 @@ fn with_app_mut<R>(cx: &mut VisualTestContext, f: impl FnOnce(&mut gpui_pre::App
 }
 
 /// 同时拿 window 与 &mut App（焦点设置等需要 window）。
-fn with_window_mut<R>(cx: &mut VisualTestContext, f: impl FnOnce(&mut gpui_pre::Window, &mut gpui_pre::App) -> R) -> R {
+fn with_window_mut<R>(
+    cx: &mut VisualTestContext,
+    f: impl FnOnce(&mut gpui_pre::Window, &mut gpui_pre::App) -> R,
+) -> R {
     cx.update(|window, app| f(window, app))
 }
 
-fn wait_for<T>(cx: &mut VisualTestContext, mut f: impl FnMut(&mut VisualTestContext) -> Option<T>) -> T {
+fn wait_for<T>(
+    cx: &mut VisualTestContext,
+    mut f: impl FnMut(&mut VisualTestContext) -> Option<T>,
+) -> T {
     for _ in 0..200 {
         cx.run_until_parked();
         if let Some(v) = f(cx) {
@@ -49,7 +55,9 @@ fn wait_for<T>(cx: &mut VisualTestContext, mut f: impl FnMut(&mut VisualTestCont
 fn setup(cx: &mut gpui_pre::App) {
     gpui_kit::init(cx);
     postium_editor::init(cx);
-    cx.set_global(crate::i18n::I18nGlobal { lang: crate::i18n::Lang::Zh });
+    cx.set_global(crate::i18n::I18nGlobal {
+        lang: crate::i18n::Lang::Zh,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -67,10 +75,12 @@ fn boots_with_inbox_seed(cx: &mut TestAppContext) {
         AppShell::new(api, sync_rx, window, cx)
     });
 
-    let count = wait_for(cx, |cx| with_app(cx, |app| {
-        let n = shell.read(app).accounts.read(app).groups.len();
-        (n >= 2).then_some(n)
-    }));
+    let count = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let n = shell.read(app).accounts.read(app).groups.len();
+            (n >= 2).then_some(n)
+        })
+    });
     assert_eq!(count, 2, "seed 应含两个账号");
 
     let ok = with_app(cx, |app| {
@@ -80,14 +90,18 @@ fn boots_with_inbox_seed(cx: &mut TestAppContext) {
     });
     assert!(ok, "seed 账号应含 primary 与 secondary");
 
-    let emails = wait_for(cx, |cx| with_app(cx, |app| {
-        let store = shell.read(app).emails.read(app);
-        (!store.emails.is_empty()).then(|| store.emails.clone())
-    }));
+    let emails = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            (!store.emails.is_empty()).then(|| store.emails.clone())
+        })
+    });
     assert!(
-        emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Primary Inbox Message")),
+        emails.iter().any(|e| e
+            .subject
+            .as_deref()
+            .unwrap_or("")
+            .contains("Primary Inbox Message")),
         "inbox 应包含 seed 邮件，首封: {:?}",
         emails.first().and_then(|e| e.subject.clone())
     );
@@ -108,13 +122,16 @@ fn switches_between_accounts(cx: &mut TestAppContext) {
         AppShell::new(api, sync_rx, window, cx)
     });
 
-    wait_for(cx, |cx| with_app(cx, |app| {
-        let n = shell.read(app).accounts.read(app).groups.len();
-        (n >= 2).then_some(n)
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let n = shell.read(app).accounts.read(app).groups.len();
+            (n >= 2).then_some(n)
+        })
+    });
 
     let second_id = with_app(cx, |app| {
-        shell.read(app)
+        shell
+            .read(app)
             .accounts
             .read(app)
             .groups
@@ -127,21 +144,26 @@ fn switches_between_accounts(cx: &mut TestAppContext) {
     with_app_mut(cx, |app| {
         let api = shell.read(app).api.clone();
         shell.update(app, |shell, cx| {
-            shell.nav = NavTarget::AccountFolder { account_id: second_id, folder: "INBOX".into() };
+            shell.nav = NavTarget::AccountFolder {
+                account_id: second_id,
+                folder: "INBOX".into(),
+            };
             shell.emails.update(cx, |store, cx| {
                 store.navigate(shell.nav.clone(), &api, cx);
             });
         });
     });
 
-    let emails = wait_for(cx, |cx| with_app(cx, |app| {
-        let store = shell.read(app).emails.read(app);
-        store
-            .emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Secondary"))
-            .then(|| store.emails.clone())
-    }));
+    let emails = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            store
+                .emails
+                .iter()
+                .any(|e| e.subject.as_deref().unwrap_or("").contains("Secondary"))
+                .then(|| store.emails.clone())
+        })
+    });
     assert!(
         emails.iter().all(|e| e.account_id == second_id),
         "次账号列表不应混入其他账号邮件"
@@ -156,15 +178,23 @@ fn switches_between_accounts(cx: &mut TestAppContext) {
             });
         });
     });
-    wait_for(cx, |cx| with_app(cx, |app| {
-        shell.read(app)
-            .emails
-            .read(app)
-            .emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Primary Inbox Message"))
-            .then_some(())
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .iter()
+                .any(|e| {
+                    e.subject
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Primary Inbox Message")
+                })
+                .then_some(())
+        })
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -181,16 +211,14 @@ fn navigates_sent_starred_inbox(cx: &mut TestAppContext) {
         setup(cx);
         AppShell::new(api, sync_rx, window, cx)
     });
-    wait_for(cx, |cx| with_app(cx, |app| {
-        let n = shell.read(app).accounts.read(app).groups.len();
-        (n >= 1).then_some(n)
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let n = shell.read(app).accounts.read(app).groups.len();
+            (n >= 1).then_some(n)
+        })
+    });
 
-    fn navigate(
-        shell: &gpui_kit::Entity<AppShell>,
-        cx: &mut VisualTestContext,
-        target: NavTarget,
-    ) {
+    fn navigate(shell: &gpui_kit::Entity<AppShell>, cx: &mut VisualTestContext, target: NavTarget) {
         with_app_mut(cx, |app| {
             let api = shell.read(app).api.clone();
             shell.update(app, |shell, cx| {
@@ -202,38 +230,70 @@ fn navigates_sent_starred_inbox(cx: &mut TestAppContext) {
         });
     }
 
-    navigate(&shell, cx, NavTarget::Category(postium_core::service::email_service::EmailCategory::Sent));
-    wait_for(cx, |cx| with_app(cx, |app| {
-        shell.read(app)
-            .emails
-            .read(app)
-            .emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Sent Confirmation"))
-            .then_some(())
-    }));
+    navigate(
+        &shell,
+        cx,
+        NavTarget::Category(postium_core::service::email_service::EmailCategory::Sent),
+    );
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .iter()
+                .any(|e| {
+                    e.subject
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Sent Confirmation")
+                })
+                .then_some(())
+        })
+    });
 
-    navigate(&shell, cx, NavTarget::Category(postium_core::service::email_service::EmailCategory::Starred));
-    wait_for(cx, |cx| with_app(cx, |app| {
-        shell.read(app)
-            .emails
-            .read(app)
-            .emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Starred Reference"))
-            .then_some(())
-    }));
+    navigate(
+        &shell,
+        cx,
+        NavTarget::Category(postium_core::service::email_service::EmailCategory::Starred),
+    );
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .iter()
+                .any(|e| {
+                    e.subject
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Starred Reference")
+                })
+                .then_some(())
+        })
+    });
 
     navigate(&shell, cx, NavTarget::AllInbox);
-    wait_for(cx, |cx| with_app(cx, |app| {
-        shell.read(app)
-            .emails
-            .read(app)
-            .emails
-            .iter()
-            .any(|e| e.subject.as_deref().unwrap_or("").contains("Primary Inbox Message"))
-            .then_some(())
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .iter()
+                .any(|e| {
+                    e.subject
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Primary Inbox Message")
+                })
+                .then_some(())
+        })
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -250,9 +310,11 @@ fn searches_quarterly_planning(cx: &mut TestAppContext) {
         setup(cx);
         AppShell::new(api, sync_rx, window, cx)
     });
-    wait_for(cx, |cx| with_app(cx, |app| {
-        (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
 
     let before = with_app_mut(cx, |app| {
         let before = shell.read(app).emails.read(app).list_version;
@@ -265,16 +327,19 @@ fn searches_quarterly_planning(cx: &mut TestAppContext) {
         before
     });
 
-    let results = wait_for(cx, |cx| with_app(cx, |app| {
-        let store = shell.read(app).emails.read(app);
-        (store.list_version > before && !store.emails.is_empty())
-            .then(|| store.emails.clone())
-    }));
+    let results = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            (store.list_version > before && !store.emails.is_empty()).then(|| store.emails.clone())
+        })
+    });
     assert!(results.len() >= 2, "Quarterly 应至少命中 Alpha/Beta");
     assert!(
-        results
-            .iter()
-            .all(|e| e.subject.as_deref().unwrap_or("").contains("Quarterly Planning")),
+        results.iter().all(|e| e
+            .subject
+            .as_deref()
+            .unwrap_or("")
+            .contains("Quarterly Planning")),
         "搜索结果应全部匹配"
     );
 }
@@ -294,15 +359,20 @@ fn stars_and_deletes_selected(cx: &mut TestAppContext) {
         AppShell::new(api, sync_rx, window, cx)
     });
 
-    let target_id = wait_for(cx, |cx| with_app(cx, |app| {
-        shell.read(app)
-            .emails
-            .read(app)
-            .emails
-            .iter()
-            .find(|e| !e.is_starred && e.subject.as_deref().unwrap_or("").contains("Primary Inbox"))
-            .map(|e| e.id)
-    }));
+    let target_id = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .iter()
+                .find(|e| {
+                    !e.is_starred && e.subject.as_deref().unwrap_or("").contains("Primary Inbox")
+                })
+                .map(|e| e.id)
+        })
+    });
 
     with_app_mut(cx, |app| {
         shell.update(app, |shell, cx| {
@@ -338,10 +408,12 @@ fn stars_and_deletes_selected(cx: &mut TestAppContext) {
             });
         });
     });
-    wait_for(cx, |cx| with_app(cx, |app| {
-        let store = shell.read(app).emails.read(app);
-        (!store.emails.iter().any(|e| e.id == target_id)).then_some(())
-    }));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            (!store.emails.iter().any(|e| e.id == target_id)).then_some(())
+        })
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +438,9 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
     });
 
     // 发件账号默认选中
-    wait_for(cx, |cx| with_app(cx, |app| compose.read(app).selected_account.clone()));
+    wait_for(cx, |cx| {
+        with_app(cx, |app| compose.read(app).selected_account.clone())
+    });
 
     // 键入收件人（焦点 + 键盘事件）
     with_window_mut(cx, |window, app| {
@@ -374,7 +448,15 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
         window.focus(&handle, app);
     });
     cx.simulate_keystrokes("peer@example.com");
-    let to_value = with_app(cx, |app| compose.read(app).to_field.input.read(app).value().to_string());
+    let to_value = with_app(cx, |app| {
+        compose
+            .read(app)
+            .to_field
+            .input
+            .read(app)
+            .value()
+            .to_string()
+    });
     assert_eq!(to_value, "peer@example.com", "收件人键入应生效");
 
     // 空主题 → 发送被拦截
@@ -397,7 +479,9 @@ fn compose_fills_fields_and_draft(cx: &mut TestAppContext) {
             view.persist_draft(cx);
         });
     });
-    let draft_id = wait_for(cx, |cx| with_app(cx, |app| compose.read(app).draft_email_id));
+    let draft_id = wait_for(cx, |cx| {
+        with_app(cx, |app| compose.read(app).draft_email_id)
+    });
     assert!(draft_id > 0, "草稿应保存并返回 id");
 }
 
@@ -437,7 +521,13 @@ fn compose_reopens_empty(cx: &mut TestAppContext) {
     });
     let (to, subject) = with_app(cx, |app| {
         (
-            second.read(app).to_field.input.read(app).value().to_string(),
+            second
+                .read(app)
+                .to_field
+                .input
+                .read(app)
+                .value()
+                .to_string(),
             second.read(app).subject.read(app).value().to_string(),
         )
     });
@@ -468,7 +558,9 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
 
     use gpui_kit::component::ActiveTheme as _;
     let mode = |cx: &mut VisualTestContext| -> bool {
-        with_app(cx, |app| app.theme().mode == gpui_kit::component::ThemeMode::Dark)
+        with_app(cx, |app| {
+            app.theme().mode == gpui_kit::component::ThemeMode::Dark
+        })
     };
 
     let initial_dark = mode(cx);
@@ -515,7 +607,10 @@ fn open_calendar(
                 let v = view.read(app);
                 v.loaded
                     && v.emails.iter().any(|e| {
-                        e.subject.as_deref().unwrap_or("").contains("Calendar Today Alpha")
+                        e.subject
+                            .as_deref()
+                            .unwrap_or("")
+                            .contains("Calendar Today Alpha")
                     })
             })
         })
@@ -553,7 +648,9 @@ fn calendar_shows_today_and_pick_day(cx: &mut TestAppContext) {
     });
     assert!(
         subjects.iter().any(|s| s.contains("Calendar Today Alpha"))
-            && subjects.iter().any(|s| s.contains("Calendar Today Beta Starred")),
+            && subjects
+                .iter()
+                .any(|s| s.contains("Calendar Today Beta Starred")),
         "今天应含 2 封日历夹具，实际: {subjects:?}"
     );
     let unread = with_app(cx, |app| {
@@ -681,7 +778,6 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
         crate::views::settings::SettingsView::new(accounts, sync_store.clone(), api_for_view.clone(), window, cx)
     });
 
-
     // 等初始账号列表装载完成（settle 后台任务，保证确定性）
     wait_for(cx, |cx| {
         with_app(cx, |app| {
@@ -705,7 +801,10 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
                 .map(|a| a.providers.len())
         })
     });
-    assert!(provider_count >= 2, "服务商列表应非空，实际 {provider_count}");
+    assert!(
+        provider_count >= 2,
+        "服务商列表应非空，实际 {provider_count}"
+    );
 
     // 手动配置路径（对齐旧版"其他"卡片）
     with_app_mut(cx, |app| {
@@ -739,8 +838,7 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
     type_into(cx, 3, "imap.local.test");
     type_into(cx, 4, "smtp.local.test");
 
-
-        // 提交 → 进入同步范围步骤
+    // 提交 → 进入同步范围步骤
     with_window_mut(cx, |window, app| {
         settings.update(app, |view, cx| {
             view.submit_credentials(&gpui_pre::ClickEvent::default(), window, cx);
@@ -748,18 +846,16 @@ fn adds_account_via_password_wizard(cx: &mut TestAppContext) {
     });
     let pending = wait_for(cx, |cx| {
         with_app(cx, |app| {
-            settings
-                .read(app)
-                .add
-                .as_ref()
-                .and_then(|a| a.pending_sync)
+            settings.read(app).add.as_ref().and_then(|a| a.pending_sync)
         })
     });
     assert!(pending > 0, "创建账号应返回正 id");
-    let step = with_app(cx, |app| {
-        settings.read(app).add.as_ref().map(|a| a.step)
-    });
-    assert_eq!(step, Some(crate::views::settings::AddStep::SyncScope), "提交后应进入同步范围步骤");
+    let step = with_app(cx, |app| settings.read(app).add.as_ref().map(|a| a.step));
+    assert_eq!(
+        step,
+        Some(crate::views::settings::AddStep::SyncScope),
+        "提交后应进入同步范围步骤"
+    );
 
     // 账号确实入库（按邮箱定位）
     let created = crate::runtime::runtime()
@@ -869,7 +965,13 @@ fn compose_recipient_field_chips_commit_and_remove(cx: &mut TestAppContext) {
     );
     // chips 化后输入框清空
     let remaining = with_app(cx, |app| {
-        compose.read(app).to_field.input.read(app).value().to_string()
+        compose
+            .read(app)
+            .to_field
+            .input
+            .read(app)
+            .value()
+            .to_string()
     });
     assert!(remaining.is_empty(), "提交后输入框应清空: {remaining}");
 
@@ -892,7 +994,11 @@ fn compose_recipient_field_chips_commit_and_remove(cx: &mut TestAppContext) {
         });
     });
     let emails = with_app(cx, |app| compose.read(app).to_field.emails(app));
-    assert_eq!(emails, vec!["b@postium.test".to_string()], "删除 chip 应生效");
+    assert_eq!(
+        emails,
+        vec!["b@postium.test".to_string()],
+        "删除 chip 应生效"
+    );
     cx.run_until_parked();
 }
 
@@ -925,16 +1031,20 @@ fn compose_autocomplete_from_contacts(cx: &mut TestAppContext) {
 
     // 防抖 300ms 走模拟时钟：advance_clock 推进后再由 run_until_parked 驱动
     // 防抖定时 → tokio 查询 → 候选回填（真实 I/O 跨线程唤醒）
-    cx.dispatcher.advance_clock(std::time::Duration::from_millis(400));
+    cx.dispatcher
+        .advance_clock(std::time::Duration::from_millis(400));
 
     // 300ms 防抖 + 异步查询 → 候选非空且含 seed 联系人（星标置顶 → 第一项）
-    let sugg = wait_for(cx, |cx| with_app(cx, |app| {
-        let list = compose.read(app).to_field.suggestions.clone();
-        (!list.is_empty()).then_some(list)
-    }));
+    let sugg = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let list = compose.read(app).to_field.suggestions.clone();
+            (!list.is_empty()).then_some(list)
+        })
+    });
     let first = sugg.first().map(|c| c.email.clone()).unwrap_or_default();
     assert_eq!(
-        first, "seed.e2e@postium.test",
+        first,
+        "seed.e2e@postium.test",
         "星标 seed 联系人应排第一，实际: {:?}",
         sugg.iter().map(|c| c.email.clone()).collect::<Vec<_>>()
     );
@@ -1024,7 +1134,14 @@ fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
     // 动作执行链路 act_on_email 为核心逻辑）
     let id = {
         let email = with_app(cx, |app| {
-            shell.read(app).emails.read(app).emails.first().unwrap().clone()
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .emails
+                .first()
+                .unwrap()
+                .clone()
         });
         email.id
     };
@@ -1100,7 +1217,12 @@ fn contacts_seed_loaded(cx: &mut TestAppContext) {
     // collected 条目出现（仅能来自启动回填，种子不产生该地址）
     wait_for(cx, |_| {
         crate::runtime::runtime()
-            .block_on(async { api_check.get_contact_by_email("e2e.user@postium.test".into()).await.ok() })
+            .block_on(async {
+                api_check
+                    .get_contact_by_email("e2e.user@postium.test".into())
+                    .await
+                    .ok()
+            })
             .flatten()
             .filter(|c| c.source == "collected")
     });
@@ -1108,7 +1230,12 @@ fn contacts_seed_loaded(cx: &mut TestAppContext) {
     // 种子的 local 发件人与回填共存：频次保持种子值（10），仅推进往来时间
     let sender = wait_for(cx, |_| {
         crate::runtime::runtime()
-            .block_on(async { api_check.get_contact_by_email("sender.primary@postium.test".into()).await.ok() })
+            .block_on(async {
+                api_check
+                    .get_contact_by_email("sender.primary@postium.test".into())
+                    .await
+                    .ok()
+            })
             .flatten()
     });
     assert_eq!(sender.source, "local");
@@ -1201,7 +1328,8 @@ fn contacts_view_interactions(cx: &mut TestAppContext) {
     with_app_mut(cx, |app| {
         let api = shell.read(app).api.clone();
         view.update(app, |v, cx| {
-            v.store.update(cx, |store, cx| store.toggle_starred(primary_id, &api, cx));
+            v.store
+                .update(cx, |store, cx| store.toggle_starred(primary_id, &api, cx));
         });
     });
     wait_for(cx, |cx| {
@@ -1237,9 +1365,7 @@ fn contacts_view_interactions(cx: &mut TestAppContext) {
         with_app(cx, |app| {
             let store = view.read(app).store.read(app);
             (store.list_version >= 2 && !store.loading)
-                .then(|| {
-                    store.contacts.iter().find(|c| c.id == primary_id).cloned()
-                })
+                .then(|| store.contacts.iter().find(|c| c.id == primary_id).cloned())
                 .flatten()
                 .filter(|c| !c.is_starred)
                 .is_some()
@@ -1251,7 +1377,8 @@ fn contacts_view_interactions(cx: &mut TestAppContext) {
     with_app_mut(cx, |app| {
         let api = shell.read(app).api.clone();
         view.update(app, |v, cx| {
-            v.store.update(cx, |store, cx| store.set_query("seed.e2e", &api, cx));
+            v.store
+                .update(cx, |store, cx| store.set_query("seed.e2e", &api, cx));
         });
     });
     let filtered = wait_for(cx, |cx| {
@@ -1446,7 +1573,8 @@ fn contact_merge_and_detail_add(cx: &mut TestAppContext) {
         })
     });
     let email_id = with_app(cx, |app| {
-        shell.read(app)
+        shell
+            .read(app)
             .emails
             .read(app)
             .emails
@@ -1461,7 +1589,9 @@ fn contact_merge_and_detail_add(cx: &mut TestAppContext) {
             shell.emails.update(cx, |store, cx| {
                 store.selected = Some(email_id);
                 store.selected_version += 1;
-                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(email_id));
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    email_id,
+                ));
                 cx.notify();
             });
         });
@@ -1586,10 +1716,15 @@ fn contacts_import_export_entry(cx: &mut TestAppContext) {
     wait_for(cx, |cx| {
         with_app(cx, |app| {
             let store = view.read(app).store.read(app);
-            let alice = store.contacts.iter().any(|c| c.email == "alice.import@postium.test");
-            let bob = store.contacts.iter().any(|c| c.email == "bob.import@postium.test");
-            (!store.loading && store.contacts.len() == before + 2 && alice && bob)
-                .then_some(())
+            let alice = store
+                .contacts
+                .iter()
+                .any(|c| c.email == "alice.import@postium.test");
+            let bob = store
+                .contacts
+                .iter()
+                .any(|c| c.email == "bob.import@postium.test");
+            (!store.loading && store.contacts.len() == before + 2 && alice && bob).then_some(())
         })
     });
     // DB 层：两卡已入库（toast 在无 Root 防护下不 panic，见 notify.rs）
@@ -1636,10 +1771,9 @@ fn contacts_import_export_entry(cx: &mut TestAppContext) {
     });
 
     // ── 导出冒烟（按钮接线层直调 api：CoreApi 层等价性已在 T14 测过）──
-    let exported = crate::runtime::runtime().block_on(async {
-        api.export_contacts_vcard(None, None, false).await
-    })
-    .expect("导出 vCard 不应失败");
+    let exported = crate::runtime::runtime()
+        .block_on(async { api.export_contacts_vcard(None, None, false).await })
+        .expect("导出 vCard 不应失败");
     assert!(exported.contains("BEGIN:VCARD"), "导出应为 vCard 文本");
     assert!(
         exported.contains("alice.import@postium.test"),
@@ -1682,10 +1816,7 @@ fn settings_sections_navigate(cx: &mut TestAppContext) {
                 cx.notify();
             });
         });
-        assert_eq!(
-            with_app(cx, |app| settings.read(app).active_section),
-            want
-        );
+        assert_eq!(with_app(cx, |app| settings.read(app).active_section), want);
     }
     cx.run_until_parked();
 }
@@ -1705,7 +1836,12 @@ fn dav_offline_short_circuit(cx: &mut TestAppContext) {
         .block_on(async { api.sync_contacts(999).await })
         .expect("e2e 模式 sync_contacts 应短路成功");
     assert_eq!(
-        (report.pulled, report.pushed, report.deleted, report.conflicts),
+        (
+            report.pulled,
+            report.pushed,
+            report.deleted,
+            report.conflicts
+        ),
         (0, 0, 0, 0),
         "短路报告应为全零: {report:?}"
     );
@@ -1714,12 +1850,8 @@ fn dav_offline_short_circuit(cx: &mut TestAppContext) {
     // discover 同样短路 → 空列表
     let books = crate::runtime::runtime()
         .block_on(async {
-            api.discover_addressbooks(
-                "https://dav.example/".into(),
-                "user".into(),
-                "pass".into(),
-            )
-            .await
+            api.discover_addressbooks("https://dav.example/".into(), "user".into(), "pass".into())
+                .await
         })
         .expect("e2e 模式 discover_addressbooks 应短路成功");
     assert!(books.is_empty(), "短路发现应为空列表");
@@ -1760,5 +1892,843 @@ fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let open = with_app(cx, |app| view.read(app).dav.is_some());
     assert!(!open, "ESC 应关闭 CardDAV 配置弹窗");
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 9：GPUI HTML 渲染层冒烟——IR 文档嵌入测试窗口渲染不 panic、文本可查询
+// （行内段以内容为键写入渲染树 debug_selector，与 contacts-import 的
+// debug_bounds 查询同款 gpui_pre 文本查询模式）
+// ---------------------------------------------------------------------------
+struct HtmlRenderProbe {
+    doc: postium_html::HtmlDocument,
+    /// 链接点击回调（Task 10：e2e 注入捕获闭包断言 SafeUrl 通路）。
+    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + 'static>,
+}
+
+impl gpui_kit::Render for HtmlRenderProbe {
+    fn render(
+        &mut self,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{ParentElement as _, Styled as _};
+        // Arc<dyn Fn> 不直接满足 impl Fn 泛型界（无 Arc<dyn> 的 Fn 覆盖实现），
+        // 经闭包解引用调用（call 位点自动 deref 到 &dyn Fn）。
+        let on_link = self.on_link.clone();
+        let element = crate::views::email_html::render_html_document(
+            &self.doc,
+            false,
+            crate::views::email_html::ImageCtx::default(),
+            move |url: &postium_html::SafeUrl| on_link(url),
+            cx,
+        );
+        gpui_kit::div().size_full().overflow_hidden().child(element)
+    }
+}
+
+#[gpui_pre::test]
+fn html_render_smoke(cx: &mut TestAppContext) {
+    use postium_html::{
+        Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle,
+        SafeUrl,
+    };
+
+    fn text(t: &str) -> InlineRun {
+        InlineRun::Text {
+            text: t.into(),
+            style: InlineStyle::default(),
+        }
+    }
+
+    let doc = HtmlDocument {
+        blocks: vec![
+            // 容器 + 内嵌段落
+            Block::Container {
+                style: BlockStyle {
+                    background_color: Some([240, 244, 255, 255]),
+                    ..Default::default()
+                },
+                children: vec![Block::Paragraph {
+                    style: BlockStyle::default(),
+                    runs: vec![text("容器段落文本")],
+                    align: Align::Left,
+                }],
+            },
+            // 段落：行内文本 + 链接 + br 换行
+            Block::Paragraph {
+                style: BlockStyle {
+                    color: Some([178, 34, 34, 255]),
+                    ..Default::default()
+                },
+                runs: vec![
+                    text("普通段落"),
+                    InlineRun::Link {
+                        href: SafeUrl::Http("https://example.com/".into()),
+                        runs: vec![text("链接文字")],
+                    },
+                    InlineRun::Br,
+                    text("换行后文本"),
+                ],
+                align: Align::Left,
+            },
+            // 标题
+            Block::Heading {
+                level: 2,
+                align: Align::Center,
+                runs: vec![text("二级标题文本")],
+            },
+            // 一级标题（UA 默认字号 32px，锁标题字号非正文兜底 14px）
+            Block::Heading {
+                level: 1,
+                align: Align::Left,
+                runs: vec![text("一级标题文本")],
+            },
+            // 无序列表
+            Block::List {
+                ordered: false,
+                items: vec![
+                    vec![Block::Paragraph {
+                        style: BlockStyle::default(),
+                        runs: vec![text("列表项甲")],
+                        align: Align::Left,
+                    }],
+                    vec![Block::Paragraph {
+                        style: BlockStyle::default(),
+                        runs: vec![text("列表项乙")],
+                        align: Align::Left,
+                    }],
+                ],
+            },
+            // 引用
+            Block::Quote {
+                children: vec![Block::Paragraph {
+                    style: BlockStyle::default(),
+                    runs: vec![text("引用内容文本")],
+                    align: Align::Left,
+                }],
+            },
+            // 图片占位（Task 13 接管真实渲染）
+            Block::Image {
+                src: ImageRef::Invalid,
+                alt: "替代文字图片".into(),
+                style: ImageStyle::default(),
+            },
+            Block::Hr,
+        ],
+    };
+
+    let (probe, cx) = cx.add_window_view(|_window, cx| {
+        setup(cx);
+        HtmlRenderProbe {
+            doc,
+            on_link: Arc::new(|_: &postium_html::SafeUrl| {}),
+        }
+    });
+    let _ = &probe;
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+    // 渲染不 panic 已由重绘覆盖；文本内容可查询：行内段以内容为键出现。
+    // 探针键粒度 = 字号分组文本元素（同组段合并为一个文本元素，
+    // 键取组文本前缀）：第二段三 run 同字号 → 单键；链接 run 的下划线/
+    // 链接色、br 折行均在该组文本内呈现。
+    let keys = [
+        "html-txt-容器段落文本",
+        "html-txt-普通段落链接文字换行后文本",
+        "html-txt-二级标题文本",
+        "html-txt-一级标题文本",
+        "html-txt-列表项甲",
+        "html-txt-列表项乙",
+        "html-txt-引用内容文本",
+        "html-txt-替代文字图片",
+        "html-hr",
+        "html-root",
+    ];
+    let mut missing = keys.to_vec();
+    for _ in 0..200 {
+        cx.run_until_parked();
+        missing.retain(|k| {
+            cx.debug_bounds(k).is_none_or(|b| {
+                b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.)
+            })
+        });
+        if missing.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    assert!(missing.is_empty(), "渲染树缺失文本探针: {missing:?}");
+
+    // 标题默认字号（评审修复 1 回归锁）：h1 文本元素行高 = 32px × 1.6 =
+    // 51.2px；若字号死样式回退为正文兜底 14px，行高仅 22.4px。
+    let h1_height = cx
+        .debug_bounds("html-txt-一级标题文本")
+        .expect("h1 文本探针应存在")
+        .size
+        .height;
+    assert!(
+        h1_height > gpui_kit::px(40.),
+        "h1 应按级别默认字号渲染（行高应 >40px），实际 {h1_height}"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 10：表格 flex 模拟 + 链接交互——两列表格 + colspan 链接行渲染不 panic、
+// 单元格文本探针可见、点击链接 on_link 回调收到 SafeUrl::Http
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_render_table_and_link(cx: &mut TestAppContext) {
+    use std::sync::Mutex as StdMutex;
+
+    use postium_html::{
+        Align, Block, BlockStyle, HtmlDocument, InlineRun, InlineStyle, SafeUrl, TableCell,
+        TableRow,
+    };
+
+    fn text(t: &str) -> InlineRun {
+        InlineRun::Text {
+            text: t.into(),
+            style: InlineStyle::default(),
+        }
+    }
+    fn para(runs: Vec<InlineRun>) -> Block {
+        Block::Paragraph {
+            style: BlockStyle::default(),
+            runs,
+            align: Align::Left,
+        }
+    }
+
+    let doc = HtmlDocument {
+        blocks: vec![Block::Table {
+            style: BlockStyle::default(),
+            rows: vec![
+                // 两列表格：上排两个等权单元格
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("单元格甲")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("单元格乙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
+                },
+                // colspan [1,2] 行：colspan 权重生效断言载体（1:2 分布），
+                // 第二格含链接（交互断言载体）
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("跨列前段")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![InlineRun::Link {
+                                href: SafeUrl::Http("https://example.com/table".into()),
+                                runs: vec![text("表格链接文字")],
+                            }])],
+                            colspan: 2,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
+                },
+                // [1,1,1] 三等分对照行
+                TableRow {
+                    cells: vec![
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分甲")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分乙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                        TableCell {
+                            blocks: vec![para(vec![text("三等分丙")])],
+                            colspan: 1,
+                            width: None,
+                            style: BlockStyle::default(),
+                        },
+                    ],
+                },
+            ],
+        }],
+    };
+
+    let clicks: Arc<StdMutex<Vec<SafeUrl>>> = Arc::new(StdMutex::new(Vec::new()));
+    let sink = clicks.clone();
+    let (probe, cx) = cx.add_window_view(|_window, cx| {
+        setup(cx);
+        HtmlRenderProbe {
+            doc,
+            on_link: Arc::new(move |url: &postium_html::SafeUrl| {
+                sink.lock().unwrap().push(url.clone())
+            }),
+        }
+    });
+    let _ = &probe;
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+
+    // 表格渲染不塌陷：单元格文本以探针键出现在渲染树
+    let keys = [
+        "html-txt-单元格甲",
+        "html-txt-单元格乙",
+        "html-txt-跨列前段",
+        "html-txt-表格链接文字",
+        "html-txt-三等分甲",
+        "html-txt-三等分乙",
+        "html-txt-三等分丙",
+    ];
+    let mut missing = keys.to_vec();
+    for _ in 0..200 {
+        cx.run_until_parked();
+        missing.retain(|k| {
+            cx.debug_bounds(k).is_none_or(|b| {
+                b.size.width <= gpui_kit::px(0.) || b.size.height <= gpui_kit::px(0.)
+            })
+        });
+        if missing.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    assert!(
+        missing.is_empty(),
+        "渲染树缺失表格单元格文本探针: {missing:?}"
+    );
+
+    // colspan 权重生效（评审加固）：[1,2] 行宽度比 1:2（±5%）。探针 div 为
+    // 单元格内 w_full 文本元素，宽度即单元格宽。
+    let mut cell_w = |key: &'static str| {
+        cx.debug_bounds(key)
+            .unwrap_or_else(|| panic!("探针 {key} 应存在"))
+            .size
+            .width
+    };
+    let ratio = cell_w("html-txt-跨列前段") / cell_w("html-txt-表格链接文字");
+    assert!(
+        (0.475..=0.525).contains(&ratio),
+        "[1,2] 行应按 colspan 权重 1:2 分布（±5%），实测 {ratio:.3}——\
+         若回退为 50/50 说明 flex_basis 归零修复失效"
+    );
+    // [1,1,1] 三等分对照：三格两两差 ≤5%
+    let thirds = [
+        cell_w("html-txt-三等分甲"),
+        cell_w("html-txt-三等分乙"),
+        cell_w("html-txt-三等分丙"),
+    ];
+    let (min_w, max_w) = thirds.iter().fold((thirds[0], thirds[0]), |(lo, hi), &w| {
+        (lo.min(w), hi.max(w))
+    });
+    assert!(
+        max_w / min_w <= 1.05,
+        "[1,1,1] 行应三等分（±5%），实测 {thirds:?}"
+    );
+    drop(cell_w);
+
+    // 点击链接 → on_link 回调捕获 SafeUrl::Http（探针 div 全宽，链接文本起于左缘）
+    let bounds = cx
+        .debug_bounds("html-txt-表格链接文字")
+        .expect("链接文本探针应存在");
+    cx.simulate_click(
+        gpui_pre::point(
+            bounds.origin.x + gpui_kit::px(4.),
+            bounds.origin.y + bounds.size.height / 2.,
+        ),
+        gpui_pre::Modifiers::default(),
+    );
+    cx.run_until_parked();
+
+    let got = clicks.lock().unwrap();
+    assert_eq!(got.len(), 1, "点击链接应恰好触发一次 on_link: {got:?}");
+    assert_eq!(
+        got.first(),
+        Some(&SafeUrl::Http("https://example.com/table".into())),
+        "on_link 应收到 SafeUrl::Http"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 11：email_detail 正文接入新渲染器——种子 HTML 邮件打开后正文文本以
+// 新渲染器探针键出现（旧 gpui_kit text::html 路径不产生 html-txt-* 探针，
+// 探针键由 email_html 渲染层在测试构建写入）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_renders_via_new_renderer(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).emails.read(app).emails.is_empty()).then_some(())
+        })
+    });
+
+    // 种子 HTML 邮件（body_html = <p>This is deterministic E2E body content …</p>）
+    let email_id = with_app(cx, |app| {
+        shell
+            .read(app)
+            .emails
+            .read(app)
+            .emails
+            .iter()
+            .find(|e| {
+                e.subject
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("Primary Inbox Message 01")
+            })
+            .map(|e| e.id)
+            .expect("收件箱应含 Primary Inbox Message 01 种子邮件")
+    });
+
+    // 行选中同款事件：SelectionChanged → 详情装载 + 详情视图重建
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(email_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    email_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == email_id).then_some(())
+        })
+    });
+
+    // 正文文本以新渲染器探针键可见（text_probe_key：内容字母数字前缀 16 字符）
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-Thisisdeterminis")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 11：降级路径——>1MB 正文经 render_pipeline TooLarge → 纯文本降级 +
+// 顶部提示条出现、不 panic。形态选择：>1MB 正文经 save_draft 真实落库
+// （e2e 草稿路径本地写入，compose e2e 已覆盖），再按行选中同款事件打开
+// 详情——走完整降级链路（DetailStore 装载 → 管线超限 → 降级渲染），
+// 不用函数级直调（保留 e2e 全栈语义）。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_oversize_falls_back(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Oversize Fallback Probe".into(),
+            body_html: format!("<p>{}</p>", "x".repeat(1024 * 1024 + 64)),
+            body_text: "超大邮件降级后的纯文本正文".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("超大草稿应保存成功")
+            .draft_id
+    };
+    assert!(draft_id > 0, "草稿应保存并返回正 id");
+
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+
+    // 降级提示条可见（debug_selector 探针，contacts-import-btn 同款查询模式）；
+    // 超限分支不进入渲染树构建，测试进程存活即不 panic 断言
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-html-fallback")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 11 评审修复 P1：纯文本邮件不得误显示降级提示条——body_html 缺失时
+// DetailStore.html = Some("")，空 html 不得进 render_pipeline（Err(Empty)
+// 会把每封纯文本邮件误标「无法渲染」）。断言：提示条缺席 + 纯文本正文可见。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn plain_text_email_no_fallback_banner(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 纯文本草稿：body_html 空白（DetailStore 装载后 html = Some("")）
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Plain Text Probe".into(),
+            body_html: String::new(),
+            body_text: "纯文本邮件正文，不应出现降级提示条。".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("纯文本草稿应保存成功")
+            .draft_id
+    };
+
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+
+    cx.refresh().expect("测试窗口重绘调度失败");
+    // 正文先渲染到位（纯文本路径探针可见）
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-plain-body")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    // 多帧后提示条始终缺席（出现即红——纯文本邮件不得误标「无法渲染」）
+    for _ in 0..10 {
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds("email-html-fallback").is_none(),
+            "纯文本邮件不得出现降级提示条"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 11 评审修复 P2：文档缓存内容感知失效——同 id 新正文到达后旧文档不得
+// 命中（生产同 id 换内容路径：同步 UPSERT_EMAIL_SQL 按 (account,folder,uid)
+// 原位更新 body_html；评审所述草稿重存实测为「新行 id + 删旧行」，同 id
+// 新内容经由 DetailStore.html 到达，此处沿该接缝驱动真实渲染路径断言）。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_cache_same_id_new_content_renders(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Cache Content Probe".into(),
+            body_html: "<p>CacheKeyAlpha</p>".into(),
+            body_text: "CacheKeyAlpha".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("缓存探针草稿应保存成功")
+            .draft_id
+    };
+
+    // 打开详情 → Alpha 文本经新渲染器可见
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-CacheKeyAlpha")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+
+    // 同 id 新正文到达（同步重取/重载路径同款接缝）→ 重渲染必须展示新内容：
+    // 内容感知键 (id, hash) 未命中 → 走管线渲染 Beta；id-only 键会命中陈旧
+    // Alpha 文档 → Beta 缺席即红
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.detail.update(cx, |store, cx| {
+                store.html = Some("<p>CacheKeyBeta</p>".into());
+                cx.notify();
+            });
+        });
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-txt-CacheKeyBeta")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("html-txt-CacheKeyAlpha").is_none(),
+        "同 id 新内容渲染后陈旧文本不得残留"
+    );
+    cx.run_until_parked();
+}
+
+// ---------------------------------------------------------------------------
+// Task 13：图片管线 UI——含远程图邮件打开后默认拦截（占位框出现、无已加载
+// 真图、「加载图片」条可见）；点击加载按钮 → images_enabled 翻转；e2e_offline
+// 下 fetch_image 短路 Err → resolved 记录失败（None）→ 占位框保留（无网络
+// 请求路径由 core 短路结构性保证，断言占位框保持即为断言形态，T12 交接）。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 含远程图的 HTML 草稿（e2e_offline 本地落库，正文带跟踪像素形态远程图）
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Remote Image Probe".into(),
+            body_html: "<p>RemoteImageProbeText</p>\
+                        <img src=\"https://tracking.example.test/pixel.png\" alt=\"远程图片探针\">"
+                .into(),
+            body_text: "远程图片拦截探针正文".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("远程图草稿应保存成功")
+            .draft_id
+    };
+
+    // 打开详情（行选中同款事件接缝，T11 同款）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(
+                    draft_id,
+                ));
+                cx.notify();
+            });
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+
+    // 默认拦截：占位框出现、无已加载真图、「加载图片」条可见
+    cx.refresh().expect("测试窗口重绘调度失败");
+    wait_for(cx, |cx| {
+        cx.debug_bounds("html-img")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    assert!(
+        cx.debug_bounds("html-img-loaded").is_none(),
+        "默认拦截下不得出现已加载真图"
+    );
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-load-images")
+            .filter(|b| b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.))
+            .map(|_| ())
+    });
+    assert!(
+        !with_app(cx, |app| shell.read(app).detail.read(app).images.enabled),
+        "打开邮件时 images_enabled 应为 false"
+    );
+
+    // 点击「加载图片」（banner 探针 div 紧贴按钮，中心命中）
+    let bounds = cx
+        .debug_bounds("email-load-images")
+        .expect("加载图片条应存在");
+    cx.simulate_click(
+        gpui_pre::point(
+            bounds.origin.x + bounds.size.width / 2.,
+            bounds.origin.y + bounds.size.height / 2.,
+        ),
+        gpui_pre::Modifiers::default(),
+    );
+    cx.run_until_parked();
+
+    // images_enabled 翻转 + 条消失
+    assert!(
+        with_app(cx, |app| shell.read(app).detail.read(app).images.enabled),
+        "点击加载按钮后 images_enabled 应翻转为 true"
+    );
+    wait_for(cx, |cx| {
+        cx.debug_bounds("email-load-images").is_none().then_some(())
+    });
+
+    // e2e_offline：fetch_image 短路 Err → resolved 记录失败（None）→ 占位框保留
+    let (resolved_url, resolved_failed) = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).detail.read(app);
+            store
+                .images
+                .resolved
+                .lock()
+                .unwrap()
+                .iter()
+                .next()
+                .map(|(url, img)| (url.clone(), img.is_none()))
+        })
+    });
+    assert_eq!(
+        resolved_url, "https://tracking.example.test/pixel.png",
+        "resolved 键应为远程图 URL"
+    );
+    assert!(resolved_failed, "e2e_offline 短路 Err 应记录为失败（None）");
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds("html-img")
+            .is_some_and(|b| b.size.width > gpui_kit::px(0.)),
+        "加载失败后占位框应保留"
+    );
+    assert!(
+        cx.debug_bounds("html-img-loaded").is_none(),
+        "e2e_offline 下不得出现已加载真图"
+    );
     cx.run_until_parked();
 }

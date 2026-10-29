@@ -38,6 +38,7 @@ url = "2"
 utf7-imap = "0.3"
 uuid = { version = "1", features = ["v4"] }
 open = "5"
+moka = { version = "0.12.16", features = ["future"] }
 
 # keyring 平台原生后端（裸依赖会静默落入 mock 凭据库，密码根本不落盘）
 [target.'cfg(target_os = "windows")'.dependencies]

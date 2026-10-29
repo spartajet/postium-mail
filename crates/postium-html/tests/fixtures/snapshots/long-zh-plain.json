@@ -1,0 +1,4539 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": null,
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 680.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Heading": {
+              "level": 1,
+              "align": "Left",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "渲染管线周报 · 超长中文纯文本语料",
+                    "style": {
+                      "color": null,
+                      "font_size": 20.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第001条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第002条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第003条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第004条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第005条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第006条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第007条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第008条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第009条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第010条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第011条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第012条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第013条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第014条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第015条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第016条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第017条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第018条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第019条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第020条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第021条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第022条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第023条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第024条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第025条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第026条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第027条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第028条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第029条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第030条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第031条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第032条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第033条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第034条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第035条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第036条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第037条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第038条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第039条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第040条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第041条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第042条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第043条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第044条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第045条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第046条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第047条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第048条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第049条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第050条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第051条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第052条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第053条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第054条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第055条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第056条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第057条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第058条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第059条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第060条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第061条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第062条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第063条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第064条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第065条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第066条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第067条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第068条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第069条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第070条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第071条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第072条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第073条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第074条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第075条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第076条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮发现两处轻微偏差，已记录待复核。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第077条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第078条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第079条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": [
+                  51,
+                  51,
+                  51,
+                  255
+                ],
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  10.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "【第080条】本周邮件渲染管线进入收尾阶段：解析侧的中间表示已经冻结，深色模式的亮度重映射在浅底与深底两类语料上验证通过，快照基线未出现意外漂移。团队决定将表格布局的flex 模拟策略保留到下一个迭代，并在真实语料回归中持续观察列宽分配的保真度。本轮无异常。 此邮件由 Postium 渲染质量机器人自动发送，收件人为渲染管线评审组，请勿直接回复；如需讨论请到周二例会提出议题。",
+                    "style": {
+                      "color": [
+                        51,
+                        51,
+                        51,
+                        255
+                      ],
+                      "font_size": 14.0,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

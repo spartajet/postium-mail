@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+  <script>alert('should be stripped');</script>
+</head>
+<body>
+  <div style="width:600px;margin:0 auto">
+    <h2>安全边界语料（白名单外资源）</h2>
+    <p>1. javascript: 链接：<a href="javascript:alert(1)">点我领奖</a></p>
+    <p>2. 实体变体链接：<a href="&#106;avascript&#58;alert(2)">实体编码</a></p>
+    <p>3. vbscript: 链接：<a href="vbscript:msgbox(1)">VB 脚本</a></p>
+    <p>4. data:text 链接：<a href="data:text/html,&lt;b&gt;x&lt;/b&gt;">data 链接</a></p>
+    <p>5. 相对路径链接：<a href="/relative/path">站内相对路径</a></p>
+    <p>6. data:text 图片：<img src="data:text/html;base64,PGI+aDwvYj4=" alt="伪图片"></p>
+    <p>7. file 协议图片：<img src="file:///C:/Users/public/pic.png" alt="本地文件"></p>
+    <p>8. 带 onclick 的按钮：<a href="https://ok.postium.example/safe" onclick="steal()">这条链接本体合法</a></p>
+    <p onmouseover="pwn()">9. 段落属性事件：本段文字应保留、事件应剥离。</p>
+    <img src="cid:not-attached@nowhere.example" alt="未随附的 cid">
+  </div>
+</body>
+</html>

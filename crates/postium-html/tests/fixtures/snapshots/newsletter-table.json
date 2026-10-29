@@ -1,0 +1,769 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 600.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Table": {
+              "style": {
+                "background_color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": {
+                  "Px": 600.0
+                },
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "rows": [
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Heading": {
+                            "level": 1,
+                            "align": "Left",
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "Postium 周刊 · 第 42 期",
+                                  "style": {
+                                    "color": [
+                                      26,
+                                      115,
+                                      232,
+                                      255
+                                    ],
+                                    "font_size": 22.0,
+                                    "bold": true,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": [
+                                102,
+                                102,
+                                102,
+                                255
+                              ],
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "每周一封，只讲 Rust 与邮件客户端。",
+                                  "style": {
+                                    "color": [
+                                      102,
+                                      102,
+                                      102,
+                                      255
+                                    ],
+                                    "font_size": 13.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              }
+                            ],
+                            "align": "Left"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": [
+                          26,
+                          115,
+                          232,
+                          255
+                        ],
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          24.0,
+                          24.0,
+                          24.0,
+                          24.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Table": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": {
+                                "Percent": 100.0
+                              },
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "rows": [
+                              {
+                                "cells": [
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Heading": {
+                                          "level": 2,
+                                          "align": "Left",
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "本期要点",
+                                                "style": {
+                                                  "color": null,
+                                                  "font_size": null,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "List": {
+                                          "ordered": false,
+                                          "items": [
+                                            [
+                                              {
+                                                "Paragraph": {
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  },
+                                                  "runs": [
+                                                    {
+                                                      "Text": {
+                                                        "text": "GPUI 渲染管线的块级布局实践",
+                                                        "style": {
+                                                          "color": null,
+                                                          "font_size": null,
+                                                          "bold": false,
+                                                          "italic": false,
+                                                          "underline": false,
+                                                          "strikethrough": false
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "align": "Left"
+                                                }
+                                              }
+                                            ],
+                                            [
+                                              {
+                                                "Paragraph": {
+                                                  "style": {
+                                                    "background_color": null,
+                                                    "color": null,
+                                                    "text_align": null,
+                                                    "margin": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "margin_auto": false,
+                                                    "padding": [
+                                                      0.0,
+                                                      0.0,
+                                                      0.0,
+                                                      0.0
+                                                    ],
+                                                    "width": null,
+                                                    "height": null,
+                                                    "max_width": null,
+                                                    "border_top": null,
+                                                    "border_right": null,
+                                                    "border_bottom": null,
+                                                    "border_left": null,
+                                                    "hidden": false
+                                                  },
+                                                  "runs": [
+                                                    {
+                                                      "Text": {
+                                                        "text": "html5ever 解析器的错误恢复机制",
+                                                        "style": {
+                                                          "color": null,
+                                                          "font_size": null,
+                                                          "bold": false,
+                                                          "italic": false,
+                                                          "underline": false,
+                                                          "strikethrough": false
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "align": "Left"
+                                                }
+                                              }
+                                            ]
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "Image": {
+                                          "src": {
+                                            "Cid": {
+                                              "content_id": "banner@postium.mail"
+                                            }
+                                          },
+                                          "alt": "本期头图",
+                                          "style": {
+                                            "width": {
+                                              "Px": 280.0
+                                            },
+                                            "height": null,
+                                            "max_width": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Px": 300.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        12.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  },
+                                  {
+                                    "blocks": [
+                                      {
+                                        "Heading": {
+                                          "level": 2,
+                                          "align": "Left",
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "深度文章",
+                                                "style": {
+                                                  "color": null,
+                                                  "font_size": null,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Text": {
+                                                "text": "深色模式下的亮度重映射：背景压入深灰区间、文字提亮至可读下限，",
+                                                "style": {
+                                                  "color": null,
+                                                  "font_size": null,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "Link": {
+                                                "href": {
+                                                  "Http": "https://postium.example/issues/42"
+                                                },
+                                                "runs": [
+                                                  {
+                                                    "Text": {
+                                                      "text": "阅读全文",
+                                                      "style": {
+                                                        "color": null,
+                                                        "font_size": null,
+                                                        "bold": false,
+                                                        "italic": false,
+                                                        "underline": false,
+                                                        "strikethrough": false
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "Text": {
+                                                "text": "。",
+                                                "style": {
+                                                  "color": null,
+                                                  "font_size": null,
+                                                  "bold": false,
+                                                  "italic": false,
+                                                  "underline": false,
+                                                  "strikethrough": false
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "align": "Left"
+                                        }
+                                      },
+                                      {
+                                        "Paragraph": {
+                                          "style": {
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": "Center",
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
+                                            "height": null,
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Link": {
+                                                "href": {
+                                                  "Http": "https://postium.example/subscribe"
+                                                },
+                                                "runs": [
+                                                  {
+                                                    "Text": {
+                                                      "text": "立即订阅",
+                                                      "style": {
+                                                        "color": [
+                                                          255,
+                                                          255,
+                                                          255,
+                                                          255
+                                                        ],
+                                                        "font_size": null,
+                                                        "bold": false,
+                                                        "italic": false,
+                                                        "underline": false,
+                                                        "strikethrough": false
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ],
+                                          "align": "Center"
+                                        }
+                                      }
+                                    ],
+                                    "colspan": 1,
+                                    "width": {
+                                      "Px": 300.0
+                                    },
+                                    "style": {
+                                      "background_color": null,
+                                      "color": null,
+                                      "text_align": null,
+                                      "margin": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "margin_auto": false,
+                                      "padding": [
+                                        0.0,
+                                        0.0,
+                                        0.0,
+                                        0.0
+                                      ],
+                                      "width": null,
+                                      "height": null,
+                                      "max_width": null,
+                                      "border_top": null,
+                                      "border_right": null,
+                                      "border_bottom": null,
+                                      "border_left": null,
+                                      "hidden": false
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": null,
+                        "text_align": null,
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          24.0,
+                          24.0,
+                          24.0,
+                          24.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                },
+                {
+                  "cells": [
+                    {
+                      "blocks": [
+                        {
+                          "Paragraph": {
+                            "style": {
+                              "background_color": null,
+                              "color": null,
+                              "text_align": null,
+                              "margin": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "margin_auto": false,
+                              "padding": [
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0
+                              ],
+                              "width": null,
+                              "height": null,
+                              "max_width": null,
+                              "border_top": null,
+                              "border_right": null,
+                              "border_bottom": null,
+                              "border_left": null,
+                              "hidden": false
+                            },
+                            "runs": [
+                              {
+                                "Text": {
+                                  "text": "你收到本邮件是因为订阅了 Postium 周刊。",
+                                  "style": {
+                                    "color": [
+                                      102,
+                                      102,
+                                      102,
+                                      255
+                                    ],
+                                    "font_size": 13.0,
+                                    "bold": false,
+                                    "italic": false,
+                                    "underline": false,
+                                    "strikethrough": false
+                                  }
+                                }
+                              },
+                              {
+                                "Link": {
+                                  "href": {
+                                    "Mailto": "mailto:unsubscribe@postium.example"
+                                  },
+                                  "runs": [
+                                    {
+                                      "Text": {
+                                        "text": "退订",
+                                        "style": {
+                                          "color": [
+                                            102,
+                                            102,
+                                            102,
+                                            255
+                                          ],
+                                          "font_size": 13.0,
+                                          "bold": false,
+                                          "italic": false,
+                                          "underline": false,
+                                          "strikethrough": false
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "align": "Center"
+                          }
+                        }
+                      ],
+                      "colspan": 1,
+                      "width": null,
+                      "style": {
+                        "background_color": null,
+                        "color": [
+                          102,
+                          102,
+                          102,
+                          255
+                        ],
+                        "text_align": "Center",
+                        "margin": [
+                          0.0,
+                          0.0,
+                          0.0,
+                          0.0
+                        ],
+                        "margin_auto": false,
+                        "padding": [
+                          12.0,
+                          12.0,
+                          12.0,
+                          12.0
+                        ],
+                        "width": null,
+                        "height": null,
+                        "max_width": null,
+                        "border_top": null,
+                        "border_right": null,
+                        "border_bottom": null,
+                        "border_left": null,
+                        "hidden": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+  <style>
+    .doc { width: 640px; margin: 0 auto; }
+    .tag { background-color: #e6f4ea; color: #137333; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="doc">
+    <h1>渲染层验收清单</h1>
+    <p class="tag">状态：全部通过 · 覆盖 M-A 至 M-D</p>
+    <h2 align="center">块级形状</h2>
+    <ol>
+      <li>段落与行内样式：<b>粗体</b>、<i>斜体</i>、<u>下划线</u>、<s>删除线</s>、<span style="color:#d93025">红色文字</span>、<span style="background-color:#fff475">高亮底色</span>。</li>
+      <li>有序列表嵌套：
+        <ol>
+          <li>二级有序项</li>
+          <li>二级第二项
+            <ul><li>三级无序项</li></ul>
+          </li>
+        </ol>
+      </li>
+      <li>链接：<a href="https://example.com/docs">https 链接</a>、<a href="mailto:docs@postium.example">mailto 链接</a>。</li>
+    </ol>
+    <blockquote>
+      <p style="color:#5f6368">引用块：解析侧不做 IO，渲染侧不接触原始 HTML。</p>
+    </blockquote>
+    <h3 style="text-align:right">右对齐小节</h3>
+    <p style="text-align:center">居中段落：<span style="font-size:18px">大一号文字</span> 与 <span style="font-size:11px">小一号文字</span> 同段折行。</p>
+    <hr>
+    <p style="margin:0 0 12px 0">结束行（margin 语义锁定）。</p>
+  </div>
+</body>
+</html>

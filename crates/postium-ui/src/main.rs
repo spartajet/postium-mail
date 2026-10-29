@@ -2,7 +2,6 @@
 
 mod app;
 mod i18n;
-mod image_injector;
 mod nav;
 mod notify;
 mod runtime;

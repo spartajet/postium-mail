@@ -1,0 +1,5 @@
+# JSON 快照基线经 snapshot.rs 逐字节比对，跨平台固定 LF
+#（core.autocrlf=true 下重新检出若转 CRLF，pretty JSON 与序列化产物不一致会误报）
+crates/postium-html/tests/fixtures/snapshots/*.json text eol=lf
+# fixture 语料同样固定 LF，保证管线输入跨平台一致（空白折叠语义不受影响，双保险）
+crates/postium-html/tests/fixtures/*.html text eol=lf

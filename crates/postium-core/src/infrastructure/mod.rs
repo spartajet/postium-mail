@@ -118,3 +118,9 @@ pub mod carddav;
 /// 支持 Gmail / Outlook / 通用三种方言的表头嗅探与行转换，以及带
 /// UTF-8 BOM、RFC 4180 转义的固定表头导出。
 pub mod csv_contacts;
+
+/// 远程图片受限 HTTP 拉取（spec §4.4）。
+///
+/// 提供受限 GET（15s 超时 / 10MB 上限 / `image/*` Content-Type 校验），
+/// 不含缓存——缓存编排在 service 层 `ImageFetchService`。
+pub mod image_fetch;

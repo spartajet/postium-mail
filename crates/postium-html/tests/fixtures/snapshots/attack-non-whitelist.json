@@ -1,0 +1,532 @@
+{
+  "blocks": [
+    {
+      "Container": {
+        "style": {
+          "background_color": null,
+          "color": null,
+          "text_align": null,
+          "margin": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "margin_auto": true,
+          "padding": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "width": {
+            "Px": 600.0
+          },
+          "height": null,
+          "max_width": null,
+          "border_top": null,
+          "border_right": null,
+          "border_bottom": null,
+          "border_left": null,
+          "hidden": false
+        },
+        "children": [
+          {
+            "Heading": {
+              "level": 2,
+              "align": "Left",
+              "runs": [
+                {
+                  "Text": {
+                    "text": "安全边界语料（白名单外资源）",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "1. javascript: 链接：点我领奖",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "2. 实体变体链接：实体编码",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "3. vbscript: 链接：VB 脚本",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "4. data:text 链接：data 链接",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "5. 相对路径链接：站内相对路径",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "6. data:text 图片：",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Image": {
+              "src": "Invalid",
+              "alt": "伪图片",
+              "style": {
+                "width": null,
+                "height": null,
+                "max_width": null
+              }
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "7. file 协议图片：",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Image": {
+              "src": "Invalid",
+              "alt": "本地文件",
+              "style": {
+                "width": null,
+                "height": null,
+                "max_width": null
+              }
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "8. 带 onclick 的按钮：",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Link": {
+                    "href": {
+                      "Http": "https://ok.postium.example/safe"
+                    },
+                    "runs": [
+                      {
+                        "Text": {
+                          "text": "这条链接本体合法",
+                          "style": {
+                            "color": null,
+                            "font_size": null,
+                            "bold": false,
+                            "italic": false,
+                            "underline": false,
+                            "strikethrough": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Paragraph": {
+              "style": {
+                "background_color": null,
+                "color": null,
+                "text_align": null,
+                "margin": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "margin_auto": false,
+                "padding": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "width": null,
+                "height": null,
+                "max_width": null,
+                "border_top": null,
+                "border_right": null,
+                "border_bottom": null,
+                "border_left": null,
+                "hidden": false
+              },
+              "runs": [
+                {
+                  "Text": {
+                    "text": "9. 段落属性事件：本段文字应保留、事件应剥离。",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                }
+              ],
+              "align": "Left"
+            }
+          },
+          {
+            "Image": {
+              "src": {
+                "Cid": {
+                  "content_id": "not-attached@nowhere.example"
+                }
+              },
+              "alt": "未随附的 cid",
+              "style": {
+                "width": null,
+                "height": null,
+                "max_width": null
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

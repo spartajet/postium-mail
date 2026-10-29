@@ -47,6 +47,9 @@ pub enum MailError {
     #[error("附件解码失败: {0}")]
     AttachmentDecodeFailed(String),
 
+    #[error("图片获取失败: {0}")]
+    ImageFetchFailed(String),
+
     #[error("文件系统错误: {0}")]
     FileSystemError(String),
 
