@@ -97,6 +97,54 @@ impl ImapSession for MockSession {
     async fn logout(self: Box<Self>) -> Result<(), MailError> {
         Ok(())
     }
+    async fn fetch_body(&mut self, _folder: &str, _uid: u32) -> Result<String, MailError> {
+        Ok(String::new())
+    }
+    async fn move_uid(&mut self, _folder: &str, _uid: u32, _to_folder: &str) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn set_flags(
+        &mut self,
+        _folder: &str,
+        _uid: u32,
+        _flags: Vec<String>,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn add_flags(&mut self, _folder: &str, _uid: u32, _flag: &str) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn remove_flags(&mut self, _folder: &str, _uid: u32, _flag: &str) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn append(
+        &mut self,
+        _folder: &str,
+        _email: &[u8],
+        _flags: &[String],
+        _message_id: Option<&str>,
+    ) -> Result<u32, MailError> {
+        Ok(1)
+    }
+    async fn delete(&mut self, _folder: &str, _uid: u32) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn fetch_email_by_uid(
+        &mut self,
+        _folder: &str,
+        _uid: u32,
+    ) -> Result<Option<crate::infrastructure::protocols::types::WholeEmailDto>, MailError> {
+        Ok(None)
+    }
+    async fn fetch_body_section(
+        &mut self,
+        _folder: &str,
+        _uid: u32,
+        _section_path: &str,
+    ) -> Result<Option<crate::infrastructure::protocols::types::FetchedBodySection>, MailError>
+    {
+        Ok(None)
+    }
 }
 
 pub struct MockFactory {

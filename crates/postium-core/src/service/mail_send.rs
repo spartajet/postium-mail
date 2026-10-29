@@ -1,10 +1,9 @@
 use crate::domain::auth::Credentials;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::providers::{SmtpServerConfig, SslMode};
+use crate::engine::{EngineAccess, EngineCommand};
 use crate::error::MailError;
-use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::models::accounts;
-use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::SendEmailRequest;
 use async_trait::async_trait;
 use lettre::Message;
@@ -14,6 +13,7 @@ use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -92,34 +92,36 @@ pub trait SentArchiveWriter: Send + Sync {
     async fn append_to_sent(&self, req: SentArchiveRequest) -> Result<(), MailError>;
 }
 
-pub struct RealSentArchiveWriter;
+/// 基于 IMAP 引擎的 Sent 归档器（APPEND 走引擎连接池，标 \Seen）。
+///
+/// `SentArchiveRequest.credentials` 保留（trait 签名兼容），引擎路径由
+/// 引擎工厂自行解析凭证，本实现不使用。
+pub struct RealSentArchiveWriter {
+    engine: Arc<dyn EngineAccess>,
+}
+
+impl RealSentArchiveWriter {
+    pub fn new(engine: Arc<dyn EngineAccess>) -> Self {
+        Self { engine }
+    }
+}
 
 #[async_trait]
 impl SentArchiveWriter for RealSentArchiveWriter {
     async fn append_to_sent(&self, req: SentArchiveRequest) -> Result<(), MailError> {
-        let imap_config = imap_config_from_account(&req.account)?;
-        let mut client = match &req.credentials {
-            Credentials::Password(password) => {
-                ImapClient::connect(&imap_config, &req.account.email, password).await?
-            }
-            Credentials::OAuth2 { access_token } => {
-                ImapClient::connect_xoauth2(&imap_config, &req.account.email, access_token).await?
-            }
-        };
-
-        let result = client
-            .append_email_with_flags(&req.folder, Some("(\\Seen)"), &req.raw)
-            .await;
-        let logout_result = client.logout().await;
-        if let Err(err) = logout_result {
-            tracing::warn!(
-                account_id = req.account.id,
-                message_id = %req.message_id,
-                error = %err,
-                "远端 Sent 归档后 IMAP 登出失败"
-            );
-        }
-        result
+        let handle = self.engine.imap_engine(&req.account).await?;
+        let email = String::from_utf8(req.raw)
+            .map_err(|e| MailError::InvalidParam(format!("邮件原文不是有效 UTF-8: {e}")))?;
+        handle
+            .request(|reply| EngineCommand::Append {
+                folder: req.folder.clone(),
+                email,
+                flags: vec!["\\Seen".to_string()],
+                message_id: Some(req.message_id.clone()),
+                reply,
+            })
+            .await
+            .map(|_uid| ())
     }
 }
 

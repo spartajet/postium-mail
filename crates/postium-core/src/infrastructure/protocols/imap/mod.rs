@@ -419,6 +419,21 @@ impl ImapClient {
         self.mark_uid_deleted(uid).await
     }
 
+    /// EXPUNGE 当前选中文件夹：物理清除所有带 \Deleted 标志的邮件。
+    ///
+    /// 注意：EXPUNGE 作用于整个文件夹——其他客户端标记 \Deleted 的邮件
+    /// 也会被一并清除（async-imap 0.11 未暴露 UID EXPUNGE）。
+    pub async fn expunge(&mut self) -> Result<(), MailError> {
+        let expunged = self
+            .session
+            .expunge()
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("EXPUNGE 失败: {e}")))?;
+        futures::pin_mut!(expunged);
+        while expunged.next().await.is_some() {}
+        Ok(())
+    }
+
     /// 将一封完整 RFC822 邮件追加到目标文件夹，并可显式传入 IMAP flags。
     pub async fn append_email_with_flags(
         &mut self,

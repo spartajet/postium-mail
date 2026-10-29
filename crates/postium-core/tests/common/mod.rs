@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use postium_core::domain::auth::AuthManager;
 use postium_core::domain::providers::pool::init_provider_pool;
+use postium_core::engine::EngineAccess;
 use postium_core::error::MailError;
 use postium_core::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use postium_core::infrastructure::storage::database::DbConn;
@@ -39,6 +40,22 @@ pub struct TestServices {
 }
 
 struct NoopMailRemoteOperator;
+
+/// 测试桩引擎接入点：Real 归档/草稿写入器在本套件中不应触达 IMAP 引擎；
+/// 万一触达，返回明确错误（发送清理等容错路径会吞掉并记日志）。
+pub struct UnreachableEngineAccess;
+
+#[async_trait]
+impl EngineAccess for UnreachableEngineAccess {
+    async fn imap_engine(
+        &self,
+        _account: &accounts::Model,
+    ) -> Result<postium_core::engine::EngineHandle, MailError> {
+        Err(MailError::InvalidParam(
+            "测试路径不应触达 IMAP 引擎".to_string(),
+        ))
+    }
+}
 
 pub struct RecordingSmtpSender {
     pub sent_message_ids: Mutex<Vec<String>>,
@@ -159,6 +176,7 @@ impl TestServices {
                 auth.clone(),
                 db.clone(),
                 mail_remote,
+                Arc::new(UnreachableEngineAccess),
             ),
             label_service: LabelService::new(db.clone()),
             sync_service: SyncService::new(db.clone(), auth.clone()),
@@ -182,6 +200,7 @@ impl TestServices {
                 auth.clone(),
                 db.clone(),
                 mail_remote,
+                Arc::new(UnreachableEngineAccess),
             ),
             label_service: LabelService::new(db.clone()),
             sync_service: SyncService::new(db.clone(), auth.clone()),
@@ -211,6 +230,7 @@ impl TestServices {
                 mail_remote,
                 smtp_sender,
                 sent_archiver,
+                Arc::new(UnreachableEngineAccess),
             ),
             label_service: LabelService::new(db.clone()),
             sync_service: SyncService::new(db.clone(), auth.clone()),

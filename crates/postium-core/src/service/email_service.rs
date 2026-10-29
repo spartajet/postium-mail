@@ -331,14 +331,19 @@ impl EmailService {
     /// # 返回
     ///
     /// 返回初始化好的 EmailService 实例
-    pub fn new(auth: Arc<AuthManager>, db: DbConn) -> Self {
-        let remote = Arc::new(RealMailRemoteOperator::new(auth.clone()));
+    pub fn new(
+        auth: Arc<AuthManager>,
+        db: DbConn,
+        engine: Arc<dyn crate::engine::EngineAccess>,
+    ) -> Self {
+        let remote = Arc::new(RealMailRemoteOperator::new(engine.clone()));
         Self::new_with_dependencies(
             auth,
             db,
             remote,
             Arc::new(RealSmtpEmailSender),
-            Arc::new(RealSentArchiveWriter),
+            Arc::new(RealSentArchiveWriter::new(engine.clone())),
+            engine,
         )
     }
 
@@ -347,18 +352,19 @@ impl EmailService {
         db: DbConn,
         e2e_enabled: bool,
         e2e_truth_enabled: bool,
+        engine: Arc<dyn crate::engine::EngineAccess>,
     ) -> Self {
         let e2e_local = e2e_enabled && !e2e_truth_enabled;
         let remote: Arc<dyn MailRemoteOperator> = if e2e_local {
             Arc::new(LocalOnlyMailRemoteOperator)
         } else {
-            Arc::new(RealMailRemoteOperator::new(auth.clone()))
+            Arc::new(RealMailRemoteOperator::new(engine.clone()))
         };
         // E2E 模式下草稿远端同样本地化（真 IMAP 写入在隔离测试中必然失败）
         let draft_writer: Arc<dyn crate::service::mail_draft::DraftRemoteWriter> = if e2e_local {
             Arc::new(crate::service::mail_draft::LocalOnlyDraftRemoteWriter)
         } else {
-            Arc::new(crate::service::mail_draft::RealDraftRemoteWriter)
+            Arc::new(crate::service::mail_draft::RealDraftRemoteWriter::new(engine.clone()))
         };
 
         let mut s = Self::new_with_full_dependencies(
@@ -366,7 +372,7 @@ impl EmailService {
             db,
             remote,
             Arc::new(RealSmtpEmailSender),
-            Arc::new(RealSentArchiveWriter),
+            Arc::new(RealSentArchiveWriter::new(engine)),
             draft_writer,
         );
         s.e2e_local = e2e_local;
@@ -377,13 +383,15 @@ impl EmailService {
         auth: Arc<AuthManager>,
         db: DbConn,
         remote: Arc<dyn MailRemoteOperator>,
+        engine: Arc<dyn crate::engine::EngineAccess>,
     ) -> Self {
         Self::new_with_dependencies(
             auth,
             db,
             remote,
             Arc::new(RealSmtpEmailSender),
-            Arc::new(RealSentArchiveWriter),
+            Arc::new(RealSentArchiveWriter::new(engine.clone())),
+            engine,
         )
     }
 
@@ -393,6 +401,7 @@ impl EmailService {
         remote: Arc<dyn MailRemoteOperator>,
         smtp_sender: Arc<dyn SmtpEmailSender>,
         sent_archiver: Arc<dyn SentArchiveWriter>,
+        engine: Arc<dyn crate::engine::EngineAccess>,
     ) -> Self {
         let mut s = Self::new_with_full_dependencies(
             auth,
@@ -400,7 +409,7 @@ impl EmailService {
             remote,
             smtp_sender,
             sent_archiver,
-            Arc::new(RealDraftRemoteWriter),
+            Arc::new(RealDraftRemoteWriter::new(engine)),
         );
         s.e2e_local = false;
         s

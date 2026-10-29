@@ -61,6 +61,8 @@ pub struct CoreApi {
     pub data_dir: std::path::PathBuf,
     /// 同步进度事件发送端（IMAP 引擎复用，状态栏/节流刷新共用链路）
     pub sync_tx: crate::domain::sync::SyncEventTx,
+    /// IMAP 引擎接入点（服务层操作类命令 + `imap_engine` 共用同一 registry 去重路径）
+    pub engine: Arc<dyn crate::engine::EngineAccess>,
     /// e2e 离线模式（e2e=true 且非真连库）：同步入口短路，保证测试确定性。
     e2e_offline: bool,
 }
@@ -100,6 +102,9 @@ impl CoreApi {
         } else {
             AuthManager::default()
         });
+        let engine_access: Arc<dyn crate::engine::EngineAccess> = Arc::new(
+            crate::engine::RegistryEngineAccess::new(auth.clone(), sync_tx.clone()),
+        );
         let accounts = if e2e && !e2e_truth {
             AccountService::new_with_imap_verifier(
                 db.clone(),
@@ -109,11 +114,18 @@ impl CoreApi {
         } else {
             AccountService::new(db.clone(), auth.clone())
         };
-        let emails = EmailService::new_for_runtime(auth.clone(), db.clone(), e2e, e2e_truth);
+        let emails = EmailService::new_for_runtime(
+            auth.clone(),
+            db.clone(),
+            e2e,
+            e2e_truth,
+            engine_access.clone(),
+        );
         let sync = SyncService::new(db.clone(), auth.clone());
         let labels = LabelService::new(db.clone());
         let contacts = ContactService::new(db.clone());
-        let attachments = AttachmentService::new(db.clone(), auth.clone(), data_dir.to_path_buf());
+        let attachments =
+            AttachmentService::new(db.clone(), engine_access.clone(), data_dir.to_path_buf());
         let oauth2 = Arc::new(OAuth2Manager::new(auth.clone(), db.clone())?);
         auth.set_oauth2_manager(oauth2.clone());
 
@@ -131,6 +143,7 @@ impl CoreApi {
             oauth2,
             data_dir: data_dir.to_path_buf(),
             sync_tx,
+            engine: engine_access,
             e2e_offline: e2e && !e2e_truth,
         }))
     }
@@ -145,14 +158,7 @@ impl CoreApi {
         &self,
         account: &crate::infrastructure::storage::models::accounts::Model,
     ) -> Result<crate::engine::EngineHandle, MailError> {
-        crate::engine::registry::ensure_engine(
-            account,
-            Arc::new(crate::engine::factory::RealSessionFactory {
-                auth: self.auth.clone(),
-                account: account.clone(),
-            }),
-            self.sync_tx.clone(),
-        )
+        self.engine.imap_engine(account).await
     }
 
     // ===== account =====

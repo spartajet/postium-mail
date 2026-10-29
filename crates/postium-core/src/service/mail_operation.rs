@@ -9,7 +9,7 @@
 //! ## 模块组织
 //!
 //! - [`MailRemoteOperator`]（trait）：抽象远程 IMAP 操作，便于在单元测试中替换为 mock
-//! - [`RealMailRemoteOperator`]：基于真实 IMAP 连接的默认实现
+//! - [`RealMailRemoteOperator`]：基于 IMAP 引擎命令的默认实现（连接复用见 [`crate::engine`]）
 //! - [`MailOperationService`]：对外暴露的服务层，协调"远端 + 本地"两阶段写操作
 //!
 //! ## 设计原则
@@ -26,16 +26,14 @@
 //!
 
 use crate::domain::auth::AuthManager;
-use crate::domain::auth::manager::Credentials;
 use crate::domain::folders::{FolderCategory, FolderRegistry};
 use crate::domain::providers::pool::PROVIDER_POOL;
+use crate::engine::{EngineAccess, EngineCommand};
 use crate::error::MailError;
-use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::{account_repo, email_repo};
-use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::local_folder_registry_inputs;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -95,14 +93,14 @@ pub trait MailRemoteOperator: Send + Sync {
     ) -> Result<Option<FetchedBodySection>, MailError>;
 }
 
-/// 基于真实 IMAP 连接的远程操作实现
+/// 基于真实 IMAP 引擎的远程操作实现
 ///
-/// 持有 [`AuthManager`] 用于按账号获取凭证（密码或 OAuth2 access_token），
-/// 每次操作都新建一条 IMAP 连接并在结束时登出。无连接池，适合低频的"用户主动操作"场景；
+/// 操作不再每次新建连接，而是发送 [`EngineCommand`] 到该账号的 IMAP 引擎
+/// （[`crate::engine`]：每账号 Actor + 连接池复用，失败重建重试一次）。
 /// 高频批量同步应走同步管线（[`crate::domain::sync`]），不复用本类型。
 pub struct RealMailRemoteOperator {
-    /// 凭证管理器，按邮箱地址解析出密码或刷新后的 access_token
-    auth: Arc<AuthManager>,
+    /// 引擎句柄提供者（按账号去重的进程级 registry）
+    engine: Arc<dyn EngineAccess>,
 }
 
 /// 仅用于固定 seed E2E 的本地远端操作实现。
@@ -112,49 +110,32 @@ pub struct RealMailRemoteOperator {
 pub struct LocalOnlyMailRemoteOperator;
 
 impl RealMailRemoteOperator {
-    /// 创建一个使用指定 [`AuthManager`] 的真实远程操作器
-    pub fn new(auth: Arc<AuthManager>) -> Self {
-        Self { auth }
+    /// 创建一个使用指定引擎接入点的真实远程操作器
+    pub fn new(engine: Arc<dyn EngineAccess>) -> Self {
+        Self { engine }
     }
 
-    /// 为指定账号建立一条新的 IMAP 连接
-    ///
-    /// # 参数
-    /// - account: 账号模型（含 provider、email、IMAP 配置等字段）
-    ///
-    /// # 返回
-    /// - Ok(client): 已就绪、尚未 select 任何文件夹的 IMAP 客户端
-    /// - Err(MailError):
-    ///   - ProviderNotSupported: provider pool 未初始化，或该 provider 未注册
-    ///   - 凭证获取/IMAP 连接相关的错误
-    async fn connect_for_account(
+    /// 添加/移除单条 flag（不动其他标志，保持与旧 add_flags/remove_flags 一致）
+    async fn flag_op(
         &self,
         account: &accounts::Model,
-    ) -> Result<ImapClient, MailError> {
-        let provider_pool = PROVIDER_POOL
-            .get()
-            .ok_or_else(|| MailError::ProviderNotSupported("未找到provider pool".to_string()))?;
-        let provider = provider_pool
-            .get(&account.provider)
-            .ok_or_else(|| MailError::ProviderNotSupported(account.provider.clone()))?;
-        let credentials = self
-            .auth
-            .get_credentials(
-                &account.email,
-                &provider.provider_info().auth_type,
-                Some(&account.provider),
-            )
-            .await?;
-        let imap_config = imap_config_from_account(account)?;
-
-        match credentials {
-            Credentials::Password(password) => {
-                ImapClient::connect(&imap_config, &account.email, &password).await
-            }
-            Credentials::OAuth2 { access_token } => {
-                ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await
-            }
-        }
+        folder: &str,
+        uid: u32,
+        add: bool,
+        flag: &str,
+    ) -> Result<(), MailError> {
+        let handle = self.engine.imap_engine(account).await?;
+        let folder = folder.to_string();
+        let flag = flag.to_string();
+        handle
+            .request(move |reply| {
+                if add {
+                    EngineCommand::AddFlags { folder, uid, flag, reply }
+                } else {
+                    EngineCommand::RemoveFlags { folder, uid, flag, reply }
+                }
+            })
+            .await
     }
 }
 
@@ -167,15 +148,7 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         uid: u32,
         seen: bool,
     ) -> Result<(), MailError> {
-        let mut client = self.connect_for_account(account).await?;
-        client.select_folder(folder).await?;
-        if seen {
-            client.add_flags(uid, "\\Seen").await?;
-        } else {
-            client.remove_flags(uid, "\\Seen").await?;
-        }
-        client.logout().await.ok();
-        Ok(())
+        self.flag_op(account, folder, uid, seen, "\\Seen").await
     }
 
     async fn set_flagged(
@@ -185,15 +158,7 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         uid: u32,
         flagged: bool,
     ) -> Result<(), MailError> {
-        let mut client = self.connect_for_account(account).await?;
-        client.select_folder(folder).await?;
-        if flagged {
-            client.add_flags(uid, "\\Flagged").await?;
-        } else {
-            client.remove_flags(uid, "\\Flagged").await?;
-        }
-        client.logout().await.ok();
-        Ok(())
+        self.flag_op(account, folder, uid, flagged, "\\Flagged").await
     }
 
     async fn move_to_folder(
@@ -203,11 +168,12 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         uid: u32,
         target_folder: &str,
     ) -> Result<(), MailError> {
-        let mut client = self.connect_for_account(account).await?;
-        client.select_folder(folder).await?;
-        client.move_uid_to_folder(uid, target_folder).await?;
-        client.logout().await.ok();
-        Ok(())
+        let handle = self.engine.imap_engine(account).await?;
+        let folder = folder.to_string();
+        let to_folder = target_folder.to_string();
+        handle
+            .request(|reply| EngineCommand::Move { folder, uid, to_folder, reply })
+            .await
     }
 
     async fn reload_email(
@@ -216,10 +182,11 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         folder: &str,
         uid: u32,
     ) -> Result<Option<WholeEmailDto>, MailError> {
-        let mut client = self.connect_for_account(account).await?;
-        let result = client.fetch_email_by_uid(folder, uid).await;
-        client.logout().await.ok();
-        result
+        let handle = self.engine.imap_engine(account).await?;
+        let folder = folder.to_string();
+        handle
+            .request(|reply| EngineCommand::FetchEmailByUid { folder, uid, reply })
+            .await
     }
 
     async fn fetch_attachment_section(
@@ -229,12 +196,12 @@ impl MailRemoteOperator for RealMailRemoteOperator {
         uid: u32,
         section_path: &str,
     ) -> Result<Option<FetchedBodySection>, MailError> {
-        let mut client = self.connect_for_account(account).await?;
-        let result = client
-            .fetch_body_section_with_mime(folder, uid, section_path)
-            .await;
-        client.logout().await.ok();
-        result
+        let handle = self.engine.imap_engine(account).await?;
+        let folder = folder.to_string();
+        let section_path = section_path.to_string();
+        handle
+            .request(|reply| EngineCommand::FetchBodySection { folder, uid, section_path, reply })
+            .await
     }
 }
 

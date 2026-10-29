@@ -395,6 +395,48 @@ impl ImapClient {
         Ok(body_result)
     }
 
+    /// 获取邮件正文原文（BODY.PEEK[]，RFC822 原文）
+    ///
+    /// 与 [`Self::fetch_body`] 的区别：不做 MIME 解码，原样返回邮件字节
+    /// （引擎命令 FetchBody 用）；内部先 select 文件夹。
+    ///
+    /// # 参数
+    /// - `folder`: 文件夹名称
+    /// - `uid`: 邮件 UID
+    ///
+    /// # 返回
+    /// 成功时返回邮件原文；邮件不存在或正文为空时报错
+    pub async fn fetch_body_raw(&mut self, folder: &str, uid: u32) -> Result<String, MailError> {
+        tracing::debug!(folder, uid, "IMAP: 获取邮件正文原文");
+        self.session
+            .select(folder)
+            .await
+            .map_err(|e| MailError::ImapError(e.to_string()))?;
+
+        let mut fetches = self
+            .session
+            .uid_fetch(uid.to_string(), "BODY.PEEK[]")
+            .await
+            .map_err(|e| MailError::ImapError(format!("获取邮件体失败: {e}")))?;
+
+        let Some(fetch_result) = fetches.next().await else {
+            return Err(MailError::ImapError(format!(
+                "邮件不存在: {folder}/{uid}"
+            )));
+        };
+        let fetch = fetch_result.map_err(|e| MailError::ImapError(format!("解析邮件体失败: {e}")))?;
+        if fetch.uid != Some(uid) {
+            return Err(MailError::ImapError(format!(
+                "邮件不存在: {folder}/{uid}"
+            )));
+        }
+
+        let body = fetch
+            .body()
+            .ok_or_else(|| MailError::ImapError("邮件体为空".to_string()))?;
+        Ok(String::from_utf8_lossy(body).into_owned())
+    }
+
     /// 下载指定 MIME section 的原始内容和传输编码
     ///
     /// # 参数

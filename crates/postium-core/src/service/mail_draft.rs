@@ -1,12 +1,11 @@
 use crate::domain::auth::Credentials;
 use crate::domain::folders::{FolderCategory, FolderRegistry};
 use crate::domain::providers::{AuthType, pool::PROVIDER_POOL};
+use crate::engine::{EngineAccess, EngineCommand};
 use crate::error::MailError;
-use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::attachment_repo::AttachmentWrite;
 use crate::infrastructure::storage::repository::{account_repo, email_repo};
-use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::{EmailService, local_folder_registry_inputs};
 use crate::service::mail_send::{ComposeAttachmentInput, describe_local_attachment_sync};
 use async_trait::async_trait;
@@ -15,6 +14,7 @@ use lettre::message::header::{ContentType, Date, MessageId};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -61,7 +61,19 @@ pub trait DraftRemoteWriter: Send + Sync {
     ) -> Result<(), MailError>;
 }
 
-pub struct RealDraftRemoteWriter;
+/// 基于 IMAP 引擎的草稿远端写入器（APPEND/删除走引擎连接池）。
+///
+/// `DraftAppendRequest.credentials` / `delete_draft` 的 credentials 参数保留
+/// （trait 签名兼容），引擎路径由引擎工厂自行解析凭证，本实现不使用。
+pub struct RealDraftRemoteWriter {
+    engine: Arc<dyn EngineAccess>,
+}
+
+impl RealDraftRemoteWriter {
+    pub fn new(engine: Arc<dyn EngineAccess>) -> Self {
+        Self { engine }
+    }
+}
 
 /// E2E 模式的草稿远端：不连 IMAP，返回确定性假 UID。
 pub struct LocalOnlyDraftRemoteWriter;
@@ -85,54 +97,32 @@ impl DraftRemoteWriter for LocalOnlyDraftRemoteWriter {
 #[async_trait]
 impl DraftRemoteWriter for RealDraftRemoteWriter {
     async fn append_draft(&self, req: DraftAppendRequest) -> Result<u32, MailError> {
-        let imap_config = imap_config_from_account(&req.account)?;
-        let mut client = match &req.credentials {
-            Credentials::Password(password) => {
-                ImapClient::connect(&imap_config, &req.account.email, password).await?
-            }
-            Credentials::OAuth2 { access_token } => {
-                ImapClient::connect_xoauth2(&imap_config, &req.account.email, access_token).await?
-            }
-        };
-        let result = async {
-            client
-                .append_email_with_flags(&req.folder, Some("(\\Draft \\Seen)"), &req.raw)
-                .await?;
-            client
-                .find_uid_by_message_id(&req.folder, &req.message_id)
-                .await?
-                .ok_or_else(|| {
-                    MailError::ImapSearchFailed(format!(
-                        "追加草稿后无法确认远端 UID: {}",
-                        req.message_id
-                    ))
-                })
-        }
-        .await;
-        client.logout().await.ok();
-        result
+        let handle = self.engine.imap_engine(&req.account).await?;
+        let email = String::from_utf8(req.raw)
+            .map_err(|e| MailError::InvalidParam(format!("草稿原文不是有效 UTF-8: {e}")))?;
+        handle
+            .request(|reply| EngineCommand::Append {
+                folder: req.folder.clone(),
+                email,
+                flags: vec!["\\Draft".to_string(), "\\Seen".to_string()],
+                message_id: Some(req.message_id.clone()),
+                reply,
+            })
+            .await
     }
 
     async fn delete_draft(
         &self,
         account: &accounts::Model,
-        credentials: &Credentials,
+        _credentials: &Credentials,
         folder: &str,
         uid: u32,
     ) -> Result<(), MailError> {
-        let imap_config = imap_config_from_account(account)?;
-        let mut client = match credentials {
-            Credentials::Password(password) => {
-                ImapClient::connect(&imap_config, &account.email, password).await?
-            }
-            Credentials::OAuth2 { access_token } => {
-                ImapClient::connect_xoauth2(&imap_config, &account.email, access_token).await?
-            }
-        };
-        client.select_folder(folder).await?;
-        let result = client.delete_uid(uid).await;
-        client.logout().await.ok();
-        result
+        let handle = self.engine.imap_engine(account).await?;
+        let folder = folder.to_string();
+        handle
+            .request(|reply| EngineCommand::Delete { folder, uid, reply })
+            .await
     }
 }
 

@@ -22,7 +22,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::domain::auth::AuthManager;
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::models::attachments;
@@ -126,20 +125,20 @@ pub struct AttachmentService {
 impl AttachmentService {
     /// 创建新的附件服务实例
     ///
-    /// 使用真实的远端邮件操作器，并将缓存目录设为
+    /// 使用真实的（引擎接入的）远端邮件操作器，并将缓存目录设为
     /// `data_dir/attachments-cache`。
     ///
     /// # 参数
     ///
     /// - `db`: 数据库连接
-    /// - `auth`: 认证管理器（使用 Arc 包装以便共享）
+    /// - `engine`: IMAP 引擎接入点（附件按需下载经引擎连接池执行）
     /// - `data_dir`: 应用数据目录，附件缓存目录将作为其子目录
     ///
     /// # 返回
     ///
     /// 返回初始化好的 AttachmentService 实例
-    pub fn new(db: DbConn, auth: Arc<AuthManager>, data_dir: PathBuf) -> Self {
-        let remote = Arc::new(RealMailRemoteOperator::new(auth));
+    pub fn new(db: DbConn, engine: Arc<dyn crate::engine::EngineAccess>, data_dir: PathBuf) -> Self {
+        let remote = Arc::new(RealMailRemoteOperator::new(engine));
         Self::new_with_remote(db, remote, data_dir.join("attachments-cache"))
     }
 
