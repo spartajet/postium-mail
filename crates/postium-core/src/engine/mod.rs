@@ -6,3 +6,8 @@ pub use capabilities::CapabilitySet;
 
 pub mod transport;
 pub use transport::{ImapSession, RealSession};
+
+pub mod factory;
+pub mod pool;
+pub use factory::{RealSessionFactory, SessionFactory};
+pub use pool::{PooledSession, PoolConnect};
