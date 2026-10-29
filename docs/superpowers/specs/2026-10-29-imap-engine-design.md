@@ -64,7 +64,7 @@ ImapEngineRegistry（全局单例，账号 id → 引擎句柄）
 ### 3.2 ConnectionPool
 
 - 控制连接 ×1 常驻复用；忙时按需开临时连接，用完归还或关闭。
-- IDLE 连接 ≤3 条（LRU 管理 watch set）。
+- IDLE 连接：watch set（§5，上限 2 个文件夹）每文件夹一条；池容量按 3 预留。
 - 总连接数封顶 4/账号（163 每账号限 5 并发连接）。
 - 失效检测：命令超时（30s）/ IO 错误 → 连接标记可疑销毁 → 重建流程固定 `AUTH → CAPABILITY → ENABLE → SELECT 恢复`。
 - 重连退避：指数 1s→2s→…→30s 封顶；期间发 `Disconnected` 事件（状态栏可见）。
