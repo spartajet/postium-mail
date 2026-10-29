@@ -73,11 +73,15 @@ use crate::types::{
 /// 病理嵌套防护（与浏览器 ~512 层的防护同数量级）：超出上限的子树剪枝，防止
 /// 超深文档打爆渲染栈；上限内的正常嵌套邮件（几十层）不受影响。
 ///
-/// 栈占用说明：每层嵌套消耗 child_blocks + build_element_blocks 两个栈帧，
-/// release 构建每帧数百字节量级；debug 构建无栈槽复用、帧显著膨胀，512 层在
-/// 默认 2MB 测试线程栈上余量不足——深度剪枝语义的测试在显式大栈线程中执行
-/// （见 `deep_nesting_is_bounded_not_panicking`），生产行为以 release 为准。
-const MAX_TREE_DEPTH: usize = 512;
+/// 栈占用说明：深度上限的两端约束——
+/// - **下限（真实邮件）**：层层转发的引用链可嵌套数千层，上限必须远低于
+///   溢出阈值；
+/// - **上限（主线程渲染）**：解析侧递归已由 [`crate::pipeline::render_pipeline`]
+///   的 32MB 大栈线程承担，但渲染层（adapt 遍历、GPUI 嵌套元素树构建/Drop）
+///   仍在 Windows 默认 1MB 栈的主线程上——256 层 × debug 膨胀帧在 1MB 内
+///   有余量，且远超真实邮件嵌套（HubSpot 营销邮件约 20–40 层）。
+/// 剪枝语义的测试在显式大栈线程中执行（见 `deep_nesting_is_bounded_not_panicking`）。
+const MAX_TREE_DEPTH: usize = 256;
 
 /// 解析 HTML 为中间表示（管线最后一环）。
 ///
