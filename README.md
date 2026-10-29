@@ -2,7 +2,7 @@
 
 Postium Mail 是一个基于 **Rust + GPUI**（gpui-kit）的桌面邮件客户端，后端与前端同进程、纯原生实现，无 WebView。
 
-> 架构沿革：本项目最初基于 Tauri 2 + SvelteKit，已于 2026-10 完成向 GPUI 的整体迁移（`gpui-migration` 分支）。`src-tauri/`、`src/`（Svelte）与 `e2e/`（WebdriverIO）在验收期间保留为遗留双轨，验收后移除。
+> 架构沿革：本项目最初基于 Tauri 2 + SvelteKit，已于 2026-10 完成向 GPUI 的整体迁移（`gpui-migration` 分支）。旧应用（`src-tauri/`、Svelte 前端 `src/`、WebdriverIO E2E `e2e/`）已于验收后整体移除，如需查阅旧实现可检出归档标签 `tauri-legacy-archive`。
 
 ## 架构
 
@@ -24,6 +24,7 @@ Cargo workspace（根目录）：
 
 - Rust stable（1.98+）
 - WebView2 Runtime（Windows 自带；仅附件"浏览器打开"等场景需要，应用本身不依赖）
+- OAuth2 应用凭据（可选，微软/谷歌登录用）：复制 `.env.example` 为 `.env` 填写 `MICROSOFT_CLIENT_ID` / `GOOGLE_CLIENT_ID`，构建脚本会自动注入
 
 ## 常用命令
 
@@ -40,22 +41,15 @@ cargo test -p postium-ui e2e_tests   # 仅 E2E
 | core 集成/单元（240+） | `cargo test -p postium-core` | 账号/邮件/标签/同步/seed/迁移、协议解析、错误转换 |
 | editor 组件（6） | `cargo test -p postium-editor` | md⇄HTML 转换往返、嵌套列表、脚本剔除 |
 | UI 单元（6） | `cargo test -p postium-ui` | i18n 词条一致性、图片注入策略 |
-| **UI E2E（8）** | `cargo test -p postium-ui e2e_tests` | headless 全栈：seed 数据 → 启动/账号切换/导航/搜索/写信/草稿/星标删除/主题 |
+| **UI E2E（36）** | `cargo test -p postium-ui e2e_tests` | headless 全栈：seed 数据 → 启动/账号切换/导航/搜索/写信/草稿/星标删除/添加账号向导/主题 |
 | Truth 真实邮箱（手动） | `cargo test -p postium-core --test real_mail_accounts -- --ignored` | 真实 IMAP 登录与读取（需 `.test_mail_accounts.json`） |
 
-E2E 使用 gpui `TestAppContext` headless 运行真实全栈（CoreApi + SQLite + e2e seed 固定数据），不连接真实邮件服务；用户交互以 on_click 同款 handler 与键盘事件驱动。约 0.15 秒跑完全部场景（对比旧 WebdriverIO 分钟级）。
+E2E 使用 gpui `TestAppContext` headless 运行真实全栈（CoreApi + SQLite + e2e seed 固定数据），不连接真实邮件服务；用户交互以 on_click 同款 handler 与键盘事件驱动。
 
 更多说明见 [测试现状总览](docs/testing/overview.md)、[E2E 测试指南](docs/testing/e2e.md)、[Truth 真实邮箱测试](docs/testing/truth.md)。
-
-## 遗留双轨（验收后移除）
-
-以下为 Tauri/Svelte 旧轨，仅迁移期保留：
-
-- `src-tauri/`、`src/`：旧应用，`bun install && bun run dev` 可运行；
-- `e2e/`：WebdriverIO E2E（已被 GPUI E2E 取代；`real-accounts.e2e.js` 真实账号 UI 联测待按新模式重建）；
-- `docs/plans/`：迁移前的分阶段计划（历史存档）。
 
 ## 设计与计划文档
 
 - 迁移设计与结论：`docs/superpowers/specs/2026-10-26-gpui-migration-design.md`
 - 实施计划：`docs/superpowers/plans/`（计划 1：core/editor 地基；计划 2：postium-ui 应用）
+- 迁移前的分阶段计划：`docs/plans/`（历史存档）
