@@ -399,6 +399,9 @@ impl EmailDetailView {
 ///
 /// 远程图清单（[`collect_remote_image_urls`]）供「加载图片」条的存在性
 /// 判据（非空 ⇔ 存在 Remote 图）与放行后的逐图拉取清单。
+///
+/// panic 策略：无 catch_unwind，依赖无 panic 向量构造 + GPUI 全局 hook
+/// （终审 I-1 裁定）。
 fn html_body(
     store: &gpui_kit::Entity<DetailStore>,
     html: &str,

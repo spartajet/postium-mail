@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use gpui_kit::{Context, EventEmitter};
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::EmailDetail;
-use postium_html::{HtmlDocument, adapt_document, needs_dark_adapt, render_pipeline};
+use postium_html::{HtmlDocument, HtmlError, adapt_document, needs_dark_adapt, render_pipeline};
 
 use crate::runtime::spawn_tokio;
 use crate::views::email_html::{HtmlRenderState, decode_render_image, normalize_content_id};
@@ -224,6 +224,16 @@ struct CachedDoc {
     dark_doc: OnceLock<HtmlDocument>,
 }
 
+/// 缓存条目值：管线成功产物或失败结论（终审 I-2 负缓存）。
+enum CacheEntry {
+    /// 管线成功：浅色 + 深色双通道文档。
+    Doc(CachedDoc),
+    /// 管线失败负缓存：`TooLarge`/`TooManyNodes`/`Empty` 均由 html 内容决定
+    /// （同输入必同错误），失败结论入账后命中直接走调用方纯文本降级，
+    /// 不再每帧全量重解析（超限邮件此前每帧跑完 html5ever parse 才报错）。
+    Failed(HtmlError),
+}
+
 /// 正文 HTML 文档 LRU 缓存（容量 8，spec §7）。
 ///
 /// 键为内容感知二元组 `(email_id, hash(html))`（评审 P2）：同 id 新正文到达
@@ -231,9 +241,10 @@ struct CachedDoc {
 /// `UPSERT_EMAIL_SQL` 按 (account, folder, uid) 原位更新 body_html。64 位
 /// 默认 hash 在 LRU 8 的空间内误撞概率可忽略。
 struct EmailHtmlCache {
-    /// 最近使用序（队首最旧、队尾最新，逐出从队首）。
+    /// 最近使用序（队首最旧、队尾最新，逐出从队首）。正/负缓存条目共用
+    /// 同一 LRU 容量（spec §7 容量 8 的口径不因负缓存扩容）。
     order: VecDeque<CacheKey>,
-    map: HashMap<CacheKey, CachedDoc>,
+    map: HashMap<CacheKey, CacheEntry>,
 }
 
 /// 缓存键：邮件 id + 正文内容 hash。
@@ -261,16 +272,41 @@ impl EmailHtmlCache {
 
     /// 双通道取文档（T14 深色接线核心）：
     ///
-    /// 1. 浅色文档：命中提升为最近使用；未命中解析后入缓存（管线失败不缓存，
-    ///    返回 None 走调用方纯文本降级）；
+    /// 1. 浅色文档：命中提升为最近使用；未命中解析后入缓存；管线失败入
+    ///    负缓存（终审 I-2），返回 None 走调用方纯文本降级；
     /// 2. `dark` 且 [`needs_dark_adapt`]：深色副本 [`OnceLock::get_or_init`]
     ///    按需生成一次——主题切换零重解析（解析与适配产物都随缓存条目存活，
     ///    深底原生邮件 `needs_dark_adapt=false` 直接走浅色原文）。
+    ///
+    /// panic 策略：无 catch_unwind，依赖无 panic 向量构造 + GPUI 全局 hook
+    /// （终审 I-1 裁定）。
     fn doc_for(&mut self, key: CacheKey, html: &str, dark: bool) -> Option<HtmlDocument> {
+        self.doc_for_with(key, html, dark, render_pipeline)
+    }
+
+    /// [`Self::doc_for`] 的管线注入形态：生产走 [`render_pipeline`]，测试
+    /// 注入计数器断言负缓存命中不再重跑管线（终审 I-2 专测）。
+    fn doc_for_with(
+        &mut self,
+        key: CacheKey,
+        html: &str,
+        dark: bool,
+        pipeline: impl Fn(&str) -> Result<HtmlDocument, HtmlError>,
+    ) -> Option<HtmlDocument> {
+        // 负缓存命中：失败结论内容决定性（同 html 必同错误），直接降级
+        if self.failure_of(key).is_some() {
+            return None;
+        }
         let doc = match self.get(key) {
             Some(doc) => doc,
             None => {
-                let doc = render_pipeline(html).ok()?;
+                let doc = match pipeline(html) {
+                    Ok(doc) => doc,
+                    Err(err) => {
+                        self.put_failed(key, err);
+                        return None;
+                    }
+                };
                 self.put(key, doc.clone());
                 doc
             }
@@ -278,31 +314,61 @@ impl EmailHtmlCache {
         if !dark || !needs_dark_adapt(&doc) {
             return Some(doc);
         }
-        let entry = self.map.get_mut(&key).expect("get/put 已保证条目存在");
+        let entry = match self.map.get_mut(&key) {
+            Some(CacheEntry::Doc(entry)) => entry,
+            _ => unreachable!("get/put 已保证条目为 Doc"),
+        };
         Some(entry.dark_doc.get_or_init(|| adapt_document(&doc, true)).clone())
     }
 
-    /// 取浅色文档（命中提升为最近使用）；未命中返回 None。
+    /// 负缓存查询（命中提升为最近使用）：该键已记录的管线失败结论。
+    /// 错误变体随条目保留（`TooLarge`/`TooManyNodes`/`Empty` 内容决定性，
+    /// 当前仅作命中判据；未来降级提示细分可直接消费）。
+    fn failure_of(&mut self, key: CacheKey) -> Option<HtmlError> {
+        if let Some(pos) = self.order.iter().position(|k| *k == key) {
+            let k = self.order.remove(pos).expect("position 已验证存在");
+            self.order.push_back(k);
+        }
+        match self.map.get(&key) {
+            Some(CacheEntry::Failed(err)) => Some(err.clone()),
+            _ => None,
+        }
+    }
+
+    /// 取浅色文档（命中提升为最近使用）；未命中或负缓存条目返回 None。
     fn get(&mut self, key: CacheKey) -> Option<HtmlDocument> {
         if let Some(pos) = self.order.iter().position(|k| *k == key) {
             let k = self.order.remove(pos).expect("position 已验证存在");
             self.order.push_back(k);
         }
-        self.map.get(&key).map(|c| c.doc.clone())
+        match self.map.get(&key) {
+            Some(CacheEntry::Doc(c)) => Some(c.doc.clone()),
+            _ => None,
+        }
     }
 
     /// 放入浅色文档（已存在则覆盖并提升）；超容量逐出最久未用。
     fn put(&mut self, key: CacheKey, doc: HtmlDocument) {
+        self.insert(
+            key,
+            CacheEntry::Doc(CachedDoc {
+                doc,
+                dark_doc: OnceLock::new(),
+            }),
+        );
+    }
+
+    /// 记入管线失败结论（负缓存，与正缓存共用 LRU 8 容量）。
+    fn put_failed(&mut self, key: CacheKey, err: HtmlError) {
+        self.insert(key, CacheEntry::Failed(err));
+    }
+
+    /// 条目写入 + LRU 容量维护（正/负缓存共用）。
+    fn insert(&mut self, key: CacheKey, entry: CacheEntry) {
         if !self.order.iter().any(|k| *k == key) {
             self.order.push_back(key);
         }
-        self.map.insert(
-            key,
-            CachedDoc {
-                doc,
-                dark_doc: OnceLock::new(),
-            },
-        );
+        self.map.insert(key, entry);
         while self.order.len() > Self::CAPACITY {
             let evicted = self.order.pop_front().expect("长度受控非空");
             self.map.remove(&evicted);
@@ -394,5 +460,44 @@ mod tests {
             matches!(doc.blocks.as_slice(), [Block::Hr]),
             "应返回缓存条目本身，而非重新解析"
         );
+    }
+
+    /// 终审 I-2：管线失败负缓存——`""`（必 Err(Empty)）首调入账后，重取直接
+    /// 降级不再重跑管线（计数器注入证明调用次数恰为 1）；负缓存条目与正缓存
+    /// 共用 LRU 8，逐出后重取恢复重跑（失败结论非永久记账）。
+    #[test]
+    fn pipeline_failure_negative_cached_and_lru_evicted() {
+        use std::cell::Cell;
+
+        // 真实接线："" 必 Err(Empty)——首调 None + Failed 条目入账，重取仍 None
+        let mut cache = EmailHtmlCache::default();
+        let key = content_key(1, "");
+        assert!(cache.doc_for(key, "", false).is_none());
+        assert!(
+            matches!(cache.map.get(&key), Some(CacheEntry::Failed(HtmlError::Empty))),
+            "Empty 失败结论应入负缓存"
+        );
+        assert!(cache.doc_for(key, "", false).is_none());
+
+        // 计数器注入：第二次 doc_for 不得再进管线（此前超限邮件每帧全量重解析）
+        let calls = Cell::new(0u32);
+        let counting = |html: &str| {
+            calls.set(calls.get() + 1);
+            assert!(html.contains("超限"), "注入管线只应收到测试输入");
+            Err(HtmlError::TooManyNodes(1))
+        };
+        let key2 = content_key(2, "超限");
+        assert!(cache.doc_for_with(key2, "超限", false, &counting).is_none());
+        assert_eq!(calls.get(), 1, "首调应跑一次管线并记录失败");
+        assert!(cache.doc_for_with(key2, "超限", false, &counting).is_none());
+        assert_eq!(calls.get(), 1, "负缓存命中不得重跑管线");
+
+        // 负缓存条目随 LRU 逐出：填满容量后再取重新跑管线（非永久记账）
+        for i in 0..8 {
+            cache.put(content_key(100 + i, "正文"), HtmlDocument::default());
+        }
+        assert!(cache.map.get(&key2).is_none(), "负缓存条目应被 LRU 逐出");
+        assert!(cache.doc_for_with(key2, "超限", false, &counting).is_none());
+        assert_eq!(calls.get(), 2, "逐出后重取应重新跑管线");
     }
 }

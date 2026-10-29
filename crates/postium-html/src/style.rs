@@ -340,16 +340,25 @@ fn parse_px(s: &str) -> Option<f32> {
     }
 }
 
-/// 尺寸：`px` / `%` / 无单位数值；`auto` 视为未声明（None）。
+/// 尺寸：`px` / `%` / 无单位数值；`auto` 视为未声明（None）；非有限/负值拒绝
+/// （终审 M-1：与属性路径 `parse_dim_attr` 的 `finite_nonneg` 同语义——
+/// `f32::parse` 接受 "NaN"/"inf"，此类值不得经 width/height/max_width 进入
+/// IR 直达 GPUI 布局）。
 fn parse_width(s: &str) -> Option<Width> {
+    let finite_nonneg = |v: &f32| v.is_finite() && *v >= 0.0;
     let lowered = s.trim().to_ascii_lowercase();
     if lowered == "auto" {
         return None;
     }
     if let Some(v) = lowered.strip_suffix('%') {
-        return v.trim().parse::<f32>().ok().map(Width::Percent);
+        return v
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(finite_nonneg)
+            .map(Width::Percent);
     }
-    parse_px(&lowered).map(Width::Px)
+    parse_px(&lowered).filter(finite_nonneg).map(Width::Px)
 }
 
 /// font-size：基准 16px（pt × 96/72、% × 16/100）；em/rem/关键词/非正值忽略。
@@ -733,6 +742,33 @@ mod tests {
         assert_eq!(s.width, Some(Width::Percent(100.0)));
         assert_eq!(s.max_width, Some(Width::Px(600.0)));
         assert_eq!(ImageStyle::default().max_width, None);
+    }
+
+    #[test]
+    fn width_rejects_non_finite_and_negative() {
+        // 终审 M-1：样式路径与属性路径（parse_dim_attr 的 finite_nonneg）同
+        // 护栏——`f32::parse` 接受 "NaN"/"inf"，此类值与负值不得经
+        // width/height/max_width 进入 IR 直达 GPUI 布局
+        const CASES: &[(&str, Option<Width>)] = &[
+            ("width: NaNpx", None),
+            ("width: NaN", None),
+            ("width: infpx", None),
+            ("width: -5px", None),
+            ("width: -5%", None),
+            ("width: -5", None),
+            // 语义对照：正常值与 0（有限非负下界）不受护栏影响
+            ("width: 600px", Some(Width::Px(600.0))),
+            ("width: 0", Some(Width::Px(0.0))),
+            ("width: 100%", Some(Width::Percent(100.0))),
+        ];
+        for (css, want) in CASES {
+            assert_eq!(parse_block_style(css).width, *want, "{css}");
+        }
+        // height/max-width 同一解析入口
+        assert_eq!(parse_block_style("height: NaNpx").height, None);
+        assert_eq!(parse_block_style("height: -5px").height, None);
+        assert_eq!(parse_block_style("max-width: infpx").max_width, None);
+        assert_eq!(parse_block_style("max-width: -5%").max_width, None);
     }
 
     #[test]
