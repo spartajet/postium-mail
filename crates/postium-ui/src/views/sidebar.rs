@@ -145,7 +145,7 @@ impl Render for Sidebar {
             (EmailCategory::Starred, IconName::Star),
             (EmailCategory::Sent, IconName::Send),
             (EmailCategory::Drafts, IconName::FileText),
-            (EmailCategory::Spam, IconName::Ban),
+            (EmailCategory::Spam, IconName::Trash),
         ]
         .into_iter()
         .enumerate()
@@ -205,7 +205,7 @@ impl Render for Sidebar {
                     "INBOX" => IconName::Inbox,
                     f if f.contains("SENT") => IconName::Send,
                     f if f.contains("DRAFT") => IconName::FileText,
-                    "JUNK" | "SPAM" => IconName::Ban,
+                    "JUNK" | "SPAM" => IconName::Trash,
                     f if f.contains("TRASH") || f.contains("DELETED") => IconName::Trash,
                     _ => IconName::Folder,
                 };

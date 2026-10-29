@@ -25,8 +25,10 @@ pub fn setup_logging() {
             // dev 默认 DEBUG，但压制框架/依赖内部的高频噪音：
             // - gpui_pre(_windows)：每帧的无障碍树更新、渲染器/剪贴板内部调试
             // - tao：窗口系统事件；globset：构建 glob 集合
+            // - html5ever/markup5ever：HTML 解析器逐 tag 的 tree_builder 调试
+            //   （邮件正文解析时每封上千行）
             EnvFilter::new(
-                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper-util=warn",
+                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper-util=warn,html5ever=warn,markup5ever=warn",
             )
         }
         #[cfg(not(debug_assertions))]
