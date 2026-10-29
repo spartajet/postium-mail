@@ -128,8 +128,6 @@ pub struct AppShell {
     /// 搜索防抖代数（每次变更 +1，超时后比对决定是否执行）
     search_gen: u64,
     pub nav: NavTarget,
-    /// 主题偏好（dark | light | system），system 跟随系统外观
-    pub(crate) theme_pref: String,
     /// 系统外观观察订阅（保持存活）
     _appearance_sub: Option<gpui_kit::Subscription>,
     /// 托盘句柄（保持存活）
@@ -386,7 +384,6 @@ impl AppShell {
             search_input,
             search_gen: 0,
             nav: NavTarget::AllInbox,
-            theme_pref,
             _appearance_sub: appearance_sub,
             _tray,
             calendar_view: None,
@@ -428,7 +425,6 @@ impl AppShell {
             return;
         }
         self.sync_refresh_pending = true;
-        let weak = cx.entity().downgrade();
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(DEFER).await;
             this.update(cx, |this, cx| {
@@ -458,7 +454,8 @@ impl AppShell {
 
     /// 更新窗口标题：选中邮件时显示「邮件主题 — Postium Mail」，
     /// 无选中（详情空）时恢复默认标题。
-    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
+    pub(crate) fn update_window_title(&mut self, cx: &mut Context<Self>) {
+        // 自绘标题栏的文字由 render 读取 detail 推导（window_title_for），
         // 这里 notify 触发重绘；系统窗口标题（任务栏显示）同步更新。
         cx.notify();
         let title = window_title_for(self.detail.read(cx).detail.as_ref());
@@ -467,15 +464,10 @@ impl AppShell {
         });
     }
 
-    fn toggle_lang(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        crate::i18n::toggle_language(cx);
-        cx.notify();
-    }
-
+    /// 深浅主题互切（e2e 主题持久化测试与状态栏按钮共用逻辑入口）。
     pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.theme_pref = crate::theme::toggle_theme_mode(cx).into();
+        crate::theme::toggle_theme_mode(cx);
     }
-
 }
 
 impl Render for AppShell {

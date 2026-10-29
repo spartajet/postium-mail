@@ -6168,6 +6168,7 @@ dependencies = [
  "postium-core",
  "postium-editor",
  "postium-html",
+ "regex",
  "rfd",
  "serde",
  "serde_json",
