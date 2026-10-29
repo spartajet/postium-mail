@@ -30,8 +30,12 @@ pub fn setup_logging() {
             // - selectors：css-inline 类名匹配的 DEBUG 会把整个文档 DOM
             //   Debug 转储进单条日志（MB 级/条 × 每元素每选择器）——渲染线程
             //   同步写终端直接卡死应用（日志目标文件 selectors/matching.rs）
+            // - hyper_util：连接池后台拆除的 DEBUG 噪音（同步批取后服务器
+            //   RST 空闲连接，10053 每条一刷）。target 是模块路径下划线
+            //   （hyper_util::client::…），写成连字符 hyper-util 永不匹配
+            //   （线上反馈③：同步日志刷屏的漏网真因）
             EnvFilter::new(
-                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper-util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
+                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
             )
         }
         #[cfg(not(debug_assertions))]
@@ -52,4 +56,64 @@ pub fn setup_logging() {
 
     let layered = fmt_layer.with_filter(filter);
     tracing_subscriber::registry().with(layered).init();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    /// dev 默认过滤器对依赖 crate 噪音 target 的压制断言（端到端：真订阅者
+    /// + 捕获写入器）。target 必须按模块路径（下划线）书写——连字符形式
+    /// （hyper-util）永不匹配，线上反馈③的连接池拆除噪音正是这样漏网的。
+    #[test]
+    fn dev_filter_suppresses_dependency_noise_targets() {
+        #[derive(Clone)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl tracing_subscriber::fmt::MakeWriter<'_> for Capture {
+            type Writer = Self;
+            fn make_writer(&self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        let filter = tracing_subscriber::EnvFilter::new(
+            "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
+        );
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(Capture(Arc::clone(&captured)))
+            .with_env_filter(filter)
+            .finish();
+        let dispatch = tracing::Dispatch::new(subscriber);
+
+        tracing::dispatcher::with_default(&dispatch, || {
+            // target 须为字面量（宏约束），逐条展开
+            macro_rules! noise {
+                ($t:literal) => {
+                    tracing::debug!(target: $t, "noise-line")
+                };
+            }
+            noise!("hyper_util::client::legacy::client");
+            noise!("selectors::matching");
+            noise!("html5ever::tree_builder");
+            noise!("markup5ever::serialize");
+            noise!("reqwest::connect::connector");
+            noise!("tao::platform_impl::platform::event_loop");
+            tracing::debug!(target: "postium_core::infrastructure::protocols::imap::fetch", "business-line");
+        });
+
+        let out = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
+        assert!(!out.contains("noise-line"), "依赖噪音应全部被压制:\n{out}");
+        assert!(out.contains("business-line"), "业务 DEBUG 不应被误压制:\n{out}");
+    }
 }

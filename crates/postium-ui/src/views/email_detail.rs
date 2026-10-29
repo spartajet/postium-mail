@@ -18,12 +18,20 @@ use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
 use crate::views::email_html::{ImageCtx, collect_remote_image_urls, render_html_document};
 
+// 正文划选动作（EmailHtmlBody key_context 内派发）：Ctrl+C 复制 / Esc 清选区。
+gpui_kit::actions!([CopyHtmlSelection, ClearHtmlSelection]);
+
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
     /// 邮件列表弱引用：归档/删除/标未读后刷新列表（已删邮件不再留在列表）
     pub emails: gpui_kit::WeakEntity<crate::stores::emails::EmailsStore>,
     pub recipients_expanded: bool,
+    /// 正文划选状态（线上反馈①）：视图重建即重置（换邮件清选区），
+    /// Ctrl+C 复制选中文本（html_body_copy 动作）。
+    pub html_selection: crate::views::html_selection::HtmlSelection,
+    /// 正文滚动区焦点（划选复制动作的派发锚点）。
+    pub body_focus: gpui_kit::FocusHandle,
 }
 
 impl EmailDetailView {
@@ -304,6 +312,24 @@ impl EmailDetailView {
     }
 
     /// 浏览器精确查看（table 布局保真兜底）。
+    /// 划选复制（线上反馈①）：Ctrl+C 在正文滚动区焦点上派发，选中文本写
+    /// 剪贴板并 toast 反馈；无选区时不动作（不清系统剪贴板）。
+    fn copy_html_selection(&mut self, _: &CopyHtmlSelection, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.html_selection.is_selecting() {
+            return; // 无选区不动作（不清系统剪贴板）
+        }
+        if let Some(text) = self.html_selection.selected_text() {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
+            crate::notify::toast(t("email.selectionCopied"));
+        }
+    }
+
+    /// Esc 清空划选（浏览器一致语义）。
+    fn clear_html_selection(&mut self, _: &ClearHtmlSelection, _: &mut Window, cx: &mut Context<Self>) {
+        self.html_selection.clear();
+        cx.notify();
+    }
+
     fn open_in_browser(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(detail) = self.store.read(cx).detail.clone() else {
             return;
@@ -434,11 +460,12 @@ fn html_body(
     email_id: i32,
     dark: bool,
     images: ImageCtx,
+    selection: crate::views::html_selection::HtmlSelection,
     cx: &mut gpui_kit::App,
 ) -> Option<(AnyElement, Vec<String>)> {
     let doc = store.update(cx, |store, _| store.cached_doc(email_id, html, dark))?;
     let remote_urls = collect_remote_image_urls(&doc);
-    let el = render_html_document(&doc, dark, images, open_safe_url, cx);
+    let el = render_html_document(&doc, dark, images, selection, open_safe_url, cx);
     Some((el, remote_urls))
 }
 
@@ -533,7 +560,15 @@ impl Render for EmailDetailView {
                 Vec::new(),
             )
         } else {
-            match html_body(&self.store, &body_html_str, email_id, dark, image_ctx, cx) {
+            match html_body(
+                &self.store,
+                &body_html_str,
+                email_id,
+                dark,
+                image_ctx,
+                self.html_selection.clone(),
+                cx,
+            ) {
                 Some((el, urls)) => (
                     div()
                         .id("email-html-body")
@@ -541,6 +576,12 @@ impl Render for EmailDetailView {
                         .min_h_0()
                         .overflow_y_scroll()
                         .p_4()
+                        // 划选复制（线上反馈①）：正文滚动区可聚焦（点击文本即
+                        // 焦点），Ctrl+C 在 key_context 内派发 copy_html_selection
+                        .track_focus(&self.body_focus)
+                        .key_context("EmailHtmlBody")
+                        .on_action(cx.listener(Self::copy_html_selection))
+                        .on_action(cx.listener(Self::clear_html_selection))
                         .child(el)
                         .into_any_element(),
                     false,

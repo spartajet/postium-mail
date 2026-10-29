@@ -3,6 +3,7 @@ pub mod compose;
 pub mod contacts;
 pub mod email_detail;
 pub mod email_html;
+pub mod html_selection;
 pub mod email_list;
 pub mod recipient_field;
 pub mod settings;

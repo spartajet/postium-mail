@@ -1945,6 +1945,7 @@ impl gpui_kit::Render for HtmlRenderProbe {
             &self.doc,
             false,
             crate::views::email_html::ImageCtx::default(),
+            crate::views::html_selection::HtmlSelection::default(),
             move |url: &postium_html::SafeUrl| on_link(url),
             cx,
         );
@@ -2727,6 +2728,51 @@ fn html_email_display_keeps_status_bar(cx: &mut TestAppContext) {
             "邮件 {id}：状态栏应完整落在窗口内（y={:?}, h={:?}, 窗口高 {window_h:?}）",
             bar.origin.y,
             bar.size.height
+        );
+
+        // ---- banner 几何（线上反馈③第三波，拦截形态）----
+        // 导航 7 个链接（12px，与链接间空白异字号 → 各自成组）应全部同行横排，
+        // 且与 logo（占位 alt 探针）同一行（float 列并排）；逐块竖排的旧形态
+        // 里链接逐行堆叠、logo 在导航上方，y 带不重叠
+        let logo_alt = cx
+            .debug_bounds("html-txt-阿里云logo")
+            .expect("logo 占位 alt 探针应存在");
+        let nav_keys = [
+            "html-txt-产品",
+            "html-txt-解决方案",
+            "html-txt-文档与社区",
+            "html-txt-免费试用",
+            "html-txt-定价",
+            "html-txt-云市场",
+            "html-txt-了解阿里云",
+        ];
+        let nav_bounds: Vec<_> = nav_keys
+            .iter()
+            .map(|k| {
+                cx.debug_bounds(k)
+                    .unwrap_or_else(|| panic!("导航链接探针应存在: {k}"))
+            })
+            .collect();
+        let nav_top = nav_bounds
+            .iter()
+            .map(|b| b.origin.y)
+            .fold(gpui_kit::px(f32::MAX), |a, b| a.min(b));
+        let nav_bottom = nav_bounds
+            .iter()
+            .map(|b| b.origin.y + b.size.height)
+            .fold(gpui_kit::px(0.), |a, b| a.max(b));
+        let nav_height = nav_bottom - nav_top;
+        assert!(
+            nav_height < gpui_kit::px(40.),
+            "7 个导航链接应在同一行（y 跨度 {nav_height:?}）: {nav_bounds:?}"
+        );
+        let overlap_top = nav_top.max(logo_alt.origin.y);
+        let overlap_bottom = nav_bottom.min(logo_alt.origin.y + logo_alt.size.height);
+        assert!(
+            overlap_bottom > overlap_top,
+            "banner 的 logo 列与导航列应同行并排（logo y={:?}..{:?}, nav y={nav_top:?}..{nav_bottom:?}）",
+            logo_alt.origin.y,
+            logo_alt.origin.y + logo_alt.size.height
         );
 
         // ---- 放行 + 已加载真图形态（用户实测状态：发件人白名单记忆后自动放行）----

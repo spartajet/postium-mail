@@ -66,7 +66,8 @@ use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 
 use crate::error::HtmlError;
 use crate::style::{
-    is_inline_display, merge_inline, parse_align, parse_block_style, parse_color, parse_inline_style,
+    is_floated, is_inline_display, merge_inline, parse_align, parse_block_style, parse_color,
+    parse_inline_style,
 };
 use crate::types::{
     Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Limits,
@@ -248,16 +249,38 @@ impl<'a> TreeBuilder<'a> {
         }
         let mut blocks = Vec::new();
         let mut inline = InlineBuffer::new(ws);
+        // 相邻 float 兄弟的累积列（浏览器浮动列布局近似——收集到非 float
+        // 边界物化为单行 Table，保留各列宽/内边距水平并排，线上反馈③第三波：
+        // banner 的 logo 列/导航列靠 float:left|right 并排，逐块竖排即用户
+        // 看到"banner 不对"）
+        let mut float_cells: Vec<TableCell> = Vec::new();
+        let flush_floats = |blocks: &mut Vec<Block>, cells: &mut Vec<TableCell>| {
+            if cells.is_empty() {
+                return;
+            }
+            blocks.push(Block::Table {
+                style: BlockStyle::default(),
+                rows: vec![TableRow {
+                    cells: std::mem::take(cells),
+                }],
+            });
+        };
         for child in node.children.borrow().iter() {
             self.check_node()?;
             match &child.data {
-                NodeData::Text { contents } => inline.push_text(&contents.borrow(), text_base),
+                NodeData::Text { contents } => {
+                    if !contents.borrow().trim_matches(is_html_ws).is_empty() {
+                        flush_floats(&mut blocks, &mut float_cells);
+                    }
+                    inline.push_text(&contents.borrow(), text_base)
+                }
                 NodeData::Element { name, attrs, .. } => {
                     let local = name.local.as_ref();
                     match classify(local) {
                         Kind::Skip => {}
                         Kind::Pass => {
                             // html/body 结构壳：子块直接提升，无自身样式
+                            flush_floats(&mut blocks, &mut float_cells);
                             blocks.extend(self.child_blocks(
                                 child,
                                 depth + 1,
@@ -293,7 +316,21 @@ impl<'a> TreeBuilder<'a> {
                                     ws,
                                     depth + 1,
                                 )?;
+                            } else if is_floated(style_text) {
+                                // float:left|right：入浮动列累积组（见 float_cells）
+                                let built = self.build_element_blocks(
+                                    child,
+                                    kind,
+                                    attrs.as_slice(),
+                                    depth,
+                                    inherited,
+                                    text_base,
+                                )?;
+                                if let Some(cell) = float_cell_of(built) {
+                                    float_cells.push(cell);
+                                }
                             } else {
+                                flush_floats(&mut blocks, &mut float_cells);
                                 blocks.extend(inline.flush_blocks(inherited));
                                 blocks.extend(self.build_element_blocks(
                                     child,
@@ -310,6 +347,7 @@ impl<'a> TreeBuilder<'a> {
                 _ => {} // 注释 / DOCTYPE / PI：跳过
             }
         }
+        flush_floats(&mut blocks, &mut float_cells);
         blocks.extend(inline.flush_blocks(inherited));
         Ok(blocks)
     }
@@ -1259,6 +1297,35 @@ fn paragraph(runs: Vec<InlineRun>, align: Align, style: BlockStyle) -> Block {
     Block::Paragraph { style, runs, align }
 }
 
+/// 浮动列构建产物 → [`TableCell`]：单个 Container 解包为格（列宽进 cell.width、
+/// 内边距/背景落在格样式上，免双层容器）；其余形态（多块产物）整体入格。
+/// 空产物（display:none 剪枝）→ None（该列不参与并排）。
+fn float_cell_of(built: Vec<Block>) -> Option<TableCell> {
+    if built.is_empty() {
+        return None;
+    }
+    let mut blocks = built;
+    if blocks.len() == 1
+        && matches!(blocks[0], Block::Container { .. })
+        && let Block::Container { style, children } = std::mem::take(&mut blocks).remove(0)
+    {
+        return Some(TableCell {
+            blocks: children,
+            colspan: 1,
+            rowspan: 1,
+            width: style.width,
+            style,
+        });
+    }
+    Some(TableCell {
+        blocks,
+        colspan: 1,
+        rowspan: 1,
+        width: None,
+        style: BlockStyle::default(),
+    })
+}
+
 /// HTML 可折叠空白字符（空格/制表/换行/回车/换页）。`&nbsp;`（U+00A0）是内容
 /// 空白——浏览器不折叠也不删除它，邮件排版大量依赖，必须排除在折叠语义外。
 fn is_html_ws(c: char) -> bool {
@@ -2195,8 +2262,37 @@ mod tests {
     }
 
     #[test]
-    fn inline_images_stay_in_paragraph_runs() {
-        // 线上反馈③第二波（banner 竖排的真因）：行内图片与文字/链接同段，
+    fn floated_columns_merge_into_single_row() {
+        // 线上反馈③第三波（banner float 列）：相邻 float:left|right 兄弟水平
+        // 并排为单行 Table（列宽保留在 cell.width）；非 float 内容回到纵向流
+        let floated = doc(
+            r#"<div><div style="float:left;width:20%"><a href="https://e/logo"><img src="https://e/logo.png" alt="logo"></a></div><div style="float:right;width:70%;padding-left:10%"><a href="https://e/a">产品</a> <a href="https://e/b">定价</a></div><p>after</p></div>"#,
+        );
+        let Block::Container { children, .. } = &floated.blocks[0] else {
+            panic!("应为 Container")
+        };
+        // [float 并排行, after 段落]
+        assert_eq!(children.len(), 2, "float 组 + 后续段落");
+        let Block::Table { rows, .. } = &children[0] else {
+            panic!("float 组应物化为单行 Table，实际 {:?}", children[0])
+        };
+        assert_eq!(rows.len(), 1);
+        let cells = &rows[0].cells;
+        assert_eq!(cells.len(), 2, "两个浮动列并排");
+        assert_eq!(cells[0].width, Some(Width::Percent(20.0)));
+        assert_eq!(cells[1].width, Some(Width::Percent(70.0)));
+        // 第二列的 padding 声明保留在格样式上（百分比槽位按已知限制记 0）
+        assert_eq!(cells[1].style.padding, [0.0, 0.0, 0.0, 0.0]);
+        // float:none 不入组（保持块级）
+        let none_float = doc(r#"<div><div style="float:none;width:20%">a</div><p>b</p></div>"#);
+        let Block::Container { children, .. } = &none_float.blocks[0] else {
+            panic!("应为 Container")
+        };
+        assert!(matches!(children[0], Block::Container { .. }), "float:none 应保持块级");
+    }
+
+    #[test]
+    fn inline_images_stay_in_paragraph_runs() {        // 线上反馈③第二波（banner 竖排的真因）：行内图片与文字/链接同段，
         // 不再提升为块级——「链接 + 分隔小图」混排的横向菜单保持单一流
         let doc = doc(
             r#"<div><a href="https://e/a">产品</a><img src="https://e/s.gif" width="5" height="28" alt=""><a href="https://e/b">定价</a></div>"#,

@@ -422,6 +422,18 @@ pub(crate) fn is_inline_display(css_text: &str) -> bool {
     })
 }
 
+/// `float` 声明是否为 left/right（浏览器浮动列布局判定；none/未声明 → false，
+/// 后声明覆盖前置）。邮件 banner 的「logo 列 + 导航列」靠 float 并排。
+pub(crate) fn is_floated(css_text: &str) -> bool {
+    let mut floated = false;
+    for (key, value) in declarations(css_text) {
+        if key == "float" {
+            floated = matches!(value.as_str(), "left" | "right");
+        }
+    }
+    floated
+}
+
 /// 边框宽度：px / 无单位 / 关键字（thin=1、medium=3、thick=5）。
 fn parse_border_width(s: &str) -> Option<f32> {
     match s.trim().to_ascii_lowercase().as_str() {

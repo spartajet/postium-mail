@@ -183,6 +183,19 @@ impl AppShell {
 
         // Toast 总线 + 关闭主窗口 → 隐藏到托盘（退出走托盘菜单）
         crate::notify::setup(window, cx);
+        // 正文划选复制（线上反馈①）：Ctrl+C 在 EmailHtmlBody 焦点上下文内派发
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new(
+                "ctrl-c",
+                crate::views::email_detail::CopyHtmlSelection,
+                Some("EmailHtmlBody"),
+            ),
+            gpui_kit::KeyBinding::new(
+                "escape",
+                crate::views::email_detail::ClearHtmlSelection,
+                Some("EmailHtmlBody"),
+            ),
+        ]);
         // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 保存状态后最小化（退出走托盘菜单）
         // 关闭行为：托盘可用 → 保存状态并最小化（退出走托盘菜单）；
         // 托盘不可用（如无 appindicator 的环境）→ 真关闭，否则应用无法退出
@@ -287,11 +300,13 @@ impl AppShell {
                     this.detail.update(cx, |store, cx| {
                         store.load(*id, &this.api, cx);
                     });
-                    this.detail_view = Some(cx.new(|_| EmailDetailView {
+                    this.detail_view = Some(cx.new(|cx| EmailDetailView {
                         store: this.detail.clone(),
                         api: this.api.clone(),
                         emails: this.emails.downgrade(),
                         recipients_expanded: false,
+                        html_selection: Default::default(),
+                        body_focus: cx.focus_handle(),
                     }));
                     this.detail_build_version = this.emails.read(cx).selected_version;
                     cx.notify();
@@ -568,11 +583,13 @@ impl Render for AppShell {
                             Some(view) => view.into_any_element(),
                             None => {
                                 // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
-                                let view = cx.new(|_| EmailDetailView {
+                                let view = cx.new(|cx| EmailDetailView {
                                     store: self.detail.clone(),
                                     api: self.api.clone(),
                                     emails: self.emails.downgrade(),
                                     recipients_expanded: false,
+                                    html_selection: Default::default(),
+                                    body_focus: cx.focus_handle(),
                                 });
                                 self.detail_view = Some(view.clone());
                                 view.into_any_element()

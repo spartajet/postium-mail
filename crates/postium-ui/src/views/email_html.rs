@@ -23,13 +23,16 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ElementId, FontStyle, FontWeight, Hsla, InteractiveElement as _,
-    InteractiveText, IntoElement as _, ParentElement as _, RenderImage, SharedString,
+    AnyElement, App, CursorStyle, DispatchPhase, Element, ElementId, FontStyle,
+    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
+    InteractiveElement as _, IntoElement, LayoutId, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement as _, RenderImage, SharedString,
     StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun, UnderlineStyle, div,
     font as base_font, img, px, relative, rgba,
 };
@@ -37,6 +40,8 @@ use postium_html::{
     Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Rgba,
     SafeUrl, TableCell, TableRow, Width,
 };
+
+use crate::views::html_selection::HtmlSelection;
 
 /// 正文基础字号（px）。邮件作者未声明字号时的兜底。
 const BASE_FONT_SIZE: f32 = 14.;
@@ -117,14 +122,15 @@ struct RenderCtx {
     border: Hsla,
     /// 图片/表格占位底色（主题 secondary）。
     placeholder_bg: Hsla,
-    /// 链接点击回调（InteractiveText hitbox → 调用方打开动作；email_detail
+    /// 划选高亮底色（主题 selection，线上反馈①：正文可选中）。
+    selection_bg: Hsla,
+    /// 链接点击回调（SelectableText hitbox → 调用方打开动作；email_detail
     /// 侧为 open::that_detached 系统处理，见其 open_safe_url）。
     on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
     /// 图片三源上下文（Remote 查 resolved / Cid 扫 attachments / DataUri 解码）。
     images: ImageCtx,
-    /// 链接元素 id 序号（InteractiveText::new 需唯一 ElementId；每次渲染
-    /// 从 0 起算，树结构不变则 id 帧间稳定，元素状态不串）。
-    link_ix: Cell<usize>,
+    /// 文本划选状态（组注册表 + 锚点/游标，线上反馈①）。
+    selection: HtmlSelection,
 }
 
 impl RenderCtx {
@@ -132,6 +138,7 @@ impl RenderCtx {
         dark: bool,
         on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
         images: ImageCtx,
+        selection: HtmlSelection,
         cx: &App,
     ) -> Self {
         let theme = cx.theme();
@@ -143,9 +150,10 @@ impl RenderCtx {
             link: theme.link,
             border: theme.border,
             placeholder_bg: theme.secondary,
+            selection_bg: theme.selection,
             on_link,
             images,
-            link_ix: Cell::new(0),
+            selection,
         }
     }
 
@@ -161,12 +169,6 @@ impl RenderCtx {
         f
     }
 
-    /// 下一个链接元素 id（渲染树内唯一）。
-    fn next_link_id(&self) -> ElementId {
-        let ix = self.link_ix.get();
-        self.link_ix.set(ix + 1);
-        ElementId::named_usize("html-link", ix)
-    }
 }
 
 /// 块级递归的继承上下文。
@@ -182,17 +184,21 @@ struct Inherited {
 ///
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
 /// - `images`：图片三源上下文（Remote/Cid/DataUri，Task 13）。
-/// - `on_link`：链接点击回调（InteractiveText hitbox 命中链接区间时以
+/// - `selection`：文本划选状态（线上反馈①——每帧重建组注册表，锚点/游标
+///   由 SelectableText 的鼠标事件维护）。
+/// - `on_link`：链接点击回调（SelectableText hitbox 命中链接区间时以
 ///   [`SafeUrl`] 调用；email_detail 侧接线为 `open::that_detached`——
 ///   Http/https 系统浏览器、mailto 系统邮件客户端）。
 pub fn render_html_document(
     doc: &HtmlDocument,
     dark: bool,
     images: ImageCtx,
+    selection: HtmlSelection,
     on_link: impl Fn(&SafeUrl) + 'static,
     cx: &mut App,
 ) -> AnyElement {
-    let rcx = RenderCtx::new(dark, Arc::new(on_link), images, cx);
+    selection.begin_frame();
+    let rcx = RenderCtx::new(dark, Arc::new(on_link), images, selection, cx);
     render_blocks(&doc.blocks, Inherited::default(), &rcx)
         .when_probe("html-root")
         .into_any_element()
@@ -412,9 +418,25 @@ fn render_inline_flow(
     let mut segs: Vec<FlowSeg> = Vec::new();
     flatten_runs(runs, None, force_bold, &mut segs);
     let has_image = segs.iter().any(|s| matches!(s, FlowSeg::Image { .. }));
+    // 混字号判定：字号异组分段即多组——组走 inline 形态并入 wrap-flow
+    //（线上反馈③第三波：导航链接 12px 与链接间空白默认字号异组，逐组块级
+    //  纵排把每个链接独占一行）
+    let has_mixed_sizes = {
+        // f32 无 Hash——以 Vec 判重
+        let mut distinct: Vec<Option<f32>> = Vec::new();
+        for seg in &segs {
+            if let FlowSeg::Text { style, .. } = seg
+                && !distinct.contains(&style.font_size)
+            {
+                distinct.push(style.font_size);
+            }
+        }
+        distinct.len() > 1
+    };
+    let wrap_flow = has_image || has_mixed_sizes;
 
     // 2) 连续文本段按字号分组为单个 StyledText（组内相邻同样式 run 再合并）；
-    //    图文混排时组走 inline 形态（max_w_full 而非占满整行），与图片同容器
+    //    wrap-flow 时组走 inline 形态（max_w_full 而非占满整行），横向共容器
     let mut els: Vec<AnyElement> = Vec::new();
     let mut group: Vec<FlowSeg> = Vec::new();
     let mut group_size: Option<Option<f32>> = None;
@@ -424,7 +446,7 @@ fn render_inline_flow(
             base_color,
             rcx,
             default_size,
-            has_image,
+            wrap_flow,
             els,
         );
     };
@@ -450,9 +472,10 @@ fn render_inline_flow(
     }
     flush(&mut group, &mut els);
 
-    // 3) 图文混排：全部子元素并入单一 wrap-flow 容器（横排 + 行满换行）；
-    //    纯文本流保持逐组块级纵排
-    if !has_image {
+    // 3) wrap-flow 流（含图片或混字号）并入单一 wrap 容器（横排 + 行满换行）；
+    //    单一字号组的纯文本流保持既有块级形态（视觉等价，零回归；
+    //    T9 备案"异字号不共段折行"在此闭环）
+    if !wrap_flow {
         return els;
     }
     let mut flow = h_flex().flex_wrap().items_baseline().w_full();
@@ -559,9 +582,11 @@ fn flatten_runs(
 /// 溢出行宽，组内文本在钳制宽内自然折行），与图片同线横排；块级形态
 /// （纯文本流）保持占满整行。
 ///
-/// 组内含链接段时以 [`InteractiveText`] 承载：链接段按 seg 级标记 + 段长
-/// 累加为字节区间（`TextRun.len` / `index_for_position` 均以字节计）注册
-/// clickable range，命中即以段归属的 [`SafeUrl`] 调用 `on_link`。
+/// 文本以 [`SelectableText`] 承载（线上反馈①）：链接段按 seg 级标记 +
+/// 段长累加为字节区间（`TextRun.len` / `index_for_position` 均以字节计）
+/// 注册 clickable range，按下/抬起同区间命中即以段归属的 [`SafeUrl`] 调用
+/// `on_link`；同时向 [`HtmlSelection`] 上报按下/拖动/抬起，选中区间在
+/// run 上切分并施加高亮背景。
 #[allow(clippy::too_many_arguments)]
 fn flush_text_group(
     group: Vec<FlowSeg>,
@@ -607,6 +632,12 @@ fn flush_text_group(
         return;
     }
 
+    // 划选（线上反馈①）：注册组序号，选中字节区间切 run 施加高亮背景
+    let group_ix = rcx.selection.register_group(&text);
+    if let Some(range) = rcx.selection.range_for_group(group_ix) {
+        runs = apply_selection_background(runs, range, rcx.selection_bg);
+    }
+
     let d = if inline {
         // wrap-flow 内的文本组：宽度自适应内容、上钳行宽（组内折行），
         // 不占满整行——与图片同线横排的前提
@@ -617,33 +648,247 @@ fn flush_text_group(
     .text_size(px(size.unwrap_or(default_size)))
     .line_height(relative(BASE_LINE_HEIGHT));
 
-    let d = if links.is_empty() {
-        d.child(StyledText::new(text.clone()).with_runs(runs))
-    } else {
-        let ranges: Vec<Range<usize>> = links.iter().map(|(r, _)| r.clone()).collect();
-        let urls: Vec<SafeUrl> = links.into_iter().map(|(_, u)| u).collect();
-        let on_link = Arc::clone(&rcx.on_link);
-        d.child(
-            InteractiveText::new(
-                rcx.next_link_id(),
-                StyledText::new(text.clone()).with_runs(runs),
-            )
-            .on_click(ranges, move |range_ix, _window, _cx| {
-                if let Some(url) = urls.get(range_ix) {
-                    on_link(url);
-                }
-            }),
-        )
-    };
+    let d = d.child(SelectableText {
+        id: ElementId::named_usize("html-sel", group_ix),
+        text: StyledText::new(text).with_runs(runs),
+        group: group_ix,
+        selection: rcx.selection.clone(),
+        ranges: links.iter().map(|(r, _)| r.clone()).collect(),
+        urls: links.into_iter().map(|(_, u)| u).collect(),
+        on_link: Arc::clone(&rcx.on_link),
+    });
 
     // 文本探针（仅测试构建）：以内容前缀为键记录渲染树，
     // e2e 经 `VisualTestContext::debug_bounds` 查询文本可见性。
     #[cfg(test)]
     let d = {
-        let key = text_probe_key(&text);
+        let key = text_probe_key(&{
+            // 探针键沿用组全文（含划选无关），从注册表取回避免再拼
+            let mut probe = String::new();
+            for seg in &group {
+                if let FlowSeg::Text { text, .. } = seg {
+                    probe.push_str(text);
+                }
+            }
+            probe
+        });
         d.debug_selector(move || key)
     };
     els.push(d.into_any_element());
+}
+
+/// 选中区间切分 [`TextRun`]：交叠 run 拆为 前/选中/后 三段，选中段施加
+/// 高亮背景（字节偏移来自 index_for_position，必在字符边界；区间边界
+/// 落在 run 边界时相应段为空自动省略）。
+fn apply_selection_background(runs: Vec<TextRun>, sel: Range<usize>, bg: Hsla) -> Vec<TextRun> {
+    let mut out = Vec::with_capacity(runs.len() + 2);
+    let mut cursor = 0usize;
+    for run in runs {
+        let start = cursor;
+        let end = cursor + run.len;
+        cursor = end;
+        let lo = start.max(sel.start);
+        let hi = end.min(sel.end);
+        if hi > lo {
+            if lo > start {
+                out.push(TextRun {
+                    len: lo - start,
+                    ..run.clone()
+                });
+            }
+            out.push(TextRun {
+                len: hi - lo,
+                background_color: Some(bg),
+                ..run.clone()
+            });
+            if end > hi {
+                out.push(TextRun {
+                    len: end - hi,
+                    ..run
+                });
+            }
+        } else {
+            out.push(run);
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// SelectableText：可划选 + 可点击链接的文本元素（线上反馈①）
+//
+// 镜像 gpui InteractiveText 的元素管线（StyledText 委托 + hitbox +
+// window.on_mouse_event），在其上叠加：
+// - 划选：按下设锚点、拖动移游标（仅拖选态）、抬起定格；选中区间由
+//   flush_text_group 在 run 上施加高亮背景（重渲染经 window.refresh）；
+// - 链接：按下/抬起同落一个 clickable 区间才触发（不与拖选冲突——
+//   拖选产生的位移会使 down/up 落入不同字节区间，天然不触发）。
+// ---------------------------------------------------------------------------
+
+/// 可划选文本元素（元素态：链接点击的按下字节位，跨帧保持）。
+struct SelectableText {
+    id: ElementId,
+    text: StyledText,
+    group: usize,
+    selection: HtmlSelection,
+    ranges: Vec<Range<usize>>,
+    urls: Vec<SafeUrl>,
+    on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+}
+
+#[derive(Default)]
+struct SelectableTextState {
+    down_index: Rc<Cell<Option<usize>>>,
+}
+
+impl Element for SelectableText {
+    type RequestLayoutState = ();
+    type PrepaintState = Hitbox;
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut gpui_kit::Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        self.text.request_layout(None, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+        _state: &mut (),
+        window: &mut gpui_kit::Window,
+        cx: &mut App,
+    ) -> Hitbox {
+        self.text
+            .prepaint(None, inspector_id, bounds, &mut (), window, cx);
+        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+    }
+
+    fn paint(
+        &mut self,
+        global_id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+        _: &mut (),
+        hitbox: &mut Hitbox,
+        window: &mut gpui_kit::Window,
+        cx: &mut App,
+    ) {
+        let text_layout = self.text.layout().clone();
+        let group = self.group;
+        let selection = self.selection.clone();
+        let ranges = std::mem::take(&mut self.ranges);
+        let urls = std::mem::take(&mut self.urls);
+        let on_link = Arc::clone(&self.on_link);
+
+        window.with_element_state::<SelectableTextState, _>(
+            global_id.unwrap(),
+            |state, window| {
+                let down_index = state.unwrap_or_default().down_index;
+
+                // 光标：链接上手指、正文文本 I-beam
+                if hitbox.is_hovered(window)
+                    && let Ok(ix) = text_layout.index_for_position(window.mouse_position())
+                {
+                    let style = if ranges.iter().any(|r| r.contains(&ix)) {
+                        CursorStyle::PointingHand
+                    } else {
+                        CursorStyle::IBeam
+                    };
+                    window.set_cursor_style(style, hitbox);
+                }
+
+                {
+                    let hitbox = hitbox.clone();
+                    let layout = text_layout.clone();
+                    let selection = selection.clone();
+                    let down_index = Rc::clone(&down_index);
+                    window.on_mouse_event(
+                        move |event: &MouseDownEvent, phase, window: &mut gpui_kit::Window, _| {
+                            if phase == DispatchPhase::Bubble
+                                && event.button == MouseButton::Left
+                                && hitbox.is_hovered(window)
+                                && let Ok(ix) = layout.index_for_position(event.position)
+                            {
+                                down_index.set(Some(ix));
+                                selection.on_down(group, ix);
+                                window.refresh();
+                            }
+                        },
+                    );
+                }
+                {
+                    let hitbox = hitbox.clone();
+                    let layout = text_layout.clone();
+                    let selection = selection.clone();
+                    window.on_mouse_event(
+                        move |event: &MouseMoveEvent, phase, window: &mut gpui_kit::Window, _| {
+                            if phase == DispatchPhase::Bubble
+                                && selection.is_dragging()
+                                && hitbox.is_hovered(window)
+                                && let Ok(ix) = layout.index_for_position(event.position)
+                            {
+                                selection.on_move(group, ix);
+                                window.refresh();
+                            }
+                        },
+                    );
+                }
+                {
+                    let hitbox = hitbox.clone();
+                    let layout = text_layout.clone();
+                    let selection = selection.clone();
+                    let down_index = Rc::clone(&down_index);
+                    window.on_mouse_event(
+                        move |event: &MouseUpEvent, phase, window: &mut gpui_kit::Window, _| {
+                            if phase != DispatchPhase::Bubble
+                                || event.button != MouseButton::Left
+                            {
+                                return;
+                            }
+                            if hitbox.is_hovered(window)
+                                && let Ok(up_ix) = layout.index_for_position(event.position)
+                                && let Some(down) = down_index.get()
+                                && let Some(range_ix) = ranges
+                                    .iter()
+                                    .position(|r| r.contains(&down) && r.contains(&up_ix))
+                                && let Some(url) = urls.get(range_ix)
+                            {
+                                on_link(url);
+                            }
+                            down_index.take();
+                            selection.on_up();
+                            window.refresh();
+                        },
+                    );
+                }
+
+                self.text
+                    .paint(None, inspector_id, bounds, &mut (), &mut (), window, cx);
+                ((), SelectableTextState { down_index })
+            },
+        );
+    }
+}
+
+impl IntoElement for SelectableText {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
 }
 
 /// [`TextRun`] 同样式判据（比较样式字段、不含 `len`——len 是入列时回填的
@@ -1075,6 +1320,50 @@ fn text_probe_key(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plain_run(len: usize) -> TextRun {
+        TextRun {
+            len,
+            font: base_font(SharedString::default()),
+            color: rgba(0x000000FF).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }
+    }
+
+    /// 划选 run 切分（线上反馈①）：交叠 run 拆前/选中/后三段、选中段带
+    /// 高亮背景；区间边界对齐 run 边界时不产空段；无交叠原样返回。
+    #[test]
+    fn selection_background_splits_runs() {
+        let bg: Hsla = rgba(0x3344CC55).into();
+        let mk_runs = || vec![plain_run(6), plain_run(6)];
+        // 选中横跨两 run 中段（3..9）：按 run 各自拆前/选中/后
+        //（不同 run 样式可能不同，选中片段不跨 run 合并）
+        let split = apply_selection_background(mk_runs(), 3..9, bg);
+        assert_eq!(
+            split.iter().map(|r| r.len).collect::<Vec<_>>(),
+            vec![3, 3, 3, 3],
+            "run1: 前 3 + 选中 3；run2: 选中 3 + 后 3"
+        );
+        assert_eq!(
+            split
+                .iter()
+                .map(|r| r.background_color)
+                .collect::<Vec<_>>(),
+            vec![None, Some(bg), Some(bg), None],
+            "仅选中片段带背景"
+        );
+        // 区间与 run 边界对齐：不产空段
+        let split = apply_selection_background(mk_runs(), 0..6, bg);
+        assert_eq!(split.iter().map(|r| r.len).collect::<Vec<_>>(), vec![6, 6]);
+        assert_eq!(split[0].background_color, Some(bg));
+        assert_eq!(split[1].background_color, None);
+        // 无交叠：原样
+        let split = apply_selection_background(mk_runs(), 20..24, bg);
+        assert_eq!(split.iter().map(|r| r.len).collect::<Vec<_>>(), vec![6, 6]);
+        assert!(split.iter().all(|r| r.background_color.is_none()));
+    }
 
     /// T9 交接：纯空白/符号文本的字母数字前缀为空，旧实现一律退化为
     /// "html-txt-"——br 独立成组（"\n"）、符号分隔线等组互相碰撞同键，
