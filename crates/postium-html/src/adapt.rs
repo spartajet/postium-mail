@@ -147,6 +147,7 @@ fn adapt_table_cell(cell: &TableCell) -> TableCell {
     TableCell {
         blocks: adapt_blocks(&cell.blocks),
         colspan: cell.colspan,
+        rowspan: cell.rowspan,
         width: cell.width,
         style: adapt_block_style(&cell.style),
     }

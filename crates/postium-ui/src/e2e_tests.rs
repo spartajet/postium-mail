@@ -21,6 +21,32 @@ fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx)
         .expect("核心服务初始化失败")
 }
 
+/// 进程级一次初始化的 E2E 数据目录（POSTIUM_E2E=1 + POSTIUM_DATA_DIR）。
+///
+/// ui-state 等持久化路径经 `resolve_data_dir` 读进程全局环境变量——并行测试
+/// 各自 set_var 会在毫秒窗口内互相翻转（写与读落在不同 tempdir，断言偶发击穿，
+/// 线上反馈①的放行记忆断言实测踩中）。改为首个调用者一次设定、全进程共享
+/// 同一目录：各测试的 DB 仍用独立 tempdir，ui-state.json 字段互不相干
+/// （theme/lang 与 remote_image_senders 不重叠，读改写交错最坏丢一次对方
+/// 字段写入，不破坏各自断言）。目录句柄泄漏持有——进程存活期间不得回收。
+static E2E_DATA_DIR: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+fn force_e2e_data_dir() {
+    E2E_DATA_DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().expect("E2E 数据目录创建失败");
+        let path = dir.path().to_path_buf();
+        std::mem::forget(dir);
+        unsafe {
+            std::env::set_var("POSTIUM_E2E", "1");
+            std::env::set_var("POSTIUM_DATA_DIR", path.to_str().unwrap());
+        }
+    });
+}
+
+/// 共享 ui-state.json 的测试间串行化（theme 持久化 × 放行记忆）：读改写
+/// 整份文件的两组写者并行交错会丢对方字段（OnceLock 只稳定目录，不序列化
+/// 文件写）。锁只在这两个测试体内持有，测试结束随 guard 释放。
+static UI_STATE_FILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn with_app<R>(cx: &mut VisualTestContext, f: impl FnOnce(&gpui_pre::App) -> R) -> R {
     cx.update(|_, app| f(app))
 }
@@ -543,11 +569,13 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
     cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
-    // ui-state 持久化路径走 resolve_data_dir：测试内强制 E2E 目录
-    unsafe {
-        std::env::set_var("POSTIUM_E2E", "1");
-        std::env::set_var("POSTIUM_DATA_DIR", dir.path().to_str().unwrap());
-    }
+    // ui-state 持久化路径走 resolve_data_dir：强制进程级共享 E2E 目录
+    //（此前各测试自行 set_var，并行下毫秒窗口内互相翻转——见 force_e2e_data_dir）。
+    // 与放行记忆测试共享同一 ui-state.json，串行化防读改写交错丢字段
+    force_e2e_data_dir();
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let ui_state_path =
+        std::path::PathBuf::from(std::env::var("POSTIUM_DATA_DIR").unwrap()).join("ui-state.json");
 
     let (api, sync_rx) = boot(dir.path());
 
@@ -571,7 +599,7 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
     });
     assert_ne!(mode(cx), initial_dark, "第一次切换应翻转主题");
 
-    let saved = std::fs::read_to_string(dir.path().join("ui-state.json")).unwrap_or_default();
+    let saved = std::fs::read_to_string(&ui_state_path).unwrap_or_default();
     assert!(saved.contains("theme"), "主题应写入 ui-state.json: {saved}");
 
     with_window_mut(cx, |window, app| {
@@ -580,11 +608,8 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
         });
     });
     assert_eq!(mode(cx), initial_dark, "第二次切换应回到原主题");
-
-    unsafe {
-        std::env::remove_var("POSTIUM_E2E");
-        std::env::remove_var("POSTIUM_DATA_DIR");
-    }
+    // 环境变量不回收：OnceLock 语义下进程内首个设定全程稳定，其他测试
+    //（放行记忆等 ui-state 写读）依赖它定位共享目录
 }
 
 // ---------------------------------------------------------------------------
@@ -2110,12 +2135,14 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("单元格甲")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("单元格乙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2128,6 +2155,7 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("跨列前段")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2137,6 +2165,7 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                                 runs: vec![text("表格链接文字")],
                             }])],
                             colspan: 2,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2148,18 +2177,21 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("三等分甲")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("三等分乙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("三等分丙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2601,7 +2633,14 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
     cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
+    // 放行记忆走 ui-state.json 持久化（线上反馈①）：E2E 数据目录进程级共享
+    //（见 force_e2e_data_dir），不得写入真实 ~/.postium（否则下一次运行的
+    // 默认拦截断言会被记忆击穿）；与主题持久化测试串行化防文件写交错
+    force_e2e_data_dir();
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let (api, sync_rx) = boot(dir.path());
+    // 草稿保存的 async move 会移走 api；重装载体用提前克隆（放行记忆段用）
+    let reload_api = api.clone();
 
     let (shell, cx) = cx.add_window_view(|window, cx| {
         setup(cx);
@@ -2729,6 +2768,43 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("html-img-loaded").is_none(),
         "e2e_offline 下不得出现已加载真图"
+    );
+
+    // ---- 放行记忆（线上反馈①）----
+    // 1) ui-state.json 已记下发件人；
+    // 2) 重开同一封邮件（force 走重装载路径）：放行态从持久化恢复，不再询问
+    let sender = with_app(cx, |app| {
+        shell.read(app)
+            .detail
+            .read(app)
+            .detail
+            .as_ref()
+            .map(|d| crate::ui_state::normalize_sender(&d.email.sender_email))
+            .filter(|s| !s.is_empty())
+            .expect("详情应带发件人")
+    });
+    let state = crate::ui_state::load();
+    assert!(
+        state.allows_remote_images_from(&sender),
+        "点击放行后应按发件人持久化记忆"
+    );
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell
+                .detail
+                .update(cx, |store, cx| store.force_load(draft_id, &reload_api, cx))
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).detail.read(app);
+            (store.images.enabled && !store.loading).then_some(())
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds("email-load-images").is_none(),
+        "已放行发件人的邮件重开不得再询问"
     );
     cx.run_until_parked();
 }

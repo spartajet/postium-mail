@@ -160,6 +160,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": [
@@ -353,6 +354,7 @@
                                       }
                                     ],
                                     "colspan": 1,
+                                    "rowspan": 1,
                                     "width": null,
                                     "style": {
                                       "background_color": null,
@@ -445,6 +447,7 @@
                                       }
                                     ],
                                     "colspan": 1,
+                                    "rowspan": 1,
                                     "width": null,
                                     "style": {
                                       "background_color": [
@@ -541,6 +544,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": null,

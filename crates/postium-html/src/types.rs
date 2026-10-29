@@ -197,6 +197,10 @@ pub struct TableCell {
     pub blocks: Vec<Block>,
     /// 跨列数（colspan，默认 1，上限 16）。
     pub colspan: u8,
+    /// 跨行数（rowspan，默认 1，上限 16；线上反馈②）。树构建期的网格
+    /// 归一化消费它生成占位单元格对齐列位；渲染层不拉伸（span 单元格
+    /// 只在起始行渲染，内容不跨行垂直居中——已知近似）。
+    pub rowspan: u8,
     /// 单元格宽度（width 属性 / style，转 flex-basis）。
     pub width: Option<Width>,
     /// 单元格样式。

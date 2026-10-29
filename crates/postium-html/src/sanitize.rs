@@ -163,10 +163,17 @@ pub fn sanitize_lenient(html: &str) -> String {
         .generic_attributes(HashSet::from(["class", "id", "style", "align"]))
         // td/th 的 width 属性放行（T6）+ 三者的 bgcolor（T6 预批准补）：
         // 宽度/背景色的遗留呈现属性主流来源，builder 依赖它们到达树构建；
-        // table 的 width 一并放行（T8 管线 fixture 实证补齐，与 bgcolor 同批）
-        .add_tag_attributes("table", &["width", "bgcolor"])
-        .add_tag_attributes("td", &["width", "bgcolor"])
-        .add_tag_attributes("th", &["width", "bgcolor"])
+        // table 的 width 一并放行（T8 管线 fixture 实证补齐，与 bgcolor 同批）。
+        // 线上反馈②（表格框线/列位）：table 的 border/bordercolor/cellpadding
+        // 放行（border="1" 的 1px 全框线 + cellpadding 是遗留邮件表格的主流
+        // 画法；数值经 parse 钳制、颜色经 parse_color 终审，无 URL/脚本向量）；
+        // td/th 的 height/rowspan 放行（单元格定高、跨行占位对齐列位）
+        .add_tag_attributes(
+            "table",
+            &["width", "bgcolor", "border", "bordercolor", "cellpadding"],
+        )
+        .add_tag_attributes("td", &["width", "bgcolor", "height", "rowspan"])
+        .add_tag_attributes("th", &["width", "bgcolor", "height", "rowspan"])
         // cid:/data: 先过 ammonia 的 scheme 校验（其 url_schemes 是全局白名单、
         // 无 per-tag 配置）；attribute_filter 在其后执行、只能收紧——不合规形态
         // （a href="data:…"、img 的 data:text 等）在净化期即被剥除
@@ -264,6 +271,26 @@ mod tests {
         );
         assert!(out.contains(r#"bgcolor="teal""#));
         assert!(!out.contains(r#"bgcolor="red""#));
+    }
+
+    #[test]
+    fn sanitize_keeps_table_grid_attributes() {
+        // 线上反馈②：table 的 border/bordercolor/cellpadding、td/th 的
+        // height/rowspan 放行（网格归一化依赖它们到达树构建；数值钳制与
+        // 颜色终审在 builder 侧，无 URL/脚本向量）
+        let out = sanitize_lenient(
+            r##"<table border="1" bordercolor="#ccc" cellpadding="6"><tr><td rowspan="2" height="40">x</td></tr></table>"##,
+        );
+        assert!(
+            out.contains(r#"border="1""#)
+                && out.contains(r##"bordercolor="#ccc""##)
+                && out.contains(r#"cellpadding="6""#)
+                && out.contains(r#"rowspan="2""#)
+                && out.contains(r#"height="40""#)
+        );
+        // 白名单外元素不享受（p 的 border/height 仍剔除）
+        let out = sanitize_lenient(r#"<p border="1" height="40">x</p>"#);
+        assert!(!out.contains("border") && !out.contains("height"));
     }
 
     #[test]

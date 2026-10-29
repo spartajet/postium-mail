@@ -399,6 +399,29 @@ pub(crate) fn parse_align(s: &str) -> Option<Align> {
     }
 }
 
+/// 取 style 串中最后一条 `display` 声明的值（小写、去空白；未声明 → None）。
+///
+/// `pub(crate)`：builder 的行内系 display 判定（线上反馈③：邮件横向菜单的
+/// 主流写法是块级标签 + `display:inline-block`）复用声明切分逻辑，与
+/// [`parse_block_style`] 的 hidden 判定同源（后声明覆盖前置）。
+pub(crate) fn display_value(css_text: &str) -> Option<String> {
+    let mut last = None;
+    for (key, value) in declarations(css_text) {
+        if key == "display" {
+            last = Some(value.to_ascii_lowercase());
+        }
+    }
+    last
+}
+
+/// display 值是否为行内系（inline / inline-block / inline-flex）：元素按
+/// 行内透传参与父级行内流（不产块）。
+pub(crate) fn is_inline_display(css_text: &str) -> bool {
+    display_value(css_text).is_some_and(|v| {
+        matches!(v.as_str(), "inline" | "inline-block" | "inline-flex" | "inline-table")
+    })
+}
+
 /// 边框宽度：px / 无单位 / 关键字（thin=1、medium=3、thick=5）。
 fn parse_border_width(s: &str) -> Option<f32> {
     match s.trim().to_ascii_lowercase().as_str() {
@@ -679,6 +702,28 @@ mod tests {
         // 非 none 取值不构成隐藏
         assert!(!parse_block_style("display: block").hidden);
         assert!(!parse_block_style("display: grid").hidden);
+    }
+
+    #[test]
+    fn inline_display_detection() {
+        // 线上反馈③：块级标签 + display:inline-block 的横向菜单写法
+        assert!(is_inline_display("display:inline-block"));
+        assert!(is_inline_display("DISPLAY: Inline-Block ; color:red"));
+        assert!(is_inline_display("display:inline"));
+        assert!(is_inline_display("display:inline-flex"));
+        // 后声明覆盖（block 覆盖 inline-block → 不再行内）
+        assert!(!is_inline_display("display:inline-block; display:block"));
+        // 块级/未声明/none 均不构成行内
+        assert!(!is_inline_display("display:block"));
+        assert!(!is_inline_display("display:none"));
+        assert!(!is_inline_display("color:red"));
+        assert!(!is_inline_display(""));
+        // display_value：最后一条声明胜出、小写化
+        assert_eq!(
+            display_value("color:red; display:FLEX"),
+            Some("flex".to_string())
+        );
+        assert_eq!(display_value("color:red"), None);
     }
 
     #[test]

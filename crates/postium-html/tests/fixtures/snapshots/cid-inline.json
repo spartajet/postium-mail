@@ -245,6 +245,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": null,

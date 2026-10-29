@@ -77,7 +77,8 @@ impl Default for ImageCtx {
 }
 
 /// 详情侧按邮件维度持有的图片渲染状态（email_detail/DetailStore 持有，
-/// 切换邮件即重置——spec §4.4「放行状态按邮件维度存内存，不持久化」）。
+/// 切换邮件即重置——放行态的持久记忆由 DetailStore 装载回调按发件人白名单
+/// 恢复，见 detail.rs 线上反馈①）。
 ///
 /// 与 [`ImageCtx`] 的分工：本结构是状态（随邮件装载生灭、被后台拉取
 /// 任务写入），[`ImageCtx`] 是单帧渲染快照（[`HtmlRenderState::to_ctx`]
@@ -342,6 +343,9 @@ fn render_table_row(row: &TableRow, inh: Inherited, rcx: &RenderCtx) -> gpui_kit
 /// 表格单元格 → 容器（colspan → flex_grow 权重、width → 固定宽/百分比宽、
 /// 无显式宽 basis 归零交 grow 相位分配、cell.style → map_block_style；
 /// 嵌套块递归 [`render_blocks`]，空单元格占最小行高防塌陷）。
+///
+/// 内容垂直居中（线上反馈②）：浏览器 td 默认 `valign=middle`，单元格内容
+/// 在行高内垂直居中——flex_col 主轴 justify_center 对齐该语义。
 fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
     let child_inh = Inherited {
         color: cell.style.color.map(ir_color).or(inh.color),
@@ -353,10 +357,12 @@ fn render_table_cell(cell: &TableCell, inh: Inherited, rcx: &RenderCtx) -> gpui_
     // 相位（按 basis 比例收缩）且自由空间归零——grow 相位从不被咨询，
     // colspan 权重失效（[1,2] 行渲染成 50/50）。basis 归零后 shrink 无从
     // 发生，grow 相位按权重接管分配。有显式 width 的格保持 width→
-    // flex-basis（声明宽 + 自动扩展）。
+    // flex-basis（声明宽 + 自动扩展）；列宽的跨行协调由 builder 网格
+    // 归一化传播到各行同列（逐行独立 flex 下对齐竖线的前提）。
     let mut c = map_block_style(&cell.style, rcx.dark)
         .flex()
         .flex_col()
+        .justify_center()
         .flex_grow(f32::from(cell.colspan).max(1.))
         .when_some(cell.style.text_align, |d, a| d.text_align(map_align(a)));
     match cell.width {
