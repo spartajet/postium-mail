@@ -2,29 +2,22 @@
 //！ 同步服务模块 (Sync Service)
 //！ ═════════════════════════════════════════════════════════════════════════
 //！
-//！ 本模块负责与邮件服务器（IMAP/SMTP）的同步操作，包括：
-//！ 1. 账号同步 - 从邮件服务器拉取新邮件、同步邮件状态
-//！ 2. 进度通知 - 通过 Tauri 事件系统向前端推送同步进度
+//！ 本模块负责与邮件服务器（IMAP）的同步操作，包括：
+//！ 1. 账号同步 - 转发每账号 IMAP 引擎的 SyncNow（三档策略执行）
+//！ 2. 进度通知 - 引擎经 SyncEventTx 发进度，前端订阅消费
 //！ 3. 文件夹统计 - 提供各文件夹的邮件数量统计
-//！
-//！ 设计特点：
-//！ - 使用 SyncOrchestrator 编排复杂的同步流程
-//！ - 通过 Tauri 事件系统实时通知前端同步进度
-//！ - 支持分阶段同步（连接、列出文件夹、同步邮件等）
-//！ - 提供详细的同步结果统计
+//！ 4. 历史回填 - sync_older_emails（before_uid 分页，直连路径保留）
 //！ ═════════════════════════════════════════════════════════════════════════
 
 use crate::domain::auth::AuthManager;
 use crate::domain::auth::manager::Credentials;
 use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::providers::pool::PROVIDER_POOL;
-use crate::domain::sync::SyncProgressEmitter;
-use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
-use crate::domain::sync::folder_sync_full::fetch_emails_body;
 use crate::domain::sync::{
-    FolderStat, HISTORY_UID_BATCH_SIZE, InitialSyncRange, SyncProgress, SyncStage,
-    headers_to_contacts, history_exhausted_before_uid, next_history_before_uid,
+    FolderStat, HISTORY_UID_BATCH_SIZE, InitialSyncRange, headers_to_contacts,
+    history_exhausted_before_uid, next_history_before_uid,
 };
+use crate::engine::{EngineAccess, EngineCommand};
 use crate::error::MailError;
 use crate::infrastructure::protocols::imap::ImapClient;
 use crate::infrastructure::storage::DbConn;
@@ -74,219 +67,107 @@ pub struct SyncAllAccountsResult {
 
 /// 同步服务
 ///
-/// 负责处理所有与邮件服务器同步相关的业务逻辑。
+/// 同步流程由每账号 IMAP 引擎（`AccountEngine`）承载：本服务负责把同步
+/// 请求转成 `EngineCommand::SyncNow` 发给引擎 Actor，进度事件由引擎经
+/// `SyncEventTx` 发出（UI 的 SyncStore 消费）。
 ///
 /// # 字段
 ///
-/// - `db`: 数据库连接，用于持久化同步的邮件数据
-/// - `auth`: 认证管理器，用于获取连接邮件服务器所需的凭证
-///
-/// # 主要功能
-///
-/// - 同步账号（带进度通知）
-/// - 获取文件夹统计信息
+/// - `db`: 数据库连接，用于账号/文件夹统计查询
+/// - `auth`: 认证管理器（历史回填直连路径使用）
+/// - `engine`: 引擎接入点（`CoreApi` 装配时经 [`SyncService::with_engine`]
+///   注入；未装配时同步路径返回明确错误，不影响纯本地查询方法）
 pub struct SyncService {
-    /// 数据库连接
     db: DbConn,
-    /// 认证管理器（线程安全）
     auth: Arc<AuthManager>,
+    engine: Option<Arc<dyn EngineAccess>>,
 }
 
 impl SyncService {
-    /// 创建新的同步服务实例
-    ///
-    /// # 参数
-    ///
-    /// - `db`: 数据库连接
-    /// - `auth`: 认证管理器（使用 Arc 包装以便共享）
-    ///
-    /// # 返回
-    ///
-    /// 返回初始化好的 SyncService 实例
+    /// 创建新的同步服务实例（引擎未装配；api.rs 装配处调 `with_engine`）。
     pub fn new(db: DbConn, auth: Arc<AuthManager>) -> Self {
-        Self { db, auth }
+        Self { db, auth, engine: None }
     }
 
-    /// 同步账号（带进度通知）
+    /// 注入引擎接入点（生产装配用；测试构造不关心引擎时省略）。
+    pub fn with_engine(mut self, engine: Arc<dyn EngineAccess>) -> Self {
+        self.engine = Some(engine);
+        self
+    }
+
+    fn engine(&self) -> Result<&Arc<dyn EngineAccess>, MailError> {
+        self.engine
+            .as_ref()
+            .ok_or_else(|| MailError::SyncFailed("同步引擎未装配".into()))
+    }
+
+    /// 同步账号（带进度通知）：转发引擎 `SyncNow`。
     ///
-    /// 这是主要的同步方法，会启动一个完整的同步流程，并实时向前端发送进度事件。
-    /// 前端可以监听这些事件来显示同步进度条、状态消息等。
-    ///
-    /// # 工作流程
-    ///
-    /// 1. **连接阶段**: 连接到 IMAP 服务器
-    /// 2. **列出文件夹**: 获取服务器上的文件夹列表
-    /// 3. **同步文件夹**: 逐个同步文件夹中的邮件
-    /// 4. **完成**: 返回同步结果统计
-    ///
-    /// # 进度通知
-    ///
-    /// 同步过程中会发送多个 Tauri 事件到前端，每个事件包含：
-    /// - `stage`: 当前同步阶段（Connecting, Syncing, Completed, Error 等）
-    /// - `folder`: 当前正在同步的文件夹（如果有）
-    /// - `current`: 当前进度计数
-    /// - `total`: 总数量
-    /// - `message`: 进度消息文本
-    ///
-    /// # 参数
-    ///
-    /// - `app_handle`: Tauri 应用句柄，用于发送事件到前端
-    /// - `account_id`: 要同步的账号 ID
-    ///
-    /// # 返回
-    ///
-    /// 成功时返回 Ok(())，失败时返回错误。
-    ///
-    /// # 同步结果
-    ///
-    /// 同步完成后会发送 `Completed` 事件，包含：
-    /// - `new_emails`: 新增的邮件数量
-    /// - `updated_emails`: 更新的邮件数量
-    /// - `duration_ms`: 同步耗时（毫秒）
-    ///
-    /// # 错误处理
-    ///
-    /// 如果同步失败，会发送 `Error` 事件，包含错误消息。
-    ///
-    /// # 前端监听示例
-    ///
-    /// ```typescript,ignore
-    /// // 监听同步进度事件
-    /// const unlisten = await listen<SyncProgress>('sync:progress', (event) => {
-    ///     const progress = event.payload;
-    ///     console.log(`阶段: ${progress.stage}`);
-    ///     console.log(`消息: ${progress.message}`);
-    ///
-    ///     // 更新进度条
-    ///     if (progress.total > 0) {
-    ///         const percent = (progress.current / progress.total) * 100;
-    ///         updateProgressBar(percent);
-    ///     }
-    ///
-    ///     // 显示消息
-    ///     showToast(progress.message);
-    /// });
-    ///
-    /// // 开始同步
-    /// await invoke('sync_account_with_progress', { accountId: 1 });
-    /// ```
-    ///
-    /// # 同步阶段说明
-    ///
-    /// - `Connecting`: 正在连接到邮件服务器
-    /// - `ListingFolders`: 正在获取文件夹列表
-    /// - `SyncingFolder`: 正在同步某个文件夹
-    /// - `Completed`: 同步完成
-    /// - `Error`: 同步失败
+    /// `event_tx` 作为本次同步的进度事件出口传给引擎（覆盖引擎默认出口），
+    /// 与旧 dispatcher 链路一致——首同步向导（settings begin_sync）依赖该
+    /// channel 的实时进度。
     pub async fn sync_account_with_progress(
         &self,
         event_tx: crate::domain::sync::SyncEventTx,
         account_id: i32,
     ) -> Result<(), MailError> {
-        // 记录日志，便于追踪
-        tracing::info!(account_id, "开始同步（带进度）");
-
-        // ─── 创建进度事件发射器 ───
-        // 这个发射器会通过 Tauri 事件系统向前端发送进度更新
-        let emitter = SyncProgressEmitter::new(event_tx);
-
-        // ─── 发送"正在连接"事件 ───
-        emitter.emit(SyncProgress {
-            account_id,
-            stage: SyncStage::Connecting,
-            folder: None,
-            folder_display_name: None,
-            current: 0,
-            total: 0,
-            message: "正在连接...".into(),
-        });
-
-        // ─── 创建同步编排器 ───
-        // SyncOrchestrator 负责协调整个同步流程
-        // .with_emitter() 将进度发射器注册到编排器，使其能发送进度事件
-        let orchestrator =
-            SyncOrchestrator::new(self.db.clone(), self.auth.clone()).with_emitter(emitter.clone());
-
-        // ─── 执行同步 ───
-        match orchestrator.sync_account(account_id).await {
-            // ─── 同步成功 ───
-            Ok(result) => {
-                // 记录详细的同步结果
-                tracing::info!(
-                    account_id,
-                    new_emails = result.new_emails,
-                    updated_emails = result.updated_emails,
-                    duration_ms = result.duration_ms,
-                    "同步完成"
-                );
-
-                // 发送"同步完成"事件
-                emitter.emit(SyncProgress {
-                    account_id,
-                    stage: SyncStage::Completed,
-                    folder: None,
-                    folder_display_name: None,
-                    current: result.new_emails,
-                    total: result.new_emails + result.updated_emails,
-                    message: format!(
-                        "同步完成: {} 封新邮件, {} 封更新",
-                        result.new_emails, result.updated_emails
-                    ),
-                });
-
-                Ok(())
-            }
-
-            // ─── 同步失败 ───
-            Err(e) => {
-                // 发送"同步失败"事件，包含错误消息
-                emitter.emit(SyncProgress {
-                    account_id,
-                    stage: SyncStage::Error,
-                    folder: None,
-                    folder_display_name: None,
-                    current: 0,
-                    total: 0,
-                    message: format!("同步失败: {e}"),
-                });
-
-                // 返回错误，让调用方处理
-                Err(e)
-            }
-        }
+        tracing::info!(account_id, "开始同步（引擎路径）");
+        self.sync_via_engine(Some(event_tx), account_id, None).await
     }
 
+    /// 同步账号（首同步范围档位）。
+    ///
+    /// 公共签名保留（settings.rs begin_sync 调用）。`range` 当前不参与引擎
+    /// 决策：首同步窗口由 `sync_state` 空状态触发的 `FullResync` 承担
+    /// （全量抓取后由历史回填 `sync_older_emails` 补更早邮件），范围档位
+    /// 的窗口化接入留给后续任务。
     pub async fn sync_account_with_range(
         &self,
         event_tx: crate::domain::sync::SyncEventTx,
         account_id: i32,
         range: InitialSyncRange,
     ) -> Result<(), MailError> {
-        let emitter = SyncProgressEmitter::new(event_tx);
-        emitter.emit(SyncProgress {
-            account_id,
-            stage: SyncStage::Connecting,
-            folder: None,
-            folder_display_name: None,
-            current: 0,
-            total: 0,
-            message: "正在连接...".into(),
-        });
+        let _ = range;
+        tracing::info!(account_id, "开始首同步（引擎路径）");
+        self.sync_via_engine(Some(event_tx), account_id, None).await
+    }
 
-        let orchestrator =
-            SyncOrchestrator::new(self.db.clone(), self.auth.clone()).with_emitter(emitter);
-        orchestrator
-            .sync_account_with_range(account_id, range)
+    /// 引擎同步入口：取账号 → ensure_engine → 发 SyncNow → await 回执。
+    ///
+    /// `events_override`：Some 时本次同步进度发往该 channel（同步服务调用方
+    /// 自带出口）；None 时走引擎默认出口（`CoreApi.sync_tx`）。
+    async fn sync_via_engine(
+        &self,
+        events_override: Option<crate::domain::sync::SyncEventTx>,
+        account_id: i32,
+        folder: Option<String>,
+    ) -> Result<(), MailError> {
+        let engine = self.engine()?;
+        let account = account_repo::get_by_id(&self.db, account_id)
+            .await?
+            .ok_or(MailError::AccountNotFound(account_id))?;
+        let handle = engine.imap_engine(&account).await?;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        handle
+            .send(EngineCommand::SyncNow {
+                folder,
+                events: events_override,
+                reply: reply_tx,
+            })
+            .await?;
+        reply_rx
             .await
-            .map(|_| ())
+            .map_err(|_| MailError::ImapConnectionFailed("引擎已关闭".into()))?
     }
 
     pub async fn sync_all_accounts_with_progress(
         &self,
-        event_tx: crate::domain::sync::SyncEventTx,
+        _event_tx: crate::domain::sync::SyncEventTx,
     ) -> Result<SyncAllAccountsResult, MailError> {
+        // 进度事件统一走引擎默认出口（CoreApi.sync_tx）；入参 channel 由调用方
+        // （UI sync_all）即时创建、rx 即弃，旧链路本就无人消费
         self.sync_all_accounts_with_runner(|account_id| {
-            self.sync_account_with_progress(event_tx.clone(), account_id)
+            self.sync_via_engine(None, account_id, None)
         })
         .await
     }
@@ -800,6 +681,31 @@ fn normalized_history_window_bound(value: i64) -> i64 {
     } else {
         value
     }
+}
+
+/// 批量拉取邮件正文并落库（历史回填路径专用，原 folder_sync_full 内联实现迁入）。
+async fn fetch_emails_body(
+    db: DbConn,
+    account_id: i32,
+    folder: &str,
+    uids: &[u32],
+    imap_client: &mut ImapClient,
+) -> Result<(), MailError> {
+    tracing::debug!(
+        "开始获取邮件正文: account_id={}, folder={}, uids len={}",
+        account_id,
+        folder,
+        uids.len()
+    );
+    imap_client.select_folder(folder).await?;
+    for uid in uids {
+        if let Ok((body_text, body_html)) = imap_client.fetch_body(*uid).await {
+            email_repo::update_body(&db, account_id, folder, *uid, body_text, body_html).await?;
+            tracing::debug!("已更新邮件正文: account_id={}, uid={}", account_id, uid);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

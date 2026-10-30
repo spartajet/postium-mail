@@ -235,8 +235,11 @@ impl AppShell {
         // e2e 离线模式跳过后台调度（避免真实网络连接破坏测试确定性）
         if !api.is_e2e_offline() {
             let db = api.db.clone();
-            let auth = api.auth.clone();
-            let mut scheduler = postium_core::domain::sync::SyncScheduler::new(db, auth, Some(sched_tx));
+            let mut scheduler = postium_core::domain::sync::SyncScheduler::new(
+                db,
+                api.engine.clone(),
+                Some(sched_tx),
+            );
             scheduler = scheduler.with_interval(5);
             scheduler.start();
             std::mem::forget(scheduler); // 调度器随进程存活（Drop 会停止）

@@ -103,7 +103,7 @@ impl CoreApi {
             AuthManager::default()
         });
         let engine_access: Arc<dyn crate::engine::EngineAccess> = Arc::new(
-            crate::engine::RegistryEngineAccess::new(auth.clone(), sync_tx.clone()),
+            crate::engine::RegistryEngineAccess::new(auth.clone(), db.clone(), sync_tx.clone()),
         );
         let accounts = if e2e && !e2e_truth {
             AccountService::new_with_imap_verifier(
@@ -121,7 +121,7 @@ impl CoreApi {
             e2e_truth,
             engine_access.clone(),
         );
-        let sync = SyncService::new(db.clone(), auth.clone());
+        let sync = SyncService::new(db.clone(), auth.clone()).with_engine(engine_access.clone());
         let labels = LabelService::new(db.clone());
         let contacts = ContactService::new(db.clone());
         let attachments =

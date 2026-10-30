@@ -5,13 +5,11 @@
 //! 2. CondstoreResync 落 flag 变更 + 清理 vanished
 //! 3. FullResync 清空本地后全量重建
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use postium_core::domain::sync::SyncProgressEvent;
-use postium_core::engine::sync::{execute_plan, FetchNewEmails, LocalSyncState, SyncPlan};
+use postium_core::engine::sync::{execute_plan, LocalSyncState, SyncPlan};
 use postium_core::engine::ImapSession;
 use postium_core::error::MailError;
 use postium_core::infrastructure::protocols::imap::MailboxInfo;
@@ -108,11 +106,31 @@ fn mailbox_info(uidvalidity: u32, highest_modseq: Option<u64>, exists: u32) -> M
     }
 }
 
-/// 可控 Mock 会话：UID 搜索 / flag 变更 / 邮箱 meta 均为预设值，其余方法空实现。
+/// 可控 Mock 会话：UID 搜索 / flag 变更 / 邮箱 meta / 批量抓取均为预设值。
+/// `fetch_requests` 记录每次批量抓取的 UID 批次，供断言"只抓新 UID"。
 struct MockSyncSession {
     mailbox: MailboxInfo,
     search_uids: Vec<u32>,
     flag_changes: Vec<(u32, Vec<String>)>,
+    fetch_emails: Vec<WholeEmailDto>,
+    fetch_requests: Arc<Mutex<Vec<Vec<u32>>>>,
+}
+
+impl MockSyncSession {
+    fn new(
+        mailbox: MailboxInfo,
+        search_uids: Vec<u32>,
+        flag_changes: Vec<(u32, Vec<String>)>,
+        fetch_emails: Vec<WholeEmailDto>,
+    ) -> Self {
+        Self {
+            mailbox,
+            search_uids,
+            flag_changes,
+            fetch_emails,
+            fetch_requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
 }
 
 #[async_trait]
@@ -123,6 +141,12 @@ impl ImapSession for MockSyncSession {
 
     async fn enable(&mut self, _caps: &[&str]) -> Result<(), MailError> {
         Ok(())
+    }
+
+    async fn list_folders(
+        &mut self,
+    ) -> Result<Vec<postium_core::infrastructure::protocols::imap::FolderInfo>, MailError> {
+        Ok(Vec::new())
     }
 
     async fn select_folder(&mut self, _folder: &str) -> Result<MailboxInfo, MailError> {
@@ -202,6 +226,15 @@ impl ImapSession for MockSyncSession {
         Ok(None)
     }
 
+    async fn fetch_emails_by_uids(
+        &mut self,
+        _folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        self.fetch_requests.lock().unwrap().push(uids.to_vec());
+        Ok(self.fetch_emails.clone())
+    }
+
     async fn fetch_body_section(
         &mut self,
         _folder: &str,
@@ -214,22 +247,6 @@ impl ImapSession for MockSyncSession {
     async fn logout(self: Box<Self>) -> Result<(), MailError> {
         Ok(())
     }
-}
-
-/// 构造 `fetch_new_emails` 回调：直接按请求的 UID 构造 DTO 返回（入库由执行函数做），
-/// 同时记录每次请求的 UID 批次供断言"只抓新 UID"。测试进程内泄漏，无需回收。
-fn make_fetch(
-    requests: Arc<Mutex<Vec<Vec<u32>>>>,
-) -> FetchNewEmails<'static> {
-    let closure = move |_session: &mut dyn ImapSession,
-                        _folder: &str,
-                        uids: &[u32]|
-        -> Pin<Box<dyn Future<Output = Result<Vec<WholeEmailDto>, MailError>> + Send>> {
-        requests.lock().unwrap().push(uids.to_vec());
-        let dtos: Vec<WholeEmailDto> = uids.iter().copied().map(whole_email).collect();
-        Box::pin(async move { Ok(dtos) })
-    };
-    Box::leak(Box::new(closure)) as FetchNewEmails<'static>
 }
 
 fn progress_channel() -> smol::channel::Sender<SyncProgressEvent> {
@@ -249,13 +266,12 @@ async fn uid_incremental_fetches_only_new_uids() {
         insert_email(&db, uid, false).await;
     }
 
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let fetch = make_fetch(Arc::clone(&requests));
-    let mut session = MockSyncSession {
-        mailbox: mailbox_info(1, Some(9), 5),
-        search_uids: vec![2, 3, 4, 5],
-        flag_changes: vec![],
-    };
+    let mut session = MockSyncSession::new(
+        mailbox_info(1, Some(9), 5),
+        vec![2, 3, 4, 5],
+        vec![],
+        vec![whole_email(4), whole_email(5)],
+    );
     let events = progress_channel();
 
     let local = LocalSyncState {
@@ -270,14 +286,14 @@ async fn uid_incremental_fetches_only_new_uids() {
         ACCOUNT_ID,
         FOLDER,
         &SyncPlan::UidIncremental,
-        &local,
-        fetch,
-        &events,
+        local.clone(),
+        events.clone(),
     )
     .await
     .unwrap();
 
     // 只补抓 uid > 3 的两封，且单批到位
+    let requests = Arc::clone(&session.fetch_requests);
     assert_eq!(requests.lock().unwrap().as_slice(), [vec![4u32, 5]].as_slice());
     assert_eq!(outcome.new_emails, 2);
     assert_eq!(outcome.flag_updates, 0);
@@ -310,17 +326,16 @@ async fn modseq_resync_updates_flags_and_deletes_vanished() {
     insert_email(&db, 2, false).await;
     insert_email(&db, 3, false).await;
 
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let fetch = make_fetch(requests);
-    let mut session = MockSyncSession {
-        mailbox: mailbox_info(1, Some(9), 3),
+    let mut session = MockSyncSession::new(
+        mailbox_info(1, Some(9), 3),
         // uid2 已从服务器消失；uid2/uid3 的 flag 变为 \Seen
-        search_uids: vec![1, 3],
-        flag_changes: vec![
+        vec![1, 3],
+        vec![
             (2, vec!["\\Seen".to_string()]),
             (3, vec!["\\Seen".to_string()]),
         ],
-    };
+        vec![],
+    );
     let events = progress_channel();
 
     let local = LocalSyncState {
@@ -335,9 +350,8 @@ async fn modseq_resync_updates_flags_and_deletes_vanished() {
         ACCOUNT_ID,
         FOLDER,
         &SyncPlan::CondstoreResync,
-        &local,
-        fetch,
-        &events,
+        local.clone(),
+        events.clone(),
     )
     .await
     .unwrap();
@@ -383,13 +397,12 @@ async fn full_resync_clears_and_refills() {
     insert_email(&db, 1, false).await;
     insert_email(&db, 2, false).await;
 
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let fetch = make_fetch(requests);
-    let mut session = MockSyncSession {
-        mailbox: mailbox_info(7, Some(12), 2),
-        search_uids: vec![10, 11],
-        flag_changes: vec![],
-    };
+    let mut session = MockSyncSession::new(
+        mailbox_info(7, Some(12), 2),
+        vec![10, 11],
+        vec![],
+        vec![whole_email(10), whole_email(11)],
+    );
     let events = progress_channel();
 
     let local = LocalSyncState {
@@ -404,9 +417,8 @@ async fn full_resync_clears_and_refills() {
         ACCOUNT_ID,
         FOLDER,
         &SyncPlan::FullResync,
-        &local,
-        fetch,
-        &events,
+        local.clone(),
+        events.clone(),
     )
     .await
     .unwrap();

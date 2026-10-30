@@ -11,6 +11,7 @@ use crate::domain::sync::SyncEventTx;
 use crate::engine::actor::EngineHandle;
 use crate::engine::factory::RealSessionFactory;
 use crate::error::MailError;
+use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::accounts;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -24,12 +25,13 @@ pub trait EngineAccess: Send + Sync {
 /// 生产实现：ensure_engine + RealSessionFactory（凭证走 AuthManager）。
 pub struct RegistryEngineAccess {
     auth: Arc<AuthManager>,
+    db: DbConn,
     sync_tx: SyncEventTx,
 }
 
 impl RegistryEngineAccess {
-    pub fn new(auth: Arc<AuthManager>, sync_tx: SyncEventTx) -> Self {
-        Self { auth, sync_tx }
+    pub fn new(auth: Arc<AuthManager>, db: DbConn, sync_tx: SyncEventTx) -> Self {
+        Self { auth, db, sync_tx }
     }
 }
 
@@ -42,6 +44,7 @@ impl EngineAccess for RegistryEngineAccess {
                 auth: self.auth.clone(),
                 account: account.clone(),
             }),
+            self.db.clone(),
             self.sync_tx.clone(),
         )
     }

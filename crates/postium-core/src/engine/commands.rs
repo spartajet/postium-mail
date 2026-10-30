@@ -1,5 +1,6 @@
 //! 引擎命令与事件。
 
+use crate::domain::sync::SyncEventTx;
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use tokio::sync::oneshot;
@@ -7,9 +8,14 @@ use tokio::sync::oneshot;
 /// 引擎命令（账号内串行执行）。
 #[derive(Debug)]
 pub enum EngineCommand {
-    /// 立即同步指定文件夹（None = 全部订阅文件夹）。阶段 2 实装同步体。
+    /// 立即同步指定文件夹（None = 服务器全部可选文件夹）。
+    ///
+    /// `events`：本次同步的进度事件出口覆盖；`None` 时走引擎默认出口
+    /// （`CoreApi.sync_tx`）。首同步向导（settings begin_sync）传入自带
+    /// channel，使实时进度按既有链路展示。
     SyncNow {
         folder: Option<String>,
+        events: Option<SyncEventTx>,
         reply: oneshot::Sender<Result<(), MailError>>,
     },
     /// 获取邮件正文原文（BODY.PEEK[]）。

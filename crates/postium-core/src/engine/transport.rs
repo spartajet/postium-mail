@@ -1,7 +1,7 @@
 //! 传输层抽象：引擎面向 `ImapSession` trait 编写，mock 会话可注入。
 
 use crate::error::MailError;
-use crate::infrastructure::protocols::imap::{ImapClient, MailboxInfo};
+use crate::infrastructure::protocols::imap::{FolderInfo, ImapClient, MailboxInfo};
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use async_trait::async_trait;
 
@@ -15,6 +15,8 @@ pub trait ImapSession: Send {
     async fn capabilities(&mut self) -> Result<Vec<String>, MailError>;
     /// 发送 ENABLE 命令（服务器不支持时忽略错误）。
     async fn enable(&mut self, caps: &[&str]) -> Result<(), MailError>;
+    /// LIST 全部文件夹（同步入口的文件夹发现）。
+    async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, MailError>;
     /// 选择文件夹（可写模式），返回消息数等状态。
     async fn select_folder(
         &mut self,
@@ -68,6 +70,12 @@ pub trait ImapSession: Send {
     /// 删除邮件（\Deleted + EXPUNGE；EXPUNGE 会一并清除该文件夹内所有
     /// \Deleted 邮件——async-imap 0.11 无 UID EXPUNGE）。
     async fn delete(&mut self, folder: &str, uid: u32) -> Result<(), MailError>;
+    /// 按 UID 批量拉取完整邮件（含正文与附件元信息），不存在者跳过。
+    async fn fetch_emails_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<WholeEmailDto>, MailError>;
     /// 按 UID 拉取一封完整邮件（含正文与附件元信息），邮件不存在返回 None。
     async fn fetch_email_by_uid(
         &mut self,
@@ -111,6 +119,10 @@ impl ImapSession for RealSession {
         let cmd = format!("ENABLE {}", caps.join(" "));
         let _ = self.client.run_command_and_check_ok(cmd.as_str()).await;
         Ok(())
+    }
+
+    async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, MailError> {
+        self.client.list_folders().await
     }
 
     async fn select_folder(
@@ -212,6 +224,14 @@ impl ImapSession for RealSession {
         self.client.select_folder(folder).await?;
         self.client.delete_uid(uid).await?;
         self.client.expunge().await
+    }
+
+    async fn fetch_emails_by_uids(
+        &mut self,
+        folder: &str,
+        uids: &[u32],
+    ) -> Result<Vec<WholeEmailDto>, MailError> {
+        self.client.batch_fetch_emails_by_uids(folder, uids).await
     }
 
     async fn fetch_email_by_uid(

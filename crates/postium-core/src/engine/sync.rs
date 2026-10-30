@@ -6,10 +6,8 @@ use crate::domain::sync::{
     SyncEventTx, SyncProgress, SyncProgressEvent, SyncStage, HISTORY_UID_BATCH_SIZE,
     whole_emails_to_contacts,
 };
-use crate::domain::sync::folder_sync_full::delete_account_folder_emails;
 use crate::engine::transport::ImapSession;
 use crate::error::MailError;
-use crate::infrastructure::protocols::types::WholeEmailDto;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::repository::{email_repo, sync_repo};
 
@@ -135,18 +133,6 @@ pub struct FolderSyncOutcome {
     pub deleted_emails: usize,
 }
 
-/// 抓取新邮件并入库的回调（由调用方注入，保持 engine 与入库细节解耦）：
-/// 按 UID 集合批量拉取完整邮件，返回 DTO 列表；落库（save_batch_emails +
-/// 联系人收集）由执行函数内部完成。
-pub type FetchNewEmails<'a> = &'a (dyn Fn(
-        &mut dyn ImapSession,
-        &str,
-        &[u32],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<WholeEmailDto>, MailError>> + Send + 'a>,
-    > + Send
-    + Sync);
-
 /// 执行同步计划（面向 `ImapSession` + DB）。
 ///
 /// 按 [`SyncPlan`] 分派到四档执行体：
@@ -154,6 +140,11 @@ pub type FetchNewEmails<'a> = &'a (dyn Fn(
 /// - `QresyncResync` / `CondstoreResync`：CHANGEDSINCE flag 同步 + vanished
 ///   清理 + 新邮件补抓 → 状态回写（含服务器当前 highest_modseq）
 /// - `UidIncremental`：仅抓取 `last_seen_uid` 之后的新邮件 → 状态回写
+///
+/// 新邮件抓取直接经 [`ImapSession::fetch_emails_by_uids`]（真实会话转发
+/// `batch_fetch_emails_by_uids`），落库 + 联系人收集由 [`fetch_and_store`]
+/// 完成。注意：`local` / `events` 按 owned 传入（async fn 链捕获共享引用
+/// 在 tokio::spawn 的 Send 证明下会触发 "not general enough" 推导失败）。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_plan(
     session: &mut dyn ImapSession,
@@ -161,22 +152,21 @@ pub async fn execute_plan(
     account_id: i32,
     folder: &str,
     plan: &SyncPlan,
-    local: &LocalSyncState,
-    fetch_new_emails: FetchNewEmails<'_>,
-    events: &crate::domain::sync::SyncEventTx,
+    local: LocalSyncState,
+    events: SyncEventTx,
 ) -> Result<FolderSyncOutcome, MailError> {
     match plan {
         SyncPlan::FullResync => {
-            execute_full(session, db, account_id, folder, fetch_new_emails, events).await
+            execute_full(session, db, account_id, folder, events).await
         }
         SyncPlan::QresyncResync => {
-            execute_modseq_resync(session, db, account_id, folder, local, fetch_new_emails, events, true).await
+            execute_modseq_resync(session, db, account_id, folder, local, events, true).await
         }
         SyncPlan::CondstoreResync => {
-            execute_modseq_resync(session, db, account_id, folder, local, fetch_new_emails, events, false).await
+            execute_modseq_resync(session, db, account_id, folder, local, events, false).await
         }
         SyncPlan::UidIncremental => {
-            execute_uid_incremental(session, db, account_id, folder, local, fetch_new_emails, events).await
+            execute_uid_incremental(session, db, account_id, folder, local, events).await
         }
     }
 }
@@ -186,7 +176,7 @@ pub async fn execute_plan(
 async fn select_qresync_with_local_state(
     session: &mut dyn ImapSession,
     folder: &str,
-    local: &LocalSyncState,
+    local: LocalSyncState,
 ) -> Result<(), MailError> {
     if let (Some(uidvalidity), Some(modseq)) = (local.uidvalidity, local.highest_modseq) {
         session.select_qresync(folder, uidvalidity, modseq).await?;
@@ -199,18 +189,17 @@ async fn select_qresync_with_local_state(
 /// 返回成功落库的行数。
 async fn fetch_and_store(
     session: &mut dyn ImapSession,
-    db: &DbConn,
+    db: DbConn,
     account_id: i32,
     folder: &str,
     uids: &[u32],
-    fetch_new_emails: FetchNewEmails<'_>,
 ) -> Result<usize, MailError> {
     let mut inserted = 0usize;
     for group in uids.chunks(HISTORY_UID_BATCH_SIZE) {
-        let emails = fetch_new_emails(session, folder, group).await?;
-        inserted += email_repo::save_batch_emails(db, account_id, folder, &emails).await?;
+        let emails = session.fetch_emails_by_uids(folder, group).await?;
+        inserted += email_repo::save_batch_emails(&db, account_id, folder, &emails).await?;
         // 落库成功后把发件人（含 sender_name）/ 收件人 / 抄送并入联系人表
-        whole_emails_to_contacts(db, &emails).await;
+        whole_emails_to_contacts(&db, &emails).await;
     }
     Ok(inserted)
 }
@@ -224,9 +213,8 @@ async fn execute_uid_incremental(
     db: DbConn,
     account_id: i32,
     folder: &str,
-    local: &LocalSyncState,
-    fetch_new_emails: FetchNewEmails<'_>,
-    events: &SyncEventTx,
+    local: LocalSyncState,
+    events: SyncEventTx,
 ) -> Result<FolderSyncOutcome, MailError> {
     let last_seen_uid = local.last_seen_uid.unwrap_or(0);
     let server_uids = session.uid_search_all(folder).await?;
@@ -237,7 +225,7 @@ async fn execute_uid_incremental(
         .collect();
 
     let inserted =
-        fetch_and_store(session, &db, account_id, folder, &new_uids, fetch_new_emails).await?;
+        fetch_and_store(session, db.clone(), account_id, folder, &new_uids).await?;
 
     let max_uid = new_uids.iter().max().copied().unwrap_or(last_seen_uid);
     // modseq None = COALESCE 保留原值
@@ -247,7 +235,7 @@ async fn execute_uid_incremental(
         new_emails: inserted,
         ..Default::default()
     };
-    emit_done(events, account_id, folder, &outcome);
+    emit_done(&events, account_id, folder, &outcome);
     Ok(outcome)
 }
 
@@ -267,14 +255,13 @@ async fn execute_modseq_resync(
     db: DbConn,
     account_id: i32,
     folder: &str,
-    local: &LocalSyncState,
-    fetch_new_emails: FetchNewEmails<'_>,
-    events: &SyncEventTx,
+    local: LocalSyncState,
+    events: SyncEventTx,
     qresync_only: bool,
 ) -> Result<FolderSyncOutcome, MailError> {
     // 1. 选文件夹：QRESYNC 参数化或 EXAMINE（都返回最新 uidvalidity / modseq）
     if qresync_only {
-        select_qresync_with_local_state(session, folder, local).await?;
+        select_qresync_with_local_state(session, folder, local.clone()).await?;
     }
     let meta = session.examine_folder(folder).await?;
     let server_modseq = meta.highest_modseq;
@@ -311,7 +298,7 @@ async fn execute_modseq_resync(
         .filter(|uid| *uid > last_seen_uid)
         .collect();
     outcome.new_emails =
-        fetch_and_store(session, &db, account_id, folder, &new_uids, fetch_new_emails).await?;
+        fetch_and_store(session, db.clone(), account_id, folder, &new_uids).await?;
 
     // 5. 状态回写（highest_modseq = 服务器当前值）
     let max_uid = server_uids.iter().max().copied().or(local.last_seen_uid);
@@ -326,7 +313,7 @@ async fn execute_modseq_resync(
     )
     .await?;
 
-    emit_done(events, account_id, folder, &outcome);
+    emit_done(&events, account_id, folder, &outcome);
     Ok(outcome)
 }
 
@@ -339,19 +326,24 @@ async fn execute_full(
     db: DbConn,
     account_id: i32,
     folder: &str,
-    fetch_new_emails: FetchNewEmails<'_>,
-    events: &SyncEventTx,
+    events: SyncEventTx,
 ) -> Result<FolderSyncOutcome, MailError> {
     // 1. EXAMINE 取 meta
     let meta = session.examine_folder(folder).await?;
 
     // 2. 清空本地该文件夹邮件（含标签 / 附件元数据，照旧全量路径用法）
-    let deleted = delete_account_folder_emails(db.clone(), account_id, folder).await?;
+    let deleted = email_repo::delete_folder_contents(&db, account_id, folder).await? as usize;
+    tracing::info!(
+        account_id,
+        folder,
+        count = deleted,
+        "全量重同步：已清空账号文件夹本地邮件"
+    );
 
     // 3. 全量抓取入库
     let server_uids = session.uid_search_all(folder).await?;
     let inserted =
-        fetch_and_store(session, &db, account_id, folder, &server_uids, fetch_new_emails).await?;
+        fetch_and_store(session, db.clone(), account_id, folder, &server_uids).await?;
 
     // 4. 状态回写（uidvalidity + last_seen_uid=最大 + highest_modseq）
     sync_repo::upsert_sync_state(
@@ -370,7 +362,7 @@ async fn execute_full(
         flag_updates: 0,
         deleted_emails: deleted,
     };
-    emit_done(events, account_id, folder, &outcome);
+    emit_done(&events, account_id, folder, &outcome);
     Ok(outcome)
 }
 

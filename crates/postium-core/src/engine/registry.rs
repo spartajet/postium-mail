@@ -3,6 +3,7 @@
 use crate::engine::actor::{AccountEngine, EngineHandle};
 use crate::engine::pool::{ConnectionPool, PoolConnect};
 use crate::domain::sync::SyncEventTx;
+use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::accounts;
 use crate::error::MailError;
 use std::collections::HashMap;
@@ -15,9 +16,12 @@ fn registry() -> &'static Mutex<HashMap<i32, EngineHandle>> {
 }
 
 /// 确保某账号的引擎在运行（已运行则返回句柄克隆，否则启动新引擎）。
+///
+/// `db` 供引擎 SyncNow 落库使用；引擎构造时的账号快照取自 `account`。
 pub fn ensure_engine<F>(
     account: &accounts::Model,
     factory: Arc<F>,
+    db: DbConn,
     events: SyncEventTx,
 ) -> Result<EngineHandle, MailError>
 where
@@ -28,7 +32,7 @@ where
         return Ok(h.clone());
     }
     let pool = ConnectionPool::new(factory, Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-    let (handle, engine) = AccountEngine::new(account.id, pool, 32);
+    let (handle, engine) = AccountEngine::new(account.clone(), pool, db, 32);
     tokio::spawn(engine.run(events));
     map.insert(account.id, handle.clone());
     Ok(handle)

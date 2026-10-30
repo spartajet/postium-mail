@@ -20,22 +20,39 @@ pub trait PoolConnect: Send + Sync {
 }
 
 /// 连接池：控制连接复用；命令失败时销毁重连一次，仍失败则向上报错。
-pub struct ConnectionPool<F: PoolConnect> {
-    factory: Arc<F>,
+///
+/// 工厂以 `Arc<dyn PoolConnect>` 存储（对象安全擦除）：Actor 侧持有非泛型
+/// 池，`run` 的 future 单态化后 Send 证明走具体类型路径（泛型 `F` 上下文
+/// 会触发 async fn 借用捕获的 "Send not general enough" 推导失败）。
+pub struct ConnectionPool {
+    factory: Arc<dyn PoolConnect>,
     control: Option<PooledSession>,
     /// 已执行的连接次数（测试断言复用/重建行为）。
     connect_count: Arc<AtomicUsize>,
 }
 
-impl<F: PoolConnect> ConnectionPool<F> {
-    pub fn new(factory: Arc<F>, connect_count: Arc<AtomicUsize>) -> Self {
-        Self { factory, control: None, connect_count }
+impl ConnectionPool {
+    pub fn new<F: PoolConnect + 'static>(factory: Arc<F>, connect_count: Arc<AtomicUsize>) -> Self {
+        Self { factory: factory as Arc<dyn PoolConnect>, control: None, connect_count }
     }
 
     /// 获取控制连接执行命令：无连接则新建；命令失败时销毁重建一次重试。
-    pub async fn with_control<R>(
+    ///
+    /// 闭包以 `dyn Fn -> Pin<Box<dyn Future + Send + 's>>` 传入（HRTB：
+    /// future 允许借用 session 参数）。APIT `AsyncFn` 在 tokio::spawn 的
+    /// Send 泛型证明下会对任意内部借用捕获触发 "Send not general enough"
+    /// 推导失败；dyn 擦除让 Send 在装箱点具体化。闭包须为 `Fn`：捕获值
+    /// 在闭包体内 clone 后再移入 async 块。
+    pub async fn with_control<R: Send + 'static>(
         &mut self,
-        f: impl AsyncFn(&mut PooledSession) -> Result<R, MailError>,
+        f: &(dyn for<'s> Fn(
+                &'s mut PooledSession,
+            )
+                -> std::pin::Pin<
+                    Box<dyn std::future::Future<Output = Result<R, MailError>> + Send + 's>,
+                >
+            + Send
+            + Sync),
     ) -> Result<R, MailError> {
         if self.control.is_none() {
             self.control = Some(self.factory.connect().await?);
@@ -67,8 +84,15 @@ impl<F: PoolConnect> ConnectionPool<F> {
 
 // ---- 测试用 Mock（同文件，供 tests 模块与后续阶段复用） ----
 
+#[derive(Default)]
 pub struct MockSession {
     pub fail_select_with: Option<MailError>,
+    /// `list_folders` 预设返回（SyncNow 文件夹发现用，默认空）。
+    pub list_folders: Vec<crate::infrastructure::protocols::imap::FolderInfo>,
+    /// `uid_search_all` 预设返回（默认空）。
+    pub search_uids: Vec<u32>,
+    /// `fetch_emails_by_uids` 预设返回（默认空）。
+    pub fetch_emails: Vec<crate::infrastructure::protocols::types::WholeEmailDto>,
 }
 
 #[async_trait::async_trait]
@@ -78,6 +102,11 @@ impl ImapSession for MockSession {
     }
     async fn enable(&mut self, _caps: &[&str]) -> Result<(), MailError> {
         Ok(())
+    }
+    async fn list_folders(
+        &mut self,
+    ) -> Result<Vec<crate::infrastructure::protocols::imap::FolderInfo>, MailError> {
+        Ok(self.list_folders.clone())
     }
     async fn select_folder(
         &mut self,
@@ -125,7 +154,7 @@ impl ImapSession for MockSession {
         Ok(Vec::new())
     }
     async fn uid_search_all(&mut self, _folder: &str) -> Result<Vec<u32>, MailError> {
-        Ok(Vec::new())
+        Ok(self.search_uids.clone())
     }
     async fn logout(self: Box<Self>) -> Result<(), MailError> {
         Ok(())
@@ -161,6 +190,13 @@ impl ImapSession for MockSession {
     }
     async fn delete(&mut self, _folder: &str, _uid: u32) -> Result<(), MailError> {
         Ok(())
+    }
+    async fn fetch_emails_by_uids(
+        &mut self,
+        _folder: &str,
+        _uids: &[u32],
+    ) -> Result<Vec<crate::infrastructure::protocols::types::WholeEmailDto>, MailError> {
+        Ok(self.fetch_emails.clone())
     }
     async fn fetch_email_by_uid(
         &mut self,
@@ -200,6 +236,7 @@ impl PoolConnect for MockFactory {
         Ok(PooledSession {
             session: Box::new(MockSession {
                 fail_select_with: fail.then(|| MailError::ImapConnectionFailed("stale".into())),
+                ..Default::default()
             }),
             caps: CapabilitySet::parse(&["IMAP4REV1".into()]),
         })
@@ -218,9 +255,9 @@ mod tests {
             count.clone(),
         );
         for _ in 0..3 {
-            pool.with_control(async |s| {
+            pool.with_control(&|s| Box::pin(async move {
                 s.session.select_folder("INBOX").await.map(|_| ())
-            })
+            }))
             .await
             .unwrap();
         }
@@ -234,9 +271,9 @@ mod tests {
             Arc::new(MockFactory::new(true)),
             count.clone(),
         );
-        pool.with_control(async |s| {
+        pool.with_control(&|s| Box::pin(async move {
             s.session.select_folder("INBOX").await.map(|_| ())
-        })
+        }))
         .await
         .unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 2, "陈旧连接应重建一次并重试成功");
