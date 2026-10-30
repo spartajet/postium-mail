@@ -14,6 +14,7 @@ pub mod commands;
 pub mod actor;
 pub mod registry;
 pub mod access;
+pub mod sync;
 pub use registry::ensure_engine;
 pub use access::{EngineAccess, RegistryEngineAccess};
 pub use factory::{RealSessionFactory, SessionFactory};
