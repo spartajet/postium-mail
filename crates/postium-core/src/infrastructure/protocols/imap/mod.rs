@@ -17,7 +17,8 @@ use crate::domain::folders::SpecialUseFlag;
 use crate::domain::providers::ImapServerConfig;
 use crate::error::MailError;
 use crate::infrastructure::protocols::types::FolderMetadata;
-use async_imap::imap_proto::NameAttribute;
+use async_imap::imap_proto::{AttributeValue, NameAttribute, Response, Status};
+use async_imap::types::Flag;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -88,6 +89,8 @@ pub struct MailboxInfo {
     pub uid_validity: Option<u32>,
     /// 预期的下一个 UID
     pub uid_next: Option<u32>,
+    /// 最高 MODSEQ（RFC 7162 CONDSTORE/QRESYNC；服务器不支持时为 None）
+    pub highest_modseq: Option<u64>,
 }
 
 /// IMAP 客户端
@@ -258,9 +261,152 @@ impl ImapClient {
             unseen: Option::map(mailbox.unseen, |v| v),
             uid_validity: mailbox.uid_validity,
             uid_next: mailbox.uid_next,
+            highest_modseq: mailbox.highest_modseq,
         };
         tracing::debug!(folder, exists = info.exists, recent = info.recent, unseen = ?info.unseen, "IMAP: 文件夹已选择");
         Ok(info)
+    }
+
+    /// EXAMINE（只读）选择文件夹。
+    ///
+    /// 与 [`Self::select_folder`] 的区别：只读模式下对邮件标志的修改会被
+    /// 服务器拒绝，适合增量同步等不允许副作用的场景。
+    pub async fn examine_folder(&mut self, folder: &str) -> Result<MailboxInfo, MailError> {
+        tracing::debug!(folder, "IMAP: EXAMINE 文件夹");
+        let mailbox = self
+            .session
+            .examine(folder)
+            .await
+            .map_err(|e| MailError::FolderNotFound(format!("EXAMINE '{folder}' 失败: {e}")))?;
+        let info = MailboxInfo {
+            exists: mailbox.exists as u32,
+            recent: mailbox.recent as u32,
+            unseen: mailbox.unseen,
+            uid_validity: mailbox.uid_validity,
+            uid_next: mailbox.uid_next,
+            highest_modseq: mailbox.highest_modseq,
+        };
+        tracing::debug!(
+            folder,
+            exists = info.exists,
+            highest_modseq = ?info.highest_modseq,
+            "IMAP: 文件夹已只读选择"
+        );
+        Ok(info)
+    }
+
+    /// QRESYNC 参数化 SELECT（RFC 7162）。
+    ///
+    /// 需先 ENABLE QRESYNC/CONDSTORE。SELECT 响应中的 flag 变更（FETCH）与
+    /// VANISHED 数据由后续解析方法提取——本方法只负责发送命令并确认 tagged OK。
+    pub async fn select_qresync(
+        &mut self,
+        folder: &str,
+        uidvalidity: u32,
+        modseq: u64,
+    ) -> Result<(), MailError> {
+        tracing::debug!(folder, uidvalidity, modseq, "IMAP: QRESYNC SELECT");
+        // async-imap 0.11 未暴露 QRESYNC 参数化 SELECT，走裸命令；
+        // 文件夹名按 IMAP quoted-string 转义（同 async-imap 内部 quote! 宏规则）
+        let quoted = format!("\"{}\"", folder.replace('\\', "\\\\").replace('"', "\\\""));
+        let cmd = format!("SELECT {quoted} (QRESYNC ({uidvalidity} {modseq}))");
+        self.run_command_and_check_ok(&cmd).await
+    }
+
+    /// CHANGEDSINCE flag 拉取（RFC 7162 CONDSTORE 档）：
+    /// `UID FETCH uid_set (UID FLAGS) (CHANGEDSINCE modseq)`。
+    ///
+    /// 返回自 `modseq` 以来标志发生变化的 (uid, flags) 列表。
+    ///
+    /// 实现说明：`run_command_and_check_ok` 会把 untagged 响应路由到
+    /// unsolicited 通道后丢弃，因此这里用 `run_command` + 手动循环
+    /// `read_response`，直接解析 untagged FETCH 的 UID/FLAGS，
+    /// 直到本命令的 tagged OK。
+    pub async fn fetch_flags_changed_since(
+        &mut self,
+        folder: &str,
+        uid_set: &str,
+        modseq: u64,
+    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
+        tracing::debug!(folder, uid_set, modseq, "IMAP: CHANGEDSINCE 拉取 flag 变更");
+        self.select_folder(folder).await?;
+
+        let cmd = format!("UID FETCH {uid_set} (UID FLAGS) (CHANGEDSINCE {modseq})");
+        let request_id = self
+            .session
+            .run_command(cmd.as_str())
+            .await
+            .map_err(|e| MailError::ImapConnectionFailed(format!("命令 {cmd} 发送失败: {e}")))?;
+
+        let mut results = Vec::new();
+        loop {
+            let Some(response) = self
+                .session
+                .read_response()
+                .await
+                .map_err(|e| MailError::ImapConnectionFailed(format!("读取 FETCH 响应失败: {e}")))?
+            else {
+                return Err(MailError::ImapConnectionFailed(
+                    "连接中断：未收到 CHANGEDSINCE FETCH 的 tagged 响应".to_string(),
+                ));
+            };
+            match response.parsed() {
+                Response::Fetch(_seq, attrs) => {
+                    let mut uid = None;
+                    let mut flags = Vec::new();
+                    for attr in attrs {
+                        match attr {
+                            AttributeValue::Uid(id) => uid = Some(*id),
+                            AttributeValue::Flags(raw_flags) => {
+                                // 与 fetch_flags 一致：用 Flag 的 Debug 形式
+                                // （如 "Seen"、"Custom(\"...\")"）
+                                flags = raw_flags
+                                    .iter()
+                                    .map(|f| format!("{:?}", Flag::from(f.as_ref())))
+                                    .collect();
+                            }
+                            _ => {}
+                        }
+                    }
+                    // 缺 UID 的 untagged FETCH（服务器单边推送）无法定位邮件，跳过
+                    if let Some(uid) = uid {
+                        results.push((uid, flags));
+                    }
+                }
+                Response::Done {
+                    tag,
+                    status,
+                    code,
+                    information,
+                } => {
+                    if *tag != request_id {
+                        // 理论上不会混入其他命令的 tagged 响应，防御性跳过
+                        continue;
+                    }
+                    match status {
+                        Status::Ok => {
+                            tracing::debug!(count = results.len(), "IMAP: CHANGEDSINCE 拉取完成");
+                            return Ok(results);
+                        }
+                        other => {
+                            return Err(MailError::ImapConnectionFailed(format!(
+                                "CHANGEDSINCE FETCH 失败: {other:?} {code:?} {information:?}"
+                            )));
+                        }
+                    }
+                }
+                // EXISTS/RECENT/EXPUNGE 等服务器单边推送：跳过
+                _ => {}
+            }
+        }
+    }
+
+    /// UID SEARCH ALL：文件夹内全部 UID（vanished 对比/增量同步用）。
+    ///
+    /// 转发 [`Self::list_all_uids`]（自带 SELECT + 排序）。
+    pub async fn uid_search_all(&mut self, folder: &str) -> Result<Vec<u32>, MailError> {
+        tracing::debug!(folder, "IMAP: UID SEARCH ALL");
+        self.list_all_uids(folder).await
     }
 
     /// 获取文件夹 IMAP 元数据

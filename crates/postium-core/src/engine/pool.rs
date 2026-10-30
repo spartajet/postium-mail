@@ -91,8 +91,41 @@ impl ImapSession for MockSession {
                 unseen: None,
                 uid_validity: Some(1),
                 uid_next: Some(1),
+                highest_modseq: None,
             }),
         }
+    }
+    async fn examine_folder(
+        &mut self,
+        _folder: &str,
+    ) -> Result<crate::infrastructure::protocols::imap::MailboxInfo, MailError> {
+        Ok(crate::infrastructure::protocols::imap::MailboxInfo {
+            exists: 0,
+            recent: 0,
+            unseen: None,
+            uid_validity: Some(1),
+            uid_next: Some(1),
+            highest_modseq: None,
+        })
+    }
+    async fn select_qresync(
+        &mut self,
+        _folder: &str,
+        _uidvalidity: u32,
+        _modseq: u64,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
+    async fn fetch_flags_changed_since(
+        &mut self,
+        _folder: &str,
+        _uid_set: &str,
+        _modseq: u64,
+    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
+        Ok(Vec::new())
+    }
+    async fn uid_search_all(&mut self, _folder: &str) -> Result<Vec<u32>, MailError> {
+        Ok(Vec::new())
     }
     async fn logout(self: Box<Self>) -> Result<(), MailError> {
         Ok(())

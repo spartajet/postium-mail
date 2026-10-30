@@ -1,7 +1,7 @@
 //! 传输层抽象：引擎面向 `ImapSession` trait 编写，mock 会话可注入。
 
 use crate::error::MailError;
-use crate::infrastructure::protocols::imap::ImapClient;
+use crate::infrastructure::protocols::imap::{ImapClient, MailboxInfo};
 use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
 use async_trait::async_trait;
 
@@ -20,6 +20,24 @@ pub trait ImapSession: Send {
         &mut self,
         folder: &str,
     ) -> Result<crate::infrastructure::protocols::imap::MailboxInfo, MailError>;
+    /// EXAMINE（只读）选择文件夹，返回邮箱状态（含 HIGHESTMODSEQ）。
+    async fn examine_folder(&mut self, folder: &str) -> Result<MailboxInfo, MailError>;
+    /// QRESYNC 参数化 SELECT（响应中的 flag 变更/VANISHED 由后续解析方法提取）。
+    async fn select_qresync(
+        &mut self,
+        folder: &str,
+        uidvalidity: u32,
+        modseq: u64,
+    ) -> Result<(), MailError>;
+    /// CHANGEDSINCE flag 拉取：返回自 modseq 以来标志变化的 (uid, flags) 列表。
+    async fn fetch_flags_changed_since(
+        &mut self,
+        folder: &str,
+        uid_set: &str,
+        modseq: u64,
+    ) -> Result<Vec<(u32, Vec<String>)>, MailError>;
+    /// UID SEARCH ALL：文件夹内全部 UID（vanished 对比/增量同步用）。
+    async fn uid_search_all(&mut self, folder: &str) -> Result<Vec<u32>, MailError>;
     /// 获取邮件正文原文（BODY.PEEK[]）。
     async fn fetch_body(&mut self, folder: &str, uid: u32) -> Result<String, MailError>;
     /// 移动邮件到目标文件夹（服务器支持 MOVE 扩展时用 MOVE，否则 COPY+\Deleted）。
@@ -100,6 +118,36 @@ impl ImapSession for RealSession {
         folder: &str,
     ) -> Result<crate::infrastructure::protocols::imap::MailboxInfo, MailError> {
         self.client.select_folder(folder).await
+    }
+
+    async fn examine_folder(&mut self, folder: &str) -> Result<MailboxInfo, MailError> {
+        self.client.examine_folder(folder).await
+    }
+
+    async fn select_qresync(
+        &mut self,
+        folder: &str,
+        uidvalidity: u32,
+        modseq: u64,
+    ) -> Result<(), MailError> {
+        self.client
+            .select_qresync(folder, uidvalidity, modseq)
+            .await
+    }
+
+    async fn fetch_flags_changed_since(
+        &mut self,
+        folder: &str,
+        uid_set: &str,
+        modseq: u64,
+    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
+        self.client
+            .fetch_flags_changed_since(folder, uid_set, modseq)
+            .await
+    }
+
+    async fn uid_search_all(&mut self, folder: &str) -> Result<Vec<u32>, MailError> {
+        self.client.uid_search_all(folder).await
     }
 
     async fn fetch_body(&mut self, folder: &str, uid: u32) -> Result<String, MailError> {
