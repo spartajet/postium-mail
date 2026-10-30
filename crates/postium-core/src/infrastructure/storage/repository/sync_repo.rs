@@ -25,6 +25,7 @@ fn map_sync_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_state::Model
         uidnext: row.get("uidnext")?,
         synced_at: row.get("synced_at")?,
         last_sync_uid: row.get("last_sync_uid")?,
+        highest_modseq: row.get("highest_modseq")?,
         history_synced_since: row.get("history_synced_since")?,
         history_before_uid: row.get("history_before_uid")?,
         history_exhausted: opt_int_to_bool(row.get("history_exhausted")?),
@@ -53,7 +54,8 @@ fn map_sync_error(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_errors::Mode
 /// 写入或更新文件夹的同步状态（upsert）。
 ///
 /// 基于账号 ID + 文件夹的唯一约束进行 upsert 操作。
-/// 对于 `uidnext`、`uidvalidity`、`last_sync_uid` 字段，传入 `None` 时保留原值（使用 COALESCE）。
+/// 对于 `uidnext`、`uidvalidity`、`last_sync_uid`、`highest_modseq` 字段，
+/// 传入 `None` 时保留原值（使用 COALESCE）。
 ///
 /// # 参数
 ///
@@ -63,6 +65,7 @@ fn map_sync_error(row: &rusqlite::Row<'_>) -> rusqlite::Result<sync_errors::Mode
 /// - `uidnext`: IMAP uidnext 值，`None` 表示不更新
 /// - `uidvalidity`: IMAP uidvalidity 值，`None` 表示不更新
 /// - `last_sync_uid`: 上次同步到的最大 UID，`None` 表示不更新
+/// - `highest_modseq`: 已见过的最大修改序列号，`None` 表示不更新
 ///
 /// # 返回
 ///
@@ -74,18 +77,20 @@ pub async fn upsert_sync_state(
     uidnext: Option<u32>,
     uidvalidity: Option<u32>,
     last_sync_uid: Option<u32>,
+    highest_modseq: Option<u64>,
 ) -> Result<(), MailError> {
     let folder = folder.to_string();
     let now = chrono::Utc::now().timestamp();
     db.call(move |conn| {
         conn.execute(
             "INSERT INTO sync_state (
-                account_id, folder, uidnext, uidvalidity, last_sync_uid, synced_at, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?6)
+                account_id, folder, uidnext, uidvalidity, last_sync_uid, highest_modseq, synced_at, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7)
              ON CONFLICT(account_id, folder) DO UPDATE SET
                 uidnext = COALESCE(excluded.uidnext, sync_state.uidnext),
                 uidvalidity = COALESCE(excluded.uidvalidity, sync_state.uidvalidity),
                 last_sync_uid = COALESCE(excluded.last_sync_uid, sync_state.last_sync_uid),
+                highest_modseq = COALESCE(excluded.highest_modseq, sync_state.highest_modseq),
                 synced_at = excluded.synced_at,
                 updated_at = excluded.updated_at",
             rusqlite::params![
@@ -94,6 +99,7 @@ pub async fn upsert_sync_state(
                 uidnext,
                 uidvalidity,
                 last_sync_uid,
+                highest_modseq,
                 now,
             ],
         )?;
@@ -112,8 +118,18 @@ pub async fn upsert_state(
     uidnext: Option<u32>,
     uidvalidity: Option<u32>,
     last_sync_uid: Option<u32>,
+    highest_modseq: Option<u64>,
 ) -> Result<(), MailError> {
-    upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
+    upsert_sync_state(
+        db,
+        account_id,
+        folder,
+        uidnext,
+        uidvalidity,
+        last_sync_uid,
+        highest_modseq,
+    )
+    .await
 }
 
 /// 写入或更新文件夹的标准分类元数据。
@@ -161,8 +177,8 @@ pub async fn get_sync_state(
     db.call(move |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, account_id, folder, folder_category, folder_nick_name, uidvalidity, uidnext,
-                    synced_at, last_sync_uid, history_synced_since, history_before_uid,
-                    history_exhausted,
+                    synced_at, last_sync_uid, highest_modseq, history_synced_since,
+                    history_before_uid, history_exhausted,
                     created_at, updated_at
              FROM sync_state
              WHERE account_id = ?1 AND folder = ?2",
@@ -239,6 +255,7 @@ pub async fn folder_categories_by_account(
 /// - `uidnext`: IMAP uidnext 值
 /// - `uidvalidity`: IMAP uidvalidity 值
 /// - `last_sync_uid`: 上次同步到的最大 UID
+/// - `highest_modseq`: 已见过的最大修改序列号，`None` 表示不更新
 ///
 /// # 返回
 ///
@@ -250,8 +267,18 @@ pub async fn update_sync_state(
     uidnext: Option<u32>,
     uidvalidity: Option<u32>,
     last_sync_uid: Option<u32>,
+    highest_modseq: Option<u64>,
 ) -> Result<(), MailError> {
-    upsert_sync_state(db, account_id, folder, uidnext, uidvalidity, last_sync_uid).await
+    upsert_sync_state(
+        db,
+        account_id,
+        folder,
+        uidnext,
+        uidvalidity,
+        last_sync_uid,
+        highest_modseq,
+    )
+    .await
 }
 
 /// 更新文件夹的历史同步窗口状态。

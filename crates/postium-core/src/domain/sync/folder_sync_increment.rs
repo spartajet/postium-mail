@@ -65,7 +65,8 @@ pub async fn sync_folder_incremental(
     }
 
     let max_uid = new_uids.last().copied().unwrap_or(last_sync_uid);
-    sync_repo::upsert_sync_state(&db, account_id, folder, None, None, Some(max_uid)).await?;
+    // highest_modseq 暂传 None（Task 4 SyncEngine 执行时接入 QRESYNC 后传真实值）
+    sync_repo::upsert_sync_state(&db, account_id, folder, None, None, Some(max_uid), None).await?;
 
     Ok(SyncResult {
         new_emails: inserted,

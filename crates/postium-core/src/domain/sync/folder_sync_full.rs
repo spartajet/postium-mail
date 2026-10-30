@@ -74,6 +74,7 @@ pub async fn sync_folder_full(
             Some(uidnext),
             Some(uidvalidity),
             Some(last_sync_uid),
+            None,
         )
         .await?;
         match window.start {
@@ -155,6 +156,7 @@ pub async fn sync_folder_full(
         Some(uidnext),
         Some(uidvalidity),
         Some(max_uid),
+        None,
     )
     .await?;
 

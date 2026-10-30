@@ -11,7 +11,7 @@
 //!   `IF NOT EXISTS`，因此对已有数据库是安全的幂等操作。
 //! - **渐进式迁移**：历史版本遗留的 schema（如 `message_id` 上的全局唯一约束、
 //!   缺失的 `(account_id, folder, uid)` 唯一索引、`sync_state` 缺少的 history
-//!   列）由专用迁移函数修正。所有迁移遵循**幂等**原则——先用
+//!   列与 `highest_modseq` 列）由专用迁移函数修正。所有迁移遵循**幂等**原则——先用
 //!   `PRAGMA table_info` / [`index_exists`] / [`table_exists`] 等检查当前状态，
 //!   仅在确有必要时才执行，可安全反复运行。
 //!
@@ -25,7 +25,8 @@
 //!    `CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_uid` 之前，
 //!    否则该建索引语句会因已存在的重复行而失败。
 //! 2. **再**执行 [`SCHEMA_SQL`]，补齐当前版本的表与索引定义。
-//! 3. **最后**执行 [`migrate_sync_state_history_columns`]，为旧库的 `sync_state`
+//! 3. **最后**执行 [`migrate_sync_state_history_columns`] 与
+//!    [`migrate_sync_state_highest_modseq_column`]，为旧库的 `sync_state`
 //!    表 `ALTER TABLE ADD COLUMN`。放在建表之后是为了确保该表一定存在。
 
 use std::path::Path;
@@ -71,6 +72,7 @@ impl DbConn {
             migrate_email_uid_unique_index(conn)?;
             conn.execute_batch(SCHEMA_SQL)?;
             migrate_sync_state_history_columns(conn)?;
+            migrate_sync_state_highest_modseq_column(conn)?;
             Ok(())
         })
         .await
@@ -163,6 +165,27 @@ fn migrate_sync_state_history_columns(conn: &rusqlite::Connection) -> rusqlite::
     if !table_has_column(conn, "sync_state", "history_exhausted")? {
         conn.execute(
             "ALTER TABLE sync_state ADD COLUMN history_exhausted INTEGER DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// 为 `sync_state` 表补齐 `highest_modseq` 列。
+///
+/// **为什么迁移**：旧版 `sync_state` 仅记录 UID 游标；启用 QRESYNC/CONDSTORE
+/// 后需要记录已见过的最大修改序列号（MODSEQ），用于服务端侧的变更过滤与
+/// 快速重同步。新增列 `highest_modseq` 承载该高水位。
+///
+/// **如何幂等**：先调用 [`table_has_column`] 判断，已存在则跳过
+/// `ALTER TABLE ADD COLUMN`，避免重复加列报错。新增列允许 `NULL`，
+/// 对历史数据无破坏。
+///
+/// **数据风险**：无。仅 `ADD COLUMN`，不修改或删除已有数据。
+fn migrate_sync_state_highest_modseq_column(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    if !table_has_column(conn, "sync_state", "highest_modseq")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN highest_modseq INTEGER",
             [],
         )?;
     }

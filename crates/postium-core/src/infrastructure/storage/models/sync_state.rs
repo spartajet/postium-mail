@@ -21,6 +21,8 @@ pub struct Model {
     pub synced_at: Option<i64>,
     /// 已同步的最后一个邮件 UID（增量同步的断点）
     pub last_sync_uid: Option<u32>,
+    /// 已见过的最大修改序列号（QRESYNC/CONDSTORE 高水位）
+    pub highest_modseq: Option<u64>,
     /// 历史邮件已经同步到的最早时间戳（Unix 秒）
     pub history_synced_since: Option<i64>,
     /// 下一次历史回填应查询的 UID 上界（查询 UID 小于该值的邮件）
