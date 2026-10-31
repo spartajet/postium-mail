@@ -161,6 +161,26 @@ impl CoreApi {
         self.engine.imap_engine(account).await
     }
 
+    /// UI 浏览文件夹 → 通知该账号引擎将其加入 IDLE watch（最近浏览 LRU，
+    /// INBOX 恒定 watch）。e2e 离线模式短路（测试确定性）；引擎未运行时
+    /// 顺带启动（与同步路径同一 registry 去重）。fire-and-forget：发送失败
+    /// 仅记日志，由下一次浏览/同步兜底。
+    pub async fn watch_folder(&self, account_id: i32, folder: String) -> Result<(), MailError> {
+        if self.e2e_offline {
+            return Ok(());
+        }
+        let account = crate::infrastructure::storage::repository::account_repo::get_by_id(
+            &self.db,
+            account_id,
+        )
+        .await?
+        .ok_or(MailError::AccountNotFound(account_id))?;
+        let handle = self.engine.imap_engine(&account).await?;
+        handle
+            .send(crate::engine::commands::EngineCommand::WatchFolder { folder })
+            .await
+    }
+
     // ===== account =====
 
     pub async fn list_accounts(&self) -> Result<Vec<AccountDto>, MailError> {

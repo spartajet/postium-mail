@@ -105,8 +105,6 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
 /// 应用主壳实体。
 pub struct AppShell {
     pub api: Arc<CoreApi>,
-    #[allow(dead_code)] // Task 7 起消费
-    pub sync_rx: SyncEventRx,
     pub accounts: gpui_kit::Entity<crate::stores::accounts::AccountsStore>,
     pub sidebar: gpui_kit::Entity<Sidebar>,
     pub emails: gpui_kit::Entity<EmailsStore>,
@@ -228,7 +226,11 @@ impl AppShell {
         let sync_store = cx.new(|cx| {
             let mut store = SyncStore::new(cx);
             let weak = cx.entity().downgrade();
-            SyncStore::spawn_consumer(weak, sched_rx, cx);
+            SyncStore::spawn_consumer(weak.clone(), sched_rx, cx);
+            // 引擎默认事件出口（CoreApi.sync_tx 的 rx）：IDLE EXISTS 触发与
+            // 手动/定时 SyncNow 的进度事件都发到这里，并入同一消费端驱动
+            // SyncEvent::Progress → 节流刷新（此前该 rx 无消费者，事件被丢弃）
+            SyncStore::spawn_consumer(weak, sync_rx, cx);
             store.progress.clear();
             store
         });
@@ -262,6 +264,17 @@ impl AppShell {
             match event {
                 SidebarEvent::Navigate(target) => {
                     this.nav = target.clone();
+                    // 浏览具体文件夹 → 通知该账号引擎 IDLE watch（最近浏览 LRU，
+                    // 新邮件秒级推送；fire-and-forget，失败不影响导航）
+                    if let NavTarget::AccountFolder { account_id, folder } = &target {
+                        let api = this.api.clone();
+                        let (account_id, folder) = (*account_id, folder.clone());
+                        crate::runtime::spawn_tokio(async move {
+                            if let Err(e) = api.watch_folder(account_id, folder).await {
+                                tracing::debug!(target: "postium::ui", "WatchFolder 发送失败: {e}");
+                            }
+                        });
+                    }
                     this.emails.update(cx, |store, cx| {
                         store.navigate(target.clone(), &this.api, cx);
                     });
@@ -387,7 +400,6 @@ impl AppShell {
 
         let shell = Self {
             api,
-            sync_rx,
             accounts,
             sidebar,
             emails,
@@ -525,7 +537,12 @@ impl Render for AppShell {
         let nav_label: SharedString = match &self.nav {
             NavTarget::AllInbox => i18n::t("sidebar.inbox"),
             NavTarget::Category(c) => i18n::t(crate::nav::category_label_key(c)),
-            NavTarget::AccountFolder { folder, .. } => folder.clone().into(),
+            NavTarget::AccountFolder { folder, .. } => {
+                // 角色文件夹的类别键（"sent" 等）显示标准标签，原始名原样显示
+                crate::nav::folder_label_key(folder)
+                    .map(i18n::t)
+                    .unwrap_or_else(|| folder.clone().into())
+            }
             NavTarget::Label(id) => format!("标签 #{id}").into(),
             NavTarget::Calendar => i18n::t("sidebar.calendar"),
             NavTarget::Workflow => i18n::t("sidebar.workflow"),

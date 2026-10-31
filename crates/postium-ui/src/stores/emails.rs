@@ -207,7 +207,21 @@ impl EmailsStore {
                     .await
                 }
                 NavTarget::AccountFolder { account_id, folder } => {
-                    api.list_emails(*account_id, folder, page, PAGE_LIMIT).await
+                    // 角色文件夹经 get_folder_stats 归一为类别键（"sent" 等）：
+                    // 按类别解析该账号的真实文件夹列表查询；原始文件夹名走精确匹配
+                    match postium_core::domain::folders::FolderCategory::parse(folder) {
+                        Some(cat) => {
+                            api.list_emails_by_category(
+                                *account_id,
+                                cat.to_email_category(),
+                                page,
+                                PAGE_LIMIT,
+                                unread_only,
+                            )
+                            .await
+                        }
+                        None => api.list_emails(*account_id, folder, page, PAGE_LIMIT).await,
+                    }
                 }
                 NavTarget::Label(label_id) => {
                     // 标签视图：取标签下全部 id，按页切片取详情摘要

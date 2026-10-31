@@ -207,6 +207,8 @@ impl Render for Sidebar {
                     f if f.contains("DRAFT") => IconName::FileText,
                     "JUNK" | "SPAM" => IconName::Trash,
                     f if f.contains("TRASH") || f.contains("DELETED") => IconName::Trash,
+                    // 角色文件夹（\All 等）经 get_folder_stats 归一为类别键 "archive"
+                    "ARCHIVE" => IconName::Archive,
                     _ => IconName::Folder,
                 };
                 scroll = scroll.child(nav!(
