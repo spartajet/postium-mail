@@ -95,7 +95,7 @@ mod tests {
     }
     #[test]
     fn oversized_input_rejected() {
-        let big = format!("<div>{}</div>", "x".repeat(1024 * 1024 + 10));
+        let big = format!("<div>{}</div>", "x".repeat(4 * 1024 * 1024 + 10));
         assert!(matches!(render_pipeline(&big), Err(HtmlError::TooLarge(_))));
     }
     #[test]

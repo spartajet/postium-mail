@@ -20,6 +20,8 @@ pub struct HtmlSelection {
 struct SelState {
     /// 拖选中（按下未抬）。
     dragging: bool,
+    /// 本次按下期间游标是否变化过（点击 vs 拖选判据，review I-1）。
+    moved: bool,
     anchor: Option<SelPos>,
     head: Option<SelPos>,
     /// 本帧文本组注册表（文档序）：组文本，划选复制与区间展开的依据。
@@ -51,31 +53,56 @@ impl HtmlSelection {
         state.anchor.is_some_and(|a| state.head != Some(a))
     }
 
+    /// 组注册表里的组文本（a11y 值等只读消费）。
+    pub fn group_text(&self, group: usize) -> Option<String> {
+        self.lock().groups.get(group).cloned()
+    }
+
     /// 拖选中（移动事件只在该态更新游标）。
     pub fn is_dragging(&self) -> bool {
         self.lock().dragging
     }
 
-    /// 按下：设锚点并进入拖选态。
+    /// 按下：设锚点并进入拖选态（重置本次按下的位移标记——review I-1：
+    /// 链接抬起判定要能区分"点击"与"拖选后抬起"）。
     pub fn on_down(&self, group: usize, offset: usize) {
         let mut state = self.lock();
         let pos = SelPos { group, offset };
         state.dragging = true;
+        state.moved = false;
         state.anchor = Some(pos);
         state.head = Some(pos);
     }
 
-    /// 拖动：更新游标（仅拖选态；组内偏移钳制到文本长度）。
-    pub fn on_move(&self, group: usize, offset: usize) {
+    /// 拖动：更新游标（仅拖选态；组内偏移钳制到文本长度）。返回游标是否
+    /// 变化（review I-5：调用方据此决定是否 refresh，避免拖选期每次
+    /// mousemove 全窗口重排）。
+    pub fn on_move(&self, group: usize, offset: usize) -> bool {
         let mut state = self.lock();
         if !state.dragging {
-            return;
+            return false;
         }
         let len = state.groups.get(group).map_or(0, |t| t.len());
-        state.head = Some(SelPos {
+        let new_head = SelPos {
             group,
             offset: offset.min(len),
-        });
+        };
+        let changed = state.head != Some(new_head);
+        if changed {
+            // 位移标记粘滞：拖走又拖回锚点仍是拖选（浏览器同语义）。
+            // 生命周期 = 按下重置 → 移动置位 → 下次按下重置（不在 on_up
+            // 清——抬起事件按注册序跑在多个文本组上，先到的 on_up 清掉
+            // 标记会让后到组的链接判定读到假"未拖动"）
+            state.moved = true;
+            state.head = Some(new_head);
+        }
+        changed
+    }
+
+    /// 本次按下期间是否发生过拖动（点击 vs 拖选判据，review I-1：
+    /// 在链接文字上拖选后抬起不得触发 on_link）。
+    pub fn moved_during_press(&self) -> bool {
+        self.lock().moved
     }
 
     /// 抬起：结束拖选。锚点 == 游标（单击）清空选区。
@@ -220,6 +247,31 @@ mod tests {
         sel.on_up();
         assert!(!sel.is_selecting());
         assert_eq!(sel.selected_text(), None);
+    }
+
+    /// review I-1：moved 标记生命周期——按下重置、移动置位（粘滞：拖回
+    /// 锚点仍是拖选）、下次按下重置；供链接抬起判定区分点击与拖选。
+    #[test]
+    fn moved_flag_distinguishes_click_from_drag() {
+        let (sel, ids) = setup();
+        // 纯点击：无移动 → 未拖动
+        sel.on_down(ids[0], 3);
+        sel.on_up();
+        assert!(!sel.moved_during_press(), "原地点击不算拖动");
+        // 拖选：移动过 → 拖动（拖回锚点仍粘滞）
+        sel.on_down(ids[0], 3);
+        assert!(sel.on_move(ids[0], 6), "游标变化应返回 true");
+        assert!(!sel.on_move(ids[0], 6), "同位重复移动返回 false（review I-5：免 refresh）");
+        assert!(sel.on_move(ids[0], 3), "拖回锚点仍是变化");
+        assert!(sel.moved_during_press(), "拖回锚点仍是拖选");
+        sel.on_up();
+        assert!(sel.moved_during_press(), "抬起不清标记（多组 up 处理序安全）");
+        // 下一次按下重置
+        sel.on_down(ids[1], 0);
+        assert!(!sel.moved_during_press(), "新按下重置");
+        // 无按下时移动无效
+        sel.on_up();
+        assert!(!sel.on_move(ids[1], 4), "非拖选态移动返回 false 且不改状态");
     }
 
     #[test]

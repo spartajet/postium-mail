@@ -41,6 +41,7 @@
                     "text": "安全边界语料（白名单外资源）",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -86,6 +87,7 @@
                     "text": "1. javascript: 链接：点我领奖",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -132,6 +134,7 @@
                     "text": "2. 实体变体链接：实体编码",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -178,6 +181,7 @@
                     "text": "3. vbscript: 链接：VB 脚本",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -224,6 +228,7 @@
                     "text": "4. data:text 链接：data 链接",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -270,6 +275,7 @@
                     "text": "5. 相对路径链接：站内相对路径",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -316,6 +322,7 @@
                     "text": "6. data:text 图片：",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -373,6 +380,7 @@
                     "text": "7. file 协议图片：",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -430,6 +438,7 @@
                     "text": "8. 带 onclick 的按钮：",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -449,6 +458,7 @@
                           "text": "这条链接本体合法",
                           "style": {
                             "color": null,
+                            "background": null,
                             "font_size": null,
                             "bold": false,
                             "italic": false,
@@ -498,6 +508,7 @@
                     "text": "9. 段落属性事件：本段文字应保留、事件应剥离。",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,

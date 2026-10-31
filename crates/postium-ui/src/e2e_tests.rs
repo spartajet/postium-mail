@@ -2402,7 +2402,7 @@ fn html_email_oversize_falls_back(cx: &mut TestAppContext) {
             cc: vec![],
             bcc: vec![],
             subject: "Oversize Fallback Probe".into(),
-            body_html: format!("<p>{}</p>", "x".repeat(1024 * 1024 + 64)),
+            body_html: format!("<p>{}</p>", "x".repeat(4 * 1024 * 1024 + 64)), // review M-7：上限 4MB
             body_text: "超大邮件降级后的纯文本正文".into(),
             attachments: vec![],
         };

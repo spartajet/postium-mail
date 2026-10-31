@@ -304,20 +304,17 @@ impl<'a> TreeBuilder<'a> {
                         Kind::Block(kind) => {
                             let attrs = attrs.borrow();
                             let style_text = attr_str(attrs.as_slice(), "style").unwrap_or("");
-                            if is_inline_display(style_text) {
-                                // 行内系 display（inline/inline-block/inline-flex，
-                                // 线上反馈③）：块级标签按行内透传并入父级行内流——
-                                // 邮件横向菜单的主流写法，逐项成块会竖排
-                                self.collect_inline_element(
-                                    child,
-                                    attrs.as_slice(),
-                                    &mut inline,
-                                    text_base,
-                                    ws,
-                                    depth + 1,
-                                )?;
-                            } else if is_floated(style_text) {
-                                // float:left|right：入浮动列累积组（见 float_cells）
+                            if is_floated(style_text) {
+                                // float:left|right（review M-3：float 优先于
+                                // display:inline-block——浏览器语义，列宽得以
+                                // 保留）：入浮动列累积组（见 float_cells）。
+                                // 首个 float 前先物化行内缓冲（review I-4）：
+                                // 「文字A float 文字B」若 A 留在缓冲，物化顺序
+                                // 会变成 [float表][A+B合并段]——A 被搬到 float
+                                // 之后；先 flush 保住 [A][float表][B] 文档序
+                                if float_cells.is_empty() {
+                                    blocks.extend(inline.flush_blocks(inherited));
+                                }
                                 let built = self.build_element_blocks(
                                     child,
                                     kind,
@@ -329,6 +326,18 @@ impl<'a> TreeBuilder<'a> {
                                 if let Some(cell) = float_cell_of(built) {
                                     float_cells.push(cell);
                                 }
+                            } else if is_inline_display(style_text) {
+                                // 行内系 display（inline/inline-block/inline-flex，
+                                // 线上反馈③）：块级标签按行内透传并入父级行内流——
+                                // 邮件横向菜单的主流写法，逐项成块会竖排
+                                self.collect_inline_element(
+                                    child,
+                                    attrs.as_slice(),
+                                    &mut inline,
+                                    text_base,
+                                    ws,
+                                    depth + 1,
+                                )?;
                             } else {
                                 flush_floats(&mut blocks, &mut float_cells);
                                 blocks.extend(inline.flush_blocks(inherited));
@@ -734,10 +743,15 @@ impl<'a> TreeBuilder<'a> {
         };
         let local = name.local.as_ref();
         let style_text = attr_str(attrs, "style").unwrap_or("");
-        if parse_block_style(style_text).hidden {
+        let block_style = parse_block_style(style_text);
+        if block_style.hidden {
             return Ok(()); // display:none 行内子树剪枝
         }
-        let merged = merge_inline(base, &tag_inline_style(local, style_text));
+        let mut own = tag_inline_style(local, style_text, attrs);
+        // 行内底色（review M-2）：style 声明的纯色背景随行内样式叠加——
+        // span/mark 高亮、按钮式菜单项底色此前在行内通道整体丢失
+        own.background = own.background.or(block_style.background_color);
+        let merged = merge_inline(base, &own);
         if local == "img" {
             inline.push_wrapped(InlineRun::Image {
                 src: classify_image_src(attr_str(attrs, "src").unwrap_or("")),
@@ -927,7 +941,9 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
         .max()
         .unwrap_or(0);
 
-    // 列宽协调：首见声明传播到同列所有行（colspan=1 才可逐列定宽）
+    // 列宽协调：首见声明传播到同列所有行（colspan=1 才可逐列定宽）。
+    // review M-6：声明百分比总和 >100%（邮件作者常态误差）先按比例归一到
+    // 100——浏览器同语义；不归一的话未声明列的自由空间为 0、塌成 ~0 宽
     let mut col_widths: Vec<Option<Width>> = vec![None; n_cols];
     for row in &placed_rows {
         let mut col = 0usize;
@@ -938,13 +954,42 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
             col += p.cell.colspan as usize;
         }
     }
+    let declared_pct_sum: f32 = col_widths
+        .iter()
+        .filter_map(|w| match w {
+            Some(Width::Percent(p)) => Some(*p),
+            _ => None,
+        })
+        .sum();
+    if declared_pct_sum > 100.0 {
+        let scale = 100.0 / declared_pct_sum;
+        for w in &mut col_widths {
+            if let Some(Width::Percent(p)) = w {
+                *p *= scale;
+            }
+        }
+    }
+    // 传播 + 归一改写：所有 colspan=1 格统一落 col_widths[col]（声明格在
+    // M-6 归一中也要改写，否则只有未声明列拿到归一值、总和仍超 100）
     for row in &mut placed_rows {
         let mut col = 0usize;
         for p in row {
-            if p.cell.colspan == 1 && p.cell.width.is_none() {
+            if p.cell.colspan == 1 {
                 p.cell.width = col_widths[col];
             }
             col += p.cell.colspan as usize;
+        }
+    }
+
+    // cellpadding 施加（review M-1：先于估权——列权重需含表级默认内边距，
+    // 此前估权在施加前跑、比例略偏）。仅无自身 padding 声明的单元格
+    if let Some(cp) = grid.cellpadding.filter(|cp| *cp > 0.0) {
+        for row in &mut placed_rows {
+            for p in row {
+                if p.cell.style.padding == [0.0; 4] {
+                    p.cell.style.padding = [cp; 4];
+                }
+            }
         }
     }
 
@@ -986,7 +1031,10 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
             .filter(|(w, _)| w.is_none())
             .map(|(_, weight)| *weight)
             .sum();
-        if undeclared_weight > 0.0 {
+        // review M-6：free_pct == 0（声明列已占满/超出）时不赋 Percent——
+        // Percent(0) 会把列锁死在 0 宽（basis 0 + 无自由空间），保持 None
+        // 语义更诚实（等分 grow，与浏览器归一后的行为一致）
+        if free_pct > 0.0 && undeclared_weight > 0.0 {
             for row in &mut placed_rows {
                 let mut col = 0usize;
                 for p in row {
@@ -1001,7 +1049,7 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
         }
     }
 
-    // 网格线 + cellpadding（占位单元格按 span 语义：不画 span 内部的横线，
+    // 网格线（占位单元格按 span 语义：不画 span 内部的横线，
     // 只在 span 边界与表格外缘画线，跨行区域不被横线切开）
     let line = grid
         .border
@@ -1048,11 +1096,6 @@ fn normalize_table_grid(rows: Vec<TableRow>, grid: &TableGrid) -> Vec<TableRow> 
                         }
                     }
                 }
-            }
-            if let Some(cp) = grid.cellpadding.filter(|cp| *cp > 0.0)
-                && p.cell.style.padding == [0.0; 4]
-            {
-                p.cell.style.padding = [cp; 4];
             }
             col = col_end;
         }
@@ -1230,13 +1273,22 @@ fn decode_base64_lenient(payload: &str) -> Option<Vec<u8>> {
 /// `<s>/<strike>/<del>` → 删除线；ammonia 白名单保留它们正是为了语义）。
 /// 标签语义与 style 属性声明按布尔或叠加（`<u style="text-decoration:none">`
 /// 的撤销语义不支持，与 [`InlineStyle`] 布尔叠加语义一致，已知限制）。
-fn tag_inline_style(local: &str, style_text: &str) -> InlineStyle {
+///
+/// `<font color>`（review I-3）：遗留邮件文字着色的头号来源——color 属性
+/// 经 [`parse_color`] 白名单终审后作为前景色兜底（style 声明的 color 优先，
+/// 浏览器同序）。size/face 缓期（低频且映射面大）。
+fn tag_inline_style(local: &str, style_text: &str, attrs: &[Attribute]) -> InlineStyle {
     let mut style = parse_inline_style(style_text);
     match local {
         "b" | "strong" => style.bold = true,
         "i" | "em" => style.italic = true,
         "u" => style.underline = true,
         "s" | "strike" | "del" => style.strikethrough = true,
+        "font" => {
+            if style.color.is_none() {
+                style.color = attr_str(attrs, "color").and_then(parse_color);
+            }
+        }
         _ => {}
     }
     style
@@ -1261,7 +1313,8 @@ fn image_style(attrs: &[Attribute]) -> ImageStyle {
 }
 
 /// img/td 的 width/height 属性值：无单位数值 / px / `%`；非有限/负值拒绝
-/// （T5 评审备案：`f32::parse` 接受 "NaN"/"inf"，不得进入 IR）。
+/// （T5 备案：`f32::parse` 接受 "NaN"/"inf"，不得进入 IR）。上限钳制同
+/// 样式路径（review I-2）：px 幅值 ≤ 100_000、百分比 ≤ 1000。
 fn parse_dim_attr(value: &str) -> Option<Width> {
     let finite_nonneg = |v: &f32| v.is_finite() && *v >= 0.0;
     let value = value.trim();
@@ -1271,14 +1324,14 @@ fn parse_dim_attr(value: &str) -> Option<Width> {
             .parse::<f32>()
             .ok()
             .filter(finite_nonneg)
-            .map(Width::Percent);
+            .map(|p| Width::Percent(p.min(1000.0)));
     }
     let value = value.strip_suffix("px").unwrap_or(value).trim();
     value
         .parse::<f32>()
         .ok()
         .filter(finite_nonneg)
-        .map(Width::Px)
+        .map(|v| Width::Px(v.min(100_000.0)))
 }
 
 /// colspan 属性：数值钳制到 1–16（types.rs 契约：默认 1、上限 16，防病理宽表）；
@@ -2259,6 +2312,127 @@ mod tests {
             panic!("应为 Table")
         };
         assert_eq!(rows[1].cells[0].width, None, "含 colspan 的表不做估权分配");
+    }
+
+    #[test]
+    fn font_color_attr_maps_to_run_color() {
+        // review I-3：<font color> 是遗留邮件文字着色的头号来源——color 属性
+        // 经 parse_color 终审映射为前景色；style 声明的 color 优先（浏览器同序）
+        let red = doc(r#"<font color="red">红字</font>"#);
+        let Block::Paragraph { runs, .. } = &red.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([255, 0, 0, 255]));
+        // style 声明覆盖属性
+        let blue = doc(r##"<font color="red" style="color:blue">蓝字</font>"##);
+        let Block::Paragraph { runs, .. } = &blue.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, Some([0, 0, 255, 255]));
+        // 非法色值安全丢弃
+        let invalid = doc(r#"<font color="javascript:alert(1)">字</font>"#);
+        let Block::Paragraph { runs, .. } = &invalid.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.color, None);
+    }
+
+    #[test]
+    fn inline_background_carries_to_runs() {
+        // review M-2：行内底色（span/mark 高亮、按钮式菜单项底色）此前在
+        // 行内通道整体丢失——style 声明的纯色背景随行内样式叠加进 runs
+        let yellow = doc(r#"<span style="background:yellow">高亮</span>尾随"#);
+        let Block::Paragraph { runs, .. } = &yellow.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.background, Some([255, 255, 0, 255]));
+        let InlineRun::Text { style, .. } = &runs[1] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.background, None, "底色不外溢到兄弟 run");
+        // url() 资源向量照旧丢弃，仅纯色生效
+        let url_case = doc(r#"<span style="background:url(https://e/x.png) aqua">底</span>"#);
+        let Block::Paragraph { runs, .. } = &url_case.blocks[0] else {
+            panic!("应为 Paragraph")
+        };
+        let InlineRun::Text { style, .. } = &runs[0] else {
+            panic!("应为 Text")
+        };
+        assert_eq!(style.background, Some([0, 255, 255, 255]));  // aqua
+    }
+
+    #[test]
+    fn text_before_float_keeps_document_order() {
+        // review I-4：「文字A float 文字B」此前 A 留在行内缓冲被整体搬到
+        // float 表之后（[表][A+B]）；先 flush 保住 [A][表][B] 文档序
+        let doc = doc(
+            r#"<div>A<div style="float:left;width:30%">F</div>B</div>"#,
+        );
+        let Block::Container { children, .. } = &doc.blocks[0] else {
+            panic!("应为 Container")
+        };
+        assert_eq!(children.len(), 3, "[段A, float表, 段B]");
+        assert_eq!(text_of(&children[0]), "A");
+        assert!(matches!(children[1], Block::Table { .. }));
+        assert_eq!(text_of(&children[2]), "B");
+    }
+
+    #[test]
+    fn float_wins_over_inline_display() {
+        // review M-3：float 与 display:inline-block 并存时浏览器语义是 float
+        // 优先（列宽保留在 cell 上，不再走行内透传丢宽）
+        let doc = doc(
+            r#"<div><div style="float:left;display:inline-block;width:40%">L</div><div style="float:right;width:40%">R</div></div>"#,
+        );
+        let Block::Container { children, .. } = &doc.blocks[0] else {
+            panic!("应为 Container")
+        };
+        let Block::Table { rows, .. } = &children[0] else {
+            panic!("float 应优先入列组（单行 Table），实际 {:?}", children[0])
+        };
+        assert_eq!(rows[0].cells.len(), 2);
+        assert_eq!(rows[0].cells[0].width, Some(Width::Percent(40.0)));
+    }
+
+    #[test]
+    fn overdeclared_percent_widths_normalized() {
+        // review M-6：声明百分比总和 >100% 按比例归一（浏览器语义）——
+        // 此前未声明列自由空间为 0 塌成 ~0 宽
+        let overdeclared = doc(
+            r#"<table><tr><td width="60%">a</td><td width="60%">b</td><td>c</td></tr></table>"#,
+        );
+        let Block::Table { rows, .. } = &overdeclared.blocks[0] else {
+            panic!("应为 Table")
+        };
+        let pct = |w: Option<Width>| match w {
+            Some(Width::Percent(p)) => p,
+            other => panic!("应为百分比宽度: {other:?}"),
+        };
+        let c0 = pct(rows[0].cells[0].width);
+        let c1 = pct(rows[0].cells[1].width);
+        assert!((c0 - 50.0).abs() < 0.5, "60/120*100=50，实际 {c0}");
+        assert!((c1 - 50.0).abs() < 0.5, "实际 {c1}");
+        // 归一后总和恰 100：未声明列 free=0 → 估权不赋 Percent（None 走
+        // 等分 grow，不再被 Percent(0) 锁死塌缩）
+        assert_eq!(rows[0].cells[2].width, None);
+        // 总和 ≤100 的常规表不受影响
+        let normal = doc(r#"<table><tr><td width="30%">a</td><td>b</td></tr></table>"#);
+        let Block::Table { rows, .. } = &normal.blocks[0] else {
+            panic!("应为 Table")
+        };
+        assert_eq!(rows[0].cells[0].width, Some(Width::Percent(30.0)));
     }
 
     #[test]

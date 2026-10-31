@@ -174,6 +174,10 @@ pub fn sanitize_lenient(html: &str) -> String {
         )
         .add_tag_attributes("td", &["width", "bgcolor", "height", "rowspan"])
         .add_tag_attributes("th", &["width", "bgcolor", "height", "rowspan"])
+        // font 的 color 放行（review I-3）：<font color> 是遗留邮件文字着色
+        // 的头号来源，此前被剥除致颜色整体丢失；取值经 builder 的
+        // parse_color 白名单终审，无 URL/脚本向量。size/face 缓期
+        .add_tag_attributes("font", &["color"])
         // cid:/data: 先过 ammonia 的 scheme 校验（其 url_schemes 是全局白名单、
         // 无 per-tag 配置）；attribute_filter 在其后执行、只能收紧——不合规形态
         // （a href="data:…"、img 的 data:text 等）在净化期即被剥除
@@ -291,6 +295,14 @@ mod tests {
         // 白名单外元素不享受（p 的 border/height 仍剔除）
         let out = sanitize_lenient(r#"<p border="1" height="40">x</p>"#);
         assert!(!out.contains("border") && !out.contains("height"));
+    }
+
+    #[test]
+    fn sanitize_keeps_font_color() {
+        // review I-3：<font color> 是遗留邮件文字着色的头号来源——color 放行
+        //（值经 builder 的 parse_color 白名单终审）；size/face 仍剔除
+        let out = sanitize_lenient(r#"<font color="red" size="5" face="Arial">红字</font>"#);
+        assert!(out.contains(r#"<font color="red">红字</font>"#), "实际: {out}");
     }
 
     #[test]

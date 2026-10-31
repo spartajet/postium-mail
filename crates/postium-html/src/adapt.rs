@@ -173,8 +173,9 @@ fn adapt_block_style(style: &BlockStyle) -> BlockStyle {
     adapted
 }
 
-/// 行内 run 适配：Text 的 color 按前景角色；Link 递归内层 runs（href 不动）；
-/// 行内图片无颜色、Br 无样式。
+/// 行内 run 适配：Text 的 color 按前景角色、background 按背景角色
+/// （review M-2：行内底色随深色适配反转，避免浅底高亮在深底刺眼）；
+/// Link 递归内层 runs（href 不动）；行内图片无颜色、Br 无样式。
 fn adapt_runs(runs: &[InlineRun]) -> Vec<InlineRun> {
     runs.iter()
         .map(|run| match run {
@@ -182,6 +183,7 @@ fn adapt_runs(runs: &[InlineRun]) -> Vec<InlineRun> {
                 text: text.clone(),
                 style: InlineStyle {
                     color: style.color.map(|color| remap(color, false)),
+                    background: style.background.map(|color| remap(color, true)),
                     ..style.clone()
                 },
             },

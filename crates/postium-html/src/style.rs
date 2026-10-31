@@ -236,6 +236,7 @@ pub fn parse_inline_style(css_text: &str) -> InlineStyle {
 pub fn merge_inline(base: &InlineStyle, over: &InlineStyle) -> InlineStyle {
     InlineStyle {
         color: over.color.or(base.color),
+        background: over.background.or(base.background),
         font_size: over.font_size.or(base.font_size),
         bold: base.bold || over.bold,
         italic: base.italic || over.italic,
@@ -332,18 +333,26 @@ fn parse_rgb_args(inner: &str, has_alpha: bool) -> Option<Rgba> {
 }
 
 /// 间距/边框宽度的长度：`px` 或无单位数值（0 等，表格属性风格）；`%`/`em`/`auto` 不适配。
+/// 上限钳制（review I-2）：`padding:1e30px` 一类畸形值原样进 IR 会直达
+/// taffy/GPUI 布局（NaN/溢出级联的潜在入口）；100_000px 对邮件排版语义
+/// 已无意义，钳住即可。
 fn parse_px(s: &str) -> Option<f32> {
     let lowered = s.trim().to_ascii_lowercase();
-    match lowered.strip_suffix("px") {
-        Some(v) => v.trim().parse::<f32>().ok(),
-        None => lowered.parse::<f32>().ok(),
-    }
+    let v = match lowered.strip_suffix("px") {
+        Some(v) => v.trim().parse::<f32>().ok()?,
+        None => lowered.parse::<f32>().ok()?,
+    };
+    // 负值保留（margin 负边距合法；padding/border 侧由消费语义自然钳 0
+    // 之外的渲染行为兜底），仅限幅幅值
+    v.is_finite().then(|| v.clamp(-100_000.0, 100_000.0))
 }
 
 /// 尺寸：`px` / `%` / 无单位数值；`auto` 视为未声明（None）；非有限/负值拒绝
 /// （终审 M-1：与属性路径 `parse_dim_attr` 的 `finite_nonneg` 同语义——
 /// `f32::parse` 接受 "NaN"/"inf"，此类值不得经 width/height/max_width 进入
-/// IR 直达 GPUI 布局）。
+/// IR 直达 GPUI 布局）。上限钳制（review I-2）：px 幅值 ≤ 100_000、
+/// 百分比 ≤ 1000——畸形巨值（1e30px）直达布局是 NaN/溢出级联的入口，
+/// 钳后语义上仍等效"无约束"。
 fn parse_width(s: &str) -> Option<Width> {
     let finite_nonneg = |v: &f32| v.is_finite() && *v >= 0.0;
     let lowered = s.trim().to_ascii_lowercase();
@@ -356,12 +365,15 @@ fn parse_width(s: &str) -> Option<Width> {
             .parse::<f32>()
             .ok()
             .filter(finite_nonneg)
-            .map(Width::Percent);
+            .map(|p| Width::Percent(p.min(1000.0)));
     }
-    parse_px(&lowered).filter(finite_nonneg).map(Width::Px)
+    parse_px(&lowered)
+        .filter(finite_nonneg)
+        .map(Width::Px)
 }
 
 /// font-size：基准 16px（pt × 96/72、% × 16/100）；em/rem/关键词/非正值忽略。
+/// 上限钳制 200px（review I-2）：`font-size:1e30px` 直达文本整形/布局。
 fn parse_font_size(s: &str) -> Option<f32> {
     let lowered = s.trim().to_ascii_lowercase();
     let px = if let Some(v) = lowered.strip_suffix('%') {
@@ -373,7 +385,7 @@ fn parse_font_size(s: &str) -> Option<f32> {
             .strip_suffix("px")
             .and_then(|v| v.trim().parse::<f32>().ok())?
     };
-    (px > 0.0).then_some(px)
+    (px > 0.0).then(|| px.min(200.0))
 }
 
 /// font-weight：`bold` → true，`normal` → false，数值 ≥ 600 → true，其余（bolder 等）忽略。
@@ -826,6 +838,56 @@ mod tests {
         assert_eq!(parse_block_style("height: -5px").height, None);
         assert_eq!(parse_block_style("max-width: infpx").max_width, None);
         assert_eq!(parse_block_style("max-width: -5%").max_width, None);
+    }
+
+    #[test]
+    fn oversized_values_clamped() {
+        // review I-2：`font-size:1e30px` / `padding:1e30px` / `width:1e30px`
+        // 曾原样进 IR 直达 taffy/GPUI 布局（NaN/溢出级联入口）——实证探针
+        // 见修复波记录。钳制后语义上仍等效"无约束"
+        for (css, want) in [
+            ("width: 1e30px", Some(Width::Px(100_000.0))),
+            ("width: 1e30%", Some(Width::Percent(1000.0))),
+            ("width: 500%", Some(Width::Percent(500.0))), // 合理值不受影响
+        ] {
+            assert_eq!(parse_block_style(css).width, want, "{css}");
+        }
+        assert_eq!(
+            parse_block_style("height: 999999999px").height,
+            Some(Width::Px(100_000.0))
+        );
+        assert_eq!(
+            parse_block_style("max-width: 1e30px").max_width,
+            Some(Width::Px(100_000.0))
+        );
+        assert_eq!(
+            parse_block_style("padding: 1e30px").padding,
+            [100_000.0; 4],
+            "padding 巨值钳到 100_000"
+        );
+        assert_eq!(
+            parse_inline_style("font-size: 1e30px").font_size,
+            Some(200.0),
+            "font-size 巨值钳到 200"
+        );
+        assert_eq!(
+            parse_inline_style("font-size: 1e30%").font_size,
+            Some(200.0)
+        );
+        assert_eq!(
+            parse_inline_style("font-size: 24px").font_size,
+            Some(24.0),
+            "正常字号不受影响"
+        );
+        // 负 margin 合法保留（幅值限幅）
+        assert_eq!(
+            parse_block_style("margin-left: -20px").margin,
+            [0.0, 0.0, 0.0, -20.0]
+        );
+        assert_eq!(
+            parse_block_style("margin-left: -1e30px").margin,
+            [0.0, 0.0, 0.0, -100_000.0]
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::i18n::{t, t_format};
 use crate::nav::NavTarget;
 use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
-use crate::views::email_html::{ImageCtx, collect_remote_image_urls, render_html_document};
+use crate::views::email_html::{ImageCtx, render_html_document};
 
 // 正文划选动作（EmailHtmlBody key_context 内派发）：Ctrl+C 复制 / Esc 清选区。
 gpui_kit::actions!([CopyHtmlSelection, ClearHtmlSelection]);
@@ -299,13 +299,13 @@ impl EmailDetailView {
         }) else {
             return;
         };
-        let Some(doc) = self
-            .store
-            .update(cx, |store, _| store.cached_doc(email_id, &html, false))
-        else {
+        // review M-5：URL 清单随缓存条目（此前此处手动 parse + 全文档遍历）
+        let urls = self.store.update(cx, |store, _| {
+            store.remote_image_urls(email_id, &html)
+        });
+        if urls.is_empty() {
             return;
-        };
-        let urls = collect_remote_image_urls(&doc);
+        }
         let api = self.api.clone();
         self.store
             .update(cx, |store, cx| store.allow_remote_images(urls, &api, cx));
@@ -464,7 +464,9 @@ fn html_body(
     cx: &mut gpui_kit::App,
 ) -> Option<(AnyElement, Vec<String>)> {
     let doc = store.update(cx, |store, _| store.cached_doc(email_id, html, dark))?;
-    let remote_urls = collect_remote_image_urls(&doc);
+    // review M-5：URL 清单随缓存条目一次计算（此前每帧全文档遍历）
+    let remote_urls =
+        store.update(cx, |store, _| store.remote_image_urls(email_id, html));
     let el = render_html_document(&doc, dark, images, selection, open_safe_url, cx);
     Some((el, remote_urls))
 }

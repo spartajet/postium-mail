@@ -648,6 +648,9 @@ fn flush_text_group(
     .text_size(px(size.unwrap_or(default_size)))
     .line_height(relative(BASE_LINE_HEIGHT));
 
+    // 探针键文本在 move 进 StyledText 前留副本（仅测试构建有消费）
+    #[cfg(test)]
+    let probe_text = text.clone();
     let d = d.child(SelectableText {
         id: ElementId::named_usize("html-sel", group_ix),
         text: StyledText::new(text).with_runs(runs),
@@ -662,16 +665,7 @@ fn flush_text_group(
     // e2e 经 `VisualTestContext::debug_bounds` 查询文本可见性。
     #[cfg(test)]
     let d = {
-        let key = text_probe_key(&{
-            // 探针键沿用组全文（含划选无关），从注册表取回避免再拼
-            let mut probe = String::new();
-            for seg in &group {
-                if let FlowSeg::Text { text, .. } = seg {
-                    probe.push_str(text);
-                }
-            }
-            probe
-        });
+        let key = text_probe_key(&probe_text);
         d.debug_selector(move || key)
     };
     els.push(d.into_any_element());
@@ -751,6 +745,23 @@ impl Element for SelectableText {
 
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
         None
+    }
+
+    fn a11y_role(&self) -> Option<gpui_kit::accesskit::Role> {
+        // 对齐被替换的 InteractiveText（review M-4）：正文文本作为 Label 暴露
+        // 给读屏器，组文本作为节点值
+        Some(gpui_kit::accesskit::Role::Label)
+    }
+
+    fn write_a11y_info(&self, node: &mut gpui_kit::accesskit::Node) {
+        // StyledText.text 私有——a11y 值用组注册表文本（同源同帧填充，
+        // 渲染期 flush_text_group 先 register 后建元素，序号即本组）
+        if let Some(text) = self
+            .selection
+            .group_text(self.group)
+        {
+            node.set_value(text);
+        }
     }
 
     fn request_layout(
@@ -840,8 +851,10 @@ impl Element for SelectableText {
                                 && selection.is_dragging()
                                 && hitbox.is_hovered(window)
                                 && let Ok(ix) = layout.index_for_position(event.position)
+                                // review I-5：游标字节位没变不 refresh——拖选期的
+                                // mousemove 高频于字节位变化，全窗口重排是空的
+                                && selection.on_move(group, ix)
                             {
-                                selection.on_move(group, ix);
                                 window.refresh();
                             }
                         },
@@ -859,7 +872,10 @@ impl Element for SelectableText {
                             {
                                 return;
                             }
+                            // review I-1：按下期间拖动过（含拖走又拖回）是拖选
+                            // 不是点击——在链接文字上选字不得打开链接
                             if hitbox.is_hovered(window)
+                                && !selection.moved_during_press()
                                 && let Ok(up_ix) = layout.index_for_position(event.position)
                                 && let Some(down) = down_index.get()
                                 && let Some(range_ix) = ranges
@@ -902,7 +918,10 @@ fn same_run_style(a: &TextRun, b: &TextRun) -> bool {
         && a.strikethrough == b.strikethrough
 }
 
-/// 构建单段 [`TextRun`]（字体/颜色/下划线/删除线；链接段附加链接色与下划线）。
+/// 构建单段 [`TextRun`]（字体/颜色/底色/下划线/删除线；链接段附加链接色
+/// 与下划线。底色来自 InlineStyle.background——review M-2：span/mark
+/// 高亮与按钮式菜单项底色；选中高亮由 apply_selection_background 在
+/// run 级覆盖，优先于作者底色）。
 fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &RenderCtx) -> TextRun {
     TextRun {
         len: 0,
@@ -913,7 +932,7 @@ fn text_run(style: &InlineStyle, link: bool, base_color: Option<Hsla>, rcx: &Ren
             .or(link.then_some(rcx.link))
             .or(base_color)
             .unwrap_or(rcx.foreground),
-        background_color: None,
+        background_color: style.background.map(ir_color),
         underline: (style.underline || link).then_some(UnderlineStyle {
             thickness: px(1.),
             color: None,

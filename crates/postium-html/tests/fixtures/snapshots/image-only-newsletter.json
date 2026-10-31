@@ -82,6 +82,7 @@
                     "text": " ",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -112,6 +113,7 @@
                     "text": " ",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -142,6 +144,7 @@
                     "text": " ",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -215,6 +218,7 @@
                         136,
                         255
                       ],
+                      "background": null,
                       "font_size": 12.0,
                       "bold": false,
                       "italic": false,
@@ -239,6 +243,7 @@
                               136,
                               255
                             ],
+                            "background": null,
                             "font_size": 12.0,
                             "bold": false,
                             "italic": false,

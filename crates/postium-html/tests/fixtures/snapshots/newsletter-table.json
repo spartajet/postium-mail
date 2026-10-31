@@ -91,6 +91,7 @@
                                       232,
                                       255
                                     ],
+                                    "background": null,
                                     "font_size": 22.0,
                                     "bold": true,
                                     "italic": false,
@@ -146,6 +147,7 @@
                                       102,
                                       255
                                     ],
+                                    "background": null,
                                     "font_size": 13.0,
                                     "bold": false,
                                     "italic": false,
@@ -245,6 +247,7 @@
                                                 "text": "本期要点",
                                                 "style": {
                                                   "color": null,
+                                                  "background": null,
                                                   "font_size": null,
                                                   "bold": false,
                                                   "italic": false,
@@ -295,6 +298,7 @@
                                                         "text": "GPUI 渲染管线的块级布局实践",
                                                         "style": {
                                                           "color": null,
+                                                          "background": null,
                                                           "font_size": null,
                                                           "bold": false,
                                                           "italic": false,
@@ -343,6 +347,7 @@
                                                         "text": "html5ever 解析器的错误恢复机制",
                                                         "style": {
                                                           "color": null,
+                                                          "background": null,
                                                           "font_size": null,
                                                           "bold": false,
                                                           "italic": false,
@@ -454,6 +459,7 @@
                                                 "text": "深度文章",
                                                 "style": {
                                                   "color": null,
+                                                  "background": null,
                                                   "font_size": null,
                                                   "bold": false,
                                                   "italic": false,
@@ -499,6 +505,7 @@
                                                 "text": "深色模式下的亮度重映射：背景压入深灰区间、文字提亮至可读下限，",
                                                 "style": {
                                                   "color": null,
+                                                  "background": null,
                                                   "font_size": null,
                                                   "bold": false,
                                                   "italic": false,
@@ -518,6 +525,7 @@
                                                       "text": "阅读全文",
                                                       "style": {
                                                         "color": null,
+                                                        "background": null,
                                                         "font_size": null,
                                                         "bold": false,
                                                         "italic": false,
@@ -534,6 +542,7 @@
                                                 "text": "。",
                                                 "style": {
                                                   "color": null,
+                                                  "background": null,
                                                   "font_size": null,
                                                   "bold": false,
                                                   "italic": false,
@@ -589,6 +598,12 @@
                                                           255,
                                                           255,
                                                           255,
+                                                          255
+                                                        ],
+                                                        "background": [
+                                                          26,
+                                                          115,
+                                                          232,
                                                           255
                                                         ],
                                                         "font_size": null,
@@ -720,6 +735,7 @@
                                       102,
                                       255
                                     ],
+                                    "background": null,
                                     "font_size": 13.0,
                                     "bold": false,
                                     "italic": false,
@@ -744,6 +760,7 @@
                                             102,
                                             255
                                           ],
+                                          "background": null,
                                           "font_size": 13.0,
                                           "bold": false,
                                           "italic": false,

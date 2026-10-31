@@ -34,6 +34,7 @@
               "text": "王经理，您好：",
               "style": {
                 "color": null,
+                "background": null,
                 "font_size": null,
                 "bold": false,
                 "italic": false,
@@ -80,6 +81,7 @@
               "text": "关于 10 月 28 日渲染管线评审会的结论：阶段一（纯 Rust 管线）按计划收尾，JSON 快照框架与性能冒烟随本次任务补齐；阶段二（GPUI 渲染层）预计下周启动，届时将直接消费本管线的中间表示。",
               "style": {
                 "color": null,
+                "background": null,
                 "font_size": null,
                 "bold": false,
                 "italic": false,
@@ -129,6 +131,7 @@
                     "text": "原文：渲染管线以中间表示为界，解析侧不做任何 IO，渲染侧不接触原始 HTML。",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -178,6 +181,7 @@
               "text": "请查收附件中的评审记录，如有异议请于本周五下班前回复。",
               "style": {
                 "color": null,
+                "background": null,
                 "font_size": null,
                 "bold": false,
                 "italic": false,
@@ -224,6 +228,7 @@
               "text": "此致",
               "style": {
                 "color": null,
+                "background": null,
                 "font_size": null,
                 "bold": false,
                 "italic": false,
@@ -238,6 +243,7 @@
               "text": "敬礼",
               "style": {
                 "color": null,
+                "background": null,
                 "font_size": null,
                 "bold": false,
                 "italic": false,
@@ -294,6 +300,7 @@
                   102,
                   255
                 ],
+                "background": null,
                 "font_size": 12.0,
                 "bold": false,
                 "italic": false,
@@ -313,6 +320,7 @@
                   102,
                   255
                 ],
+                "background": null,
                 "font_size": 12.0,
                 "bold": false,
                 "italic": false,
@@ -332,6 +340,7 @@
                   102,
                   255
                 ],
+                "background": null,
                 "font_size": 12.0,
                 "bold": false,
                 "italic": false,
@@ -356,6 +365,7 @@
                         102,
                         255
                       ],
+                      "background": null,
                       "font_size": 12.0,
                       "bold": false,
                       "italic": false,

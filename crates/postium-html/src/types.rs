@@ -92,6 +92,9 @@ pub struct BlockStyle {
 pub struct InlineStyle {
     /// 文字颜色。
     pub color: Option<Rgba>,
+    /// 行内底色（`background`/`background-color` 纯色 + `<font>` 无；
+    /// review M-2：span/mark/按钮式菜单项的底色此前在行内透传时丢弃）。
+    pub background: Option<Rgba>,
     /// 字号（px；pt/% 解析期换算，基准 16px）。
     pub font_size: Option<f32>,
     /// 粗体（font-weight: bold 或数值 ≥ 600）。
@@ -276,7 +279,8 @@ pub enum SafeUrl {
 /// 管线输入限制（spec §8：超限走纯文本降级）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Limits {
-    /// 原始 HTML 最大字节数。
+    /// 原始 HTML 最大字节数（review M-7：1MB→4MB——现代营销邮件超限后
+    /// 整封降级纯文本的实测面；栈已 32MB、节点数另有上限，字节闸放宽安全）。
     pub max_bytes: usize,
     /// 解析树最大节点数。
     pub max_nodes: usize,
@@ -285,7 +289,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_bytes: 1024 * 1024,
+            max_bytes: 4 * 1024 * 1024,
             max_nodes: 20_000,
         }
     }

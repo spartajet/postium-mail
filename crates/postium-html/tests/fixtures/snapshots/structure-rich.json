@@ -41,6 +41,7 @@
                     "text": "渲染层验收清单",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -101,6 +102,7 @@
                         51,
                         255
                       ],
+                      "background": null,
                       "font_size": 12.0,
                       "bold": false,
                       "italic": false,
@@ -123,6 +125,7 @@
                     "text": "块级形状",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -173,6 +176,7 @@
                             "text": "段落与行内样式：",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -186,6 +190,7 @@
                             "text": "粗体",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": true,
                               "italic": false,
@@ -199,6 +204,7 @@
                             "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -212,6 +218,7 @@
                             "text": "斜体",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": true,
@@ -225,6 +232,7 @@
                             "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -238,6 +246,7 @@
                             "text": "下划线",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -251,6 +260,7 @@
                             "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -264,6 +274,7 @@
                             "text": "删除线",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -277,6 +288,7 @@
                             "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -295,6 +307,7 @@
                                 37,
                                 255
                               ],
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -305,9 +318,43 @@
                         },
                         {
                           "Text": {
-                            "text": "、高亮底色。",
+                            "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "高亮底色",
+                            "style": {
+                              "color": null,
+                              "background": [
+                                255,
+                                244,
+                                117,
+                                255
+                              ],
+                              "font_size": null,
+                              "bold": false,
+                              "italic": false,
+                              "underline": false,
+                              "strikethrough": false
+                            }
+                          }
+                        },
+                        {
+                          "Text": {
+                            "text": "。",
+                            "style": {
+                              "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -356,6 +403,7 @@
                             "text": "有序列表嵌套：",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -407,6 +455,7 @@
                                     "text": "二级有序项",
                                     "style": {
                                       "color": null,
+                                      "background": null,
                                       "font_size": null,
                                       "bold": false,
                                       "italic": false,
@@ -455,6 +504,7 @@
                                     "text": "二级第二项",
                                     "style": {
                                       "color": null,
+                                      "background": null,
                                       "font_size": null,
                                       "bold": false,
                                       "italic": false,
@@ -506,6 +556,7 @@
                                             "text": "三级无序项",
                                             "style": {
                                               "color": null,
+                                              "background": null,
                                               "font_size": null,
                                               "bold": false,
                                               "italic": false,
@@ -562,6 +613,7 @@
                             "text": "链接：",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -581,6 +633,7 @@
                                   "text": "https 链接",
                                   "style": {
                                     "color": null,
+                                    "background": null,
                                     "font_size": null,
                                     "bold": false,
                                     "italic": false,
@@ -597,6 +650,7 @@
                             "text": "、",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -616,6 +670,7 @@
                                   "text": "mailto 链接",
                                   "style": {
                                     "color": null,
+                                    "background": null,
                                     "font_size": null,
                                     "bold": false,
                                     "italic": false,
@@ -632,6 +687,7 @@
                             "text": "。",
                             "style": {
                               "color": null,
+                              "background": null,
                               "font_size": null,
                               "bold": false,
                               "italic": false,
@@ -695,6 +751,7 @@
                               104,
                               255
                             ],
+                            "background": null,
                             "font_size": null,
                             "bold": false,
                             "italic": false,
@@ -720,6 +777,7 @@
                     "text": "右对齐小节",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -765,6 +823,7 @@
                     "text": "居中段落：",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -778,6 +837,7 @@
                     "text": "大一号文字",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": 18.0,
                       "bold": false,
                       "italic": false,
@@ -791,6 +851,7 @@
                     "text": " 与 ",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -804,6 +865,7 @@
                     "text": "小一号文字",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": 11.0,
                       "bold": false,
                       "italic": false,
@@ -817,6 +879,7 @@
                     "text": " 同段折行。",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,
@@ -864,6 +927,7 @@
                     "text": "结束行（margin 语义锁定）。",
                     "style": {
                       "color": null,
+                      "background": null,
                       "font_size": null,
                       "bold": false,
                       "italic": false,

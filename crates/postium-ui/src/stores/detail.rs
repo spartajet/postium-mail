@@ -135,12 +135,9 @@ impl DetailStore {
                                 && ui_state::load().allows_remote_images_from(&sender)
                             {
                                 let html = store.html.clone().unwrap_or_default();
-                                // URL 收集走浅色通道（Remote URL 不受深色适配影响），
-                                // cached_doc 首帧渲染同键命中零重复解析
-                                if let Some(doc) = store.cached_doc(email_id, &html, false) {
-                                    let urls = collect_remote_image_urls(&doc);
-                                    store.allow_remote_images(urls, &allow_api, cx);
-                                }
+                                // URL 清单走缓存条目（review M-5，浅色通道同键命中）
+                                let urls = store.remote_image_urls(email_id, &html);
+                                store.allow_remote_images(urls, &allow_api, cx);
                             }
                         }
                         Err(e) => {
@@ -242,6 +239,28 @@ impl DetailStore {
     pub fn cached_doc(&mut self, email_id: i32, html: &str, dark: bool) -> Option<HtmlDocument> {
         self.html_cache.doc_for(content_key(email_id, html), html, dark)
     }
+
+    /// 正文远程图 URL 清单（review M-5：随缓存条目一次计算，视图每帧零
+    /// 重走——此前 collect_remote_image_urls 每帧全文档遍历）。管线失败
+    /// （负缓存/超限）返回空清单（无 Remote 图，拦截条不显示）。
+    pub fn remote_image_urls(&mut self, email_id: i32, html: &str) -> Vec<String> {
+        let key = content_key(email_id, html);
+        if self.html_cache.failure_of(key).is_some() {
+            return Vec::new();
+        }
+        let doc = match self.html_cache.doc_for(key, html, false) {
+            Some(doc) => doc,
+            None => return Vec::new(),
+        };
+        let entry = match self.html_cache.map.get_mut(&key) {
+            Some(CacheEntry::Doc(entry)) => entry,
+            _ => unreachable!("doc_for 已保证条目为 Doc"),
+        };
+        entry
+            .remote_urls
+            .get_or_init(|| collect_remote_image_urls(&doc))
+            .clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +278,9 @@ struct CachedDoc {
     /// `OnceLock` 随之 Sync；`get_or_init` 值语义与 OnceCell 相同）——T11
     /// 「OnceCell 口径」注记随迁移变更备案。
     dark_doc: OnceLock<HtmlDocument>,
+    /// 远程图 URL 清单（review M-5：随缓存条目一次计算——此前视图每帧
+    /// 全文档遍历重收集，O(doc)/帧；浅/深通道的 Remote URL 相同）。
+    remote_urls: OnceLock<Vec<String>>,
 }
 
 /// 缓存条目值：管线成功产物或失败结论（终审 I-2 负缓存）。
@@ -391,6 +413,7 @@ impl EmailHtmlCache {
             CacheEntry::Doc(CachedDoc {
                 doc,
                 dark_doc: OnceLock::new(),
+                remote_urls: OnceLock::new(),
             }),
         );
     }

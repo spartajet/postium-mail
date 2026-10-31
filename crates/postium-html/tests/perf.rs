@@ -13,7 +13,7 @@ use postium_html::types::{Block, InlineRun, SafeUrl};
 
 /// 合成语料：50 张两列表格（每表 2 个 http 链接 → 100 链接），单元格内长段落
 /// 与表后填充段落补足字节预算；节点规模约 2000（元素 + 文本，构造估算），远低于
-/// `max_nodes`（20_000），字节量低于 `max_bytes`（1MB），两道限制均不触发。
+/// `max_nodes`（20_000），字节量低于 `max_bytes`（4MB），两道限制均不触发。
 fn synthetic_html() -> String {
     const TABLES: usize = 50;
     const TARGET_BYTES: usize = 500_000;
