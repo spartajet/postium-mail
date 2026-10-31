@@ -292,6 +292,56 @@ mod tests {
         );
     }
 
+    /// SPECIAL-USE 标注与名字启发式冲突时，标注胜出（服务器标注优先）。
+    #[test]
+    fn special_use_beats_keyword_heuristic_on_conflict() {
+        // 名字 "Sent" 会被关键词层判为 Sent，但服务器标注 \Trash：必须按 Trash 归类，
+        // 且关键词层不得再把它认成 Sent。
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "Sent".into(),
+                special_use: vec![SpecialUseFlag::Trash],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(reg.classify("Sent"), Some(FolderCategory::Trash));
+        assert!(reg.resolve(FolderCategory::Sent).is_empty());
+        assert_eq!(reg.resolve(FolderCategory::Trash), vec!["Sent".to_string()]);
+    }
+
+    /// \All（Gmail All Mail）经 registry 整体链路归为 Archive。
+    #[test]
+    fn all_flag_classifies_gmail_all_mail_as_archive() {
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "[Gmail]/All Mail".into(),
+                special_use: vec![SpecialUseFlag::All],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(
+            reg.resolve_one(FolderCategory::Archive).as_deref(),
+            Some("[Gmail]/All Mail")
+        );
+    }
+
+    /// \Flagged 不映射类别：该文件夹仍按名字启发式识别，不因携带标注而跳过。
+    #[test]
+    fn flagged_only_folder_falls_through_to_keyword_layer() {
+        // "&XfJT0ZAB-" 解码为 "已发送"（关键词层可识别），但服务器只给了 \Flagged
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "&XfJT0ZAB-".into(),
+                special_use: vec![SpecialUseFlag::Flagged],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(
+            reg.resolve_one(FolderCategory::Sent).as_deref(),
+            Some("&XfJT0ZAB-")
+        );
+    }
+
     #[test]
     fn keyword_layer_identifies_netease_sent_decoded() {
         // 网易已发送编码名 &XfJT0ZAB- 解码后为 "已发送"

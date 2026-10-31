@@ -625,6 +625,56 @@ mod tests {
         );
     }
 
+    /// SyncNow LIST 后的 SPECIAL-USE 角色回写：文件夹名字不在关键词表、也不在
+    /// provider 候选名里，仅凭服务器 \Sent 标注也应把 `folder_category` 落库。
+    #[tokio::test]
+    async fn sync_now_persists_special_use_folder_category() {
+        crate::domain::providers::pool::init_provider_pool();
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        seed_account_row(&db).await;
+
+        let factory = ScriptedSyncFactory {
+            session: MockSession {
+                list_folders: vec![FolderInfo {
+                    name: "SysVault".into(),
+                    delimiter: None,
+                    flags: vec![],
+                    special_use: vec![crate::domain::folders::special_use::SpecialUseFlag::Sent],
+                    no_select: false,
+                }],
+                ..Default::default()
+            },
+        };
+        let (handle, engine) = AccountEngine::new(
+            test_account(1),
+            ConnectionPool::new(Arc::new(factory), Arc::new(AtomicUsize::new(0))),
+            db.clone(),
+            16,
+        );
+        let (event_tx, _event_rx) = progress_channel();
+        let task = tokio::spawn(engine.run(event_tx));
+
+        let result = handle
+            .request(|reply| EngineCommand::SyncNow { folder: None, events: None, reply })
+            .await;
+        assert!(result.is_ok(), "SyncNow 应回执成功: {result:?}");
+
+        let state = crate::infrastructure::storage::repository::sync_repo::get_sync_state(
+            &db, 1, "SysVault",
+        )
+        .await
+        .unwrap()
+        .expect("SPECIAL-USE 文件夹应已写入 sync_state");
+        assert_eq!(
+            state.folder_category.as_deref(),
+            Some("sent"),
+            "服务器 \\Sent 标注应回写为 sent 类别"
+        );
+
+        handle.send(EngineCommand::Shutdown).await.unwrap();
+        task.await.unwrap();
+    }
+
     /// SyncNow 指定单文件夹：即使服务器 LIST 不含该文件夹也应同步。
     #[tokio::test]
     async fn sync_now_with_explicit_folder_skips_listing() {
