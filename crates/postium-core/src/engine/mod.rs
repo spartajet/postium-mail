@@ -12,6 +12,7 @@ pub mod pool;
 
 pub mod commands;
 pub mod actor;
+pub mod idle;
 pub mod registry;
 pub mod access;
 pub mod sync;
@@ -21,3 +22,4 @@ pub use factory::{RealSessionFactory, SessionFactory};
 pub use pool::{ConnectionPool, PooledSession, PoolConnect};
 pub use actor::{AccountEngine, EngineHandle};
 pub use commands::{EngineCommand, EngineEvent};
+pub use idle::{IdleConnect, IdleSupervisor, MAX_WATCHED, run_idle_loop, should_degrade, watch_changes};

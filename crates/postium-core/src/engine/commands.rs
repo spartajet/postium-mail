@@ -82,6 +82,9 @@ pub enum EngineCommand {
         section_path: String,
         reply: oneshot::Sender<Result<Option<FetchedBodySection>, MailError>>,
     },
+    /// UI 浏览文件夹：更新 IDLE watch requested 集合（最近使用序，IdleManager
+    /// 据此启停文件夹的 IDLE 任务——INBOX 恒定 watch）。
+    WatchFolder { folder: String },
     /// 关闭引擎（账号删除/退出）。
     Shutdown,
 }

@@ -4,6 +4,7 @@ use crate::domain::folders::{FolderCategory, FolderRegistry, RemoteFolder};
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::{SyncEventTx, SyncProgress, SyncProgressEvent, SyncStage};
 use crate::engine::commands::EngineCommand;
+use crate::engine::idle::{IdleConnect, IdleSupervisor};
 use crate::engine::pool::ConnectionPool;
 use crate::engine::sync::{
     FolderSyncOutcome, LocalSyncState, ServerMailboxMeta, decide_plan, execute_plan,
@@ -12,6 +13,7 @@ use crate::error::MailError;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::repository::{account_repo, sync_repo};
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 /// 引擎运行句柄：向 Actor 发命令。
@@ -46,9 +48,13 @@ pub struct AccountEngine {
     /// 引擎绑定的账号快照（SyncNow 分类回写 / 日志用）。
     pub account: accounts::Model,
     rx: mpsc::Receiver<EngineCommand>,
+    /// 命令发送端克隆（IDLE 循环回发 SyncNow / WatchFolder 用）。
+    self_tx: mpsc::Sender<EngineCommand>,
     pub pool: ConnectionPool,
     /// 同步落库连接（sync_state 读写 + 邮件入库由执行层完成）。
     pub db: DbConn,
+    /// IDLE 专属连接工厂（生产注入；测试传 None——不启动 idle 任务）。
+    idle_factory: Option<Arc<dyn IdleConnect>>,
 }
 
 impl AccountEngine {
@@ -57,17 +63,30 @@ impl AccountEngine {
         pool: ConnectionPool,
         db: DbConn,
         buffer: usize,
+        idle_factory: Option<Arc<dyn IdleConnect>>,
     ) -> (EngineHandle, Self) {
         let account_id = account.id;
         let (tx, rx) = mpsc::channel(buffer.max(16));
+        let self_tx = tx.clone();
         (
             EngineHandle { account_id, tx },
-            Self { account, rx, pool, db },
+            Self { account, rx, self_tx, pool, db, idle_factory },
         )
     }
 
     /// 命令循环（tokio::spawn 此函数）。同步进度经事件出口转发。
+    ///
+    /// 入口即启动 IdleManager（工厂注入时）：INBOX 恒定 watch，
+    /// `WatchFolder` 命令驱动最近浏览文件夹的启停。
     pub async fn run(mut self, events: SyncEventTx) {
+        let mut supervisor = self
+            .idle_factory
+            .take()
+            .map(|f| IdleSupervisor::new(self.account.clone(), f, self.self_tx.clone()));
+        if let Some(sup) = supervisor.as_mut() {
+            sup.watch_folder(&events, "INBOX".to_string());
+        }
+
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
                 EngineCommand::FetchBody { folder, uid, reply } => {
@@ -169,8 +188,22 @@ impl AccountEngine {
                     };
                     let _ = reply.send(result);
                 }
-                EngineCommand::Shutdown => break,
+                EngineCommand::WatchFolder { folder } => {
+                    if let Some(sup) = supervisor.as_mut() {
+                        sup.watch_folder(&events, folder);
+                    }
+                }
+                EngineCommand::Shutdown => {
+                    if let Some(sup) = supervisor.as_mut() {
+                        sup.shutdown_all();
+                    }
+                    break;
+                }
             }
+        }
+        // rx 关闭（全部发送端丢弃）同样需要停掉 idle 任务
+        if let Some(sup) = supervisor.as_mut() {
+            sup.shutdown_all();
         }
         self.pool.shutdown().await;
     }
@@ -492,6 +525,7 @@ mod tests {
             ConnectionPool::new(Arc::new(MockFactory::new(false)), count),
             db,
             16,
+            None,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -512,6 +546,7 @@ mod tests {
             ConnectionPool::new(Arc::new(MockFactory::new(false)), count),
             db,
             16,
+            None,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -540,6 +575,7 @@ mod tests {
             ConnectionPool::new(Arc::new(MockFactory::new(false)), count),
             db,
             16,
+            None,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -577,6 +613,7 @@ mod tests {
             ConnectionPool::new(Arc::new(factory), Arc::new(AtomicUsize::new(0))),
             db.clone(),
             16,
+            None,
         );
         let (event_tx, event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx.clone()));
@@ -650,6 +687,7 @@ mod tests {
             ConnectionPool::new(Arc::new(factory), Arc::new(AtomicUsize::new(0))),
             db.clone(),
             16,
+            None,
         );
         let (event_tx, _event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx));
@@ -695,6 +733,7 @@ mod tests {
             ConnectionPool::new(Arc::new(factory), Arc::new(AtomicUsize::new(0))),
             db.clone(),
             16,
+            None,
         );
         let (event_tx, _event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx));

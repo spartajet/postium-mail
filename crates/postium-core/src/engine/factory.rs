@@ -4,6 +4,7 @@ use crate::domain::auth::AuthManager;
 use crate::domain::auth::manager::Credentials;
 use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::engine::capabilities::CapabilitySet;
+use crate::engine::idle::IdleConnect;
 use crate::engine::pool::{PooledSession, PoolConnect};
 use crate::engine::transport::{ImapSession, RealSession};
 use crate::error::MailError;
@@ -25,9 +26,9 @@ pub struct RealSessionFactory {
     pub account: accounts::Model,
 }
 
-#[async_trait]
-impl SessionFactory for RealSessionFactory {
-    async fn connect(&self) -> Result<(Box<dyn ImapSession>, CapabilitySet), MailError> {
+impl RealSessionFactory {
+    /// 建立已认证 + 已 ENABLE 的具体客户端与能力集（池会话与 IDLE 专属连接共用）。
+    async fn connect_client(&self) -> Result<(ImapClient, CapabilitySet), MailError> {
         let account = &self.account;
         let provider_pool = PROVIDER_POOL
             .get()
@@ -44,16 +45,31 @@ impl SessionFactory for RealSessionFactory {
             )
             .await?;
         let imap_config = imap_config_from_account(account)?;
-        let mut session: Box<dyn ImapSession> = match credentials {
-            Credentials::Password(password) => Box::new(RealSession::new(
-                ImapClient::connect(&imap_config, &account.email, &password).await?,
-            )),
-            Credentials::OAuth2 { access_token } => Box::new(RealSession::new(
-                ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await?,
-            )),
+        let mut client = match credentials {
+            Credentials::Password(password) => {
+                ImapClient::connect(&imap_config, &account.email, &password).await?
+            }
+            Credentials::OAuth2 { access_token } => {
+                ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await?
+            }
         };
-        let caps = CapabilitySet::parse(&session.capabilities().await?);
-        session.enable(&caps.enable_list()).await?;
+        let caps = CapabilitySet::parse(&client.capabilities().await?);
+        // 与 RealSession::enable 一致：无可 ENABLE 的扩展时跳过命令
+        let enable = caps.enable_list();
+        if !enable.is_empty() {
+            client
+                .run_command_and_check_ok(&format!("ENABLE {}", enable.join(" ")))
+                .await?;
+        }
+        Ok((client, caps))
+    }
+}
+
+#[async_trait]
+impl SessionFactory for RealSessionFactory {
+    async fn connect(&self) -> Result<(Box<dyn ImapSession>, CapabilitySet), MailError> {
+        let (client, caps) = self.connect_client().await?;
+        let session: Box<dyn ImapSession> = Box::new(RealSession::new(client));
         Ok((session, caps))
     }
 }
@@ -63,5 +79,14 @@ impl PoolConnect for RealSessionFactory {
     async fn connect(&self) -> Result<PooledSession, MailError> {
         let (session, caps) = SessionFactory::connect(self).await?;
         Ok(PooledSession { session, caps })
+    }
+}
+
+/// IDLE 专属连接：复用同一连接/能力探测逻辑，但保留具体 `ImapClient`
+/// （`into_idle` 消费会话所需，trait object 无法回退）。
+#[async_trait]
+impl IdleConnect for RealSessionFactory {
+    async fn connect_idle(&self) -> Result<(ImapClient, CapabilitySet), MailError> {
+        self.connect_client().await
     }
 }

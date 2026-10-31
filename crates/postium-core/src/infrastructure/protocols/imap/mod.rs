@@ -616,6 +616,26 @@ impl ImapClient {
         Ok(())
     }
 
+    /// 转入 IDLE 模式（消费会话——IDLE 连接是专属连接）。
+    ///
+    /// 返回的 `Handle` 需先 `init()` 发出 IDLE 命令，再 `wait_with_timeout()`
+    /// 等待服务器推送。退出 IDLE：drop `StopSource` 只会中断等待
+    /// （wait 返回 `ManualInterrupt`，**不发 DONE**）；显式发 DONE 并取回
+    /// 会话须调 `Handle::done()`（消费 Handle，返回 `Session`）。
+    pub fn into_idle(
+        self,
+    ) -> async_imap::extensions::idle::Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>
+    {
+        self.session.idle()
+    }
+
+    /// 从 `Handle::done()` 返回的会话重建客户端（IDLE 专属连接跨轮复用）。
+    pub(crate) fn from_idle_session(
+        session: async_imap::Session<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+    ) -> Self {
+        Self { session }
+    }
+
     /// 发送任意命令并检查 OK（引擎 ENABLE 用）。
     pub async fn run_command_and_check_ok(&mut self, cmd: &str) -> Result<(), MailError> {
         self.session

@@ -1,6 +1,7 @@
 //! 引擎注册表：账号 id → 引擎句柄（进程级单例）。
 
 use crate::engine::actor::{AccountEngine, EngineHandle};
+use crate::engine::idle::IdleConnect;
 use crate::engine::pool::{ConnectionPool, PoolConnect};
 use crate::domain::sync::SyncEventTx;
 use crate::infrastructure::storage::DbConn;
@@ -18,6 +19,8 @@ fn registry() -> &'static Mutex<HashMap<i32, EngineHandle>> {
 /// 确保某账号的引擎在运行（已运行则返回句柄克隆，否则启动新引擎）。
 ///
 /// `db` 供引擎 SyncNow 落库使用；引擎构造时的账号快照取自 `account`。
+/// 工厂须同时实现 [`IdleConnect`]：引擎入口即启动 INBOX 的 IDLE 监听
+/// （IdleManager，专属连接与池连接分离）。
 pub fn ensure_engine<F>(
     account: &accounts::Model,
     factory: Arc<F>,
@@ -25,14 +28,15 @@ pub fn ensure_engine<F>(
     events: SyncEventTx,
 ) -> Result<EngineHandle, MailError>
 where
-    F: PoolConnect + 'static,
+    F: PoolConnect + IdleConnect + 'static,
 {
     let mut map = registry().lock().expect("registry 锁");
     if let Some(h) = map.get(&account.id) {
         return Ok(h.clone());
     }
+    let idle_factory: Arc<dyn IdleConnect> = factory.clone();
     let pool = ConnectionPool::new(factory, Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-    let (handle, engine) = AccountEngine::new(account.clone(), pool, db, 32);
+    let (handle, engine) = AccountEngine::new(account.clone(), pool, db, 32, Some(idle_factory));
     tokio::spawn(engine.run(events));
     map.insert(account.id, handle.clone());
     Ok(handle)
