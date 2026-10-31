@@ -144,7 +144,6 @@ pub use folder_sync_dispatcher::SyncOrchestrator;
 pub use scheduler::SyncScheduler;
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use smol::channel::Sender;
 
 use crate::infrastructure::protocols::types::{EmailHeader, WholeEmailDto};
@@ -273,7 +272,7 @@ pub(crate) async fn whole_emails_to_contacts(db: &DbConn, emails: &[WholeEmailDt
 }
 
 /// 初始同步范围
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InitialSyncRange {
     Week,
@@ -309,7 +308,7 @@ pub struct SyncWindow {
 ///     console.log(`消息: ${progress.message}`);
 /// });
 /// ```
-#[derive(Debug, Clone, Serialize, Type)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SyncProgressEvent {
     /// 同步进度信息
     pub progress: SyncProgress,
@@ -384,7 +383,7 @@ impl SyncProgressEmitter {
 ///                 ↓                  ↓
 ///               Error              Error
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SyncStage {
     /// 正在连接到 IMAP 服务器
     Connecting,
@@ -426,7 +425,7 @@ pub enum SyncStage {
 /// };
 /// emitter.emit(progress);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncProgress {
     /// 正在同步的账号 ID
     pub account_id: i32,
@@ -467,7 +466,7 @@ pub struct SyncProgress {
 /// println!("同步完成: 新增 {} 封, 更新 {} 封, 删除 {} 封, 耗时 {} ms",
 ///     result.new_emails, result.updated_emails, result.deleted_emails, result.duration_ms);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncResult {
     /// 新增的邮件数量
     pub new_emails: usize,
@@ -499,7 +498,7 @@ pub struct SyncResult {
 /// };
 /// println!("{}: {} 封邮件, {} 封未读", stat.folder, stat.total, stat.unread);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderStat {
     /// 文件夹名称
     pub folder: String,

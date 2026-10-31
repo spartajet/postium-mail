@@ -18,13 +18,12 @@ use crate::error::MailError;
 use rusqlite::OptionalExtension as _;
 use crate::infrastructure::storage::database::DbConn;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// 联系人 DTO（完整展示视图）
 ///
 /// `extra_emails` 与 `phones` 在数据库中以 JSON 字符串存储，读出时反序列化为列表。
 /// `groups` 由仓储在查询后通过第二条 SQL 批量组装，避免 N+1。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactDto {
     pub id: i32,
     pub email: String,
@@ -45,7 +44,7 @@ pub struct ContactDto {
 }
 
 /// 联系人分组 DTO
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactGroupDto {
     pub id: i32,
     pub name: String,
@@ -53,7 +52,7 @@ pub struct ContactGroupDto {
 }
 
 /// 联系人分页列表响应
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactListResponse {
     pub contacts: Vec<ContactDto>,
     pub total: u64,
@@ -65,7 +64,7 @@ pub struct ContactListResponse {
 ///
 /// `count` 由 [`group_list`] 通过 LEFT JOIN `contact_group_members` 聚合，
 /// 无成员的分组计数为 0（LEFT JOIN 保证分组本身仍出现在结果中）。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactGroupWithCount {
     pub id: i32,
     pub name: String,
@@ -1008,7 +1007,7 @@ pub async fn backfill_from_emails(db: &DbConn) -> Result<usize, MailError> {
 
 
 /// CardDAV 绑定 DTO（不含密码——密码经 AuthManager 托管，键 `dav:{account_id}`）。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DavBindingDto {
     pub id: i32,
     pub account_id: i32,

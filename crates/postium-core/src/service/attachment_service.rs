@@ -30,7 +30,6 @@ use crate::infrastructure::storage::repository::attachment_repo;
 use crate::service::mail_operation::{MailRemoteOperator, RealMailRemoteOperator};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 // ─── 常量定义 ───
 
@@ -61,7 +60,7 @@ pub const SMALL_ATTACHMENT_LIMIT_BYTES: i64 = 10 * 1024 * 1024;
 /// - `is_inline`: 是否为内联资源（disposition 为 inline 或存在 content_id）
 /// - `is_cached`: 是否已缓存到本地磁盘
 /// - `cache_path`: 本地缓存文件的绝对路径（未缓存时为 None）
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AttachmentDto {
     /// 数据库主键 ID
     pub id: i32,
@@ -94,7 +93,7 @@ pub struct AttachmentDto {
 ///
 /// - `content_id`: 内联资源的 Content-ID（不含尖括号）
 /// - `url`: 本地缓存文件的路径，作为 `cid:` 的替换目标
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InlineAttachmentDto {
     /// 内联资源 Content-ID
     pub content_id: String,

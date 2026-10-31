@@ -1,7 +1,7 @@
 /// 同步错误数据模型 — 对应数据库 sync_errors 表
 ///
 /// 记录邮件同步过程中发生的错误，用于错误追踪和重试。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 错误记录唯一 ID（自增主键）
     pub id: i32,

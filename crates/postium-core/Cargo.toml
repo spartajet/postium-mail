@@ -17,8 +17,6 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry", "env-filter", "fmt", "ansi"] }
 async-trait.workspace = true
-specta = { version = "=2.0.0-rc.24", features = ["chrono", "derive"] }
-
 # 邮件协议与工具（版本照抄 src-tauri/Cargo.toml）
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 lettre = { version = "0.11", features = ["tokio1-native-tls"] }

@@ -20,7 +20,6 @@ use crate::infrastructure::protocols::types::FolderMetadata;
 use async_imap::imap_proto::NameAttribute;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use utf7_imap::decode_utf7_imap;
 
 // ─── 内部模块 ───
@@ -36,7 +35,7 @@ pub use util::Xoauth2Authenticator;
 /// IMAP 文件夹信息（LIST 命令返回）
 ///
 /// 包含文件夹的名称、分隔符、属性和特殊用途标记。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderInfo {
     /// 文件夹名称（可能包含 UTF-7 编码）
     pub name: String,
@@ -55,7 +54,7 @@ pub struct FolderInfo {
 /// 邮件头部摘要（UID FETCH 返回的轻量信息）
 ///
 /// 包含邮件的基本信息，用于列表展示和快速预览。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawEmailHeader {
     /// IMAP UID
     pub uid: u32,
@@ -76,7 +75,7 @@ pub struct RawEmailHeader {
 /// 选中文件夹后的邮箱状态信息（SELECT/EXAMINE 命令返回）
 ///
 /// 包含文件夹的邮件计数和 UID 相关信息。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailboxInfo {
     /// 文件夹中的邮件总数
     pub exists: u32,

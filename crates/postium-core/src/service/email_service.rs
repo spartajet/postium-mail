@@ -21,7 +21,6 @@ use crate::service::mail_send::{
     smtp_config_from_account, validate_send_request,
 };
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::sync::Arc;
 
 pub use crate::service::email_address::{
@@ -83,7 +82,7 @@ pub use crate::infrastructure::storage::repository::contact_repo::{
 ///     limit
 /// ).await?;
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EmailCategory {
     /// 收件箱
@@ -125,7 +124,7 @@ pub enum EmailCategory {
 /// - `is_starred`: 是否星标
 /// - `sent_at`: 发送时间（Unix 时间戳，秒）
 /// - `has_attachments`: 是否有附件（根据附件表真实计算）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailDto {
     /// 数据库主键
     pub id: i32,
@@ -170,7 +169,7 @@ pub struct EmailDto {
 /// - `body_text`: 纯文本正文
 /// - `body_html`: HTML 格式正文
 /// - `attachments`: 附件列表
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailDetail {
     /// 邮件基本信息
     #[serde(flatten)]
@@ -189,7 +188,7 @@ pub struct EmailDetail {
     pub attachments: Vec<AttachmentDto>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ReloadEmailResult {
     Reloaded { email: EmailDetail },
@@ -206,7 +205,7 @@ pub enum ReloadEmailResult {
 /// - `total`: 总邮件数
 /// - `page`: 当前页码（从 1 开始）
 /// - `limit`: 每页数量
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailListResponse {
     /// 当前页的邮件列表
     pub emails: Vec<EmailDto>,
@@ -225,7 +224,7 @@ pub struct EmailListResponse {
 /// - `imported`: 成功导入的联系人数量
 /// - `skipped`: 被跳过的条目数量（邮箱已存在 / 条目缺邮箱等）
 /// - `errors`: 每个被跳过或失败条目的原因描述（与 `skipped` 对应）
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportReport {
     /// 成功导入的联系人数量
     pub imported: usize,
@@ -263,7 +262,7 @@ pub struct ImportReport {
 /// };
 /// await sendEmail(req);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendEmailRequest {
     /// 发送账号 ID
     pub account_id: i32,

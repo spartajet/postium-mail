@@ -1,5 +1,9 @@
 //! Postium Mail 应用入口：数据目录 → 核心服务装配 → GPUI 主窗口。
 
+// GUI 应用不挂控制台（Explorer 启动不再弹黑窗、发行包不携带控制台子系统）。
+// debug 构建保留控制台：开发期终端日志是排障主通道（log.rs dev DEBUG）。
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod i18n;
 mod nav;

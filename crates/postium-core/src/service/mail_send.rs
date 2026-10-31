@@ -12,11 +12,10 @@ use lettre::address::{Address, Envelope};
 use lettre::message::header::{ContentType, Date, MessageId};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::path::Path;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ComposeAttachmentInput {
     pub path: String,
     pub filename: Option<String>,
@@ -24,7 +23,7 @@ pub struct ComposeAttachmentInput {
     pub size: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocalAttachmentDraft {
     pub path: String,
     pub filename: String,
@@ -32,7 +31,7 @@ pub struct LocalAttachmentDraft {
     pub size: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendEmailResponse {
     pub message_id: String,
     pub local_email_id: i32,

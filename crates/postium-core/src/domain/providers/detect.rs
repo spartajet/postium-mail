@@ -21,12 +21,11 @@ use crate::{domain::providers::pool::PROVIDER_POOL, error::MailError};
 use super::ProviderInfo;
 use super::pool::ProviderPool;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// 服务商探测结果。
 ///
 /// 由 [`detect_provider`] 返回，描述一个邮箱地址是否匹配到服务商，以及匹配到的服务商元信息。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderDetectionResult {
     /// 是否成功探测到匹配的服务商。
     pub detected: bool,

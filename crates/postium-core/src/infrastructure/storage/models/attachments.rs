@@ -1,7 +1,7 @@
 /// 附件数据模型 — 对应数据库 attachments 表
 ///
 /// 存储邮件附件的元数据，支持按 MIME section 路径惰性下载附件内容。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 附件唯一 ID（自增主键）
     pub id: i32,

@@ -1,7 +1,7 @@
 /// 账号数据模型 — 对应数据库 accounts 表
 ///
 /// 存储用户添加的邮箱账号信息，包括服务器连接配置、认证方式和同步状态。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 账号唯一 ID（自增主键）
     pub id: i32,

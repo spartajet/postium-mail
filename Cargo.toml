@@ -9,7 +9,15 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "fs",
+    "net",
+    "io-util",
+] }
 tokio-rusqlite = "0.7"
 rusqlite = { version = "0.37", features = ["bundled", "chrono"] }
 smol = "2"
@@ -20,3 +28,18 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "fmt", "ansi"] }
 async-trait = "0.1"
+
+# 体积优化（用户反馈：发行包过大，release 49.6MB → 目标 30MB 内）：
+# - lto=fat + codegen-units=1：跨 crate 全程序优化，未触达代码与泛型实例
+#   最大限度死剥离（含 gpui-pre 硬编码的 image 全家桶编解码器中未被引用路径）；
+# - opt-level="z"：体积优先（邮件客户端 CPU 热点主要是文本排版，"z" 相对
+#   默认 3 的运行回退远小于二进制收益；如需性能可回调 "s"/"3"）；
+# - strip="symbols"：剥离符号表与调试信息（崩溃定位走 PDB/发布流水线）；
+# - 不设 panic="abort"：托盘初始化依赖 catch_unwind 做「无托盘环境优雅
+#   降级」（tray.rs，headless CI/无托盘桌面可用性保证），abort 会把降级
+#   路径变成进程崩溃，仅省 1-3% 不值。
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

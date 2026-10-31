@@ -37,7 +37,6 @@ use oauth2::{
     basic::BasicClient,
 };
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -72,7 +71,7 @@ fn ensure_credentials(provider_id: &str, config: &crate::domain::providers::OAut
 }
 
 /// OAuth2 授权 URL 结果
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuth2AuthUrl {
     /// 完整的授权 URL，前端打开此 URL 进入服务商登录/授权页
     pub url: String,
@@ -94,7 +93,7 @@ pub struct OAuth2TokenResult {
 }
 
 /// OAuth2 授权完成信息（返回给前端的最小信息）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuth2CompletedInfo {
     /// 授权成功的邮箱地址（token 等敏感信息不返回前端）
     pub email: String,
@@ -103,7 +102,7 @@ pub struct OAuth2CompletedInfo {
 /// OAuth2 轮询状态
 ///
 /// 前端通过 [`OAuth2Manager::poll_oauth2`] 周期性轮询某个 `state` 的结果。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OAuth2PollResult {
     /// 授权仍在进行中（回调尚未到达或 token 交换未完成）
     Pending,

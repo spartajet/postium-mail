@@ -1,7 +1,7 @@
 /// 同步状态数据模型 — 对应数据库 sync_state 表
 ///
 /// 跟踪每个账号下各文件夹的 IMAP 同步进度，用于增量同步和断点续传。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 同步状态唯一 ID（自增主键）
     pub id: i32,

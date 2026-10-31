@@ -1,7 +1,7 @@
 /// 标签数据模型 — 对应数据库 labels 表
 ///
 /// 存储用户自定义的邮件标签（分类标记），每个标签属于特定账号。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 标签唯一 ID（自增主键）
     pub id: i32,

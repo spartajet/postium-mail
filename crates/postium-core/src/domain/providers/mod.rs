@@ -99,7 +99,6 @@ pub mod pool;
 pub use pool::ProviderPool;
 
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 // ═══════════════════════════════════════════════════════════════
 // 值对象 (Value Objects)
@@ -114,7 +113,7 @@ use specta::Type;
 ///
 /// - `Personal`: 个人邮箱（如 Gmail、QQ 邮箱）
 /// - `Enterprise`: 企业邮箱（自建域名邮箱）
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AccountType {
     /// 个人邮箱
     Personal,
@@ -136,7 +135,7 @@ pub enum AccountType {
 /// - `color`: 品牌颜色（十六进制，用于 UI 显示）
 /// - `icon`: 图标名称或 URL（用于 UI 显示）
 /// - `sort_order`: 排序权重（数值越小越靠前）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfo {
     /// 服务商唯一标识
     pub id: String,
@@ -164,7 +163,7 @@ pub struct ProviderInfo {
 ///
 /// - `Password`: 传统密码认证（用户名 + 密码）
 /// - `OAuth2`: OAuth2 令牌认证（更安全，支持令牌刷新）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthType {
     /// 密码认证
     Password,
@@ -204,7 +203,7 @@ impl AuthType {
 /// | Gmail | imap.gmail.com | 993 | Implicit |
 /// | Outlook | outlook.office365.com | 993 | Implicit |
 /// | QQ | imap.qq.com | 993 | Implicit |
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapServerConfig {
     /// IMAP 服务器主机名
     pub host: String,
@@ -231,7 +230,7 @@ pub struct ImapServerConfig {
 /// | Gmail | smtp.gmail.com | 465/587 | Implicit/StartTls |
 /// | Outlook | smtp.office365.com | 587 | StartTls |
 /// | QQ | smtp.qq.com | 465 | Implicit |
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SmtpServerConfig {
     /// SMTP 服务器主机名
     pub host: String,
@@ -256,7 +255,7 @@ pub struct SmtpServerConfig {
 /// - 推荐使用 `Implicit` 模式，安全性最高
 /// - `StartTls` 适用于不支持隐式 TLS 的服务器
 /// - 避免使用 `None` 模式，除非在本地测试环境
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SslMode {
     /// 不加密
     None,
@@ -286,7 +285,7 @@ pub enum SslMode {
 /// let mapping = provider.folder_mapping();
 /// // 文件夹分类统一使用 FolderRegistry（见 domain::folders 模块）。
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardFolder {
     /// 收件箱名称列表
     pub inbox: Vec<String>,
@@ -370,7 +369,7 @@ impl StandardFolder {
 ///
 /// - Google (Gmail): 支持 OAuth2 + PKCE
 /// - Microsoft (Outlook): 支持 OAuth2
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthConfig {
     pub client_id: String,
     pub client_secret: Option<String>,

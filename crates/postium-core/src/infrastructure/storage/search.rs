@@ -7,12 +7,11 @@
 use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 /// 全文搜索的返回结果
 ///
 /// 包含邮件基本信息及 FTS 相关性排名（rank），rank 越高表示匹配度越高。
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub id: i32,
     pub account_id: i32,

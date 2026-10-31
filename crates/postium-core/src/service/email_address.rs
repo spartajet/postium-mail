@@ -1,29 +1,28 @@
 use crate::error::MailError;
 use mail_parser::MessageParser;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ParsedEmailAddress {
     pub name: Option<String>,
     pub email: String,
     pub raw: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InvalidEmailAddress {
     pub raw: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DuplicateEmailAddress {
     pub raw: String,
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ParseEmailAddressesResponse {
     pub addresses: Vec<ParsedEmailAddress>,
     pub invalid: Vec<InvalidEmailAddress>,

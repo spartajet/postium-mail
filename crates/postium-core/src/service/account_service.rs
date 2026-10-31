@@ -7,7 +7,6 @@ use crate::service::account_connection::{
     ImapConnectionVerifier, RealImapConnectionVerifier, imap_config_from_create_request,
 };
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::sync::Arc;
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -53,7 +52,7 @@ use std::sync::Arc;
 /// - `account_type`: 账号类型（如 "personal", "work"）
 /// - `last_sync_at`: 上次同步的时间戳（Unix 时间戳，秒）
 /// - `created_at`: 账号创建时间（Unix 时间戳，秒）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountDto {
     /// 数据库主键 ID
     pub id: i32,
@@ -123,7 +122,7 @@ impl From<accounts::Model> for AccountDto {
 /// - `imap_port/smtp_port`: 自定义服务器端口
 /// - `imap_ssl_mode/smtp_ssl_mode`: SSL 模式
 /// - `account_type`: 账号类型
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateAccountRequest {
     /// 账号名称（用户自定义）
     pub name: String,
@@ -172,7 +171,7 @@ pub struct CreateAccountRequest {
 /// - 邮箱地址（email）不可更新，需要删除后重新创建
 /// - 密码更新使用专门的 `update_password` 方法
 /// - 认证信息不可通过此方法更新
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateAccountRequest {
     /// 账号 ID（必填）
     pub id: i32,

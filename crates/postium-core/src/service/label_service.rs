@@ -23,7 +23,6 @@ use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
 use crate::infrastructure::storage::repository::label_repo;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 // ═════════════════════════════════════════════════════════════════════════
 // 数据传输对象 (DTO)
@@ -39,7 +38,7 @@ use specta::Type;
 /// - `account_id`: 所属账号 ID，标签是账号级别的资源
 /// - `name`: 标签名称（用户自定义，如"工作"、"重要"）
 /// - `color`: 标签颜色（十六进制颜色值，如 "#ff5722"）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabelDto {
     /// 数据库主键 ID
     pub id: i32,
@@ -71,7 +70,7 @@ pub struct LabelDto {
 /// };
 /// const label = await createLabel(req);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateLabelRequest {
     /// 所属账号 ID
     pub account_id: i32,
@@ -95,7 +94,7 @@ pub struct CreateLabelRequest {
 ///
 /// - 标签 ID 不能更新，需要删除后重新创建
 /// - 所属账号 ID 不能更新
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateLabelRequest {
     /// 新的标签名称
     pub name: Option<String>,

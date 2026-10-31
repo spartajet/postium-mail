@@ -1,8 +1,7 @@
 use serde::Serialize;
-use specta::Type;
 
 /// 统一错误类型 — 前端通过 tauri-specta Result 模式拿到类型化错误
-#[derive(Debug, thiserror::Error, Type, Serialize)]
+#[derive(Debug, thiserror::Error, Serialize)]
 #[serde(tag = "type", content = "message")]
 pub enum MailError {
     #[error("账户不存在: {0}")]

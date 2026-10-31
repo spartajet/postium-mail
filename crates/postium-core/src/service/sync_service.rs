@@ -33,12 +33,11 @@ use crate::service::account_connection::imap_config_from_account;
 use crate::service::email_service::EmailCategory;
 use crate::service::email_service::local_folder_registry_inputs;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistorySyncState {
     pub account_id: i32,
     pub category: EmailCategory,
@@ -48,7 +47,7 @@ pub struct HistorySyncState {
     pub folders: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OlderSyncResult {
     pub new_emails: u64,
     pub updated_emails: u64,
@@ -58,14 +57,14 @@ pub struct OlderSyncResult {
     pub folders: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncAccountFailure {
     pub account_id: i32,
     pub email: Option<String>,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncAllAccountsResult {
     pub total: usize,
     pub succeeded: Vec<i32>,

@@ -14,10 +14,9 @@ use lettre::Message;
 use lettre::message::header::{ContentType, Date, MessageId};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveDraftRequest {
     pub draft_id: Option<i32>,
     pub account_id: i32,
@@ -31,7 +30,7 @@ pub struct SaveDraftRequest {
     pub attachments: Vec<ComposeAttachmentInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveDraftResponse {
     pub draft_id: i32,
     pub message_id: String,

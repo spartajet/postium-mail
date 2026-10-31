@@ -1,7 +1,7 @@
 /// 邮件数据模型 — 对应数据库 emails 表
 ///
 /// 存储从 IMAP 服务器同步的邮件数据，包含邮件元信息、正文和状态标志。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Model {
     /// 邮件唯一 ID（自增主键）
     pub id: i32,
