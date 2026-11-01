@@ -158,12 +158,31 @@ mod tests {
     }
 
     #[test]
-    fn resolve_none_subject_never_matches_by_subject() {
+    fn resolve_empty_subject_never_matches_by_subject() {
+        // subject 为空串（非 None）：规范化后为空键 → New，恒不触发主题查找
         let mut lk = MockLookup::default();
         lk.subject_hit = Some(9);
         let res = resolve_thread(&input_with_subject(""), &mut lk);
         assert!(matches!(res, ThreadResolution::New));
         assert_eq!(lk.subject_calls, 0, "空主题键恒不参与主题匹配");
+    }
+
+    #[test]
+    fn resolve_subject_none_chain_miss_is_new() {
+        // subject 为 None + 链 miss：unwrap_or("") 归一为空主题键 → New，且不得触发主题查找。
+        // 若实现中的 unwrap_or("") 被改坏（如改成 panic/跳过规范化），本测试即失败。
+        let mut lk = MockLookup::default();
+        lk.chain_hit = None;
+        lk.subject_hit = Some(9); // 即使 mock 声称主题可命中也不得被调用
+        let input = input_with_chain(vec!["<miss@x>"]); // subject 即为 None
+        assert_eq!(input.subject, None, "前置：确认本用例真正持有 None 主题");
+        let res = resolve_thread(&input, &mut lk);
+        assert!(matches!(res, ThreadResolution::New));
+        assert_eq!(lk.chain_calls, 1);
+        assert_eq!(
+            lk.subject_calls, 0,
+            "None 主题经 unwrap_or(\"\") 后为空键，不得触发主题查找"
+        );
     }
 
     // ---------- 分支 3：主题兜底 ----------
