@@ -721,6 +721,26 @@ fn spawn_tokok_delete(
     spawn_tokio(async move { api.delete_emails(vec![id]).await })
 }
 
+/// 供 e2e 驱动详情操作按钮的测试钩子（工具条按钮 on_click 同款 handler
+/// 链——按钮本体无探针，坐标点击脆弱；与 email_list::test_hooks 同款
+/// 口径，作用于当前展开封/当前详情）。
+#[cfg(test)]
+pub(crate) mod test_hooks {
+    use super::*;
+
+    /// 触发详情工具条「删除」按钮同款路径（时间线形态走
+    /// `refresh_timeline(removed_id)` 相邻迁移链路）。
+    pub(crate) fn delete_for_test(
+        view: &gpui_kit::Entity<EmailDetailView>,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::App,
+    ) {
+        view.update(cx, |view, cx| {
+            view.delete(&ClickEvent::default(), window, cx);
+        });
+    }
+}
+
 impl EmailDetailView {
     /// 详情中的纯文本正文（短借 store 取完即还——正文渲染需 `&mut App`，
     /// detail 共享借用不得跨越该调用）。

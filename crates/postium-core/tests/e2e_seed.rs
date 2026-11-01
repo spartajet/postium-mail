@@ -18,7 +18,8 @@ async fn test_seed_e2e_data_is_deterministic_and_idempotent() {
 
     assert_eq!(account_count, 2);
     // 48 固定夹具 + 5 封“今天锚定”日历夹具（UID 501–505）
-    assert_eq!(email_count, 53);
+    // + 2 封线程场景夹具（UID 601–602，经 save_batch_emails 落库）
+    assert_eq!(email_count, 55);
 
     let primary = account_by_email(&svc, "primary.e2e@postium.test").await;
     let secondary = account_by_email(&svc, "secondary.e2e@postium.test").await;
@@ -40,20 +41,21 @@ async fn test_seed_data_supports_category_queries_and_search() {
 
     let inbox = svc
         .email_service
-        .list_by_category(primary.id, EmailCategory::Inbox, 1, 30, false)
+        .list_by_category(primary.id, EmailCategory::Inbox, 1, 40, false)
         .await
         .unwrap();
-    // 24 固定 INBOX + 5 封今日锚定日历夹具
-    assert_eq!(inbox.total, 29);
-    assert_eq!(inbox.emails.len(), 29);
-    // 按时间倒序：最新一封是“后天 15:00”与“本月 15 日 12:00”两夹具中较晚者
-    // （月初 1–12 号运行时本月 15 日更晚，月中之后“后天”更晚——期望随运行日期计算）
+    // 24 固定 INBOX + 5 封今日锚定日历夹具 + 2 封线程场景夹具（601–602）
+    assert_eq!(inbox.total, 31);
+    assert_eq!(inbox.emails.len(), 31);
+    // 按时间倒序：最新一封是“线程探针 B（now+3 天）”与“本月 15 日 12:00”
+    // 两夹具中较晚者（线程探针恒晚于“后天 15:00”日历夹具；本月 15 日在
+    // now+3 天之后时（月初 1–12 号运行）以日历夹具为最新——期望随运行日期计算）
     assert_eq!(
         inbox
             .emails
             .first()
             .and_then(|email| email.subject.as_deref()),
-        Some(expected_latest_calendar_subject())
+        Some(expected_latest_inbox_subject())
     );
     assert!(
         inbox
@@ -164,9 +166,10 @@ async fn count_all(svc: &TestServices, table: &'static str) -> i64 {
         .unwrap()
 }
 
-/// 按 [`seed_e2e_data`] 日历夹具的时间规则（后天 15:00 vs 本月 15 日 12:00），
-/// 计算当前运行日期下 INBOX 最新一封日历夹具的主题。
-fn expected_latest_calendar_subject() -> &'static str {
+/// 按 [`seed_e2e_data`] 夹具时间规则（线程探针 B = now+3 天+60 秒 vs 本月
+/// 15 日 12:00 日历夹具；线程探针恒晚于“后天 15:00”夹具），计算当前
+/// 运行日期/时刻下 INBOX 最新一封的主题。
+fn expected_latest_inbox_subject() -> &'static str {
     use chrono::{Datelike, Duration, Local};
 
     let today = Local::now().date_naive();
@@ -174,13 +177,14 @@ fn expected_latest_calendar_subject() -> &'static str {
     let midmonth_ts = midmonth
         .and_hms_opt(12, 0, 0)
         .expect("构造夹具时间戳失败");
-    let future_ts = (today + Duration::days(2))
-        .and_hms_opt(15, 0, 0)
-        .expect("构造夹具时间戳失败");
-    if midmonth_ts > future_ts {
+    // 线程探针 B 的 sent_at = now + 3 天 + 60 秒（本地时刻基；与种子的
+    // Utc 秒级锚点存在毫秒级观测差，仅在“本月 15 日 12:00 整 ±1 秒”
+    // 边界运行时可能翻转——固定 12:00 夹具 vs 随机运行时刻，概率可忽略）
+    let probe_ts = Local::now().naive_local() + Duration::seconds(3 * 86_400 + 60);
+    if midmonth_ts > probe_ts {
         "Calendar Midmonth Epsilon"
     } else {
-        "Calendar Future Delta"
+        "Re: 线程化探针"
     }
 }
 

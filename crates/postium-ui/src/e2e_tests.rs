@@ -3253,3 +3253,439 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     );
     cx.run_until_parked();
 }
+
+// ---------------------------------------------------------------------------
+// threading Task 12 → 会话线程化全链路（seed 线程场景「线程化探针」两封经
+// save_batch_emails 生产归组路径落库）：默认平铺两行独立 → 切会话恰一行
+// （角标 2 + 未读点 1）→ 会话行点击时间线两卡/最新展开/未读清零 → 折叠卡
+// 展开切换 → 切回平铺两行恢复 + 档位 ui-state 持久化记忆 → 时间线内删除
+// 展开封相邻迁移（T10/T11 承接补测）。
+//
+// 会话档导航选 **AccountFolder{主账号, INBOX}**（folder 精确匹配，不依赖
+// sync_state.folder_category——e2e 种子库同步关闭无文件夹分类行，AllInbox/
+// 虚拟分类的会话查询按分类过滤会恒空；T11 e2e 同款选择）。
+//
+// 切档交互分层：主流程直写 view_mode + 导航重装（T11 同款——真实
+// set_view_mode 会把档位持久化到进程共享 ui-state.json，长窗口污染并行
+// 测试的默认平铺档）；真实持久化路径（toggle 按钮 handler 体同款
+// set_view_mode）在步骤⑤毫秒级窗口内专门覆盖。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn email_threading_conversation_view(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    // 步骤⑤持久化断言写共享 ui-state.json：进程级共享目录 + 与主题/放行
+    // 记忆测试串行化（防读改写交错丢字段）
+    force_e2e_data_dir();
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+
+    // email_view_mode 兜底恢复：并行测试启动读档默认会话档时，种子库的
+    // 分类会话查询恒空 → 平铺断言全数击穿。前置净化 + Drop 兜底保证本
+    // 测试任意出口（含断言失败）恢复 flat（缺省/未知值同 Flat 解析）。
+    fn sanitize_view_mode_flat() {
+        let mut ui = crate::ui_state::load();
+        if ui.email_view_mode.as_deref() != Some("flat") {
+            ui.email_view_mode = Some("flat".to_string());
+            crate::ui_state::save(&ui);
+        }
+    }
+    struct RestoreFlat;
+    impl Drop for RestoreFlat {
+        fn drop(&mut self) {
+            sanitize_view_mode_flat();
+        }
+    }
+    sanitize_view_mode_flat();
+    let _restore_flat = RestoreFlat;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+
+    // 等账号装载 settle（默认 Flat 档）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    let api2 = with_app(cx, |app| shell.read(app).api.clone());
+    let primary_account = crate::runtime::runtime()
+        .block_on(async { api2.list_accounts().await.unwrap() })
+        .into_iter()
+        .find(|a| a.email == "primary.e2e@postium.test")
+        .expect("种子主账号应存在")
+        .id;
+
+    // 导航主账号 INBOX（AccountFolder 形态，见测试头注释）
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            let nav = NavTarget::AccountFolder {
+                account_id: primary_account,
+                folder: "INBOX".to_string(),
+            };
+            shell.nav = nav.clone();
+            shell.emails.update(cx, |store, cx| {
+                store.navigate(nav, &api2, cx);
+            });
+        });
+    });
+
+    // ---- ① 默认平铺：两封探针邮件独立成行（既有形态断言：store 行集合）----
+    let (id_a, id_b) = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            let id_a = store
+                .emails
+                .iter()
+                .find(|e| e.subject.as_deref() == Some("线程化探针"))
+                .map(|e| e.id);
+            let id_b = store
+                .emails
+                .iter()
+                .find(|e| e.subject.as_deref() == Some("Re: 线程化探针"))
+                .map(|e| e.id);
+            id_a.zip(id_b)
+        })
+    });
+    assert_ne!(id_a, id_b, "平铺档两封探针邮件应各自独立成行");
+
+    // 档位切换 helper：直写 view_mode + 导航重装（见测试头注释「切档交互分层」）
+    let switch_mode = |cx: &mut VisualTestContext, mode: crate::stores::emails::EmailViewMode| {
+        with_app_mut(cx, |app| {
+            let api = shell.read(app).api.clone();
+            shell.update(app, |shell, cx| {
+                shell.emails.update(cx, |store, cx| {
+                    let nav = store.nav.clone();
+                    store.view_mode = mode;
+                    store.navigate(nav, &api, cx);
+                });
+            });
+        });
+    };
+
+    // ---- ② 切会话档：探针线程恰一行（角标 2 + 未读点 1）----
+    switch_mode(cx, crate::stores::emails::EmailViewMode::Threaded);
+    let probe = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .find(|c| c
+                    .subject
+                    .as_deref()
+                    .is_some_and(|s| s.contains("线程化探针")))
+                .cloned()
+        })
+    });
+    let thread_id = probe.thread_id;
+    assert_eq!(probe.total, 2, "会话角标应恰 2 封");
+    assert_eq!(probe.unread, 1, "未读点应恰 1（A 未读、B 已读）");
+    assert!(!probe.starred_any);
+    assert_eq!(
+        probe.sender_email, "c@external.test",
+        "会话头应取最新封（B）发件人"
+    );
+
+    // 行渲染探针：conv-row-{thread_id} 可见（行可见 = 行内角标/未读点随
+    // total/unread 确定性渲染）；切档按钮探针在渲染树
+    let conv_selector: &'static str = Box::leak(format!("conv-row-{thread_id}").into_boxed_str());
+    wait_for(cx, |cx| {
+        cx.refresh().ok()?;
+        cx.debug_bounds(conv_selector).filter(|b| {
+            b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.)
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds("view-mode-toggle").is_some(),
+        "会话/平铺切档按钮应在渲染树"
+    );
+
+    // ---- ③ 点击会话行（真实点击：探针 bounds → simulate_click 命中测试）----
+    // → 时间线两卡、最新（B）展开、未读清零
+    {
+        let bounds = cx.debug_bounds(conv_selector).expect("会话行探针应存在");
+        cx.simulate_click(
+            gpui_pre::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + gpui_kit::px(10.),
+            ),
+            gpui_pre::Modifiers::default(),
+        );
+    }
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).emails.read(app).selected_thread == Some(thread_id)).then_some(())
+        })
+    });
+
+    let card_a: &'static str = Box::leak(format!("thread-card-{id_a}").into_boxed_str());
+    let card_b: &'static str = Box::leak(format!("thread-card-{id_b}").into_boxed_str());
+    const BODY_A: &str = "html-txt-ThreadProbeBodyA";
+    const BODY_B: &str = "html-txt-ThreadProbeBodyB";
+
+    // 时间线快照两封 + 默认展开最新（B）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let v = view.read(app);
+            let timeline_ok = v.timeline.as_ref().is_some_and(|rows| {
+                rows.len() == 2 && rows.iter().any(|e| e.id == id_a) && rows.iter().any(|e| e.id == id_b)
+            });
+            (timeline_ok && v.expanded_id == Some(id_b)).then_some(())
+        })
+    });
+    // B 详情装载完成 + A 卡可见 / B 卡不存在 / B 正文探针可见
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == id_b).then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        cx.refresh().ok()?;
+        cx.debug_bounds(card_a).filter(|b| {
+            b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.)
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds(card_b).is_none(),
+        "展开封（B）不得同时渲染折叠卡"
+    );
+    assert!(cx.debug_bounds(BODY_B).is_some(), "展开封（B）正文应完整可见");
+
+    // 未读清零：mark_conversation_read 落库 + 会话行 unread 原位归零
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .find(|c| c.thread_id == thread_id)
+                .filter(|c| c.unread == 0)
+                .map(|_| ())
+        })
+    });
+    let mut read_all = false;
+    for _ in 0..30 {
+        cx.run_until_parked();
+        let detail = crate::runtime::runtime().block_on(async { api2.get_email(id_a).await.unwrap() });
+        if detail.email.is_read {
+            read_all = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(read_all, "会话打开应把未读封（A）标已读落库");
+
+    // ---- ④ 点折叠卡 A：A 展开、B 折叠回收为卡 ----
+    {
+        let bounds = cx.debug_bounds(card_a).expect("折叠卡 A 探针应存在");
+        cx.simulate_click(
+            gpui_pre::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + bounds.size.height / 2.,
+            ),
+            gpui_pre::Modifiers::default(),
+        );
+    }
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let v = view.read(app);
+            let detail = v.store.read(app).detail.clone()?;
+            (v.expanded_id == Some(id_a) && detail.email.id == id_a).then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        cx.refresh().ok()?;
+        cx.debug_bounds(BODY_A).filter(|b| {
+            b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.)
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds(BODY_B).is_none(),
+        "切展开 A 后 B 正文应不可见（折叠回收为卡）"
+    );
+    assert!(cx.debug_bounds(card_b).is_some(), "切展开 A 后 B 应折叠为卡");
+    assert!(
+        cx.debug_bounds(card_a).is_none(),
+        "A 已展开不得同时渲染折叠卡"
+    );
+
+    // ---- ⑤ 切回平铺：两行恢复；再切会话：记忆保持（ui-state 持久化）----
+    switch_mode(cx, crate::stores::emails::EmailViewMode::Flat);
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            let has_a = store
+                .emails
+                .iter()
+                .any(|e| e.subject.as_deref() == Some("线程化探针"));
+            let has_b = store
+                .emails
+                .iter()
+                .any(|e| e.subject.as_deref() == Some("Re: 线程化探针"));
+            (has_a && has_b && store.conversations.is_empty()).then_some(())
+        })
+    });
+
+    // 真实切档持久化路径（toggle 按钮 handler 体同款 set_view_mode，
+    // 毫秒级窗口 + 前置净化/Drop 兜底防并行污染）：落盘 "threaded" →
+    // 新建 store（启动恢复同路径）读回 Threaded → 落盘 "flat" 恢复默认态。
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.set_view_mode(crate::stores::emails::EmailViewMode::Threaded, &api, cx);
+            });
+        });
+    });
+    assert_eq!(
+        crate::ui_state::load().email_view_mode.as_deref(),
+        Some("threaded"),
+        "切会话档应持久化到 ui-state.json"
+    );
+    let restored = with_app_mut(cx, |app| {
+        app.new(|cx| crate::stores::emails::EmailsStore::new(cx))
+            .read(app)
+            .view_mode
+    });
+    assert!(
+        matches!(restored, crate::stores::emails::EmailViewMode::Threaded),
+        "重建 store（启动恢复同路径）应读回会话档记忆"
+    );
+    with_app_mut(cx, |app| {
+        let api = shell.read(app).api.clone();
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.set_view_mode(crate::stores::emails::EmailViewMode::Flat, &api, cx);
+            });
+        });
+    });
+    assert_eq!(
+        crate::ui_state::load().email_view_mode.as_deref(),
+        Some("flat"),
+        "切回平铺应落盘 flat（恢复共享文件默认态）"
+    );
+
+    // ---- ⑥ T10/T11 承接补测：时间线内删除展开封 → 相邻迁移 + 刷新 ----
+    // 再切会话（直写——持久化已由步骤⑤覆盖）：会话行重新可见后点击重开
+    // 时间线（切档清选中），默认展开最新（B）；删除展开封 B（详情工具条
+    // 删除按钮同款 handler 链）→ 时间线剩 A 一卡且自动展开（末位被删回
+    // 落上一封）+ 列表聚合角标 2→1 + B 移入 Trash 落库。
+    switch_mode(cx, crate::stores::emails::EmailViewMode::Threaded);
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .any(|c| c.thread_id == thread_id && c.total == 2)
+                .then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        cx.refresh().ok()?;
+        cx.debug_bounds(conv_selector).filter(|b| {
+            b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.)
+        })
+    });
+    {
+        let bounds = cx.debug_bounds(conv_selector).expect("会话行探针应存在");
+        cx.simulate_click(
+            gpui_pre::point(
+                bounds.origin.x + bounds.size.width / 2.,
+                bounds.origin.y + gpui_kit::px(10.),
+            ),
+            gpui_pre::Modifiers::default(),
+        );
+    }
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let v = view.read(app);
+            let detail = v.store.read(app).detail.clone()?;
+            (v.timeline.as_ref().is_some_and(|rows| rows.len() == 2)
+                && v.expanded_id == Some(id_b)
+                && detail.email.id == id_b)
+                .then_some(())
+        })
+    });
+    // 删除展开封 B（真实删除链路：DB 移 Trash → refresh_timeline(removed_id)）
+    with_window_mut(cx, |window, app| {
+        let view = shell
+            .read(app)
+            .detail_view
+            .clone()
+            .expect("时间线应展开");
+        crate::views::email_detail::test_hooks::delete_for_test(&view, window, app);
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let v = view.read(app);
+            let detail = v.store.read(app).detail.clone()?;
+            (v.timeline
+                .as_ref()
+                .is_some_and(|rows| rows.len() == 1 && rows[0].id == id_a)
+                && v.expanded_id == Some(id_a)
+                && detail.email.id == id_a)
+                .then_some(())
+        })
+    });
+    wait_for(cx, |cx| {
+        cx.refresh().ok()?;
+        cx.debug_bounds(BODY_A).filter(|b| {
+            b.size.width > gpui_kit::px(0.) && b.size.height > gpui_kit::px(0.)
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds(card_b).is_none(),
+        "被删封 B 不得留在时间线（removed_id 显式摘除）"
+    );
+    // 列表聚合刷新：角标 2→1
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .find(|c| c.thread_id == thread_id)
+                .filter(|c| c.total == 1)
+                .map(|_| ())
+        })
+    });
+    // 落库断言：B 移入 Trash（第一阶段删除 = 文件夹移动）
+    let mut moved = false;
+    for _ in 0..30 {
+        cx.run_until_parked();
+        let detail =
+            crate::runtime::runtime().block_on(async { api2.get_email(id_b).await.unwrap() });
+        if detail.email.folder == "Trash" {
+            moved = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(moved, "时间线删除展开封应落库（B 移入 Trash）");
+    cx.run_until_parked();
+}

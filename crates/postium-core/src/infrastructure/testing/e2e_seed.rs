@@ -74,10 +74,24 @@
 //! - `is_deleted` —— 仅当文件夹为 `Trash` 时为真。
 //! - `is_answered` —— 恒为假。
 //! - `received_at` / `created_at` / `updated_at` —— 均等于 `sent_at`。
+//!
+//! ## 线程场景夹具（[`seed_thread_scenario`]），主账号 INBOX UID 601–602
+//!
+//! 与上述直插 SQL 夹具不同，这两封经 [`save_batch_emails`]（生产同步
+//! 入库路径）落库——事务内即时归组，`thread_id` 插入时即确定：
+//!
+//! | UID | subject | message_id / in_reply_to | 发件人 | 已读 | sent_at |
+//! |-----|---------|--------------------------|--------|------|---------|
+//! | 601 | `线程化探针` | `<thread-probe-1@seed>` / — | `a@external.test` | 否 | 锚点 |
+//! | 602 | `Re: 线程化探针` | `<thread-probe-2@seed>` / `<thread-probe-1@seed>` | `c@external.test` | 是 | 锚点 + 60s |
+//!
+//! 两封应归组同一 `thread_id`（头链匹配 + 同规范化主题参与者交集双信号）。
 
 use crate::error::MailError;
 use crate::infrastructure::storage::DbConn;
 use crate::infrastructure::storage::repository::email_repo::EmailWrite;
+use crate::infrastructure::storage::repository::email_repo::save_batch_emails;
+use crate::infrastructure::protocols::types::WholeEmailDto;
 
 /// 主测试账号的邮箱地址。颜色标记为蓝色（`#2563eb`）。
 const PRIMARY_EMAIL: &str = "primary.e2e@postium.test";
@@ -111,7 +125,7 @@ const BASE_TS: i64 = 1_779_936_000;
 /// 仅当启动应用时设置环境变量 `POSTIUM_E2E=1` 时，由 `lib.rs` 的启动流程调用。
 pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
     let now = BASE_TS;
-    db.transaction(move |tx| {
+    let primary_id = db.transaction(move |tx| {
         insert_account(
             tx,
             AccountSeed {
@@ -188,7 +202,7 @@ pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
 
         seed_contacts(tx)?;
 
-        Ok(())
+        Ok(primary_id)
     })
     .await?;
 
@@ -202,7 +216,98 @@ pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
         crate::infrastructure::storage::repository::thread_repo::backfill_threading(conn)
     })
     .await?;
+
+    // 线程场景夹具（Task 12）：经 save_batch_emails 生产路径落库（事务内
+    // 归组，不依赖回填），供会话档 e2e 覆盖「入库归组 → 会话列表 →
+    // 时间线」全链路。直插夹具不受影响（平铺断言依赖不变）。
+    seed_thread_scenario(db, primary_id).await?;
+
     Ok(())
+}
+
+/// 播种线程场景夹具（契约见[模块文档](self)）：两封 INBOX 邮件经
+/// [`save_batch_emails`] 落库。
+///
+/// - **归组前提**：邮件 B `in_reply_to` 指向 A 的 `message_id`（头链
+///   匹配），且两封收件人恒为主账号地址（同规范化主题下的参与者交集
+///   第二信号）——生产归组内核两信号皆命中，必同 `thread_id`。
+/// - **可见性**：`sent_at` 锚定播种时刻 + 3 天——晚于全部固定/「后天」
+///   夹具（日历组最晚 +2 天）；仅「本月 15 日」日历夹具在月初运行时
+///   （15 日 > 今天 + 3 天）更晚。两种情况探针均在列表首屏置顶区
+///   （虚拟列表只渲染首屏可见行），e2e 行探针可见性确定。
+/// - **正文探针**：正文以恰 16 字符的 ASCII 前缀 `ThreadProbeBodyA/B`
+///   开头（html 渲染层文本探针键取前 16 个字母数字字符），e2e 以
+///   `html-txt-ThreadProbeBodyA/B` 断言展开封正文可见。
+/// - **幂等**：UPSERT 以 (account_id, folder, uid) 为冲突键，message_id
+///   命中已有行走整行 UPDATE——重复播种（同库重启）结果确定。
+async fn seed_thread_scenario(db: &DbConn, account_id: i32) -> Result<(), MailError> {
+    let anchor = chrono::Utc::now().timestamp() + 3 * 86_400;
+    let alpha = thread_probe_dto(
+        "A",
+        601,
+        "线程化探针",
+        "<thread-probe-1@seed>",
+        None,
+        "a@external.test",
+        false,
+        anchor,
+    );
+    let beta = thread_probe_dto(
+        "B",
+        602,
+        "Re: 线程化探针",
+        "<thread-probe-2@seed>",
+        Some("<thread-probe-1@seed>"),
+        "c@external.test",
+        true,
+        anchor + 60,
+    );
+    save_batch_emails(db, account_id, "INBOX", &[alpha, beta]).await?;
+    Ok(())
+}
+
+/// 构造线程场景夹具的单封 [`WholeEmailDto`]（字段契约见
+/// [`seed_thread_scenario`]）。`tag`（"A"/"B"）区分两封：发件人显示名与
+/// 正文探针前缀。`id` / `account_id` / `folder` 为占位值——
+/// [`save_batch_emails`] 以调用参数覆盖（uid 为冲突键组成部分）。
+fn thread_probe_dto(
+    tag: &str,
+    uid: u32,
+    subject: &str,
+    message_id: &str,
+    in_reply_to: Option<&str>,
+    sender_email: &str,
+    is_read: bool,
+    sent_at: i64,
+) -> WholeEmailDto {
+    // 正文以 ASCII 探针前缀开头（恰 16 字符，见 seed_thread_scenario 文档）
+    let body = format!("ThreadProbeBody{tag} 线程化探针正文（{tag}）。");
+    WholeEmailDto {
+        id: 0,
+        account_id: 0,
+        folder: "INBOX".to_string(),
+        uid,
+        message_id: Some(message_id.to_string()),
+        in_reply_to: in_reply_to.map(str::to_string),
+        sender_name: Some(format!("线程探针 {tag}")),
+        sender_email: sender_email.to_string(),
+        recipient_emails: PRIMARY_EMAIL.to_string(),
+        cc_emails: None,
+        bcc_emails: None,
+        subject: Some(subject.to_string()),
+        preview: Some(format!("Preview for {subject}")),
+        body_text: Some(body.clone()),
+        body_html: Some(format!("<p>{body}</p>")),
+        attachments: Vec::new(),
+        is_read,
+        is_starred: false,
+        is_draft: false,
+        is_answered: false,
+        is_deleted: false,
+        sent_at,
+        received_at: sent_at,
+        created_at: sent_at,
+    }
 }
 
 /// 种子联系人夹具（契约见[模块文档](self)）。
