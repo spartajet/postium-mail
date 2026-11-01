@@ -11,7 +11,8 @@
 //!   `IF NOT EXISTS`，因此对已有数据库是安全的幂等操作。
 //! - **渐进式迁移**：历史版本遗留的 schema（如 `message_id` 上的全局唯一约束、
 //!   缺失的 `(account_id, folder, uid)` 唯一索引、`sync_state` 缺少的 history
-//!   列）由专用迁移函数修正。所有迁移遵循**幂等**原则——先用
+//!   列、线程化前缺 `threads` 表与 `emails` 线程两列）由专用迁移函数修正。
+//!   所有迁移遵循**幂等**原则——先用
 //!   `PRAGMA table_info` / [`index_exists`] / [`table_exists`] 等检查当前状态，
 //!   仅在确有必要时才执行，可安全反复运行。
 //!
@@ -20,10 +21,13 @@
 //! [`DbConn::initialize_schema`] 中迁移与建表语句的顺序是有意安排的：
 //!
 //! 1. **先**执行邮件相关迁移（[`migrate_email_message_id_unique_constraint`]、
-//!    [`migrate_email_uid_unique_index`]）。其中 [`migrate_email_uid_unique_index`]
-//!    会先对历史重复数据去重、再建唯一索引——必须赶在 [`SCHEMA_SQL`] 里的
-//!    `CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_uid` 之前，
-//!    否则该建索引语句会因已存在的重复行而失败。
+//!    [`migrate_email_uid_unique_index`]、[`migrate_threading`]）。其中
+//!    [`migrate_email_uid_unique_index`] 会先对历史重复数据去重、再建唯一索引，
+//!    [`migrate_threading`] 会为旧库的 `emails` 补 `thread_id`/`in_reply_to`
+//!    两列——二者都必须赶在 [`SCHEMA_SQL`] 之前，否则 SCHEMA_SQL 里的
+//!    `CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_account_folder_uid` 会因
+//!    已存在的重复行而失败，`CREATE INDEX IF NOT EXISTS idx_emails_thread_id`
+//!    会因旧库尚无 `thread_id` 列而失败。
 //! 2. **再**执行 [`SCHEMA_SQL`]，补齐当前版本的表与索引定义。
 //! 3. **最后**执行 [`migrate_sync_state_history_columns`]，为旧库的 `sync_state`
 //!    表 `ALTER TABLE ADD COLUMN`。放在建表之后是为了确保该表一定存在。
@@ -31,6 +35,8 @@
 use std::path::Path;
 
 use crate::error::MailError;
+use crate::infrastructure::storage::repository::thread_repo::backfill_threading;
+use rusqlite::OptionalExtension;
 
 pub const SCHEMA_SQL: &str = include_str!("../../../sql/schema.sql");
 
@@ -69,6 +75,7 @@ impl DbConn {
             conn.pragma_update(None, "journal_mode", "WAL")?;
             migrate_email_message_id_unique_constraint(conn)?;
             migrate_email_uid_unique_index(conn)?;
+            migrate_threading(conn)?;
             conn.execute_batch(SCHEMA_SQL)?;
             migrate_sync_state_history_columns(conn)?;
             Ok(())
@@ -165,6 +172,64 @@ fn migrate_sync_state_history_columns(conn: &rusqlite::Connection) -> rusqlite::
             "ALTER TABLE sync_state ADD COLUMN history_exhausted INTEGER DEFAULT 0",
             [],
         )?;
+    }
+    Ok(())
+}
+
+/// 建立 `threads` 表并为 `emails` 补线程化所需的两列，随后按需回填存量邮件。
+///
+/// **为什么迁移**：会话线程化（头链 + 主题兜底归组）需要独立的 `threads` 表
+/// 与 `emails.thread_id` / `emails.in_reply_to` 两列，旧库二者皆无。
+///
+/// **为何必须排在 [`SCHEMA_SQL`] 之前**：schema 中的
+/// `CREATE INDEX IF NOT EXISTS idx_emails_thread_id ON emails(thread_id)` 在
+/// 旧库（尚无该列）上会直接报 `no such column` 失败——与
+/// [`migrate_email_uid_unique_index`] 必须先于 SCHEMA_SQL 是同一类约束。
+/// threads 表与 `idx_threads_subject_key` 索引在本迁移中一并补建，
+/// SCHEMA_SQL 中对应的 `IF NOT EXISTS` 语句随之成为幂等空操作。
+///
+/// **如何幂等**：建表/加列前分别用 [`table_exists`] / [`table_has_column`]
+/// 判断；回填仅在存在 `thread_id IS NULL AND is_draft = 0` 的邮件时执行
+/// （回填本身也幂等，见 [`backfill_threading`]）。对全新库（`emails` 表尚不
+/// 存在）全部步骤跳过，由 SCHEMA_SQL 直接建出含新列的表。
+///
+/// **数据风险**：无删除。回填只 INSERT threads / UPDATE emails.thread_id，
+/// 且包在 [`backfill_threading`] 自己的事务里，任一步失败整体回滚。
+fn migrate_threading(conn: &mut rusqlite::Connection) -> rusqlite::Result<()> {
+    if !table_exists(conn, "threads")? {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_key TEXT NOT NULL,
+                participants TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_threads_subject_key ON threads(subject_key);",
+        )?;
+    }
+    if !table_exists(conn, "emails")? {
+        // 全新（或极早期）库：SCHEMA_SQL 会直接建出含 thread_id/in_reply_to 的表
+        return Ok(());
+    }
+    if !table_has_column(conn, "emails", "thread_id")? {
+        conn.execute("ALTER TABLE emails ADD COLUMN thread_id INTEGER", [])?;
+    }
+    if !table_has_column(conn, "emails", "in_reply_to")? {
+        conn.execute("ALTER TABLE emails ADD COLUMN in_reply_to TEXT", [])?;
+    }
+    // 幂等判据：仍有未归组的非草稿邮件才回填（草稿不参与线程化；
+    // 迁移后新同步进来的邮件也靠此判据在下次启动时补归组）
+    let has_pending = conn
+        .query_row(
+            "SELECT 1 FROM emails WHERE thread_id IS NULL AND is_draft = 0 LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if has_pending {
+        backfill_threading(conn)?;
     }
     Ok(())
 }
@@ -422,5 +487,145 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(tables.len(), 4, "联系人四表应存在: {tables:?}");
+    }
+
+    /// 构造一个“线程化之前”的旧库：emails 无 thread_id/in_reply_to、无 threads 表。
+    async fn legacy_conn_with_emails() -> tokio_rusqlite::Connection {
+        let conn = tokio_rusqlite::Connection::open_in_memory().await.unwrap();
+        conn.call(|conn| {
+            conn.execute_batch(
+                "
+                CREATE TABLE accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    provider TEXT NOT NULL,
+                    auth_type TEXT DEFAULT 'password',
+                    account_type TEXT NOT NULL DEFAULT 'personal',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE emails (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    folder TEXT NOT NULL,
+                    uid INTEGER NOT NULL,
+                    message_id TEXT,
+                    subject TEXT,
+                    sender_name TEXT,
+                    sender_email TEXT NOT NULL,
+                    recipient_emails TEXT NOT NULL,
+                    cc_emails TEXT,
+                    bcc_emails TEXT,
+                    preview TEXT,
+                    body_text TEXT,
+                    body_html TEXT,
+                    is_read INTEGER DEFAULT 0,
+                    is_starred INTEGER DEFAULT 0,
+                    is_draft INTEGER DEFAULT 0,
+                    is_answered INTEGER DEFAULT 0,
+                    is_deleted INTEGER DEFAULT 0,
+                    sent_at INTEGER NOT NULL,
+                    received_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                INSERT INTO accounts (id, name, email, provider, created_at, updated_at)
+                VALUES (1, 'Legacy', 'legacy@example.com', 'custom', 1, 1);
+                INSERT INTO emails (
+                    account_id, folder, uid, subject, sender_email, recipient_emails,
+                    is_draft, sent_at, received_at, created_at, updated_at
+                ) VALUES
+                    (1, 'INBOX', 1, 'Kickoff', 'a@x.com', 'b@x.com', 0, 10, 10, 1, 1),
+                    (1, 'INBOX', 2, 'Re: Kickoff', 'b@x.com', 'a@x.com', 0, 20, 20, 2, 2),
+                    (1, 'INBOX', 3, 'Re: Kickoff', 'b@x.com', 'a@x.com', 1, 30, 30, 3, 3);
+                ",
+            )?;
+            Ok::<(), tokio_rusqlite::Error>(())
+        })
+        .await
+        .unwrap();
+        conn
+    }
+
+    #[tokio::test]
+    async fn migrate_threading_upgrades_legacy_database_and_is_idempotent() {
+        let db = DbConn {
+            inner: legacy_conn_with_emails().await,
+        };
+        db.initialize_schema().await.unwrap();
+
+        // 旧库升级：threads 表已建、emails 两列已补、非草稿已按主题归组、草稿跳过
+        let (threads_exists, has_thread_id, has_in_reply_to) = db
+            .call(|conn| {
+                Ok((
+                    super::table_exists(conn, "threads")?,
+                    super::table_has_column(conn, "emails", "thread_id")?,
+                    super::table_has_column(conn, "emails", "in_reply_to")?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(threads_exists, "旧库应建出 threads 表");
+        assert!(has_thread_id, "emails 应补 thread_id 列");
+        assert!(has_in_reply_to, "emails 应补 in_reply_to 列");
+
+        let (t1, t2, t_draft, thread_count) = db
+            .call(|conn| {
+                let t1: Option<i64> = conn
+                    .query_row("SELECT thread_id FROM emails WHERE uid = 1", [], |r| r.get(0))?;
+                let t2: Option<i64> = conn
+                    .query_row("SELECT thread_id FROM emails WHERE uid = 2", [], |r| r.get(0))?;
+                let t_draft: Option<i64> = conn
+                    .query_row("SELECT thread_id FROM emails WHERE uid = 3", [], |r| r.get(0))?;
+                let thread_count: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
+                Ok((t1, t2, t_draft, thread_count))
+            })
+            .await
+            .unwrap();
+        assert!(t1.is_some(), "存量非草稿应被归组");
+        assert_eq!(t1, t2, "同主题两封应归同一线程");
+        assert!(t_draft.is_none(), "草稿不参与回填");
+        assert_eq!(thread_count, 1);
+
+        // 幂等：重跑 initialize 不报错、不新增线程
+        db.initialize_schema().await.unwrap();
+        let (thread_count_again, index_exists): (i64, bool) = db
+            .call(|conn| {
+                let thread_count: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
+                Ok((thread_count, super::index_exists(conn, "idx_emails_thread_id")?))
+            })
+            .await
+            .unwrap();
+        assert_eq!(thread_count_again, 1, "重跑不得新增线程");
+        assert!(index_exists, "idx_emails_thread_id 应存在");
+
+        // 回填门槛判定据是“存在未归组的非草稿邮件”：新同步进来的邮件在下次启动时补归组
+        db.call(|conn| {
+            conn.execute(
+                "INSERT INTO emails (
+                    account_id, folder, uid, subject, sender_email, recipient_emails,
+                    is_draft, sent_at, received_at, created_at, updated_at
+                ) VALUES (1, 'INBOX', 4, 'Re: Kickoff', 'a@x.com', 'b@x.com', 0, 40, 40, 4, 4)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.initialize_schema().await.unwrap();
+        let (t4, thread_count_after_new) = db
+            .call(|conn| {
+                let t4: Option<i64> = conn
+                    .query_row("SELECT thread_id FROM emails WHERE uid = 4", [], |r| r.get(0))?;
+                let count: i64 = conn.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
+                Ok((t4, count))
+            })
+            .await
+            .unwrap();
+        assert_eq!(t4, t1, "新到邮件应归入既有主题线程");
+        assert_eq!(thread_count_after_new, 1);
     }
 }

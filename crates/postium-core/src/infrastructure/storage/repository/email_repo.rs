@@ -140,6 +140,8 @@ fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
         received_at: row.get("received_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        thread_id: row.get("thread_id")?,
+        in_reply_to: row.get("in_reply_to")?,
     })
 }
 
@@ -214,6 +216,7 @@ fn read_email_by_id(
         "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                 recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                 is_read, is_starred, is_draft, is_answered, is_deleted,
+                thread_id, in_reply_to,
                 sent_at, received_at, created_at, updated_at
          FROM emails
          WHERE id = ?1",
@@ -337,6 +340,7 @@ pub async fn list_by_folder(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ?1 AND folder = ?2 AND is_deleted = 0
@@ -406,6 +410,7 @@ pub async fn list_by_folders(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ? AND folder IN ({in_clause}) AND is_deleted = 0
@@ -461,6 +466,7 @@ pub async fn list_starred(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ?1 AND is_starred = 1 AND is_deleted = 0
@@ -506,6 +512,7 @@ pub async fn list_starred_all_accounts(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE is_starred = 1 AND is_deleted = 0
@@ -572,6 +579,7 @@ pub async fn list_by_account_folder_filters(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE ({where_groups}) AND is_deleted = 0
@@ -632,6 +640,7 @@ pub async fn get_by_id(db: &DbConn, id: i32) -> Result<Option<emails::Model>, Ma
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE id = ?1",
@@ -671,6 +680,7 @@ pub async fn get_by_uid(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",
@@ -833,6 +843,7 @@ pub async fn update(db: &DbConn, id: i32, model: EmailWrite) -> Result<emails::M
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE id = ?1",
@@ -1527,6 +1538,7 @@ pub async fn replace_email_with_attachments(
             "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
                     recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
                     is_read, is_starred, is_draft, is_answered, is_deleted,
+                    thread_id, in_reply_to,
                     sent_at, received_at, created_at, updated_at
              FROM emails
              WHERE id = ?1",

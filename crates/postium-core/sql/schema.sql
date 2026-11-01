@@ -46,7 +46,10 @@ CREATE TABLE IF NOT EXISTS emails (
     sent_at INTEGER NOT NULL,
     received_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- 会话线程化（置于表尾，与旧库 ALTER TABLE ADD COLUMN 的追加位置一致）
+    thread_id INTEGER,
+    in_reply_to TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -193,3 +196,17 @@ CREATE TABLE IF NOT EXISTS dav_deletes (
     deleted_at INTEGER NOT NULL,
     UNIQUE(account_id, href)
 );
+
+-- 会话线程化：threads 表 + 索引。
+-- 注意：idx_emails_thread_id 依赖 emails.thread_id 列；旧库该列由
+-- migrate_threading 在本文件（SCHEMA_SQL）执行之前 ALTER 补齐，
+-- 否则此建索引语句会在旧库上因缺列失败。
+CREATE TABLE IF NOT EXISTS threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_key TEXT NOT NULL,
+    participants TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_threads_subject_key ON threads(subject_key);
+CREATE INDEX IF NOT EXISTS idx_emails_thread_id ON emails(thread_id);

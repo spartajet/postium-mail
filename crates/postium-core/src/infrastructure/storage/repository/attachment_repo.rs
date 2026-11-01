@@ -213,7 +213,7 @@ pub async fn get_with_email_context(
                 e.sender_name, e.sender_email, e.recipient_emails, e.cc_emails, e.bcc_emails,
                 e.preview, e.body_text, e.body_html, e.is_read, e.is_starred, e.is_draft,
                 e.is_answered, e.is_deleted, e.sent_at, e.received_at, e.created_at AS email_created_at,
-                e.updated_at,
+                e.updated_at, e.thread_id, e.in_reply_to,
                 ac.id AS account_id_value, ac.name, ac.email, ac.display_name, ac.provider,
                 ac.imap_host, ac.imap_port, ac.imap_ssl, ac.imap_ssl_mode, ac.smtp_host,
                 ac.smtp_port, ac.smtp_ssl, ac.smtp_ssl_mode, ac.color, ac.sync_enabled,
@@ -263,6 +263,8 @@ pub async fn get_with_email_context(
                     received_at: row.get("received_at")?,
                     created_at: row.get("email_created_at")?,
                     updated_at: row.get("updated_at")?,
+                    thread_id: row.get("thread_id")?,
+                    in_reply_to: row.get("in_reply_to")?,
                 },
                 account: accounts::Model {
                     id: row.get("account_id_value")?,

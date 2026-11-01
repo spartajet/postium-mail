@@ -49,4 +49,8 @@ pub struct Model {
     pub created_at: i64,
     /// 最后更新时间戳（Unix 毫秒）
     pub updated_at: i64,
+    /// 所属会话线程 ID（threads.id；未归组为 NULL，草稿恒为 NULL）
+    pub thread_id: Option<i64>,
+    /// In-Reply-To 头原始值（头链归组依据；未解析/无值为 NULL）
+    pub in_reply_to: Option<String>,
 }
