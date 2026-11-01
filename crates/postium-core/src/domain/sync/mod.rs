@@ -689,6 +689,7 @@ mod tests {
             folder: "INBOX".into(),
             uid: 7,
             message_id: None,
+            in_reply_to: None,
             sender_name: Some("Alice Sender".into()),
             sender_email: "alice@example.com".into(),
             recipient_emails: "bob@example.com, Erin <erin@example.com>".into(),

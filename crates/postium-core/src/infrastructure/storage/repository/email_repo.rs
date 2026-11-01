@@ -20,6 +20,7 @@ use crate::infrastructure::storage::models::emails;
 use crate::infrastructure::storage::repository::attachment_repo::{
     AttachmentWrite, INSERT_ATTACHMENT_SQL, execute_attachment_insert,
 };
+use crate::infrastructure::storage::repository::thread_repo;
 use crate::infrastructure::storage::row::{bool_to_int, opt_bool_to_int, opt_int_to_bool};
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
@@ -29,20 +30,20 @@ const INSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         account_id, folder, uid, message_id, subject, sender_name, sender_email,
         recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
         is_read, is_starred, is_draft, is_answered, is_deleted,
-        sent_at, received_at, created_at, updated_at
+        sent_at, received_at, created_at, updated_at, in_reply_to, thread_id
      ) VALUES (
         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
      )";
 
 const INSERT_EMAIL_HEADER_SQL: &str = "INSERT INTO emails (
         account_id, folder, uid, message_id, subject, sender_name, sender_email,
         recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
         is_read, is_starred, is_draft, is_answered, is_deleted,
-        sent_at, received_at, created_at, updated_at
+        sent_at, received_at, created_at, updated_at, in_reply_to, thread_id
      ) VALUES (
         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
      )
      ON CONFLICT(account_id, folder, uid) DO NOTHING";
 
@@ -50,10 +51,10 @@ const UPSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         account_id, folder, uid, message_id, subject, sender_name, sender_email,
         recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
         is_read, is_starred, is_draft, is_answered, is_deleted,
-        sent_at, received_at, created_at, updated_at
+        sent_at, received_at, created_at, updated_at, in_reply_to, thread_id
      ) VALUES (
         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+        ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
      )
      ON CONFLICT(account_id, folder, uid) DO UPDATE SET
         message_id = COALESCE(excluded.message_id, emails.message_id),
@@ -73,7 +74,9 @@ const UPSERT_EMAIL_SQL: &str = "INSERT INTO emails (
         is_deleted = excluded.is_deleted,
         sent_at = excluded.sent_at,
         received_at = excluded.received_at,
-        updated_at = excluded.updated_at";
+        updated_at = excluded.updated_at,
+        in_reply_to = COALESCE(excluded.in_reply_to, emails.in_reply_to),
+        thread_id = COALESCE(excluded.thread_id, emails.thread_id)";
 
 /// 用于创建或更新邮件的写入数据结构
 ///
@@ -85,6 +88,9 @@ pub struct EmailWrite {
     pub folder: String,
     pub uid: u32,
     pub message_id: Option<String>,
+    /// In-Reply-To + References 合并的 Message-ID 集（`<id1>,<id2>` 逗号串），
+    /// 供会话线程化的头链匹配使用
+    pub in_reply_to: Option<String>,
     pub subject: Option<String>,
     pub sender_name: Option<String>,
     pub sender_email: String,
@@ -163,9 +169,12 @@ fn placeholders(count: usize) -> String {
 ///
 /// - `stmt`: 已预编译的插入语句
 /// - `model`: 待插入的邮件数据
+/// - `thread_id`: 会话线程归属（由调用方在事务内经 [`assign_thread_tx`]
+///   决定；未归组/草稿传 `None`，落库为 NULL）
 fn execute_email_insert(
     stmt: &mut rusqlite::Statement<'_>,
     model: &EmailWrite,
+    thread_id: Option<i64>,
 ) -> rusqlite::Result<usize> {
     stmt.execute(rusqlite::params![
         model.account_id,
@@ -190,7 +199,37 @@ fn execute_email_insert(
         model.received_at,
         model.created_at,
         model.updated_at,
+        &model.in_reply_to,
+        thread_id,
     ])
+}
+
+/// 在调用方事务内为待写入邮件决定会话线程归属。
+///
+/// 草稿（`is_draft == Some(true)`）不参与线程化，返回 `None`（thread_id 落 NULL）；
+/// 其余邮件构造 [`ThreadingInput`]（message_id/subject 原样借用；链 id 解析自
+/// `in_reply_to` 合并串；参与者为 发+收+抄 的小写邮箱集）交给
+/// [`thread_repo::assign`]，在既有事务内完成三分支决策并返回 thread_id。
+fn assign_thread_tx(
+    tx: &rusqlite::Transaction<'_>,
+    write: &EmailWrite,
+) -> rusqlite::Result<Option<i64>> {
+    if write.is_draft == Some(true) {
+        return Ok(None);
+    }
+    let input = crate::domain::threading::ThreadingInput {
+        message_id: write.message_id.as_deref(),
+        subject: write.subject.as_deref(),
+        chain_ids: crate::domain::threading::parse_message_ids(
+            write.in_reply_to.as_deref().unwrap_or(""),
+        ),
+        participants: super::thread_repo::collect_participants(
+            &write.sender_email,
+            &write.recipient_emails,
+            write.cc_emails.as_deref(),
+        ),
+    };
+    thread_repo::assign(tx, &input, write.received_at).map(Some)
 }
 
 fn next_local_uid(
@@ -231,8 +270,11 @@ fn insert_email_with_attachments_tx(
 ) -> rusqlite::Result<emails::Model> {
     write.uid = next_local_uid(tx, write.account_id, &write.folder)?;
 
+    // 已发送邮件同样参与会话归属；草稿在 assign_thread_tx 内跳过（thread_id NULL）
+    let thread_id = assign_thread_tx(tx, &write)?;
+
     let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
-    execute_email_insert(&mut insert_stmt, &write)?;
+    execute_email_insert(&mut insert_stmt, &write, thread_id)?;
     let email_id = tx.last_insert_rowid() as i32;
 
     let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
@@ -250,7 +292,8 @@ fn insert_email_with_attachments_tx_preserving_uid(
     attachments: Vec<AttachmentWrite>,
 ) -> rusqlite::Result<emails::Model> {
     let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
-    execute_email_insert(&mut insert_stmt, &write)?;
+    // 草稿专用路径：不参与线程化，thread_id 落 NULL
+    execute_email_insert(&mut insert_stmt, &write, None)?;
     let email_id = tx.last_insert_rowid() as i32;
 
     let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
@@ -712,7 +755,7 @@ pub async fn get_by_uid(
 pub async fn create(db: &DbConn, model: EmailWrite) -> Result<emails::Model, MailError> {
     db.transaction(move |tx| {
         let mut insert_stmt = tx.prepare(INSERT_EMAIL_SQL)?;
-        execute_email_insert(&mut insert_stmt, &model)?;
+        execute_email_insert(&mut insert_stmt, &model, None)?;
         let id = tx.last_insert_rowid() as i32;
         read_email_by_id(tx, id)
     })
@@ -781,7 +824,7 @@ pub async fn bulk_insert(db: &DbConn, models: Vec<EmailWrite>) -> Result<(), Mai
     db.transaction(move |tx| {
         let mut stmt = tx.prepare(INSERT_EMAIL_SQL)?;
         for model in &models {
-            execute_email_insert(&mut stmt, model)?;
+            execute_email_insert(&mut stmt, model, None)?;
         }
         Ok(())
     })
@@ -1200,6 +1243,7 @@ pub async fn save_batch_email_headers(
                 body_text: None,
                 body_html: None,
                 message_id: None,
+                in_reply_to: None,
                 preview: None,
                 is_read: Some(header.flags.seen),
                 is_starred: Some(header.flags.flagged),
@@ -1235,7 +1279,7 @@ pub async fn save_batch_email_headers(
         let mut attachment_stmt = tx.prepare(INSERT_ATTACHMENT_SQL)?;
         let mut inserted_count = 0;
         for (email, attachments) in &writes {
-            let inserted = execute_email_insert(&mut email_stmt, email)?;
+            let inserted = execute_email_insert(&mut email_stmt, email, None)?;
             if inserted == 0 {
                 continue;
             }
@@ -1287,6 +1331,7 @@ pub async fn save_batch_emails(
                 folder: folder.clone(),
                 uid: email.uid,
                 message_id: email.message_id.clone(),
+                in_reply_to: email.in_reply_to.clone(),
                 subject: email.subject.clone(),
                 sender_name: email.sender_name.clone(),
                 sender_email: email.sender_email.clone(),
@@ -1345,6 +1390,8 @@ pub async fn save_batch_emails(
             };
 
             if let Some(email_id) = existing_by_message_id {
+                // message_id 命中已有行（如本地发送后远端同步拉回）：走整行 UPDATE，
+                // 不重新归属——邮件行保留既有 thread_id（未归组则留待存量回填）。
                 update_existing_email_by_id(tx, email_id, email)?;
                 tx.execute("DELETE FROM attachments WHERE email_id = ?1", [email_id])?;
                 for attachment in attachments {
@@ -1356,7 +1403,9 @@ pub async fn save_batch_emails(
                 continue;
             }
 
-            affected_rows += execute_email_insert(&mut email_stmt, email)?;
+            // 新行：草稿跳过归属（NULL），其余在事务内决定线程归属并写入本行
+            let thread_id = assign_thread_tx(tx, email)?;
+            affected_rows += execute_email_insert(&mut email_stmt, email, thread_id)?;
             let email_id = tx.query_row(
                 "SELECT id FROM emails WHERE account_id = ?1 AND folder = ?2 AND uid = ?3",
                 rusqlite::params![email.account_id, &email.folder, i64::from(email.uid)],
@@ -1458,6 +1507,7 @@ pub async fn replace_email_with_attachments(
         folder: folder.clone(),
         uid: email.uid,
         message_id: email.message_id,
+        in_reply_to: email.in_reply_to,
         subject: email.subject,
         sender_name: email.sender_name,
         sender_email: email.sender_email,
@@ -1710,6 +1760,7 @@ mod tests {
             folder: "INBOX".to_string(),
             uid: 100,
             message_id: Some("<new@example.com>".to_string()),
+            in_reply_to: None,
             subject: Some("新主题".to_string()),
             sender_name: Some("New Sender".to_string()),
             sender_email: "new@example.com".to_string(),
@@ -1773,5 +1824,250 @@ mod tests {
             Some("updated inbox body")
         );
         assert_eq!(body_text(&db, sent_id).await.as_deref(), Some("sent body"));
+    }
+
+    // ─── 会话线程化：save_batch_emails 事务内归属 ───
+
+    /// 构造用于线程化测试的完整邮件 DTO（最小字段 + 线程化相关参数）。
+    fn threading_email(
+        uid: u32,
+        subject: &str,
+        sender: &str,
+        recipient: &str,
+        message_id: Option<&str>,
+        in_reply_to: Option<&str>,
+        received_at: i64,
+        is_draft: bool,
+    ) -> WholeEmailDto {
+        WholeEmailDto {
+            id: 0,
+            account_id: 0,
+            folder: "INBOX".to_string(),
+            uid,
+            message_id: message_id.map(str::to_string),
+            in_reply_to: in_reply_to.map(str::to_string),
+            sender_name: None,
+            sender_email: sender.to_string(),
+            recipient_emails: recipient.to_string(),
+            cc_emails: None,
+            bcc_emails: None,
+            subject: Some(subject.to_string()),
+            preview: None,
+            body_text: None,
+            body_html: None,
+            attachments: vec![],
+            is_read: false,
+            is_starred: false,
+            is_draft,
+            is_answered: false,
+            is_deleted: false,
+            sent_at: received_at,
+            received_at,
+            created_at: received_at,
+        }
+    }
+
+    /// 按文件夹查全部邮件的 thread_id（uid 升序）。
+    async fn thread_ids_by_folder(db: &DbConn, account_id: i32, folder: &str) -> Vec<Option<i64>> {
+        let folder = folder.to_string();
+        db.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT thread_id FROM emails
+                 WHERE account_id = ?1 AND folder = ?2
+                 ORDER BY uid ASC",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![account_id, folder], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .unwrap()
+    }
+
+    /// 查线程的 (created_at, updated_at)。
+    async fn thread_timestamps(db: &DbConn, thread_id: i64) -> (i64, i64) {
+        db.call(move |conn| {
+            conn.query_row(
+                "SELECT created_at, updated_at FROM threads WHERE id = ?1",
+                [thread_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn thread_count(db: &DbConn) -> i64 {
+        db.call(|conn| conn.query_row("SELECT COUNT(*) FROM threads", [], |row| row.get(0)))
+            .await
+            .unwrap()
+    }
+
+    /// Re: 链：第二封带 In-Reply-To 指向首封 Message-ID → 同一线程，
+    /// 线程 updated_at 刷新为第二封的 received_at。
+    #[tokio::test]
+    async fn save_batch_emails_threads_reply_chain_into_same_thread() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let first = threading_email(
+            1,
+            "Quarterly Review",
+            "alice@x.com",
+            "bob@x.com",
+            Some("<id1@x.com>"),
+            None,
+            1000,
+            false,
+        );
+        let reply = threading_email(
+            2,
+            "Re: Quarterly Review",
+            "bob@x.com",
+            "alice@x.com",
+            Some("<id2@x.com>"),
+            Some("<id1@x.com>"),
+            2000,
+            false,
+        );
+
+        save_batch_emails(&db, account_id, "INBOX", &[first, reply])
+            .await
+            .unwrap();
+
+        let thread_ids = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        assert_eq!(thread_ids.len(), 2);
+        let t1 = thread_ids[0].expect("首封应已归组");
+        let t2 = thread_ids[1].expect("回信应已归组");
+        assert_eq!(t1, t2, "Re: 链命中的回信应归入首封所在线程");
+
+        let (created_at, updated_at) = thread_timestamps(&db, t1).await;
+        assert_eq!(created_at, 1000, "线程 created_at 应取首封 received_at");
+        assert_eq!(updated_at, 2000, "线程 updated_at 应刷新为回信 received_at");
+    }
+
+    /// 无链头：同主题（规范化同键）+ 参与者交集 → 主题兜底归入同一线程。
+    #[tokio::test]
+    async fn save_batch_emails_threads_same_subject_with_participant_intersection() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let first = threading_email(
+            3,
+            "Lunch plan",
+            "a@x.com",
+            "b@x.com",
+            Some("<m1@x.com>"),
+            None,
+            1000,
+            false,
+        );
+        let second = threading_email(
+            4,
+            "Re: Lunch plan",
+            "b@x.com",
+            "a@x.com",
+            Some("<m2@x.com>"),
+            None,
+            1100,
+            false,
+        );
+
+        save_batch_emails(&db, account_id, "INBOX", &[first, second])
+            .await
+            .unwrap();
+
+        let thread_ids = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        assert_eq!(thread_ids.len(), 2);
+        let t1 = thread_ids[0].expect("首封应已归组");
+        let t2 = thread_ids[1].expect("第二封应已归组");
+        assert_eq!(t1, t2, "同主题 + 参与者交集应归入同一线程");
+        assert_eq!(thread_count(&db).await, 1, "不得重复建线程");
+    }
+
+    /// 草稿不参与线程化：即便带 In-Reply-To 也保持 thread_id NULL，且不建线程。
+    #[tokio::test]
+    async fn save_batch_emails_leaves_draft_thread_id_null() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let draft = threading_email(
+            5,
+            "Re: Anything",
+            "me@x.com",
+            "peer@x.com",
+            Some("<d1@x.com>"),
+            Some("<ghost@x.com>"),
+            1200,
+            true,
+        );
+
+        save_batch_emails(&db, account_id, "INBOX", &[draft])
+            .await
+            .unwrap();
+
+        let thread_ids = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        assert_eq!(thread_ids, vec![None], "草稿 thread_id 应保持 NULL");
+        assert_eq!(thread_count(&db).await, 0, "草稿不得创建线程");
+    }
+
+    /// 已发送邮件同样参与归属：本地发送的回信按主题 + 参与者并入既有线程。
+    #[tokio::test]
+    async fn insert_sent_email_assigns_thread_on_insert() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let received = threading_email(
+            6,
+            "Hello",
+            "alice@x.com",
+            "me@x.com",
+            Some("<r1@x.com>"),
+            None,
+            1000,
+            false,
+        );
+        save_batch_emails(&db, account_id, "INBOX", &[received])
+            .await
+            .unwrap();
+        let inbox_thread = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        let expected = inbox_thread[0].expect("收件应已归组");
+
+        let now = 1500;
+        let sent = insert_sent_email(
+            &db,
+            EmailWrite {
+                account_id,
+                folder: "Sent".to_string(),
+                uid: 0,
+                message_id: Some("<s1@x.com>".to_string()),
+                in_reply_to: None,
+                subject: Some("Re: Hello".to_string()),
+                sender_name: None,
+                sender_email: "me@x.com".to_string(),
+                recipient_emails: "alice@x.com".to_string(),
+                cc_emails: None,
+                bcc_emails: None,
+                preview: None,
+                body_text: None,
+                body_html: None,
+                is_read: Some(true),
+                is_starred: Some(false),
+                is_draft: Some(false),
+                is_answered: Some(false),
+                is_deleted: Some(false),
+                sent_at: now,
+                received_at: now,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            sent.thread_id,
+            Some(expected),
+            "已发送回信应并入收件所在线程"
+        );
     }
 }

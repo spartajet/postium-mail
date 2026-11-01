@@ -35,6 +35,9 @@ pub struct ParsedHeaders {
     pub cc_emails: Option<String>,
     pub bcc_emails: Option<String>,
     pub message_id: Option<String>,
+    /// In-Reply-To + References 合并的 Message-ID 集（`<id1>,<id2>` 逗号串，
+    /// 小写去重、超 2048 字节截断），供会话线程化的头链匹配使用
+    pub in_reply_to: Option<String>,
     /// Unix 时间戳（秒）
     pub sent_at: i64,
 }
@@ -145,6 +148,9 @@ pub fn extract_headers_from_message_with_raw(
     let cc_emails = format_mp_address_opt(msg.cc());
     let bcc_emails = format_mp_address_opt(msg.bcc());
 
+    // In-Reply-To + References（会话线程化头链）
+    let in_reply_to = extract_in_reply_to(msg);
+
     ParsedHeaders {
         subject,
         sender_name,
@@ -155,8 +161,61 @@ pub fn extract_headers_from_message_with_raw(
         cc_emails,
         bcc_emails,
         message_id,
+        in_reply_to,
         sent_at,
     }
+}
+
+/// `in_reply_to` 落库串的最大字节数。
+const MAX_IN_REPLY_TO_BYTES: usize = 2048;
+
+/// 合并 In-Reply-To 与 References 头的 Message-ID 集，供会话线程化的头链匹配。
+///
+/// mail-parser 已把两头解析为无尖括号的 id 列表（`as_text_list` 对单个/
+/// 多个 id、缺失头分别返回单元素切片/多元素切片/None），此处重新包裹尖括号
+/// 后交给 threading 引擎的 [`parse_message_ids`] 归一（小写、去重、剥噪声），
+/// In-Reply-To 的 id 优先于 References，跨头去重保序。
+///
+/// 落库形态为 `<id1>,<id2>` 逗号串（带尖括号，与 RFC 原始头形态一致，
+/// 下游 `parse_message_ids` 依赖尖括号对正确提取 id），超 2048 字节截断。
+/// 两头皆缺失时返回 None。
+fn extract_in_reply_to(msg: &mail_parser::Message<'_>) -> Option<String> {
+    use crate::domain::threading::parse_message_ids;
+
+    let mut ids: Vec<String> = Vec::new();
+    for header in [msg.in_reply_to(), msg.references()] {
+        if let Some(list) = header.as_text_list() {
+            let raw = list
+                .iter()
+                .map(|id| format!("<{id}>"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            ids.extend(parse_message_ids(&raw));
+        }
+    }
+
+    // 跨头并集去重（保首次出现顺序：In-Reply-To 优先）
+    let mut seen = std::collections::HashSet::new();
+    let joined = ids
+        .iter()
+        .filter(|id| seen.insert((*id).clone()))
+        .map(|id| format!("<{id}>"))
+        .collect::<Vec<_>>()
+        .join(",");
+    if joined.is_empty() {
+        return None;
+    }
+    if joined.len() <= MAX_IN_REPLY_TO_BYTES {
+        return Some(joined);
+    }
+    // 截断到 2048 字节（回退到最近的 char 边界，防御非 ASCII id）
+    let mut end = MAX_IN_REPLY_TO_BYTES;
+    while end > 0 && !joined.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut truncated = joined;
+    truncated.truncate(end);
+    Some(truncated)
 }
 
 /// 解析主题，支持多种编码回退机制
@@ -1409,5 +1468,39 @@ PK\r\n\
 
         assert!(result.recipient_emails.contains("bob@example.com"));
         assert!(result.recipient_emails.contains("charlie@example.com"));
+    }
+
+    /// 测试合并 In-Reply-To 与 References 的 Message-ID 集（去重、In-Reply-To 优先）
+    #[test]
+    fn extracts_in_reply_to_merged_with_references() {
+        let raw = b"From: alice@example.com\r\n\
+                    To: bob@example.com\r\n\
+                    Subject: Re: Hello\r\n\
+                    Message-ID: <msg456@example.com>\r\n\
+                    In-Reply-To: <Parent@Example.com>\r\n\
+                    References: <root@example.com> <parent@example.com> <other@example.com>\r\n\
+                    Date: Mon, 20 Apr 2026 10:00:00 +0800\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        // In-Reply-To 的 id 在前（大小写归一），References 依序去重合并，带尖括号逗号 join
+        assert_eq!(
+            result.in_reply_to.as_deref(),
+            Some("<parent@example.com>,<root@example.com>,<other@example.com>")
+        );
+    }
+
+    /// 测试无 In-Reply-To / References 头时 in_reply_to 为 None
+    #[test]
+    fn in_reply_to_is_none_when_both_headers_missing() {
+        let raw = b"From: alice@example.com\r\n\
+                    Subject: Fresh\r\n\
+                    Message-ID: <fresh@example.com>\r\n\
+                    \r\n\
+                    Body";
+        let result = parse_headers_from_raw(raw, 0).expect("应成功解析");
+
+        assert_eq!(result.in_reply_to, None);
     }
 }

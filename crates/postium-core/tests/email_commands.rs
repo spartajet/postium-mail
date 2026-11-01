@@ -1413,6 +1413,7 @@ fn remote_email(uid: u32, subject: &str, body: &str) -> WholeEmailDto {
         folder: "INBOX".to_string(),
         uid,
         message_id: Some(format!("<reload-{uid}@example.com>")),
+        in_reply_to: None,
         sender_name: Some("Reload Sender".to_string()),
         sender_email: "reload@example.com".to_string(),
         recipient_emails: "recipient@example.com".to_string(),

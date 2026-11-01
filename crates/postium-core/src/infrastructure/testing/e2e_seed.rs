@@ -659,6 +659,7 @@ fn email_model(
         folder: folder.to_string(),
         uid,
         message_id: Some(format!("<e2e-{account_id}-{folder}-{uid}@postium.test>")),
+        in_reply_to: None,
         subject: Some(subject.to_string()),
         sender_name: Some(sender_name.to_string()),
         sender_email: sender_email.to_string(),

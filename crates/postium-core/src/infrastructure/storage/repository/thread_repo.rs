@@ -306,7 +306,14 @@ fn create_thread(
 }
 
 /// 从发件人 + 收件人 + 抄送（均为逗号分隔）构造小写参与者集合。
-fn collect_participants(sender: &str, recipients: &str, cc: Option<&str>) -> BTreeSet<String> {
+///
+/// 供本模块（回填/单封归属）与 email_repo（入库接线）共用，
+/// 保证写入线程与查找交集的两侧参与者集合构造规则一致。
+pub(crate) fn collect_participants(
+    sender: &str,
+    recipients: &str,
+    cc: Option<&str>,
+) -> BTreeSet<String> {
     let mut participants = BTreeSet::new();
     let mut add_field = |field: &str| {
         for candidate in field.split(',') {

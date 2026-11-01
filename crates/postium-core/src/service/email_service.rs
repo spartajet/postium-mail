@@ -990,6 +990,7 @@ impl EmailService {
                 folder: sent_folder.clone(),
                 uid: 0,
                 message_id: Some(built.message_id.clone()),
+                in_reply_to: None,
                 subject: Some(req.subject.trim().to_string()),
                 sender_name: account.display_name.clone(),
                 sender_email: account.email.clone(),

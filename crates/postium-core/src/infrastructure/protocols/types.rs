@@ -202,6 +202,9 @@ pub struct WholeEmailDto {
     pub uid: u32,
     /// RFC 2822 Message-ID 邮件头
     pub message_id: Option<String>,
+    /// In-Reply-To + References 合并的 Message-ID 集（`<id1>,<id2>` 逗号串），
+    /// 供会话线程化的头链匹配使用
+    pub in_reply_to: Option<String>,
 
     // ─── 发件人/收件人 ───
     /// 发件人显示名
