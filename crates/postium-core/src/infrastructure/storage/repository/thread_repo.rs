@@ -10,8 +10,9 @@
 //! - 运行期单封归组 [`assign`]：入库时在调用方事务内决定归属线程并返回
 //!   `thread_id`（调用方写入邮件行）；
 //! - 会话聚合查询 [`list_conversations`] / [`conversation_emails`]：按
-//!   [`ConversationFilter`] 可见性过滤（账号 / 分类 / 文件夹 / 仅未读）
-//!   聚合线程列表（封数 / 未读 / 星标 + 最新一封列表头）与会话内邮件时间线。
+//!   [`ConversationFilter`] 可见性过滤（账号 / 分类 / 文件夹 / 仅未读，
+//!   且恒排除 Trash/Spam 分类文件夹——Gmail 会话语义）聚合线程列表
+//!   （封数 / 未读 / 星标 + 最新一封列表头）与会话内邮件时间线。
 
 use std::collections::BTreeSet;
 
@@ -111,7 +112,13 @@ pub fn assign(
 ///   运行时解析同样以这份持久化分类为输入（`local_folder_registry_inputs`），
 ///   两侧消费同一来源；
 /// - `unread_only` → `(? = 0 OR is_read = 0 OR is_read IS NULL)`，与
-///   `email_repo` 既有 list* 查询的未读条件写法一致（`is_read` 可空）。
+///   `email_repo` 既有 list* 查询的未读条件写法一致（`is_read` 可空）；
+/// - 恒附加 **Trash/Spam 文件夹排除**（Gmail 会话语义：废弃箱/垃圾箱邮件
+///   不参与会话视图，归档/已发送保留）——`folder NOT IN (按本行账号分类为
+///   trash/spam 的文件夹)`，复用与上面分类过滤**同一份** `sync_state`
+///   持久化映射 + [`FolderCategory::as_str`] 常量，不另建名称表。
+///   UI 侧（T9 裁定）Trash/Spam 分类与文件夹本就回退平铺，不消费会话查询，
+///   排除不会误伤显式浏览废弃箱的路径。
 struct VisibilitySpec {
     account_id: Option<i32>,
     folder: Option<String>,
@@ -168,6 +175,18 @@ impl VisibilitySpec {
             ));
             values.push(Value::from(category.to_string()));
         }
+        // Trash/Spam 文件夹排除（Gmail 会话语义：时间线删除 = 移入 Trash 的邮件
+        // 不得在后续无 removed_id 的会话刷新中"复活"）。与上面的分类过滤同一份
+        // sync_state 持久化分类 + FolderCategory 常量（trash/spam），关联子查询
+        // 同样按本行账号对齐（同名文件夹在不同账号可有不同分类）。
+        conds.push(format!(
+            "{alias}.folder NOT IN (
+                SELECT s.folder FROM sync_state s
+                WHERE s.folder_category IN (?, ?) AND s.account_id = {alias}.account_id
+            )"
+        ));
+        values.push(Value::from(FolderCategory::Trash.as_str().to_string()));
+        values.push(Value::from(FolderCategory::Junk.as_str().to_string()));
         if self.unread_only {
             conds.push(format!(
                 "(? = 0 OR {alias}.is_read = 0 OR {alias}.is_read IS NULL)"
@@ -1373,6 +1392,166 @@ mod tests {
 
         assert_eq!(total, 1, "全部软删除的线程不进列表与总数");
         assert_eq!(conv_ids(&rows), vec![t_alive]);
+    }
+
+    #[test]
+    fn list_conversations_excludes_trash_folder_emails_from_thread() {
+        // I-1 根治断言：线程含 [收件箱封 + Trash 封]（Trash 封**未软删**——
+        // 被排除只能来自文件夹排除，不是 is_deleted）。分类行复用生产写入侧
+        // 的 FolderCategory::as_str 形态（与 resolve_special_folders 消费的
+        // 是同一份 sync_state 映射）。
+        let conn = minimal_conn();
+        seed_sync_category(&conn, 1, "Trash", FolderCategory::Trash.as_str());
+        let tid = seed_thread(&conn, "mixed", "a@x,b@x", 100, 500);
+        let inbox = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("收件箱封"),
+            Some("Alice"),
+            "alice@x",
+            Some("在收件箱"),
+            false,
+            false,
+            false,
+            300,
+        );
+        let trash = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "Trash",
+            Some("回收站封"),
+            Some("Bob"),
+            "bob@x",
+            Some("更晚但已删"),
+            false,
+            false,
+            false,
+            400,
+        );
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1, "收件箱封仍在，线程不整体消失");
+        let row = &rows[0];
+        assert_eq!(row.thread_id, tid);
+        assert_eq!(row.total, 1, "聚合 total 只数收件箱封，Trash 封不计入");
+        assert_eq!(
+            row.subject.as_deref(),
+            Some("收件箱封"),
+            "列表头（last-email 子查询）跳过更晚的 Trash 封，取收件箱封"
+        );
+        assert_eq!(row.preview.as_deref(), Some("在收件箱"));
+
+        let emails =
+            conversation_emails_impl(&conn, tid, &VisibilitySpec::from(&base_filter())).unwrap();
+        assert_eq!(
+            emails.iter().map(|m| m.id as i64).collect::<Vec<_>>(),
+            vec![inbox],
+            "conversation_emails 时间线不含 Trash 封"
+        );
+
+        // 账号对齐：同名 "Trash" 文件夹在账号 2 无分类行 → 账号 2 的 Trash 封
+        // 不被排除（排除集按各自行账号取 sync_state 分类，与分类过滤同一口径）。
+        let acct2_trash = seed_conv_email(
+            &conn,
+            tid,
+            2,
+            "Trash",
+            Some("他账号回收站封"),
+            None,
+            "c@x",
+            None,
+            true,
+            false,
+            false,
+            500,
+        );
+        let emails =
+            conversation_emails_impl(&conn, tid, &VisibilitySpec::from(&base_filter())).unwrap();
+        assert_eq!(
+            emails.iter().map(|m| m.id as i64).collect::<Vec<_>>(),
+            vec![inbox, acct2_trash],
+            "无账号过滤时逐行按各自账号对齐：账号 1 的 Trash 封被排除，账号 2 的不被排除"
+        );
+        let mut by_acct = base_filter();
+        by_acct.account_id = Some(1);
+        let emails =
+            conversation_emails_impl(&conn, tid, &VisibilitySpec::from(&by_acct)).unwrap();
+        assert_eq!(
+            emails.iter().map(|m| m.id as i64).collect::<Vec<_>>(),
+            vec![inbox],
+            "账号 1 过滤下 Trash 封仍被排除"
+        );
+        let _ = trash;
+    }
+
+    #[test]
+    fn list_conversations_hides_thread_whose_emails_all_in_trash_or_spam() {
+        // I-1 根治断言：全部封在 Trash/Spam（均未软删）→ 线程从列表与总数
+        // 整体消失；保留一个收件箱对照线程，排除"恒空"的假阳性。
+        let conn = minimal_conn();
+        seed_sync_category(&conn, 1, "Trash", FolderCategory::Trash.as_str());
+        seed_sync_category(&conn, 1, "Junk", FolderCategory::Junk.as_str());
+        let t_alive = seed_thread(&conn, "alive", "a@x", 100, 100);
+        let t_gone = seed_thread(&conn, "gone", "a@x,b@x", 100, 400);
+        seed_conv_email(
+            &conn,
+            t_alive,
+            1,
+            "INBOX",
+            Some("alive"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            100,
+        );
+        seed_conv_email(
+            &conn,
+            t_gone,
+            1,
+            "Trash",
+            Some("trash"),
+            None,
+            "a@x",
+            None,
+            false,
+            false,
+            false,
+            300,
+        );
+        seed_conv_email(
+            &conn,
+            t_gone,
+            1,
+            "Junk",
+            Some("junk"),
+            None,
+            "b@x",
+            None,
+            false,
+            false,
+            false,
+            400,
+        );
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1, "全 Trash/Spam 线程不进列表与总数");
+        assert_eq!(conv_ids(&rows), vec![t_alive], "收件箱对照线程仍在");
+        let emails =
+            conversation_emails_impl(&conn, t_gone, &VisibilitySpec::from(&base_filter())).unwrap();
+        assert!(
+            emails.is_empty(),
+            "全 Trash/Spam 线程的 conversation_emails 亦为空（时间线整体消失）"
+        );
     }
 
     #[test]

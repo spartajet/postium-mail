@@ -173,9 +173,9 @@ impl EmailsStore {
     /// - 标签视图：无会话聚合 API，v1 回退平铺装载；
     /// - 草稿（分类或具体文件夹）：上游会话查询恒过滤 `is_draft = 0`，
     ///   该视图的会话档结果**数据性恒空**，只能平铺装载；
-    /// - 垃圾/回收站：会话档结果并非恒空（IMAP 移动语义下存留件
-    ///   `is_deleted = 0`，仍可聚合），但产品裁量（T9 裁定）这两类
-    ///   维护型视图不做会话聚合，回退平铺——是产品决策而非数据必然。
+    /// - 垃圾/回收站：产品裁量（T9 裁定）这两类维护型视图不做会话聚合，
+    ///   回退平铺；会话查询层现已恒排除 Trash/Spam 分类文件夹（Gmail
+    ///   会话语义，thread_repo VisibilitySpec），会话档结果亦数据性恒空。
     pub fn in_conversation_view(&self) -> bool {
         self.view_mode == EmailViewMode::Threaded
             && self.search_query.is_none()
