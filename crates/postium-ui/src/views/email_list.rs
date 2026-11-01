@@ -1,8 +1,15 @@
 //! 邮件列表视图（移植自 src/lib/components/email/EmailList.svelte，
 //! 虚拟化模式参照 spike 已验证实现）。
 //!
+//! 双行模型（Task 9）：列表行有两种形态——平铺档单封邮件行
+//! ([`EmailRow`]，现状不变)与会话档线程聚合行([`ConversationRow`])。
+//! 行数据源由 [`EmailsStore::in_conversation_view`] 决定，宿主(app.rs)
+//! 据此在 `set_rows`/`set_conversations` 间分派；列表头部工具条提供
+//! 会话/平铺二态切换按钮(`set_view_mode`)。
+//!
 //! 交互约定：行选中 = 打开该邮件（写 `EmailsStore.selected` 并异步标已读），
-//! 宿主订阅 store 渲染详情。
+//! 宿主订阅 store 渲染详情；会话行选中 = `EmailsStore::select_thread`
+//! （发 `ThreadSelectionChanged`，会话时间线由 T10 接线）。
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -22,12 +29,27 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit::component::Disableable as _;
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
-use postium_core::service::email_service::{EmailCategory, EmailDto};
+use postium_core::service::email_service::{ConversationSummary, EmailCategory, EmailDto};
 
 use crate::i18n::t;
 use crate::nav::NavTarget;
 use crate::runtime::spawn_tokio;
-use crate::stores::emails::EmailsStore;
+use crate::stores::emails::{EmailsStore, EmailViewMode};
+
+/// 列表行时间列格式化（平铺行与会话行共用，勿在行组件内复制逻辑）：
+/// 当天显示 `HH:MM`，否则 `MM-DD`。
+fn format_list_time(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| {
+            let now = chrono::Utc::now();
+            if dt.date_naive() == now.date_naive() {
+                dt.format("%H:%M").to_string()
+            } else {
+                dt.format("%m-%d").to_string()
+            }
+        })
+        .unwrap_or_default()
+}
 
 #[derive(IntoElement)]
 pub struct EmailRow {
@@ -54,17 +76,7 @@ impl RenderOnce for EmailRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let menu_ctx = (self.api.clone(), self.store.clone());
         let email_rc = self.email.clone();
-        let time = chrono::DateTime::from_timestamp(self.email.sent_at, 0)
-            .map(|dt| {
-
-                let now = chrono::Utc::now();
-                if dt.date_naive() == now.date_naive() {
-                    dt.format("%H:%M").to_string()
-                } else {
-                    dt.format("%m-%d").to_string()
-                }
-            })
-            .unwrap_or_default();
+        let time = format_list_time(self.email.sent_at);
         let unread = !self.email.is_read;
 
         // 三行等高结构（对齐 Tauri 版 EmailList.svelte 的邮件项）：
@@ -180,6 +192,179 @@ impl RenderOnce for EmailRow {
                 })
                 .into_any_element(),
             _ => row.into_any_element(),
+        }
+    }
+}
+
+/// 会话（线程聚合）行：对齐 [`EmailRow`] 的三行视觉约定（字号/间距/
+/// 选中态/未读加粗/星标图标/时间格式化均复用同一套）。
+///
+/// 与单封行的差异：无附件图标（`ConversationSummary` 不携带附件信息）；
+/// 第一行为线程最后发件人 + 封数角标（`total > 1`），第二行为主题，
+/// 第三行为最新邮件预览。e2e 探针：`conv-row-{thread_id}`。
+#[derive(IntoElement)]
+pub struct ConversationRow {
+    base: ListItem,
+    conversation: Rc<ConversationSummary>,
+    selected: bool,
+}
+
+impl Selectable for ConversationRow {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self.base = self.base.selected(selected);
+        self
+    }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+impl RenderOnce for ConversationRow {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let conv = &self.conversation;
+        let time = format_list_time(conv.received_at);
+        // 未读语义按会话聚合数（unread > 0）而非单封 is_read
+        let unread = conv.unread > 0;
+
+        // 三行等高结构（与 EmailRow 同构，行高/内距/分隔线一致）
+        let line = |h: f32| div().w_full().h(px(h)).overflow_hidden();
+
+        // ① 最后发件人 + 封数角标 + 时间；未读加粗 + 未读点
+        let mut row1 = h_flex().gap_2().items_center();
+        if unread {
+            row1 = row1.child(
+                div()
+                    .flex_none()
+                    .w(px(6.))
+                    .h(px(6.))
+                    .rounded_full()
+                    .bg(cx.theme().accent),
+            );
+        }
+        row1 = row1
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        conv.sender_name
+                            .clone()
+                            .unwrap_or_else(|| conv.sender_email.clone()),
+                    ),
+            );
+        // 封数角标：多封会话显示 total（形态对齐侧栏未读徽标）
+        if conv.total > 1 {
+            row1 = row1.child(
+                div()
+                    .flex_none()
+                    .px(px(6.))
+                    .py(px(1.))
+                    .rounded(px(8.))
+                    .text_size(px(10.5))
+                    .bg(cx.theme().secondary)
+                    .text_color(cx.theme().secondary_foreground)
+                    .child(conv.total.to_string()),
+            );
+        }
+        row1 = row1.child(
+            div()
+                .flex_none()
+                .text_size(px(11.5))
+                .text_color(cx.theme().muted_foreground)
+                .child(time),
+        );
+
+        // ② 星标（任一封星标）+ 主题；未读中粗
+        let row2 = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .when(conv.starred_any, |this| {
+                this.child(
+                    gpui_kit::component::Icon::new(IconName::Star)
+                        .size_3()
+                        .flex_none()
+                        .text_color(gpui_kit::rgb(0xf59e0b)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(13.5))
+                    .when(unread, |d| d.font_weight(FontWeight::MEDIUM).text_color(cx.theme().foreground))
+                    .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
+                    .whitespace_nowrap()
+                    .line_clamp(1)
+                    .child(
+                        conv.subject
+                            .clone()
+                            .unwrap_or_else(|| "（无主题）".into()),
+                    ),
+            );
+
+        // ③ 最新邮件预览单行；空时占位同高
+        let preview_text = conv.preview.clone().unwrap_or_default();
+        let row3 = div()
+            .mt(px(2.))
+            .h(px(15.))
+            .overflow_hidden()
+            .text_size(px(12.))
+            .text_color(cx.theme().muted_foreground)
+            .when(!preview_text.is_empty(), |d| {
+                d.whitespace_nowrap().line_clamp(1).child(preview_text)
+            });
+
+        let thread_id = conv.thread_id;
+        self.base
+            .px(px(20.))
+            .py(px(12.))
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(line(18.).child(row1))
+            .child(line(18.).mt(px(2.)).child(row2))
+            .child(row3)
+            // e2e 探针（debug 构建记录 bounds，正式构建空操作）
+            .debug_selector(move || format!("conv-row-{thread_id}"))
+    }
+}
+
+/// 列表行统一元素形态：`ListDelegate::Item` 须为单一类型且实现
+/// `Selectable + IntoElement`，故以枚举分发到平铺/会话两种行组件。
+#[derive(IntoElement)]
+pub enum EmailListRow {
+    Email(EmailRow),
+    Conversation(ConversationRow),
+}
+
+impl Selectable for EmailListRow {
+    fn selected(self, selected: bool) -> Self {
+        match self {
+            Self::Email(row) => Self::Email(row.selected(selected)),
+            Self::Conversation(row) => Self::Conversation(row.selected(selected)),
+        }
+    }
+    fn is_selected(&self) -> bool {
+        match self {
+            Self::Email(row) => row.is_selected(),
+            Self::Conversation(row) => row.is_selected(),
+        }
+    }
+}
+
+impl RenderOnce for EmailListRow {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        match self {
+            // 显式消歧：View trait 也有 render（&mut self 形态）
+            Self::Email(row) => RenderOnce::render(row, window, cx).into_any_element(),
+            Self::Conversation(row) => RenderOnce::render(row, window, cx).into_any_element(),
         }
     }
 }
@@ -368,9 +553,20 @@ fn build_row_menu(
         .item(delete_item)
 }
 
+/// 委托侧行数据（统一载体）：平铺档单封邮件 / 会话档线程聚合。
+/// 两种形态不混排（由 [`EmailsStore::in_conversation_view`] 决定），
+/// 宿主整体替换行集合（`set_rows`/`set_conversations`）。
+enum ListRow {
+    Email(Rc<EmailDto>),
+    Conversation(Rc<ConversationSummary>),
+}
+
 pub struct EmailListDelegate {
-    rows: Vec<Rc<EmailDto>>,
+    rows: Vec<ListRow>,
     selected_email: Option<i32>,
+    /// 会话档选中线程 id（与 selected_email 互斥；行集合整体换档时
+    /// 由 set_rows/set_conversations 清对侧选中）
+    selected_thread: Option<i64>,
     store: gpui_kit::WeakEntity<EmailsStore>,
     api: Arc<postium_core::api::CoreApi>,
     /// 「加载更早邮件」服务器同步中（防重复触发；footer 按钮显示态）
@@ -378,20 +574,32 @@ pub struct EmailListDelegate {
 }
 
 impl EmailListDelegate {
-    /// 原位替换行数据（翻页/刷新路径，保持滚动与选中）。
-    /// 选中 id 不在新行集合中时清除选中。
+    /// 原位替换平铺行数据（翻页/刷新路径，保持滚动与选中）。
+    /// 选中 id 不在新行集合中时清除选中；行集合换回平铺档时清会话选中。
     pub fn set_rows(&mut self, rows: Vec<Rc<EmailDto>>) {
         if let Some(sel) = self.selected_email
             && !rows.iter().any(|r| r.id == sel)
         {
             self.selected_email = None;
         }
-        self.rows = rows;
+        self.selected_thread = None;
+        self.rows = rows.into_iter().map(ListRow::Email).collect();
+    }
+
+    /// 原位替换会话行数据（会话档翻页/刷新路径，语义同 [`Self::set_rows`]）。
+    pub fn set_conversations(&mut self, rows: Vec<Rc<ConversationSummary>>) {
+        if let Some(sel) = self.selected_thread
+            && !rows.iter().any(|r| r.thread_id == sel)
+        {
+            self.selected_thread = None;
+        }
+        self.selected_email = None;
+        self.rows = rows.into_iter().map(ListRow::Conversation).collect();
     }
 }
 
 impl ListDelegate for EmailListDelegate {
-    type Item = EmailRow;
+    type Item = EmailListRow;
 
     fn sections_count(&self, _: &App) -> usize {
         1
@@ -417,49 +625,83 @@ impl ListDelegate for EmailListDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) {
-        self.selected_email = ix.and_then(|i| self.rows.get(i.row)).map(|r| r.id);
+        match ix.and_then(|i| self.rows.get(i.row)) {
+            Some(ListRow::Email(email)) => {
+                self.selected_email = Some(email.id);
 
-        // 选中即打开：写回 store，宿主据此渲染详情
-        if let Some(store) = self.store.upgrade() {
-            let selected = self.selected_email;
-            store.update(cx, |store, cx| {
-                let changed = store.selected != selected;
-                store.selected = selected;
-                store.selected_version += 1;
-                cx.notify();
-                if changed
-                    && let Some(id) = selected
-                {
-                    cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(id));
-                }
-            });
+                // 选中即打开：写回 store，宿主据此渲染详情
+                if let Some(store) = self.store.upgrade() {
+                    let selected = self.selected_email;
+                    store.update(cx, |store, cx| {
+                        let changed = store.selected != selected;
+                        store.selected = selected;
+                        store.selected_version += 1;
+                        cx.notify();
+                        if changed
+                            && let Some(id) = selected
+                        {
+                            cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(id));
+                        }
+                    });
 
-            // 异步标记已读：完成后原位更新行内 is_read 标记 + 通知侧栏刷新徽章
-            if let Some((id, _unread)) = ix.and_then(|i| self.rows.get(i.row)).map(|r| (r.id, !r.is_read)).filter(|(_, u)| *u) {
-                let api = self.api.clone();
-                let rx = spawn_tokio(async move { api.mark_as_read(id, true).await });
-                let row_ix = ix.map(|i| i.row);
-                cx.spawn(async move |this, cx| {
-                    if rx.recv().await.is_ok() {
-                        this.update(cx, |state, cx| {
-                            let delegate = state.delegate_mut();
-                            if let Some(row) = row_ix.and_then(|ri| delegate.rows.get_mut(ri))
-                                && row.id == id
-                            {
-                                let mut updated = (**row).clone();
-                                updated.is_read = true;
-                                *row = std::rc::Rc::new(updated);
+                    // 异步标记已读：完成后原位更新行内 is_read 标记 + 通知侧栏刷新徽章
+                    let (id, was_unread) = (email.id, !email.is_read);
+                    if was_unread {
+                        let api = self.api.clone();
+                        let rx = spawn_tokio(async move { api.mark_as_read(id, true).await });
+                        let row_ix = ix.map(|i| i.row);
+                        cx.spawn(async move |this, cx| {
+                            if rx.recv().await.is_ok() {
+                                this.update(cx, |state, cx| {
+                                    let delegate = state.delegate_mut();
+                                    if let Some(row) = row_ix
+                                        .and_then(|ri| delegate.rows.get_mut(ri))
+                                        && let ListRow::Email(row) = row
+                                        && row.id == id
+                                    {
+                                        let mut updated = (**row).clone();
+                                        updated.is_read = true;
+                                        *row = std::rc::Rc::new(updated);
+                                    }
+                                    cx.notify();
+                                })
+                                .ok();
+                                // 通知宿主刷新文件夹统计（侧栏未读徽章）
+                                store.update(cx, |_, cx| {
+                                    cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                                });
                             }
-                            cx.notify();
                         })
-                        .ok();
-                        // 通知宿主刷新文件夹统计（侧栏未读徽章）
-                        store.update(cx, |_, cx| {
-                            cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
-                        });
+                        .detach();
                     }
-                })
-                .detach();
+                }
+            }
+            Some(ListRow::Conversation(conv)) => {
+                self.selected_thread = Some(conv.thread_id);
+
+                // 会话选中即打开：写回 store（清单封选中 + 发
+                // ThreadSelectionChanged），会话时间线由 T10 宿主接线装载
+                if let Some(store) = self.store.upgrade() {
+                    let thread_id = conv.thread_id;
+                    store.update(cx, |store, cx| {
+                        store.select_thread(thread_id, cx);
+                    });
+                }
+            }
+            None => {
+                self.selected_email = None;
+                self.selected_thread = None;
+                if let Some(store) = self.store.upgrade() {
+                    store.update(cx, |store, cx| {
+                        // 与既有平铺清选语义一致：只推进版本，不发事件
+                        store.selected = None;
+                        store.selected_version += 1;
+                        if store.selected_thread.take().is_some() {
+                            store.selected_thread_version += 1;
+                        }
+                        cx.notify();
+                    });
+                }
             }
         }
         cx.notify();
@@ -471,14 +713,20 @@ impl ListDelegate for EmailListDelegate {
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
-        let email = self.rows.get(ix.row)?;
-        Some(EmailRow {
-            base: ListItem::new(ix).selected(Some(email.id) == self.selected_email),
-            email: email.clone(),
-            selected: Some(email.id) == self.selected_email,
-            api: Some(self.api.clone()),
-            store: Some(self.store.clone()),
-        })
+        match self.rows.get(ix.row)? {
+            ListRow::Email(email) => Some(EmailListRow::Email(EmailRow {
+                base: ListItem::new(ix).selected(Some(email.id) == self.selected_email),
+                email: email.clone(),
+                selected: Some(email.id) == self.selected_email,
+                api: Some(self.api.clone()),
+                store: Some(self.store.clone()),
+            })),
+            ListRow::Conversation(conv) => Some(EmailListRow::Conversation(ConversationRow {
+                base: ListItem::new(ix).selected(Some(conv.thread_id) == self.selected_thread),
+                conversation: conv.clone(),
+                selected: Some(conv.thread_id) == self.selected_thread,
+            })),
+        }
     }
 
     /// 列表末尾的加载按钮（合并「加载更多」/「加载更早邮件」）。
@@ -494,7 +742,12 @@ impl ListDelegate for EmailListDelegate {
         let store_entity = self.store.upgrade()?;
         let can_more = {
             let store = store_entity.read(cx);
-            (store.emails.len() as u64) < store.total
+            // 分页闸门按当前行集合档位（会话 or 邮件）判定
+            if store.in_conversation_view() {
+                (store.conversations.len() as u64) < store.conversation_total
+            } else {
+                (store.emails.len() as u64) < store.total
+            }
         };
         let label = if self.older_syncing {
             t("email.syncingOlder")
@@ -639,6 +892,21 @@ impl EmailListView {
         cx.notify();
     }
 
+    /// 会话/平铺视图档切换：持久化偏好并按新档位重装列表（退出搜索
+    /// 上下文）。宿主据 nav_version 重建整个列表视图。
+    fn toggle_view_mode(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        self.store.update(cx, |store, cx| {
+            let next = if store.view_mode == EmailViewMode::Threaded {
+                EmailViewMode::Flat
+            } else {
+                EmailViewMode::Threaded
+            };
+            store.set_view_mode(next, &api, cx);
+        });
+        cx.notify();
+    }
+
     fn forward_selected(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.store.read(cx).selected else { return };
         let api = self.api.clone();
@@ -684,6 +952,15 @@ impl Render for EmailListView {
             .find(|e| Some(e.id) == store.selected)
             .map(|e| !e.is_read)
             .unwrap_or(false);
+        // 会话/平铺切换：图标与提示指向点击后的目标档位（与未读过滤
+        // 按钮的目标态语义一致）；搜索态仍可切档（切档退出搜索重装导航视图）
+        let threaded_now = store.view_mode == EmailViewMode::Threaded;
+        let (mode_icon, mode_tip) = if threaded_now {
+            (IconName::List, t("email.flatView"))
+        } else {
+            (IconName::MessageSquare, t("email.threadedView"))
+        };
+        let conversation_ctx = store.in_conversation_view();
         let mut toolbar = h_flex()
             .gap_1()
             .items_center()
@@ -700,7 +977,16 @@ impl Render for EmailListView {
                 div()
                     .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} / {}", store.emails.len(), store.total)),
+                    // 计数按当前行集合档位（会话 or 邮件）
+                    .child(if conversation_ctx {
+                        format!(
+                            "{} / {}",
+                            store.conversations.len(),
+                            store.conversation_total
+                        )
+                    } else {
+                        format!("{} / {}", store.emails.len(), store.total)
+                    }),
             );
 
         if has_selected {
@@ -763,6 +1049,19 @@ impl Render for EmailListView {
                 );
         }
 
+        // 会话/平铺切档按钮固定在工具条右端
+        toolbar = toolbar
+            .child(div().flex_1())
+            .child(
+                Button::new("view-mode-toggle")
+                    .ghost()
+                    .xsmall()
+                    .icon(mode_icon)
+                    .tooltip(mode_tip)
+                    .on_click(cx.listener(Self::toggle_view_mode))
+                    .debug_selector(|| "view-mode-toggle".to_string()),
+            );
+
         // 加载按钮在列表末尾（delegate render_section_footer）：滚到底才可见
         v_flex()
             .size_full()
@@ -773,27 +1072,45 @@ impl Render for EmailListView {
     }
 }
 
-/// 用 EmailsStore 数据重建列表状态。
+/// 用 EmailsStore 数据重建列表状态（行数据源按 [`EmailsStore::in_conversation_view`]
+/// 分派：会话档取 `conversations`，否则平铺 `emails`）。
 pub fn rebuild_list_state(
     store: &Entity<EmailsStore>,
     api: &Arc<postium_core::api::CoreApi>,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ListState<EmailListDelegate>> {
-    let rows: Vec<Rc<EmailDto>> = store
-        .read(cx)
-        .emails
-        .iter()
-        .cloned()
-        .map(Rc::new)
-        .collect();
-    let selected = store.read(cx).selected;
+    let (rows, selected_email, selected_thread) = {
+        let s = store.read(cx);
+        if s.in_conversation_view() {
+            (
+                s.conversations
+                    .iter()
+                    .cloned()
+                    .map(|c| ListRow::Conversation(Rc::new(c)))
+                    .collect::<Vec<_>>(),
+                None,
+                s.selected_thread,
+            )
+        } else {
+            (
+                s.emails
+                    .iter()
+                    .cloned()
+                    .map(|e| ListRow::Email(Rc::new(e)))
+                    .collect::<Vec<_>>(),
+                s.selected,
+                None,
+            )
+        }
+    };
     let weak = store.downgrade();
     cx.new(|cx| {
         ListState::new(
             EmailListDelegate {
                 rows,
-                selected_email: selected,
+                selected_email,
+                selected_thread,
                 store: weak,
                 api: api.clone(),
                 older_syncing: false,

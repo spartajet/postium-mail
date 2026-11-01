@@ -318,8 +318,7 @@ impl AppShell {
                     });
                 }
                 EmailsEvent::Reloaded => {}
-                // 会话选中（T8 交付事件；T9 接线会话行点击后触达，
-                // 届时宿主在此装载会话时间线）
+                // 会话选中（T9 会话行点击已触达；T10 在此装载会话时间线）
                 EmailsEvent::ThreadSelectionChanged(_) => {}
             }
         })
@@ -508,15 +507,43 @@ impl Render for AppShell {
             self.list_data_version = data_v;
         } else if self.list_data_version != data_v {
             if let Some(view) = self.email_list.clone() {
-                let rows: Vec<std::rc::Rc<postium_core::service::email_service::EmailDto>> =
-                    self.emails.read(cx).emails.iter().cloned().map(std::rc::Rc::new).collect();
+                // 原位更新行数据：按档位分派数据源（会话档 conversations /
+                // 平铺档 emails），保持滚动与选中
+                let conversation_ctx = self.emails.read(cx).in_conversation_view();
+                if conversation_ctx {
+                    let rows: Vec<
+                        std::rc::Rc<postium_core::service::email_service::ConversationSummary>,
+                    > = self
+                        .emails
+                        .read(cx)
+                        .conversations
+                        .iter()
+                        .cloned()
+                        .map(std::rc::Rc::new)
+                        .collect();
+                    let state = view.read(cx).state.clone();
+                    state.update(cx, |st, cx| {
+                        st.delegate_mut().set_conversations(rows);
+                        cx.notify();
+                    });
+                } else {
+                    let rows: Vec<
+                        std::rc::Rc<postium_core::service::email_service::EmailDto>,
+                    > = self
+                        .emails
+                        .read(cx)
+                        .emails
+                        .iter()
+                        .cloned()
+                        .map(std::rc::Rc::new)
+                        .collect();
+                    let state = view.read(cx).state.clone();
+                    state.update(cx, |st, cx| {
+                        st.delegate_mut().set_rows(rows);
+                        cx.notify();
+                    });
+                }
                 view.update(cx, |_, cx| {
-                    cx.notify();
-                });
-                let state = view.read(cx).state.clone();
-                state.update(cx, |st, cx| {
-                    let delegate = st.delegate_mut();
-                    delegate.set_rows(rows);
                     cx.notify();
                 });
             }

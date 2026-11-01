@@ -2,7 +2,8 @@
 //!
 //! 双行模型（Task 8）：`view_mode` 决定列表行数据来自 `conversations`
 //! （会话档，线程聚合行）还是 `emails`（平铺档，单封邮件行）。会话档
-//! 下搜索降级为平铺结果执行（FTS 会话聚合非本期）。
+//! 下搜索降级为平铺结果执行（FTS 会话聚合非本期）；草稿/垃圾/回收站
+//! 与标签视图恒走平铺装载（见 [`EmailsStore::in_conversation_view`]）。
 //!
 //! 竞态防护：所有异步装载携带代数（`load_gen`），完成回调先比对代数，
 //! 过期结果（导航/搜索/切档已切换）直接丢弃——避免旧数据落入新视图。
@@ -38,10 +39,8 @@ pub struct EmailsStore {
     pub emails: Vec<EmailDto>,
     pub total: u64,
     /// 当前页会话（会话档行数据，分页追加）
-    #[allow(dead_code)] // Task 9 起消费（列表渲染会话行）
     pub conversations: Vec<ConversationSummary>,
     /// 会话总数（会话档 load_more 分页闸门）
-    #[allow(dead_code)] // Task 9 起消费
     pub conversation_total: u64,
     pub page: usize,
     pub loading: bool,
@@ -52,7 +51,7 @@ pub struct EmailsStore {
     /// 选中的线程 id（会话时间线用；与 selected 互斥）
     pub selected_thread: Option<i64>,
     /// 会话选中变化计数（宿主据此装载会话时间线）
-    #[allow(dead_code)] // Task 9 起消费（宿主接线时间线）
+    #[allow(dead_code)] // Task 10 起消费（宿主接线会话时间线）
     pub selected_thread_version: u32,
     /// 列表数据版本（每次数据变化 +1；宿主据此原位更新行数据）
     pub list_version: u64,
@@ -74,8 +73,9 @@ pub enum EmailsEvent {
     Reloaded,
     /// 选中邮件变化（详情据此装载）
     SelectionChanged(i32),
-    /// 选中会话变化（时间线据此装载；与 SelectionChanged 互斥）
-    #[allow(dead_code)] // Task 9 起消费（会话行点击接线）
+    /// 选中会话变化（时间线据此装载；与 SelectionChanged 互斥）。
+    /// 载荷 thread_id 由 T10 宿主时间线装载消费。
+    #[allow(dead_code)] // Task 10 起消费（宿主装载会话时间线读载荷）
     ThreadSelectionChanged(i64),
     /// 未读状态变化（标已读/未读后，侧栏徽章据此刷新文件夹统计）
     UnreadChanged,
@@ -126,7 +126,6 @@ impl EmailsStore {
     /// 与 navigate 同语义退出搜索上下文（搜索结果本就与档位无关——
     /// 会话档搜索降级为平铺结果，见 [`Self::search`]），切档即回到
     /// 导航视图重装。同档位重复调用为幂等空操作（不触发重载）。
-    #[allow(dead_code)] // Task 9 起消费（视图档切换按钮）
     pub fn set_view_mode(
         &mut self,
         mode: EmailViewMode,
@@ -152,8 +151,8 @@ impl EmailsStore {
 
     /// 选中会话（会话档列表行点击）。与单封邮件选中互斥：清空 `selected`，
     /// 详情区域由宿主按 `selected_thread_version` 切换为会话时间线。
-    /// 反向互斥（平铺选中清会话选中）由列表交互层（T9）接线。
-    #[allow(dead_code)] // Task 9 起消费（会话行点击）
+    /// 反向互斥（平铺选中清会话选中）由列表交互层接线（行集合按档位
+    /// 整体替换，`set_rows`/`set_conversations` 各自清对侧选中）。
     pub fn select_thread(&mut self, thread_id: i64, cx: &mut Context<Self>) {
         let changed = self.selected_thread != Some(thread_id);
         self.selected_thread = Some(thread_id);
@@ -167,15 +166,29 @@ impl EmailsStore {
         }
     }
 
-    /// 当前列表上下文是否装载会话行：会话档 + 非搜索态 + 导航目标有对应
-    /// 会话 API（标签视图无会话聚合，v1 回退平铺装载）。
-    fn in_conversation_view(&self) -> bool {
+    /// 当前列表上下文是否装载会话行（列表渲染层与宿主分派行数据源的
+    /// 同一依据）：会话档 + 非搜索态 + 导航目标有对应会话数据。
+    ///
+    /// 回退平铺的情形（T8 承接裁定，Task 9）：
+    /// - 标签视图：无会话聚合 API，v1 回退平铺装载；
+    /// - 草稿/垃圾/回收站（分类或具体文件夹）：上游会话查询恒过滤
+    ///   `is_draft = 0 AND is_deleted = 0`，这些视图的会话档结果恒为
+    ///   空——store 层直接保持平铺装载，列表才能看到数据。
+    pub fn in_conversation_view(&self) -> bool {
         self.view_mode == EmailViewMode::Threaded
             && self.search_query.is_none()
-            && matches!(
-                self.nav,
-                NavTarget::AllInbox | NavTarget::Category(_) | NavTarget::AccountFolder { .. }
-            )
+            && match &self.nav {
+                NavTarget::AllInbox => true,
+                NavTarget::Category(category) => !matches!(
+                    category,
+                    EmailCategory::Drafts | EmailCategory::Spam | EmailCategory::Trash
+                ),
+                NavTarget::AccountFolder { folder, .. } => !matches!(
+                    crate::nav::folder_label_key(folder),
+                    Some("sidebar.drafts") | Some("sidebar.spam") | Some("sidebar.trash")
+                ),
+                _ => false,
+            }
     }
 
     /// 追加下一页。
