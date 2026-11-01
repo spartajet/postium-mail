@@ -11,7 +11,7 @@
 //! - [`email_repo`] - 邮件数据访问
 //! - [`label_repo`] - 标签数据访问
 //! - [`sync_repo`] - 同步状态数据访问
-//! - [`thread_repo`] - 会话线程数据访问（存量回填）
+//! - [`thread_repo`] - 会话线程数据访问（存量回填 + 单封归组）
 
 pub mod account_repo;
 pub mod attachment_repo;
