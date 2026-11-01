@@ -153,6 +153,9 @@ impl EmailsStore {
                                 is_starred: r.is_starred,
                                 sent_at: r.sent_at,
                                 has_attachments: false,
+                                // 搜索结果不携带头信息，两个头字段占位 None
+                                message_id: None,
+                                in_reply_to: None,
                             })
                             .collect();
                         store.total = store.emails.len() as u64;

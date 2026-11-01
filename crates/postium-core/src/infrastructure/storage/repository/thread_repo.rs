@@ -321,6 +321,46 @@ pub async fn conversation_emails(
         .await
 }
 
+/// 将一个会话内的全部未读邮件标为已读（服务层
+/// [`crate::service::email_service::EmailService::mark_conversation_read`] 的存储内核）。
+///
+/// 只翻 `is_read = 0` 的行（已读行不触碰，`updated_at` 不被无谓刷新），
+/// 并把这些行的 `updated_at` 刷到当前时间。与既有的单封
+/// `email_repo::mark_as_read` 一样是本地写——FTS 索引在查询侧按 rowid
+/// 关联 `emails` 行（无触发器维护的冗余列），已读状态变更无需同步 FTS。
+pub async fn mark_thread_read(db: &DbConn, thread_id: i64) -> Result<(), MailError> {
+    db.call(move |conn| {
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "UPDATE emails SET is_read = 1, updated_at = ?1
+             WHERE thread_id = ?2 AND is_read = 0",
+            rusqlite::params![now, thread_id],
+        )?;
+        Ok(())
+    })
+    .await
+}
+
+/// 取线程内最新一封可见邮件（非草稿、未软删除）的 id。
+///
+/// "最新" 与 [`list_conversations`] 的列表头选取同一口径：
+/// `received_at DESC, id DESC`（id 作平局稳定化）。线程不存在或全部
+/// 邮件不可见（草稿/软删除）时返回 `None`。
+pub async fn latest_visible_email_id(db: &DbConn, thread_id: i64) -> Result<Option<i32>, MailError> {
+    db.call(move |conn| {
+        conn.query_row(
+            "SELECT id FROM emails
+             WHERE thread_id = ?1 AND is_draft = 0 AND is_deleted = 0
+             ORDER BY received_at DESC, id DESC
+             LIMIT 1",
+            [thread_id],
+            |row| row.get::<_, i32>(0),
+        )
+        .optional()
+    })
+    .await
+}
+
 /// 一封待归组邮件的快照（先整体读出再逐封处理，避免游标与回填写互相干扰）。
 struct PendingEmail {
     id: i64,

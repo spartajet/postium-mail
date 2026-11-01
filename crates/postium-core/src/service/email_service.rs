@@ -7,7 +7,7 @@ use crate::error::MailError;
 use crate::infrastructure::storage::models::{accounts, emails};
 use crate::infrastructure::storage::repository::attachment_repo::AttachmentWrite;
 use crate::infrastructure::storage::repository::{
-    account_repo, attachment_repo, contact_repo, email_repo, sync_repo,
+    account_repo, attachment_repo, contact_repo, email_repo, sync_repo, thread_repo,
 };
 use crate::infrastructure::storage::{DbConn, search};
 use crate::service::attachment_service::{AttachmentDto, list_dtos_by_email};
@@ -108,7 +108,7 @@ pub enum EmailCategory {
 /// `total` / `unread` / `starred_any` 聚合自该线程下满足可见性过滤
 /// （非草稿、未软删除 + [`ConversationFilter`] 条件）的邮件；列表头字段
 /// （主题 / 发件人 / 预览）取线程内**最新一封可见邮件**。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationSummary {
     /// 线程 ID（threads.id）
     pub thread_id: i64,
@@ -146,6 +146,29 @@ pub struct ConversationFilter<'a> {
     pub folder: Option<&'a str>,
     /// 只看含未读邮件的会话
     pub unread_only: bool,
+}
+
+/// 会话列表响应
+///
+/// 会话列表分页查询的响应格式，与 [`EmailListResponse`] 同构：
+/// 当前页的会话摘要 + 分页信息。
+///
+/// # 字段说明
+///
+/// - `conversations`: 当前页的会话摘要列表（按线程活跃时间降序）
+/// - `total`: 符合过滤条件的会话总数（不随页变化）
+/// - `page`: 当前页码（从 1 开始）
+/// - `limit`: 每页数量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationListResponse {
+    /// 当前页的会话摘要列表
+    pub conversations: Vec<ConversationSummary>,
+    /// 符合过滤条件的会话总数
+    pub total: u64,
+    /// 当前页码（从 1 开始）
+    pub page: usize,
+    /// 每页数量
+    pub limit: usize,
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -201,6 +224,10 @@ pub struct EmailDto {
     pub sent_at: i64,
     /// 是否有附件
     pub has_attachments: bool,
+    /// Message-ID 头（会话归组/写侧回信引用使用；未解析为 None）
+    pub message_id: Option<String>,
+    /// In-Reply-To 头原始值（会话头链归组依据；无值为 None）
+    pub in_reply_to: Option<String>,
 }
 
 /// 邮件详情
@@ -686,6 +713,177 @@ impl EmailService {
             page,
             limit,
         })
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 会话（线程）视图 API
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// 获取指定账号文件夹的会话列表（分页）
+    ///
+    /// [`list`](Self::list) 的会话聚合变体：按账号 + IMAP 文件夹过滤，
+    /// 把该范围内的邮件按会话线程聚合（封数 / 未读 / 星标 + 最新一封
+    /// 列表头），按线程活跃时间（threads.updated_at）降序分页。
+    ///
+    /// # 参数
+    ///
+    /// - `account_id`: 账号 ID
+    /// - `folder`: IMAP 文件夹名称（如 "INBOX"、"Sent"）
+    /// - `page`: 页码（从 1 开始）
+    /// - `limit`: 每页数量
+    pub async fn list_conversations(
+        &self,
+        account_id: i32,
+        folder: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        let filter = ConversationFilter {
+            account_id: Some(account_id),
+            folder: Some(folder),
+            ..ConversationFilter::default()
+        };
+        let (conversations, total) =
+            thread_repo::list_conversations(&self.db, &filter, page, limit).await?;
+        Ok(ConversationListResponse {
+            conversations,
+            total,
+            page,
+            limit,
+        })
+    }
+
+    /// 按分类获取指定账号的会话列表（分页）
+    ///
+    /// [`list_by_category`](Self::list_by_category) 的会话聚合变体。
+    ///
+    /// # 分类映射
+    ///
+    /// - `Starred`: 跨所有文件夹，只含任一可见邮件星标的会话；
+    /// - 其他分类: 对齐同步期 `FolderRegistry` 落库到
+    ///   `sync_state.folder_category` 的文件夹分类（与扁平列表的运行时
+    ///   registry 解析消费同一份持久化来源）。
+    ///
+    /// # 已知限制（v1 接受）
+    ///
+    /// 会话视图的分类过滤依赖同步期持久化的文件夹分类：`FolderRegistry`
+    /// 运行时第 2/3 层（关键词启发、provider 候选兜底）命中而同步期未
+    /// 落分类的文件夹**不会**进入会话视图——即会话分类下的文件夹集合
+    /// 可能是扁平列表（[`list_by_category`](Self::list_by_category)）的
+    /// 子集。该窗口仅出现在"文件夹从未成功同步过分类"的极端场景，
+    /// v1 不扩展过滤结构，后续版本如需收窄再议。
+    ///
+    /// # 参数
+    ///
+    /// - `account_id`: 账号 ID
+    /// - `category`: 邮件分类（Inbox / Starred / Sent 等）
+    /// - `page`: 页码（从 1 开始）
+    /// - `limit`: 每页数量
+    pub async fn list_conversations_by_category(
+        &self,
+        account_id: i32,
+        category: EmailCategory,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        let filter = ConversationFilter {
+            account_id: Some(account_id),
+            category: Some(category),
+            ..ConversationFilter::default()
+        };
+        let (conversations, total) =
+            thread_repo::list_conversations(&self.db, &filter, page, limit).await?;
+        Ok(ConversationListResponse {
+            conversations,
+            total,
+            page,
+            limit,
+        })
+    }
+
+    /// 按分类获取所有账号的会话列表（分页）
+    ///
+    /// [`list_by_category_for_all_accounts`](Self::list_by_category_for_all_accounts)
+    /// 的会话聚合变体。分类映射与已知限制同
+    /// [`list_conversations_by_category`](Self::list_conversations_by_category)：
+    /// `Starred` 跨文件夹跨账号，其他分类按各账号自己持久化的文件夹分类
+    /// 逐行对齐（不混用别的账号的分类）。
+    ///
+    /// # 参数
+    ///
+    /// - `category`: 邮件分类（Inbox / Starred / Sent 等）
+    /// - `page`: 页码（从 1 开始）
+    /// - `limit`: 每页数量
+    pub async fn list_conversations_by_category_for_all_accounts(
+        &self,
+        category: EmailCategory,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        let filter = ConversationFilter {
+            category: Some(category),
+            ..ConversationFilter::default()
+        };
+        let (conversations, total) =
+            thread_repo::list_conversations(&self.db, &filter, page, limit).await?;
+        Ok(ConversationListResponse {
+            conversations,
+            total,
+            page,
+            limit,
+        })
+    }
+
+    /// 获取一个会话内的邮件时间线
+    ///
+    /// 返回会话内可见邮件（非草稿、未软删除）的 [`EmailDto`] 列表，
+    /// 按 `received_at` 升序（时间线从旧到新），附件标志按附件表真实计算。
+    ///
+    /// # 参数
+    ///
+    /// - `thread_id`: 会话线程 ID（threads.id）
+    pub async fn conversation_emails(&self, thread_id: i64) -> Result<Vec<EmailDto>, MailError> {
+        let models =
+            thread_repo::conversation_emails(&self.db, thread_id, &ConversationFilter::default())
+                .await?;
+        convert_models_with_attachments(&self.db, models).await
+    }
+
+    /// 将一个会话内的全部未读邮件标为已读
+    ///
+    /// [`mark_as_read`](Self::mark_as_read) 的会话级批量变体：一次把线程内
+    /// 所有 `is_read = 0` 的邮件翻为已读（只动未读行并刷新其 `updated_at`，
+    /// 已读行不触碰）。单封路径的远端 `\Seen` 同步不在此逐封重放——
+    /// 服务器侧标志由下次同步收敛。
+    ///
+    /// # 参数
+    ///
+    /// - `thread_id`: 会话线程 ID（threads.id）
+    pub async fn mark_conversation_read(&self, thread_id: i64) -> Result<(), MailError> {
+        thread_repo::mark_thread_read(&self.db, thread_id).await
+    }
+
+    /// 切换会话星标（作用于最新一封）
+    ///
+    /// 会话级星标语义：取线程内 received_at 最新一封可见邮件（非草稿、
+    /// 未软删除，与列表头选取同口径），复用既有的单封星标路径
+    /// （远端 `\Flagged` 优先 + 本地翻转）。
+    ///
+    /// # 参数
+    ///
+    /// - `thread_id`: 会话线程 ID（threads.id）
+    ///
+    /// # 返回
+    ///
+    /// 最新一封切换后的星标状态（`true` 表示已星标）。线程不存在或
+    /// 没有可见邮件时返回 `InvalidParam` 错误。
+    pub async fn toggle_conversation_star(&self, thread_id: i64) -> Result<bool, MailError> {
+        let latest_id = thread_repo::latest_visible_email_id(&self.db, thread_id)
+            .await?
+            .ok_or_else(|| {
+                MailError::InvalidParam(format!("会话 {thread_id} 不存在或没有可星标的邮件"))
+            })?;
+        self.mail_operation.toggle_star(latest_id).await
     }
 
     /// 获取邮件详情
@@ -1324,6 +1522,8 @@ fn email_model_to_dto(email: &emails::Model, has_attachments: bool) -> EmailDto 
         is_starred: email.is_starred.unwrap_or(false),
         sent_at: email.sent_at,
         has_attachments,
+        message_id: email.message_id.clone(),
+        in_reply_to: email.in_reply_to.clone(),
     }
 }
 
