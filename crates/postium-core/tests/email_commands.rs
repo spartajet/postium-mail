@@ -172,6 +172,8 @@ fn build_email_generates_message_id_and_raw_rfc822() {
         subject: "Hello".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -200,6 +202,8 @@ fn build_email_with_attachment_uses_multipart_mixed() {
         subject: "With attachment".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![ComposeAttachmentInput {
             path: path.to_string_lossy().to_string(),
             filename: Some("hello.txt".to_string()),
@@ -229,6 +233,8 @@ fn build_email_does_not_write_bcc_header() {
         subject: "Secret".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -251,6 +257,8 @@ fn build_email_envelope_includes_bcc_while_raw_hides_it() {
         subject: "Secret".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -294,6 +302,8 @@ fn build_email_rejects_invalid_attachment_content_type() {
         subject: "With attachment".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![ComposeAttachmentInput {
             path: path.to_string_lossy().to_string(),
             filename: Some("hello.txt".to_string()),
@@ -324,6 +334,8 @@ fn build_email_attachment_content_type_appears_in_raw() {
         subject: "Attachment type".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![ComposeAttachmentInput {
             path: path.to_string_lossy().to_string(),
             filename: Some("payload.json".to_string()),
@@ -353,6 +365,8 @@ fn build_email_sanitizes_attachment_filename() {
         subject: "Attachment name".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![ComposeAttachmentInput {
             path: path.to_string_lossy().to_string(),
             filename: Some(" ..//unsafe\\\\name.txt ".to_string()),
@@ -378,6 +392,8 @@ fn send_validation_rejects_missing_recipients() {
         subject: "Hello".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -397,6 +413,8 @@ fn send_validation_rejects_empty_subject() {
         subject: "   ".to_string(),
         body_html: "<p>Body</p>".to_string(),
         body_text: "Body".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -416,6 +434,8 @@ fn send_validation_rejects_empty_body_text() {
         subject: "Hello".to_string(),
         body_html: "<p><br></p>".to_string(),
         body_text: " \n\t ".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     };
@@ -487,6 +507,8 @@ fn send_request(account_id: i32) -> SendEmailRequest {
         subject: "  Service Send  ".to_string(),
         body_html: "<p>Hello from service</p>".to_string(),
         body_text: "Hello from service".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
         draft_id: None,
     }
@@ -1245,6 +1267,74 @@ async fn send_email_falls_back_to_described_filename_for_blank_attachment_filena
         .unwrap();
 
     assert_eq!(detail.attachments[0].filename, "invoice.pdf");
+}
+
+/// 发送链路线程头（fix round C-1）：请求带 in_reply_to/references → 本地 sent
+/// 行落归一形态的 in_reply_to（直查 DB 经 get 透出）。
+#[tokio::test]
+async fn send_email_persists_threading_headers_on_local_sent_row() {
+    let smtp = Arc::new(RecordingSmtpSender {
+        sent_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let archiver = Arc::new(RecordingSentArchiveWriter {
+        archived_message_ids: Mutex::new(Vec::new()),
+        fail_with: Mutex::new(None),
+    });
+    let svc = new_draft_test_services_with_send_dependencies(
+        smtp,
+        archiver,
+        Arc::new(RecordingDraftWriter::default()),
+    )
+    .await;
+    let account_id = create_test_account_for_draft(&svc).await;
+
+    let mut req = send_request(account_id);
+    req.in_reply_to = Some("  <Orig@X.com> ".to_string()); // 断言归一为小写 <id> 形态
+    let response = svc.email_service.send(req).await.unwrap();
+
+    let detail = svc
+        .email_service
+        .get(response.local_email_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.email.in_reply_to.as_deref(),
+        Some("<orig@x.com>"),
+        "本地 sent 行应落归一形态的 in_reply_to"
+    );
+}
+
+/// 草稿落库 in_reply_to 归一（fix round M-1）：任意头形态 → `<id>` 小写逗号串。
+#[tokio::test]
+async fn draft_save_normalizes_in_reply_to_on_local_row() {
+    let svc = new_draft_test_services().await;
+    let account_id = create_test_account_for_draft(&svc).await;
+
+    let draft = svc
+        .email_service
+        .save_draft(SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["recipient@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Re: 归一探针".to_string(),
+            body_html: "<p>body</p>".to_string(),
+            body_text: "body".to_string(),
+            in_reply_to: Some("  <A@B.COM>  <C@d.com> ".to_string()),
+            references: None,
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+
+    let detail = svc.email_service.get(draft.draft_id).await.unwrap();
+    assert_eq!(
+        detail.email.in_reply_to.as_deref(),
+        Some("<a@b.com>,<c@d.com>"),
+        "草稿行 in_reply_to 应归一为 <id> 小写逗号串"
+    );
 }
 
 #[tokio::test]

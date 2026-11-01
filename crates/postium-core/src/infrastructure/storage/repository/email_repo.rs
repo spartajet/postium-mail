@@ -320,8 +320,9 @@ fn update_existing_email_by_id(
              cc_emails = ?9, bcc_emails = ?10, preview = ?11, body_text = ?12,
              body_html = ?13, is_read = ?14, is_starred = ?15, is_draft = ?16,
              is_answered = ?17, is_deleted = ?18, sent_at = ?19, received_at = ?20,
-             updated_at = ?21
-         WHERE id = ?22",
+             updated_at = ?21,
+             in_reply_to = COALESCE(?22, in_reply_to)
+         WHERE id = ?23",
         rusqlite::params![
             write.account_id,
             &write.folder,
@@ -344,6 +345,7 @@ fn update_existing_email_by_id(
             write.sent_at,
             write.received_at,
             write.updated_at,
+            &write.in_reply_to,
             email_id,
         ],
     )
@@ -1554,8 +1556,9 @@ pub async fn replace_email_with_attachments(
                  cc_emails = ?9, bcc_emails = ?10, preview = ?11, body_text = ?12,
                  body_html = ?13, is_read = ?14, is_starred = ?15, is_draft = ?16,
                  is_answered = ?17, is_deleted = ?18, sent_at = ?19, received_at = ?20,
-                 created_at = ?21, updated_at = ?22
-             WHERE id = ?23",
+                 created_at = ?21, updated_at = ?22,
+                 in_reply_to = COALESCE(?23, in_reply_to)
+             WHERE id = ?24",
             rusqlite::params![
                 write.account_id,
                 write.folder,
@@ -1579,6 +1582,7 @@ pub async fn replace_email_with_attachments(
                 write.received_at,
                 write.created_at,
                 write.updated_at,
+                write.in_reply_to,
                 email_id,
             ],
         )?;
@@ -1886,6 +1890,20 @@ mod tests {
         .unwrap()
     }
 
+    /// 按 message_id 直查 in_reply_to（message_id-hit UPDATE 路径断言用）。
+    async fn in_reply_to_by_message_id(db: &DbConn, message_id: &str) -> Option<String> {
+        let message_id = message_id.to_string();
+        db.call(move |conn| {
+            conn.query_row(
+                "SELECT in_reply_to FROM emails WHERE message_id = ?1",
+                [&message_id],
+                |row| row.get(0),
+            )
+        })
+        .await
+        .unwrap()
+    }
+
     /// 查线程的 (created_at, updated_at)。
     async fn thread_timestamps(db: &DbConn, thread_id: i64) -> (i64, i64) {
         db.call(move |conn| {
@@ -2071,6 +2089,75 @@ mod tests {
             sent.thread_id,
             Some(expected),
             "已发送回信应并入收件所在线程"
+        );
+    }
+
+    /// message_id 命中的整行 UPDATE 路径：解析出的 in_reply_to 落列；
+    /// 同步批次未带（None）时 COALESCE 保既有值。
+    #[tokio::test]
+    async fn save_batch_emails_message_id_hit_updates_in_reply_to_with_coalesce() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        // 首批：无头的原始行（in_reply_to NULL 落库）
+        let original = threading_email(
+            7,
+            "Re: Hello",
+            "me@x.com",
+            "alice@x.com",
+            Some("<sync-hit@x.com>"),
+            None,
+            1000,
+            false,
+        );
+        save_batch_emails(&db, account_id, "Sent", &[original])
+            .await
+            .unwrap();
+        assert_eq!(
+            in_reply_to_by_message_id(&db, "<sync-hit@x.com>").await,
+            None,
+            "首批无头应落 NULL"
+        );
+
+        // 二批：远端同步拉回同一封（message_id 命中，如旧版本发送的行被
+        // 带头 raw 重新解析覆盖）——解析值应写入列
+        let synced = threading_email(
+            7,
+            "Re: Hello",
+            "me@x.com",
+            "alice@x.com",
+            Some("<sync-hit@x.com>"),
+            Some("<orig@x.com>"),
+            1100,
+            false,
+        );
+        save_batch_emails(&db, account_id, "Sent", &[synced])
+            .await
+            .unwrap();
+        assert_eq!(
+            in_reply_to_by_message_id(&db, "<sync-hit@x.com>").await,
+            Some("<orig@x.com>".to_string()),
+            "message_id 命中 UPDATE 应写入解析出的 in_reply_to"
+        );
+
+        // 三批：同步批次未带头（None）——COALESCE 保既有值
+        let no_header = threading_email(
+            7,
+            "Re: Hello",
+            "me@x.com",
+            "alice@x.com",
+            Some("<sync-hit@x.com>"),
+            None,
+            1200,
+            false,
+        );
+        save_batch_emails(&db, account_id, "Sent", &[no_header])
+            .await
+            .unwrap();
+        assert_eq!(
+            in_reply_to_by_message_id(&db, "<sync-hit@x.com>").await,
+            Some("<orig@x.com>".to_string()),
+            "None 时 COALESCE 应保既有 in_reply_to"
         );
     }
 }

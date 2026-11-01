@@ -5,7 +5,10 @@
 
 pub mod normalize;
 
-pub use normalize::{normalize_subject, parse_message_ids};
+pub use normalize::{
+    MAX_IN_REPLY_TO_STORED_BYTES, normalize_in_reply_to_stored_value, normalize_subject,
+    parse_message_ids,
+};
 
 /// 归组决策的输入快照。
 pub struct ThreadingInput<'a> {

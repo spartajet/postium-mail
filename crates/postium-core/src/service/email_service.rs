@@ -352,6 +352,12 @@ pub struct SendEmailRequest {
     pub body_html: String,
     /// 纯文本正文
     pub body_text: String,
+    /// In-Reply-To 头值（`<id>` 形态；回信发送携带，普通发送 None）
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    /// References 头值（`<id>` 逗号串，对齐线程化落库形态；回信发送携带）
+    #[serde(default)]
+    pub references: Option<String>,
     #[serde(default)]
     pub attachments: Vec<ComposeAttachmentInput>,
     #[serde(default)]
@@ -1235,7 +1241,11 @@ impl EmailService {
                 folder: sent_folder.clone(),
                 uid: 0,
                 message_id: Some(built.message_id.clone()),
-                in_reply_to: None,
+                // 本地 sent 行落归一形态的 in_reply_to（与同步拉回的行形态一致，
+                // message_id 命中 UPDATE 的 COALESCE 语义两侧不翻转）
+                in_reply_to: crate::domain::threading::normalize_in_reply_to_stored_value(
+                    req.in_reply_to.as_deref(),
+                ),
                 subject: Some(req.subject.trim().to_string()),
                 sender_name: account.display_name.clone(),
                 sender_email: account.email.clone(),

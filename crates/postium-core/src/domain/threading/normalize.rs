@@ -76,6 +76,32 @@ pub fn parse_message_ids(raw_header_value: &str) -> Vec<String> {
     ids.into_iter().filter(|id| seen.insert(id.clone())).collect()
 }
 
+/// In-Reply-To 落库串的最大字节数（写侧与同步侧 `extract_in_reply_to` 同上限）。
+pub const MAX_IN_REPLY_TO_STORED_BYTES: usize = 2048;
+
+/// 把 In-Reply-To 头原始值归一为落库形态：`<id>` 小写逗号串（去重保序），
+/// 超 2048 字节按字节截断到最近字符边界（对齐同步侧 `extract_in_reply_to`
+/// 的落库形态与截断语义）。写侧（草稿/发送本地行）落库前统一走本函数，
+/// 保证与同步拉回的行形态一致。None/空白/无可解析 id → None。
+pub fn normalize_in_reply_to_stored_value(raw: Option<&str>) -> Option<String> {
+    let joined = parse_message_ids(raw?.trim())
+        .iter()
+        .map(|id| format!("<{id}>"))
+        .collect::<Vec<_>>()
+        .join(",");
+    if joined.is_empty() {
+        return None;
+    }
+    if joined.len() <= MAX_IN_REPLY_TO_STORED_BYTES {
+        return Some(joined);
+    }
+    let mut end = MAX_IN_REPLY_TO_STORED_BYTES;
+    while !joined.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(joined[..end].to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +189,49 @@ mod tests {
         // 不是前缀表中的形态就不剥
         assert_eq!(normalize_subject("reply: hello"), "reply: hello");
         assert_eq!(normalize_subject("reviews: top"), "reviews: top");
+    }
+
+    // ---------- normalize_in_reply_to_stored_value ----------
+
+    #[test]
+    fn stored_value_normalizes_to_bracketed_lowercase_comma_form() {
+        assert_eq!(
+            normalize_in_reply_to_stored_value(Some("  <A@B>  <C@D> ")),
+            Some("<a@b>,<c@d>".to_string())
+        );
+        assert_eq!(
+            normalize_in_reply_to_stored_value(Some("<id1@x.com>")),
+            Some("<id1@x.com>".to_string())
+        );
+        // 裸 token 兜底也归一
+        assert_eq!(
+            normalize_in_reply_to_stored_value(Some("x@y z@w")),
+            Some("<x@y>,<z@w>".to_string())
+        );
+    }
+
+    #[test]
+    fn stored_value_none_for_missing_or_blank_input() {
+        assert_eq!(normalize_in_reply_to_stored_value(None), None);
+        assert_eq!(normalize_in_reply_to_stored_value(Some("")), None);
+        assert_eq!(normalize_in_reply_to_stored_value(Some("   ")), None);
+        assert_eq!(normalize_in_reply_to_stored_value(Some("<>")), None);
+    }
+
+    #[test]
+    fn stored_value_truncates_over_2048_bytes_on_char_boundary() {
+        let long = (0..200)
+            .map(|i| format!("<id{i:03}@example.com>"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let stored =
+            normalize_in_reply_to_stored_value(Some(&long)).expect("超长链仍应产出截断值");
+        assert!(
+            stored.len() <= 2048,
+            "应截断到 2048 字节内: len={}",
+            stored.len()
+        );
+        assert!(stored.starts_with("<id000@example.com>"), "截断保头部");
     }
 
     // ---------- parse_message_ids ----------

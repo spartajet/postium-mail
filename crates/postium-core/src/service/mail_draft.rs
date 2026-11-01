@@ -188,7 +188,11 @@ pub async fn save_draft(
             folder: folder.clone(),
             uid: remote_uid,
             message_id: Some(built.message_id.clone()),
-            in_reply_to: req.in_reply_to.clone(),
+            // 落库前归一到同步侧形态（<id> 小写逗号串，截 2048）——本地草稿行
+            // 与该草稿被远端同步拉回时解析出的行形态一致
+            in_reply_to: crate::domain::threading::normalize_in_reply_to_stored_value(
+                req.in_reply_to.as_deref(),
+            ),
             subject: Some(req.subject.trim().to_string()),
             sender_name: account.display_name.clone(),
             sender_email: account.email.clone(),

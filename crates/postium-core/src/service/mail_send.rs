@@ -9,7 +9,7 @@ use crate::service::email_service::SendEmailRequest;
 use async_trait::async_trait;
 use lettre::Message;
 use lettre::address::{Address, Envelope};
-use lettre::message::header::{ContentType, Date, MessageId};
+use lettre::message::header::{ContentType, Date, InReplyTo, MessageId, References};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -317,6 +317,15 @@ pub fn build_email(
         .header(Date::now())
         .subject(req.subject.trim());
 
+    // 线程头（回信发送）：非空才写头——Message-ID 仍为本函数新生成的 UUID，
+    // 不取草稿/原邮件的 Message-ID。与 build_draft_email 同一用法。
+    if let Some(value) = req.in_reply_to.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        builder = builder.header(InReplyTo::from(value.to_string()));
+    }
+    if let Some(value) = req.references.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        builder = builder.header(References::from(value.to_string()));
+    }
+
     for addr in &req.to {
         if !addr.trim().is_empty() {
             let mailbox = addr.trim().parse().map_err(|e| {
@@ -386,8 +395,10 @@ pub fn build_email(
 
 #[cfg(test)]
 mod tests {
-    use super::read_attachment_bytes;
+    use super::{build_email, read_attachment_bytes};
     use crate::error::MailError;
+    use crate::infrastructure::storage::models::accounts;
+    use crate::service::email_service::SendEmailRequest;
     use uuid::Uuid;
 
     #[test]
@@ -402,6 +413,102 @@ mod tests {
 
         assert!(
             matches!(err, MailError::InvalidParam(message) if message.contains("读取附件失败"))
+        );
+    }
+
+    fn test_account() -> accounts::Model {
+        accounts::Model {
+            id: 1,
+            name: "测试账号".to_string(),
+            email: "user@example.com".to_string(),
+            display_name: Some("用户".to_string()),
+            provider: "custom".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl: None,
+            smtp_ssl_mode: None,
+            color: None,
+            sync_enabled: None,
+            last_sync_at: None,
+            auth_type: None,
+            account_type: "personal".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn send_req() -> SendEmailRequest {
+        SendEmailRequest {
+            account_id: 1,
+            to: vec!["dest@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Re: 主题".to_string(),
+            body_html: "<p>hi</p>".to_string(),
+            body_text: "hi".to_string(),
+            in_reply_to: None,
+            references: None,
+            attachments: vec![],
+            draft_id: None,
+        }
+    }
+
+    #[test]
+    fn build_email_includes_threading_headers_when_present() {
+        let req = SendEmailRequest {
+            in_reply_to: Some("<orig@x.com>".to_string()),
+            references: Some("<root@x.com>,<orig@x.com>".to_string()),
+            ..send_req()
+        };
+        let built = build_email(&test_account(), &req).expect("构建回信应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(
+            raw.contains("In-Reply-To: <orig@x.com>"),
+            "raw 应含 In-Reply-To 头: {raw}"
+        );
+        assert!(
+            raw.contains("References: <root@x.com>,<orig@x.com>"),
+            "raw 应含 References 头: {raw}"
+        );
+        // 发送链路 Message-ID 语义不变：新 UUID（不取草稿 Message-ID）
+        assert!(
+            built.message_id.starts_with('<')
+                && built.message_id.ends_with('>')
+                && built.message_id.contains('@')
+                && built.message_id != "<orig@x.com>",
+            "Message-ID 仍为新 UUID 形态: {}",
+            built.message_id
+        );
+    }
+
+    #[test]
+    fn build_email_omits_threading_headers_when_absent() {
+        let built = build_email(&test_account(), &send_req()).expect("构建普通发送应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(!raw.contains("In-Reply-To:"), "无值不应带 In-Reply-To 头");
+        assert!(!raw.contains("References:"), "无值不应带 References 头");
+    }
+
+    #[test]
+    fn build_email_blank_threading_values_omit_headers() {
+        let req = SendEmailRequest {
+            in_reply_to: Some("   ".to_string()),
+            references: Some("".to_string()),
+            ..send_req()
+        };
+        let built = build_email(&test_account(), &req).expect("构建发送应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(
+            !raw.contains("In-Reply-To:"),
+            "空白值不应带 In-Reply-To 头: {raw}"
+        );
+        assert!(
+            !raw.contains("References:"),
+            "空白值不应带 References 头: {raw}"
         );
     }
 }

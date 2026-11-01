@@ -591,6 +591,23 @@ impl ComposeView {
         }
     }
 
+    /// 回信线程头快照（保存草稿/发送共用口径）：
+    /// In-Reply-To = 原 Message-ID 的 `<id>` 形态；References = 构造时合并的
+    /// `<id>` 逗号串。New/Forward 模式（或原邮件无 Message-ID）均为 None。
+    fn threading_headers(&self) -> (Option<String>, Option<String>) {
+        let in_reply_to = self
+            .reply_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(bracket_message_id);
+        let references = self
+            .reply_references
+            .clone()
+            .filter(|v| !v.trim().is_empty());
+        (in_reply_to, references)
+    }
+
     pub(crate) fn persist_draft(&mut self, cx: &mut Context<Self>) {
         if self.sending {
             return;
@@ -606,16 +623,7 @@ impl ComposeView {
         let body_html = self.editor.read(cx).html(cx);
         let draft_id = self.draft_email_id;
         // 回信线程头：原 Message-ID → `<id>` 形态 In-Reply-To；References 透传
-        let in_reply_to = self
-            .reply_message_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(bracket_message_id);
-        let references = self
-            .reply_references
-            .clone()
-            .filter(|v| !v.trim().is_empty());
+        let (in_reply_to, references) = self.threading_headers();
         self.draft_status = t("email.draftSaving").to_string().into();
         cx.notify();
         let rx = spawn_tokio(async move {
@@ -688,6 +696,9 @@ impl ComposeView {
         // 发件账号（未选择时回落第一个）
         let api = self.api.clone();
         let draft_id = self.draft_email_id;
+        // 回信线程头（与保存草稿同一口径）：发送报文带 In-Reply-To/References，
+        // 本地 sent 行同步落归一形态的 in_reply_to
+        let (threading_in_reply_to, threading_references) = self.threading_headers();
         let cc: Vec<String> = self.cc_field.emails(cx);
         let attachments: Vec<ComposeAttachmentInput> = self
             .attachments
@@ -738,6 +749,8 @@ impl ComposeView {
                 subject,
                 body_html,
                 body_text: String::new(),
+                in_reply_to: threading_in_reply_to,
+                references: threading_references,
                 attachments,
                 draft_id,
             })
