@@ -14,6 +14,8 @@ pub struct UiState {
     /// 邮件列表视图档位："threaded"（会话）| "flat"（平铺）。
     /// 缺省/未知值按 Flat 解析（计划 T12 裁定：默认平铺，用户手动
     /// 切会话档并记忆）；由 `EmailsStore::set_view_mode` 写入。
+    /// 并行测试写此字段须持 UI_STATE_FILE_TESTS 锁（e2e_tests 既有约定，
+    /// ui-state.json 为跨测试共享磁盘文件，防读改写互踩）。
     pub email_view_mode: Option<String>,
 }
 

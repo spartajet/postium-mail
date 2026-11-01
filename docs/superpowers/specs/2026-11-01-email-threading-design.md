@@ -21,7 +21,7 @@
 | 归组算法 | 混合：头链（In-Reply-To/References → Message-ID 链）优先，主题规范化 + 参与者交集兜底 |
 | UI 形态 | 全会话式：会话列表行 + 详情堆叠时间线 |
 | 存储策略 | 物化 `thread_id`（threads 表 + emails 加列 + 存量回填迁移），同步落库事务内归属 |
-| 视图切换 | 默认会话式，列表头部可切回平铺（`ui-state.json` 持久化），两态并存 |
+| 视图切换 | 默认平铺、列表头部可切会话并持久化（`ui-state.json`，两态并存；保护既有用户习惯与既有测试——T12 裁定） |
 
 ### 非目标（v1 明确不做）
 
@@ -131,7 +131,8 @@
 
 - `list_conversations(folder/account)`、`list_conversations_by_category(...)`、
   `list_conversations_by_category_for_all_accounts(...)`——与现有三个 list*
-  一一对应的会话变体；
+  一一对应的会话变体（三 API 均含 `unread_only` 透传——T8 fix 裁定：
+  会话档未读过滤全路径保持）；
 - `conversation_emails(thread_id)`；
 - `mark_conversation_read(thread_id)`：线程内全部 `is_read=1`（打开会话即
   全读，Gmail 语义；时间线内仍可看到历史，未读点清零）；
@@ -155,11 +156,14 @@
     截断至 2048）；
   - 主题：原主题无 `Re:` 系前缀时补 `Re: `；
 - `build_draft_email`（mail_draft）增加上述头输出（lettre builder）；
+- 发送链路同样透传（T7 fix 裁定）：`SendEmailRequest` 携带
+  In-Reply-To/References，重建报文写头、本地 sent 行归一落库，与草稿同口径；
 - 原邮件 Message-ID / in_reply_to 经 EmailDto 透出到 compose 入参。
 
 ## 5. UI：会话列表
 
-- `EmailsStore` 增加视图档位 `view_mode: Threaded | Flat`（默认 Threaded）；
+- `EmailsStore` 增加视图档位 `view_mode: Threaded | Flat`（默认 Flat，缺省/
+  未知值按 Flat 解析——T12 裁定：保护既有用户习惯与既有测试）；
   `ui-state.json` 新键 `email_view_mode: "threaded" | "flat"`，切换即重载列表。
 - 会话行渲染（`email_list.rs`）：
   `主题 ｜ 参与者摘要（去重对方邮箱/姓名，排除本账号自己的地址，超过 3 个示 +N）｜ 最后发件人 +
@@ -202,6 +206,7 @@
 | 回填遇无 message_id 存量 | 走主题路径；无主题自成一线 |
 | 大会话（100+ 封） | 时间线折叠卡轻量；展开单封；列表聚合查询有索引 |
 | 线程 participants 膨胀 | 追加去重，集合上限 64 邮箱（达上限后不再追加；交集判定仍可用既有集合） |
+| Trash/Spam 邮件 | 会话查询经 `sync_state.folder_category` 判类排除（Gmail 语义；T11 fix 裁定）；未分类文件夹不排除，delete 的 provider fallback 角落有短暂复活窗口、下次文件夹同步自愈 |
 
 ## 9. 测试策略
 
