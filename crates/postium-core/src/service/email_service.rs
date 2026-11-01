@@ -737,16 +737,21 @@ impl EmailService {
     /// - `folder`: IMAP 文件夹名称（如 "INBOX"、"Sent"）
     /// - `page`: 页码（从 1 开始）
     /// - `limit`: 每页数量
+    /// - `unread_only`: 只看含未读邮件的会话（下推
+    ///   [`ConversationFilter::unread_only`]；注意与平铺档 [`list`](Self::list)
+    ///   不带该参数不同——会话档三变体统一暴露，保证未读过滤全路径）
     pub async fn list_conversations(
         &self,
         account_id: i32,
         folder: &str,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         let filter = ConversationFilter {
             account_id: Some(account_id),
             folder: Some(folder),
+            unread_only,
             ..ConversationFilter::default()
         };
         let (conversations, total) =
@@ -785,16 +790,20 @@ impl EmailService {
     /// - `category`: 邮件分类（Inbox / Starred / Sent 等）
     /// - `page`: 页码（从 1 开始）
     /// - `limit`: 每页数量
+    /// - `unread_only`: 只看含未读邮件的会话（下推
+    ///   [`ConversationFilter::unread_only`]）
     pub async fn list_conversations_by_category(
         &self,
         account_id: i32,
         category: EmailCategory,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         let filter = ConversationFilter {
             account_id: Some(account_id),
             category: Some(category),
+            unread_only,
             ..ConversationFilter::default()
         };
         let (conversations, total) =
@@ -820,14 +829,18 @@ impl EmailService {
     /// - `category`: 邮件分类（Inbox / Starred / Sent 等）
     /// - `page`: 页码（从 1 开始）
     /// - `limit`: 每页数量
+    /// - `unread_only`: 只看含未读邮件的会话（下推
+    ///   [`ConversationFilter::unread_only`]）
     pub async fn list_conversations_by_category_for_all_accounts(
         &self,
         category: EmailCategory,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         let filter = ConversationFilter {
             category: Some(category),
+            unread_only,
             ..ConversationFilter::default()
         };
         let (conversations, total) =

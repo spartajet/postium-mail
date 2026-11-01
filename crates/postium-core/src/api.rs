@@ -209,9 +209,10 @@ impl CoreApi {
         folder: &str,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         self.emails
-            .list_conversations(account_id, folder, page, limit)
+            .list_conversations(account_id, folder, page, limit, unread_only)
             .await
     }
 
@@ -221,9 +222,10 @@ impl CoreApi {
         category: EmailCategory,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         self.emails
-            .list_conversations_by_category(account_id, category, page, limit)
+            .list_conversations_by_category(account_id, category, page, limit, unread_only)
             .await
     }
 
@@ -232,9 +234,10 @@ impl CoreApi {
         category: EmailCategory,
         page: usize,
         limit: usize,
+        unread_only: bool,
     ) -> Result<ConversationListResponse, MailError> {
         self.emails
-            .list_conversations_by_category_for_all_accounts(category, page, limit)
+            .list_conversations_by_category_for_all_accounts(category, page, limit, unread_only)
             .await
     }
 

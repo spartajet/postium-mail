@@ -32,12 +32,16 @@ async fn core_api_forwards_conversation_list_apis() {
     let dir = tempfile::tempdir().unwrap();
     let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
 
-    let by_folder = api.list_conversations(1, "INBOX", 1, 50).await.unwrap();
+    let by_folder = api.list_conversations(1, "INBOX", 1, 50, false).await.unwrap();
     assert!(by_folder.conversations.is_empty());
     assert_eq!(by_folder.total, 0);
 
+    // unread_only=true 参数链路（空库同样为空）
+    let unread_only = api.list_conversations(1, "INBOX", 1, 50, true).await.unwrap();
+    assert!(unread_only.conversations.is_empty());
+
     let by_category = api
-        .list_conversations_by_category(1, postium_core::service::email_service::EmailCategory::Inbox, 1, 50)
+        .list_conversations_by_category(1, postium_core::service::email_service::EmailCategory::Inbox, 1, 50, false)
         .await
         .unwrap();
     assert!(by_category.conversations.is_empty());
@@ -48,6 +52,7 @@ async fn core_api_forwards_conversation_list_apis() {
             postium_core::service::email_service::EmailCategory::Inbox,
             1,
             50,
+            false,
         )
         .await
         .unwrap();

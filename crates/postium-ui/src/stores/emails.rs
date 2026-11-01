@@ -414,8 +414,7 @@ impl EmailsStore {
     /// 会话档装载（[`Self::load`] 的会话聚合对应物，同形态分派）。
     ///
     /// 上游会话 API 页码从 1 开始（store 内部统一 0 基），调用侧 +1 对齐。
-    /// v1 已知限制（备案）：上游会话 API 未暴露 unread_only，会话档下
-    /// 未读过滤不生效（触发路径保持——切过滤仍会重装列表，只是不过滤）。
+    /// 未读过滤三变体统一下推（会话 API 均带 unread_only 参数）。
     fn load_conversations(&mut self, page: usize, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         self.load_gen += 1;
         let load_g = self.load_gen;
@@ -423,6 +422,7 @@ impl EmailsStore {
         cx.notify();
 
         let nav = self.nav.clone();
+        let unread_only = self.unread_only;
         let api = api.clone();
         let page_1based = page + 1;
         let rx = spawn_tokio(async move {
@@ -432,6 +432,7 @@ impl EmailsStore {
                         EmailCategory::Inbox,
                         page_1based,
                         PAGE_LIMIT,
+                        unread_only,
                     )
                     .await
                 }
@@ -442,11 +443,12 @@ impl EmailsStore {
                         category.clone(),
                         page_1based,
                         PAGE_LIMIT,
+                        unread_only,
                     )
                     .await
                 }
                 NavTarget::AccountFolder { account_id, folder } => {
-                    api.list_conversations(*account_id, folder, page_1based, PAGE_LIMIT)
+                    api.list_conversations(*account_id, folder, page_1based, PAGE_LIMIT, unread_only)
                         .await
                 }
                 // in_conversation_view 已过滤：其余导航目标不会进入会话

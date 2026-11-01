@@ -200,7 +200,7 @@ async fn list_conversations_variants_filter_correctly() {
     // 变体 1：单账号 + 文件夹
     let resp = svc
         .email_service
-        .list_conversations(a1, "INBOX", 1, 50)
+        .list_conversations(a1, "INBOX", 1, 50, false)
         .await
         .unwrap();
     assert_eq!((resp.total, thread_ids(&resp)), (1, vec![t_inbox]));
@@ -215,7 +215,7 @@ async fn list_conversations_variants_filter_correctly() {
     // 变体 2：单账号 + 分类（Inbox 只含持久化分类为 inbox 的文件夹）
     let resp = svc
         .email_service
-        .list_conversations_by_category(a1, EmailCategory::Inbox, 1, 50)
+        .list_conversations_by_category(a1, EmailCategory::Inbox, 1, 50, false)
         .await
         .unwrap();
     assert_eq!(
@@ -227,7 +227,7 @@ async fn list_conversations_variants_filter_correctly() {
     // 变体 2：Starred 分类跨文件夹（命中 Archive 里的星标线程）
     let resp = svc
         .email_service
-        .list_conversations_by_category(a1, EmailCategory::Starred, 1, 50)
+        .list_conversations_by_category(a1, EmailCategory::Starred, 1, 50, false)
         .await
         .unwrap();
     assert_eq!(
@@ -240,7 +240,7 @@ async fn list_conversations_variants_filter_correctly() {
     // 变体 3：全账号 + 分类（两账号的 Inbox 线程都在）
     let resp = svc
         .email_service
-        .list_conversations_by_category_for_all_accounts(EmailCategory::Inbox, 1, 50)
+        .list_conversations_by_category_for_all_accounts(EmailCategory::Inbox, 1, 50, false)
         .await
         .unwrap();
     assert_eq!(resp.total, 2);
@@ -249,6 +249,173 @@ async fn list_conversations_variants_filter_correctly() {
     let mut expected = vec![t_inbox, t_a2_inbox];
     expected.sort_unstable();
     assert_eq!(ids, expected, "全账号 Inbox 应含两账号各自的线程");
+}
+
+// ─── unread_only 过滤下推（三变体统一） ───
+
+#[tokio::test]
+async fn list_conversations_unread_only_keeps_threads_with_unread() {
+    let svc = TestServices::new().await;
+    let a1 = create_test_account(&svc).await;
+
+    // 线程 A：两封全未读；线程 B：两封全已读；线程 C：一读一未读（混合）
+    let (_, t_a) = seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            51,
+            "Unread thread",
+            "alice@x.com",
+            "bob@x.com",
+            Some("<u1@x.com>"),
+            None,
+            100,
+            false,
+            false,
+        ),
+    )
+    .await;
+    seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            52,
+            "Re: Unread thread",
+            "bob@x.com",
+            "alice@x.com",
+            Some("<u2@x.com>"),
+            Some("<u1@x.com>"),
+            200,
+            false,
+            false,
+        ),
+    )
+    .await;
+    let (_, t_b) = seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            53,
+            "Read thread",
+            "carol@x.com",
+            "alice@x.com",
+            Some("<u3@x.com>"),
+            None,
+            150,
+            true,
+            false,
+        ),
+    )
+    .await;
+    seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            54,
+            "Re: Read thread",
+            "alice@x.com",
+            "carol@x.com",
+            Some("<u4@x.com>"),
+            Some("<u3@x.com>"),
+            250,
+            true,
+            false,
+        ),
+    )
+    .await;
+    let (_, t_c) = seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            55,
+            "Mixed thread",
+            "dave@x.com",
+            "alice@x.com",
+            Some("<u5@x.com>"),
+            None,
+            175,
+            true,
+            false,
+        ),
+    )
+    .await;
+    seed(
+        &svc,
+        a1,
+        "INBOX",
+        conv_email(
+            56,
+            "Re: Mixed thread",
+            "alice@x.com",
+            "dave@x.com",
+            Some("<u6@x.com>"),
+            Some("<u5@x.com>"),
+            275,
+            false,
+            false,
+        ),
+    )
+    .await;
+    seed_folder_category(&svc, a1, "INBOX", "inbox").await;
+
+    // 对照：不过滤时三条线程齐全
+    let all = svc
+        .email_service
+        .list_conversations(a1, "INBOX", 1, 50, false)
+        .await
+        .unwrap();
+    let mut expected_all = vec![t_a, t_b, t_c];
+    expected_all.sort_unstable();
+    let mut got_all = thread_ids(&all);
+    got_all.sort_unstable();
+    assert_eq!((all.total, got_all), (3, expected_all));
+
+    // 变体 1：unread_only=true 只剩含未读的线程（A 全未读、C 混合），
+    // 全已读的 B 排除；混合线程聚合口径 = 过滤后可见封数（1 封未读）
+    let unread = svc
+        .email_service
+        .list_conversations(a1, "INBOX", 1, 50, true)
+        .await
+        .unwrap();
+    let mut expected_unread = vec![t_a, t_c];
+    expected_unread.sort_unstable();
+    let mut got_unread = thread_ids(&unread);
+    got_unread.sort_unstable();
+    assert_eq!(
+        (unread.total, got_unread),
+        (2, expected_unread),
+        "unread_only 只保留含未读邮件的线程"
+    );
+    let mixed = unread
+        .conversations
+        .iter()
+        .find(|c| c.thread_id == t_c)
+        .unwrap();
+    assert_eq!(
+        (mixed.total, mixed.unread),
+        (1, 1),
+        "混合线程在 unread_only 下的聚合数 = 过滤后可见（未读）封数"
+    );
+
+    // 变体 2/3：分类入口同样下推
+    let by_category = svc
+        .email_service
+        .list_conversations_by_category(a1, EmailCategory::Inbox, 1, 50, true)
+        .await
+        .unwrap();
+    assert_eq!(by_category.total, 2, "单账号分类入口同样过滤");
+
+    let all_accounts = svc
+        .email_service
+        .list_conversations_by_category_for_all_accounts(EmailCategory::Inbox, 1, 50, true)
+        .await
+        .unwrap();
+    assert_eq!(all_accounts.total, 2, "全账号分类入口同样过滤");
 }
 
 // ─── conversation_emails 时间序 + DTO 透出 ───
@@ -394,7 +561,7 @@ async fn mark_conversation_read_clears_unread_count() {
 
     let before = svc
         .email_service
-        .list_conversations(account_id, "INBOX", 1, 50)
+        .list_conversations(account_id, "INBOX", 1, 50, false)
         .await
         .unwrap();
     assert_eq!(before.conversations[0].unread, 2, "标记前应有 2 封未读");
@@ -403,7 +570,7 @@ async fn mark_conversation_read_clears_unread_count() {
 
     let after = svc
         .email_service
-        .list_conversations(account_id, "INBOX", 1, 50)
+        .list_conversations(account_id, "INBOX", 1, 50, false)
         .await
         .unwrap();
     assert_eq!(
