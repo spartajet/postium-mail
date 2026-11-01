@@ -3393,6 +3393,13 @@ fn email_threading_conversation_view(cx: &mut TestAppContext) {
         probe.sender_email, "c@external.test",
         "会话头应取最新封（B）发件人"
     );
+    // 参与者摘要（I-1）：去重对方邮箱、排除本账号地址（primary.e2e@postium.test
+    // 在两封的收件人里）、最后发件人（B）置首——行内渲染取前 3 + "+N"
+    assert_eq!(
+        probe.participants,
+        vec!["c@external.test".to_string(), "a@external.test".to_string()],
+        "参与者摘要应排除本账号地址且最后发件人置首"
+    );
 
     // 行渲染探针：conv-row-{thread_id} 可见（行可见 = 行内角标/未读点随
     // total/unread 确定性渲染）；切档按钮探针在渲染树

@@ -1206,6 +1206,14 @@ pub fn delete_by_account_tx(
 /// 将 `EmailHeader` 转换为 `EmailWrite`，在单个事务中批量插入邮件和附件元数据，
 /// 附件 `email_id` 在插入邮件后通过 `last_insert_rowid` 填充。
 ///
+/// 线程归属（终审 C-1）：headers 骨架的 `message_id`/`in_reply_to` 为 NULL，
+/// 插入时无法走头链归组，事务末尾补一次幂等
+/// [`thread_repo::backfill_threading_inner`]（`thread_id IS NULL AND is_draft = 0`
+/// 谓词，重复调用零写入）——骨架经主题+参与者兜底归组，保证全量同步
+/// （首同步/UIDVALIDITY 重同步）与历史回溯批次落库后**当次同步内**会话视图
+/// 即可见，不依赖下次启动的迁移回填。骨架后续全量正文到达（UPSERT /
+/// replace 路径）按 T4 裁定不重归属，仅补齐头链列。
+///
 /// # 参数
 ///
 /// - `db`: 数据库连接
@@ -1296,6 +1304,14 @@ pub async fn save_batch_email_headers(
                 execute_attachment_insert(&mut attachment_stmt, &attachment)?;
             }
         }
+        // 终审 C-1：headers 骨架不带 message_id/in_reply_to，插入时无法走
+        // 头链归组（thread_id 落 NULL）——若不在此补归属，全量同步
+        // （首次同步/UIDVALIDITY 变更）与历史回溯批次入库的邮件要等下次
+        // 启动迁移回填才归组，会话视图当次会话内恒空/丢线。这里在**同一
+        // 事务末尾**补一次幂等回填（无事务内核，直接在本事务内执行）：
+        // 谓词 `thread_id IS NULL AND is_draft = 0` 保证已归组邮件不重处理，
+        // 骨架经主题+参与者兜底归组（与存量回填同语义）。
+        let _stats = thread_repo::backfill_threading_inner(tx)?;
         Ok(inserted_count)
     })
     .await
@@ -2029,6 +2045,124 @@ mod tests {
         let thread_ids = thread_ids_by_folder(&db, account_id, "INBOX").await;
         assert_eq!(thread_ids, vec![None], "草稿 thread_id 应保持 NULL");
         assert_eq!(thread_count(&db).await, 0, "草稿不得创建线程");
+    }
+
+    // ─── 终审 C-1：save_batch_email_headers（全量/历史同步入库路径）事务内补归组 ───
+
+    /// 构造 IMAP 邮件头夹具（骨架形态：发件人/收件人为裸邮箱串，无头链）。
+    fn skeleton_header(
+        uid: u32,
+        subject: &str,
+        from: &str,
+        to: &str,
+        received_at: i64,
+        draft: bool,
+    ) -> EmailHeader {
+        EmailHeader {
+            uid,
+            subject: subject.to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+            cc: String::new(),
+            date: chrono::DateTime::from_timestamp(received_at, 0).unwrap(),
+            flags: crate::infrastructure::protocols::types::EmailFlags {
+                seen: false,
+                flagged: false,
+                answered: false,
+                deleted: false,
+                draft,
+                recent: false,
+            },
+            attachments: vec![],
+        }
+    }
+
+    /// headers 骨架落库即归组：骨架不带 message_id/in_reply_to（无法走链），
+    /// 事务末尾的幂等回填按主题 + 参与者交集并线——全量/历史同步的会话
+    /// 视图当次同步内可见，不再依赖重启迁移回填（终审 C-1 根治断言）。
+    /// 地址用生产 IMAP 头形态（`Name <email>` 展示串——headers 路径经
+    /// serialize_addresses 落为 JSON 数组串），锁定参与者归一对该格式的兼容。
+    #[tokio::test]
+    async fn save_batch_email_headers_assigns_threads_via_backfill() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let headers = vec![
+            skeleton_header(
+                11,
+                "Kickoff",
+                "Alice <alice@x.com>",
+                "Bob <bob@x.com>",
+                1000,
+                false,
+            ),
+            skeleton_header(
+                12,
+                "Re: Kickoff",
+                "Bob <bob@x.com>",
+                "Alice <alice@x.com>",
+                1100,
+                false,
+            ),
+        ];
+        save_batch_email_headers(&db, account_id, "INBOX", &headers)
+            .await
+            .unwrap();
+
+        let thread_ids = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        assert_eq!(thread_ids.len(), 2);
+        let t1 = thread_ids[0].expect("骨架首封应已归组");
+        let t2 = thread_ids[1].expect("骨架回信应已归组");
+        assert_eq!(t1, t2, "同主题 + 参与者交集的骨架邮件应同线");
+        assert_eq!(thread_count(&db).await, 1, "不得重复建线程");
+
+        // 线程参与者应归一为裸邮箱（M-9 方向：展示串/JSON 数组残留不入集合）
+        let participants: String = db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT participants FROM threads WHERE id = ?1",
+                    [t1],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(participants, "alice@x.com,bob@x.com");
+    }
+
+    /// headers 路径回填幂等 + 草稿跳过：重复落库同批次（ON CONFLICT DO
+    /// NOTHING）后回填零写入；骨架草稿（\Draft 标志）不归组、不建线程。
+    #[tokio::test]
+    async fn save_batch_email_headers_backfill_is_idempotent_and_skips_drafts() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        let account_id = create_account(&db).await;
+
+        let headers = vec![
+            skeleton_header(21, "Hello", "a@x.com", "b@x.com", 1000, false),
+            skeleton_header(22, "Re: Hello", "b@x.com", "a@x.com", 1100, false),
+            // 草稿骨架：即便与既有线程同主题也不得归组
+            skeleton_header(23, "Re: Hello", "a@x.com", "b@x.com", 1200, true),
+        ];
+        save_batch_email_headers(&db, account_id, "INBOX", &headers)
+            .await
+            .unwrap();
+        let after_first = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        let t1 = after_first[0].expect("骨架首封应已归组");
+        let t2 = after_first[1].expect("骨架回信应已归组");
+        assert_eq!(t1, t2);
+        assert_eq!(after_first[2], None, "草稿骨架 thread_id 应保持 NULL");
+        assert_eq!(thread_count(&db).await, 1);
+
+        // 同批次重复落库（uid 冲突 DO NOTHING）→ 回填零写入，归组不变
+        save_batch_email_headers(&db, account_id, "INBOX", &headers)
+            .await
+            .unwrap();
+        let after_second = thread_ids_by_folder(&db, account_id, "INBOX").await;
+        assert_eq!(
+            after_first, after_second,
+            "重复落库不得改变既有归组，草稿仍 NULL"
+        );
+        assert_eq!(thread_count(&db).await, 1, "不得新增线程");
     }
 
     /// 已发送邮件同样参与归属：本地发送的回信按主题 + 参与者并入既有线程。

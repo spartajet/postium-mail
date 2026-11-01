@@ -201,7 +201,9 @@ impl RenderOnce for EmailRow {
 /// 选中态/未读加粗/星标图标/时间格式化均复用同一套）。
 ///
 /// 与单封行的差异：无附件图标（`ConversationSummary` 不携带附件信息）；
-/// 第一行为线程最后发件人 + 封数角标（`total > 1`），第二行为主题，
+/// 第一行为**参与者摘要**（spec §5：去重对方邮箱、排除本账号地址、超过
+/// 3 个示 +N——最后发件人已在摘要首位，见 [`participants_summary_text`]；
+/// 空摘要回退线程最后发件人）+ 封数角标（`total > 1`），第二行为主题，
 /// 第三行为最新邮件预览。e2e 探针：`conv-row-{thread_id}`。
 ///
 /// 会话级操作（Task 11）：星标图标常驻可点（stop_propagation 防误触
@@ -215,6 +217,27 @@ pub struct ConversationRow {
     /// 右键菜单与星标点击所需：核心 API 与列表 store（弱引用）
     api: Option<Arc<CoreApi>>,
     store: Option<gpui_kit::WeakEntity<EmailsStore>>,
+}
+
+/// 会话行参与者摘要文本（spec §5，i18n 无新键——+N 为数字拼接）：
+/// 前 3 个邮箱以「, 」连接，剩余以「 +N」收尾（N=0 省略计数段）；
+/// 空列表返回 None（行内回退既有最后发件人展示）。
+/// `participants` 已由聚合查询去重、排除本账号地址，且最后发件人置首。
+fn participants_summary_text(participants: &[String]) -> Option<String> {
+    if participants.is_empty() {
+        return None;
+    }
+    let shown = participants
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let rest = participants.len() - shown.len();
+    Some(if rest > 0 {
+        format!("{} +{rest}", shown.join(", "))
+    } else {
+        shown.join(", ")
+    })
 }
 
 impl Selectable for ConversationRow {
@@ -239,7 +262,8 @@ impl RenderOnce for ConversationRow {
         // 三行等高结构（与 EmailRow 同构，行高/内距/分隔线一致）
         let line = |h: f32| div().w_full().h(px(h)).overflow_hidden();
 
-        // ① 最后发件人 + 封数角标 + 时间；未读加粗 + 未读点
+        // ① 参与者摘要（最后发件人置首；空摘要回退最后发件人）+ 封数角标
+        //    + 时间；未读加粗 + 未读点
         let mut row1 = h_flex().gap_2().items_center();
         if unread {
             row1 = row1.child(
@@ -251,6 +275,13 @@ impl RenderOnce for ConversationRow {
                     .bg(cx.theme().accent),
             );
         }
+        // ① 发件人槽 = 参与者摘要（最后发件人已置首，样式沿用既有 sender
+        // 渲染：字号/未读加粗同槽）；空摘要回退既有「发件人名/邮箱」展示
+        let sender_text = participants_summary_text(&conv.participants).unwrap_or_else(|| {
+            conv.sender_name
+                .clone()
+                .unwrap_or_else(|| conv.sender_email.clone())
+        });
         row1 = row1
             .w_full()
             .child(
@@ -262,11 +293,7 @@ impl RenderOnce for ConversationRow {
                     .when(!unread, |d| d.text_color(cx.theme().muted_foreground))
                     .whitespace_nowrap()
                     .line_clamp(1)
-                    .child(
-                        conv.sender_name
-                            .clone()
-                            .unwrap_or_else(|| conv.sender_email.clone()),
-                    ),
+                    .child(sender_text),
             );
         // 封数角标：多封会话显示 total（形态对齐侧栏未读徽标）
         if conv.total > 1 {
@@ -1375,5 +1402,40 @@ pub(crate) mod test_hooks {
             ConvActionForTest::Delete => ConvAction::Delete,
         };
         act_on_conversation(api, store, thread_id, mapped, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::participants_summary_text;
+
+    fn summary(list: &[&str]) -> Option<String> {
+        let owned: Vec<String> = list.iter().map(|s| (*s).to_string()).collect();
+        participants_summary_text(&owned)
+    }
+
+    #[test]
+    fn participants_summary_renders_up_to_three_then_plus_n() {
+        assert_eq!(summary(&["c@x"]), Some("c@x".to_string()));
+        assert_eq!(summary(&["c@x", "a@x"]), Some("c@x, a@x".to_string()));
+        assert_eq!(
+            summary(&["c@x", "a@x", "b@x"]),
+            Some("c@x, a@x, b@x".to_string()),
+            "恰 3 个：全展示，无计数段"
+        );
+        assert_eq!(
+            summary(&["c@x", "a@x", "b@x", "d@x"]),
+            Some("c@x, a@x, b@x +1".to_string()),
+            "第 4 个起折叠为 +N"
+        );
+        assert_eq!(
+            summary(&["c@x", "a@x", "b@x", "d@x", "e@x"]),
+            Some("c@x, a@x, b@x +2".to_string())
+        );
+    }
+
+    #[test]
+    fn participants_summary_empty_returns_none_for_sender_fallback() {
+        assert_eq!(summary(&[]), None, "空参与者摘要省略段（回退发件人展示）");
     }
 }

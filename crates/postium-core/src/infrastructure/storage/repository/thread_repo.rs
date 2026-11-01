@@ -40,26 +40,113 @@ pub struct BackfillStats {
     pub emails_assigned: usize,
 }
 
-/// 对存量邮件执行会话线程回填。
+/// 对存量邮件执行会话线程回填（自包事务版本，供启动迁移独立调用）。
+///
+/// 处理对象与归组依据见 [`backfill_threading_inner`]。内部通过
+/// [`rusqlite::Connection::unchecked_transaction`] 自包一个事务，全部成功
+/// 才提交、任一步失败整体回滚。**必须独立调用**——不得在外层事务中调用
+/// （SQLite 不支持嵌套 `BEGIN`，会直接报错）；已在事务内的调用方（如
+/// `save_batch_email_headers`）改调 [`backfill_threading_inner`]。
+///
+/// 幂等：已归组邮件（thread_id 非空）不再处理，重复调用返回零统计。
+pub fn backfill_threading(conn: &rusqlite::Connection) -> rusqlite::Result<BackfillStats> {
+    let tx = conn.unchecked_transaction()?;
+    let stats = backfill_threading_inner(&tx)?;
+    tx.commit()?;
+    Ok(stats)
+}
+
+/// 回填的无事务内核：在传入连接上直接执行，不自开事务。
 ///
 /// 处理对象：`is_draft = 0 AND thread_id IS NULL` 的邮件（草稿不参与线程化），
 /// 按 `received_at` 升序逐封归组，保证线程的 `created_at`/`updated_at`
 /// 与邮件时间线一致。
 ///
-/// 归组依据：存量邮件没有已落库的 In-Reply-To/References 头，`chain_ids`
-/// 恒为空、仅走主题兜底路径——同一规范化主题的候选线程（`updated_at DESC`）
-/// 中，参与者（发+收+抄，小写邮箱）有交集者归入既有线程（参与者合并入线程，
-/// 受 [`MAX_THREAD_PARTICIPANTS`] 上限约束），否则新建线程。
+/// 归组依据：待回填邮件没有可用的 In-Reply-To/References 头时（迁移存量
+/// 邮件本就无头，headers 骨架入库时头列为 NULL），`chain_ids` 恒为空、仅走
+/// 主题兜底路径——同一规范化主题的候选线程（`updated_at DESC`）中，参与者
+/// （发+收+抄，小写邮箱）有交集者归入既有线程（参与者合并入线程，受
+/// [`MAX_THREAD_PARTICIPANTS`] 上限约束），否则新建线程。
 ///
-/// 事务：内部通过 [`rusqlite::Connection::unchecked_transaction`] 自包一个事务，
-/// 全部成功才提交、任一步失败整体回滚。**必须独立调用**——不得在外层事务中
-/// 调用（SQLite 不支持嵌套 `BEGIN`，会直接报错）。
+/// 两个调用方：启动迁移经 [`backfill_threading`]（自包事务）；headers
+/// 批量入库（`save_batch_email_headers`）在**调用方外层事务内**于批次插入
+/// 后补一次归组（终审 C-1：headers 骨架插入时无 message_id/in_reply_to
+/// 可走链归组，不补则全量/历史同步的会话视图当次会话内恒空，重启才自愈）。
 ///
-/// 幂等：已归组邮件（thread_id 非空）不再处理，重复调用返回零统计。
-pub fn backfill_threading(conn: &rusqlite::Connection) -> rusqlite::Result<BackfillStats> {
-    let tx = conn.unchecked_transaction()?;
-    let stats = backfill_pending_emails(&tx)?;
-    tx.commit()?;
+/// 幂等：`thread_id IS NULL AND is_draft = 0` 谓词保证已归组邮件不再处理，
+/// 重复调用零写入、返回零统计（headers 路径逐批调用安全）。
+pub(crate) fn backfill_threading_inner(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<BackfillStats> {
+    let pending: Vec<PendingEmail> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, subject, sender_email, recipient_emails, cc_emails, received_at
+             FROM emails
+             WHERE is_draft = 0 AND thread_id IS NULL
+             ORDER BY received_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(
+            [],
+            |row| {
+                Ok(PendingEmail {
+                    id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    sender_email: row.get(3)?,
+                    recipient_emails: row.get(4)?,
+                    cc_emails: row.get(5)?,
+                    received_at: row.get(6)?,
+                })
+            },
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut stats = BackfillStats::default();
+    let mut lookup = SqlThreadLookup { conn, error: None };
+
+    for email in &pending {
+        let participants = collect_participants(
+            &email.sender_email,
+            &email.recipient_emails,
+            email.cc_emails.as_deref(),
+        );
+        let input = ThreadingInput {
+            message_id: email.message_id.as_deref(),
+            subject: email.subject.as_deref(),
+            // 待回填邮件没有落库的 In-Reply-To/References 头可走（迁移存量
+            // 无头、headers 骨架头列为 NULL），链恒为空、归组只走主题兜底
+            // （resolve_thread 对空 chain_ids 不会查头链）。骨架后续全量
+            // fetch 到达补齐 in_reply_to 时，UPSERT 按 T4 裁定不重归属。
+            chain_ids: Vec::new(),
+            participants,
+        };
+
+        let resolution = resolve_thread(&input, &mut lookup);
+        // trait 签名无法返回 Result，查询错误先记录，决策后统一上抛
+        if let Some(err) = lookup.take_error() {
+            return Err(err);
+        }
+
+        let thread_id = match resolution {
+            ThreadResolution::Existing(thread_id) => {
+                merge_thread_participants(conn, thread_id, &input.participants, email.received_at)?;
+                thread_id
+            }
+            ThreadResolution::New => {
+                let thread_id = create_thread(conn, &input, email.received_at)?;
+                stats.threads_created += 1;
+                thread_id
+            }
+        };
+
+        conn.execute(
+            "UPDATE emails SET thread_id = ?1 WHERE id = ?2",
+            rusqlite::params![thread_id, email.id],
+        )?;
+        stats.emails_assigned += 1;
+    }
+
     Ok(stats)
 }
 
@@ -241,7 +328,13 @@ fn list_conversations_impl(
                 t.updated_at AS received_at,
                 COUNT(e.id) AS total,
                 SUM(CASE WHEN e.is_read = 0 OR e.is_read IS NULL THEN 1 ELSE 0 END) AS unread,
-                MAX(e.is_starred) AS starred_any
+                MAX(e.is_starred) AS starred_any,
+                t.participants AS thread_participants,
+                (SELECT group_concat(DISTINCT LOWER(a.email))
+                 FROM accounts a
+                 WHERE a.id IN (
+                     SELECT DISTINCT e2.account_id FROM emails e2 WHERE e2.thread_id = t.id
+                 )) AS account_emails
          FROM threads t
          JOIN emails e ON e.thread_id = t.id AND e.is_draft = 0 AND e.is_deleted = 0{}
          JOIN emails latest ON latest.id = (
@@ -273,10 +366,51 @@ fn list_conversations_impl(
                 total: row.get::<_, i64>("total")? as u64,
                 unread: row.get::<_, Option<i64>>("unread")?.unwrap_or(0) as u64,
                 starred_any: row.get::<_, Option<i64>>("starred_any")?.unwrap_or(0) != 0,
+                participants: build_participants(
+                    &row.get::<_, String>("thread_participants")?,
+                    &row
+                        .get::<_, Option<String>>("account_emails")?
+                        .unwrap_or_default(),
+                    &row.get::<_, String>("sender_email")?,
+                ),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok((items, total))
+}
+
+/// 会话行参与者摘要构造（spec §5）：`threads.participants` 逗号串 → 展示序
+/// 邮箱列表。
+///
+/// - **排除本账号地址**：`account_emails` 为该线程涉及账号（emails 行
+///   `account_id` 关联 accounts）的地址逗号集（SQL 侧已小写）；全账号
+///   视图下线程可跨账号 → 排除涉及账号地址**全集**。比对侧再小写一次
+///   容忍账号地址存储大小写。
+/// - **排序**：最后发件人（与列表头 `sender_email` 同源）优先置首，
+///   其余保持存储出现序。去重由存储侧集合语义保证（BTreeSet 落库）。
+fn build_participants(
+    stored: &str,
+    account_emails: &str,
+    last_sender: &str,
+) -> Vec<String> {
+    let excluded: BTreeSet<String> = account_emails
+        .split(',')
+        .map(|addr| addr.trim().to_ascii_lowercase())
+        .filter(|addr| !addr.is_empty())
+        .collect();
+    let mut kept: Vec<String> = stored
+        .split(',')
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .filter(|candidate| !excluded.contains(&candidate.to_ascii_lowercase()))
+        .map(str::to_string)
+        .collect();
+    let sender_lc = last_sender.trim().to_ascii_lowercase();
+    if let Some(pos) = kept.iter().position(|p| p.to_ascii_lowercase() == sender_lc) {
+        let first = kept.remove(pos);
+        kept.insert(0, first);
+    }
+    kept
 }
 
 /// [`conversation_emails`] 的同步内核：会话内可见邮件按时间升序。
@@ -389,81 +523,6 @@ struct PendingEmail {
     recipient_emails: String,
     cc_emails: Option<String>,
     received_at: i64,
-}
-
-/// 在既有事务内执行回填主体（事务边界见 [`backfill_threading`]）。
-fn backfill_pending_emails(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<BackfillStats> {
-    // 归组辅助（lookup/合并/建线程）统一按裸连接编写，与运行期 [`assign`]
-    // 共用同一套存储侧实现；事务边界仍由 `tx` 持有，此处只是借用。
-    let conn: &rusqlite::Connection = tx;
-    let pending: Vec<PendingEmail> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, message_id, subject, sender_email, recipient_emails, cc_emails, received_at
-             FROM emails
-             WHERE is_draft = 0 AND thread_id IS NULL
-             ORDER BY received_at ASC, id ASC",
-        )?;
-        let rows = stmt.query_map(
-            [],
-            |row| {
-                Ok(PendingEmail {
-                    id: row.get(0)?,
-                    message_id: row.get(1)?,
-                    subject: row.get(2)?,
-                    sender_email: row.get(3)?,
-                    recipient_emails: row.get(4)?,
-                    cc_emails: row.get(5)?,
-                    received_at: row.get(6)?,
-                })
-            },
-        )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-
-    let mut stats = BackfillStats::default();
-    let mut lookup = SqlThreadLookup { conn, error: None };
-
-    for email in &pending {
-        let participants = collect_participants(
-            &email.sender_email,
-            &email.recipient_emails,
-            email.cc_emails.as_deref(),
-        );
-        let input = ThreadingInput {
-            message_id: email.message_id.as_deref(),
-            subject: email.subject.as_deref(),
-            // 存量邮件没有落库的 In-Reply-To/References 头，头链恒为空，
-            // 归组只走主题兜底（resolve_thread 对空 chain_ids 不会查头链）。
-            chain_ids: Vec::new(),
-            participants,
-        };
-
-        let resolution = resolve_thread(&input, &mut lookup);
-        // trait 签名无法返回 Result，查询错误先记录，决策后统一上抛
-        if let Some(err) = lookup.take_error() {
-            return Err(err);
-        }
-
-        let thread_id = match resolution {
-            ThreadResolution::Existing(thread_id) => {
-                merge_thread_participants(conn, thread_id, &input.participants, email.received_at)?;
-                thread_id
-            }
-            ThreadResolution::New => {
-                let thread_id = create_thread(conn, &input, email.received_at)?;
-                stats.threads_created += 1;
-                thread_id
-            }
-        };
-
-        conn.execute(
-            "UPDATE emails SET thread_id = ?1 WHERE id = ?2",
-            rusqlite::params![thread_id, email.id],
-        )?;
-        stats.emails_assigned += 1;
-    }
-
-    Ok(stats)
 }
 
 /// [`ThreadLookup`] 的 SQLite 实现：在给定连接（裸连接或事务借出的连接）上
@@ -608,6 +667,15 @@ fn create_thread(
 ///
 /// 供本模块（回填/单封归属）与 email_repo（入库接线）共用，
 /// 保证写入线程与查找交集的两侧参与者集合构造规则一致。
+///
+/// 字段的实际存储形态随写路径不同（终审 C-1 修复时一并归一，否则 headers
+/// 骨架的参与者交集恒失效、主题兜底拆线）：
+/// - 全量 fetch / 已发送写路径：裸邮箱逗号串（`a@x,b@x`）；
+/// - headers 骨架写路径（`save_batch_email_headers`）：`serialize_addresses`
+///   的 JSON 数组串（`["a@x","b@x"]`，逗号切分后首尾段带 `["` / `"]` 残留）；
+/// - 遗留展示形态：`Name <a@x>`（M-9 备案）。
+///
+/// 三种形态统一经 [`normalize_participant_token`] 归一为裸邮箱小写。
 pub(crate) fn collect_participants(
     sender: &str,
     recipients: &str,
@@ -616,7 +684,7 @@ pub(crate) fn collect_participants(
     let mut participants = BTreeSet::new();
     let mut add_field = |field: &str| {
         for candidate in field.split(',') {
-            let candidate = candidate.trim().to_ascii_lowercase();
+            let candidate = normalize_participant_token(candidate);
             if !candidate.is_empty() {
                 participants.insert(candidate);
             }
@@ -628,6 +696,20 @@ pub(crate) fn collect_participants(
         add_field(cc);
     }
     participants
+}
+
+/// 单个参与者 token 的归一：`Name <a@x>` 展示形态取尖括号内邮箱；
+/// 裸邮箱剥外围空白/引号/方括号（JSON 数组串残留）；统一 ASCII 小写。
+fn normalize_participant_token(token: &str) -> String {
+    let token = token.trim();
+    if let (Some(start), Some(end)) = (token.find('<'), token.find('>'))
+        && start < end
+    {
+        return token[start + 1..end].trim().to_ascii_lowercase();
+    }
+    token
+        .trim_matches(|c: char| c.is_whitespace() || c == '"' || c == '[' || c == ']')
+        .to_ascii_lowercase()
 }
 
 /// 把逗号分隔的已存参与者解析回集合（容忍空白与空段）。
@@ -672,11 +754,13 @@ fn join_capped(participants: &BTreeSet<String>) -> String {
 mod tests {
     use super::*;
 
-    /// 手工建最小 emails + threads + sync_state 表（不依赖 SCHEMA_SQL 全库）。
+    /// 手工建最小 emails + threads + sync_state + accounts 表（不依赖
+    /// SCHEMA_SQL 全库）。
     ///
     /// emails 列集合与生产 schema 对齐（省略 FK 与唯一索引——夹具不启用
     /// foreign_keys，且旧行不带 uid 不能加 `(account_id, folder, uid)` 唯一约束），
-    /// 供归组测试与 [`super::list_conversations_impl`] 聚合查询测试共用。
+    /// 供归组测试与 [`super::list_conversations_impl`] 聚合查询测试共用；
+    /// accounts 供参与者摘要的账号地址排除子查询（只含 id/email 最小列集）。
     fn minimal_conn() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -720,6 +804,10 @@ mod tests {
                 account_id INTEGER NOT NULL,
                 folder TEXT NOT NULL,
                 folder_category TEXT
+            );
+            CREATE TABLE accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE
             );
             ",
         )
@@ -876,6 +964,102 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM threads", [], |row| row.get(0))
             .unwrap();
         assert_eq!(thread_count_before, thread_count_after, "不得新增线程");
+    }
+
+    // ---------- backfill_threading_inner：headers 骨架归组（终审 C-1） ----------
+
+    /// 参与者 token 归一锁定：headers 路径的 JSON 数组串残留（`["a@x"` /
+    /// `"b@x"]`）、`Name <a@x>` 展示形态（M-9）、裸邮箱三种形态统一为
+    /// 裸邮箱小写——否则 headers 骨架的主题兜底交集恒失效（C-1 连带修复）。
+    #[test]
+    fn collect_participants_normalizes_stored_address_formats() {
+        // 裸邮箱（全量 fetch / 已发送写路径形态）
+        let bare = collect_participants("a@x.com", "b@x.com,c@x.com", Some("d@x.com"));
+        assert_eq!(
+            bare,
+            ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<BTreeSet<_>>()
+        );
+
+        // headers 骨架路径形态：serialize_addresses 的 JSON 数组串
+        // （recipient_emails = `["b@x.com","c@x.com"]`）
+        let json_array = collect_participants("A <a@x.com>", "[\"b@x.com\",\"c@x.com\"]", None);
+        assert_eq!(
+            json_array,
+            ["a@x.com", "b@x.com", "c@x.com"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<BTreeSet<_>>(),
+            "JSON 数组残留与展示形态都应归一为裸邮箱"
+        );
+
+        // 展示形态（遗留数据）：取尖括号内邮箱，大小写归一
+        let display = collect_participants("Bob <B@X.com>", "Carol <c@x.com>", None);
+        assert_eq!(
+            display,
+            ["b@x.com", "c@x.com"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<BTreeSet<_>>()
+        );
+    }
+
+    /// 无事务内核在裸连接上直接执行：headers 骨架（无 message_id/in_reply_to，
+    /// 与 `save_batch_email_headers` 落库形态一致）按主题 + 参与者交集同线。
+    #[test]
+    fn backfill_inner_groups_header_skeletons_on_bare_connection() {
+        let conn = minimal_conn();
+        let e1 = insert_email(&conn, "Quarterly Review", "alice@x.com", "bob@x.com", None, false, 100);
+        let e2 = insert_email(&conn, "Re: Quarterly Review", "bob@x.com", "alice@x.com", None, false, 200);
+        // 参与者无交集的第三封：不得并线
+        let e3 = insert_email(&conn, "Re: Quarterly Review", "c@y.com", "d@y.com", None, false, 300);
+
+        let stats = backfill_threading_inner(&conn).unwrap();
+
+        assert_eq!(stats.threads_created, 2);
+        assert_eq!(stats.emails_assigned, 3);
+        assert_eq!(
+            thread_id_of(&conn, e1).unwrap(),
+            thread_id_of(&conn, e2).unwrap(),
+            "同主题 + 参与者交集的骨架应同线"
+        );
+        assert_ne!(
+            thread_id_of(&conn, e1).unwrap(),
+            thread_id_of(&conn, e3).unwrap(),
+            "无交集骨架不得并线"
+        );
+    }
+
+    /// 内核可在**调用方既有事务内**运行（不自开 BEGIN——SQLite 不支持嵌套
+    /// 事务，`save_batch_email_headers` 在外层事务末尾调用即此形态）。
+    #[test]
+    fn backfill_inner_runs_inside_caller_transaction_without_nested_begin() {
+        let mut conn = minimal_conn();
+        let e1 = insert_email(&conn, "Hello", "a@x.com", "b@x.com", None, false, 100);
+        let e2 = insert_email(&conn, "Re: Hello", "b@x.com", "a@x.com", None, false, 200);
+
+        let tx = conn.transaction().unwrap();
+        let stats = backfill_threading_inner(&tx).unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!((stats.threads_created, stats.emails_assigned), (1, 2));
+        assert_eq!(
+            thread_id_of(&conn, e1).unwrap(),
+            thread_id_of(&conn, e2).unwrap(),
+            "外层事务内回填应完成归组且正常提交"
+        );
+
+        // 事务内再跑一次：零统计（幂等谓词在外层事务内同样生效）
+        let tx = conn.transaction().unwrap();
+        let rerun = backfill_threading_inner(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            (rerun.threads_created, rerun.emails_assigned),
+            (0, 0),
+            "事务内重复回填应零统计"
+        );
     }
 
     // ---------- assign 夹具 ----------
@@ -1350,6 +1534,79 @@ mod tests {
         assert_eq!(
             row.received_at, 500,
             "received_at 取线程 updated_at（=最新邮件时间）"
+        );
+    }
+
+    #[test]
+    fn list_conversations_participants_exclude_accounts_and_lead_with_last_sender() {
+        // I-1：参与者摘要取 threads.participants，排除该线程涉及账号的地址
+        // （跨账号线程排除涉及账号地址全集，比对小写容错），最后发件人
+        // 置首、其余保持存储出现序。
+        let conn = minimal_conn();
+        // 账号地址刻意混排大小写：排除比对必须小写容错
+        conn.execute(
+            "INSERT INTO accounts (id, email) VALUES (1, 'Me@X.com'), (2, 'other@y.com')",
+            [],
+        )
+        .unwrap();
+        let tid = seed_thread(
+            &conn,
+            "sum",
+            "a@x.com,b@x.com,c@x.com,d@x.com,me@x.com,other@y.com",
+            100,
+            500,
+        );
+        // 最早封（账号 1）；一封账号 2 的封（账号 2 地址随之进排除集）；
+        // 最新可见封（发件人 c@x.com，账号 1）
+        seed_conv_email(
+            &conn, tid, 1, "INBOX", Some("s"), None, "a@x.com", None, true, false, false, 100,
+        );
+        seed_conv_email(
+            &conn, tid, 2, "INBOX", Some("s"), None, "b@x.com", None, true, false, false, 200,
+        );
+        seed_conv_email(
+            &conn, tid, 1, "INBOX", Some("s"), None, "c@x.com", None, true, false, false, 500,
+        );
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1);
+        assert_eq!(
+            rows[0].participants,
+            vec![
+                "c@x.com".to_string(), // 最后发件人置首
+                "a@x.com".to_string(),
+                "b@x.com".to_string(),
+                "d@x.com".to_string(),
+            ],
+            "排除账号 1/2 地址（小写比对），最后发件人置首，其余保持存储序"
+        );
+    }
+
+    #[test]
+    fn list_conversations_participants_empty_when_only_account_addresses() {
+        // 极端：参与者全集都是本账号地址（自言自语线程）→ 摘要为空集，
+        // UI 侧回退既有最后发件人展示。
+        let conn = minimal_conn();
+        conn.execute(
+            "INSERT INTO accounts (id, email) VALUES (1, 'me@x.com')",
+            [],
+        )
+        .unwrap();
+        let tid = seed_thread(&conn, "solo", "me@x.com", 100, 500);
+        seed_conv_email(
+            &conn, tid, 1, "INBOX", Some("s"), None, "me@x.com", None, true, false, false, 500,
+        );
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].participants.is_empty(),
+            "只剩本账号地址时摘要应为空集"
         );
     }
 

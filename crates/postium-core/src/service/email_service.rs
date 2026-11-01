@@ -128,6 +128,12 @@ pub struct ConversationSummary {
     pub unread: u64,
     /// 会话内任一可见邮件星标则为 true
     pub starred_any: bool,
+    /// 参与者摘要（展示序邮箱列表，spec §5）：取自 `threads.participants`
+    /// （去重小写邮箱），**排除该线程涉及账号的地址**（小写比对；全账号
+    /// 视图下线程可跨账号 → 排除全部涉及账号的地址），最后发件人（与
+    /// `sender_email` 同源）优先置首，其余保持存储出现序。UI 渲染取
+    /// 前 3 个 +「 +N」。
+    pub participants: Vec<String>,
 }
 
 /// 会话查询过滤条件。
