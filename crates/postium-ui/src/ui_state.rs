@@ -11,6 +11,10 @@ pub struct UiState {
     /// （Gmail「始终显示来自此发件人的图片」语义，线上反馈①——此前
     /// 放行态随邮件装载生灭，每次打开都要重新点击）。
     pub remote_image_senders: Option<Vec<String>>,
+    /// 邮件列表视图档位："threaded"（会话）| "flat"（平铺）。
+    /// 缺省/未知值按 Flat 解析（计划 T12 裁定：默认平铺，用户手动
+    /// 切会话档并记忆）；由 `EmailsStore::set_view_mode` 写入。
+    pub email_view_mode: Option<String>,
 }
 
 impl UiState {

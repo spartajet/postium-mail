@@ -26,6 +26,7 @@ use crate::service::{
     contact_service::ContactService,
     contact_sync,
     email_service::{
+        ConversationListResponse,
         EmailCategory,
         EmailDetail,
         EmailListResponse,
@@ -197,6 +198,43 @@ impl CoreApi {
     ) -> Result<EmailListResponse, MailError> {
         self.emails
             .list_by_category_for_all_accounts(category, page, limit, unread_only)
+            .await
+    }
+
+    // ── 会话（线程）视图 API（Task 8 起透出；直调转发，无附加逻辑）──
+
+    pub async fn list_conversations(
+        &self,
+        account_id: i32,
+        folder: &str,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        self.emails
+            .list_conversations(account_id, folder, page, limit)
+            .await
+    }
+
+    pub async fn list_conversations_by_category(
+        &self,
+        account_id: i32,
+        category: EmailCategory,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        self.emails
+            .list_conversations_by_category(account_id, category, page, limit)
+            .await
+    }
+
+    pub async fn list_conversations_by_category_for_all_accounts(
+        &self,
+        category: EmailCategory,
+        page: usize,
+        limit: usize,
+    ) -> Result<ConversationListResponse, MailError> {
+        self.emails
+            .list_conversations_by_category_for_all_accounts(category, page, limit)
             .await
     }
 

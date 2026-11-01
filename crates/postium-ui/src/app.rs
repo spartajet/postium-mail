@@ -318,6 +318,9 @@ impl AppShell {
                     });
                 }
                 EmailsEvent::Reloaded => {}
+                // 会话选中（T8 交付事件；T9 接线会话行点击后触达，
+                // 届时宿主在此装载会话时间线）
+                EmailsEvent::ThreadSelectionChanged(_) => {}
             }
         })
         .detach();
