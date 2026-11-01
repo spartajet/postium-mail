@@ -38,7 +38,8 @@ use crate::stores::emails::{EmailsStore, EmailViewMode};
 
 /// 列表行时间列格式化（平铺行与会话行共用，勿在行组件内复制逻辑）：
 /// 当天显示 `HH:MM`，否则 `MM-DD`。
-fn format_list_time(ts: i64) -> String {
+/// Task 10 起会话时间线折叠卡（email_detail）亦复用（pub(crate)）。
+pub(crate) fn format_list_time(ts: i64) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
         .map(|dt| {
             let now = chrono::Utc::now();

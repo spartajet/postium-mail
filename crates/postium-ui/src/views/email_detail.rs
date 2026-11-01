@@ -10,7 +10,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
 use postium_core::api::CoreApi;
-use postium_core::service::email_service::ContactWrite;
+use postium_core::service::email_service::{ContactWrite, EmailDto};
 
 use crate::i18n::{t, t_format};
 use crate::nav::NavTarget;
@@ -24,7 +24,8 @@ gpui_kit::actions!([CopyHtmlSelection, ClearHtmlSelection]);
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
-    /// 邮件列表弱引用：归档/删除/标未读后刷新列表（已删邮件不再留在列表）
+    /// 邮件列表弱引用：归档/删除/标未读后刷新列表（已删邮件不再留在列表）；
+    /// 会话形态下另作时间线装载的竞态校验（selected_thread 仍为本线程）。
     pub emails: gpui_kit::WeakEntity<crate::stores::emails::EmailsStore>,
     pub recipients_expanded: bool,
     /// 正文划选状态（线上反馈①）：视图重建即重置（换邮件清选区），
@@ -32,6 +33,17 @@ pub struct EmailDetailView {
     pub html_selection: crate::views::html_selection::HtmlSelection,
     /// 正文滚动区焦点（划选复制动作的派发锚点）。
     pub body_focus: gpui_kit::FocusHandle,
+    /// 会话线程 id：`Some` = 会话时间线形态（Task 10），`None` = 既有
+    /// 单封形态（平铺入口，行为零变化）。会话入口由宿主（app.rs 订阅
+    /// `EmailsEvent::ThreadSelectionChanged`）重建本视图并在构造闭包内
+    /// 立即调 [`Self::load_timeline`] 装载。
+    pub thread_id: Option<i64>,
+    /// 会话时间线摘要（`conversation_emails` 时间升序快照）。`None` =
+    /// 非会话形态或时间线装载中（装载中渲染轻量 loading 态）。
+    pub timeline: Option<Vec<EmailDto>>,
+    /// 时间线内当前展开（渲染完整详情）的邮件 id：单展开态，点击折叠卡
+    /// 切换；详情操作按钮读 store.detail，天然作用于展开封。
+    pub expanded_id: Option<i32>,
 }
 
 impl EmailDetailView {
@@ -425,6 +437,107 @@ impl EmailDetailView {
         })
         .detach();
     }
+
+    /// 会话时间线装载（宿主 `ThreadSelectionChanged` → 视图构造后调用）：
+    /// `conversation_emails` 填 [`Self::timeline`]（时间升序）→ 默认展开
+    /// 最后一封（sent_at 最大，复用 `DetailStore::load` 装载完整详情，
+    /// 单封渲染全链路原样复用）→ 会话含未读时 `mark_conversation_read`
+    /// 清零。
+    ///
+    /// 竞态防护（对齐 [`DetailStore::load_impl`] 的「返回时校验」模式）：
+    /// 装载是异步的，返回时用户可能已切走——切邮件/切会话/切档/导航都会
+    /// 改写 `EmailsStore::selected_thread` 并由宿主重建本视图，完成回调
+    /// 先校验列表选中仍是本线程，过期结果整体丢弃（不装载详情、不清未读）。
+    pub(crate) fn load_timeline(&mut self, thread_id: i64, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move { api.conversation_emails(thread_id).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(rows)) = rx.recv().await else {
+                // 装载失败：保持 loading 占位（与列表装载失败口径一致）
+                tracing::warn!(target: "postium::ui", thread_id, "会话时间线加载失败");
+                return;
+            };
+            this.update(cx, |view, cx| {
+                // 过期结果：用户已切走（选中不再是本线程）——整体丢弃
+                let still_selected = view
+                    .emails
+                    .upgrade()
+                    .is_some_and(|list| list.read(cx).selected_thread == Some(thread_id));
+                if !still_selected {
+                    return;
+                }
+                view.timeline = Some(rows.clone());
+                // 默认展开最后一封（时间线升序 ⇒ sent_at 最大；max_by_key
+                // 对上游排序契约防御）
+                if let Some(last) = rows.iter().max_by_key(|e| e.sent_at) {
+                    let id = last.id;
+                    view.expanded_id = Some(id);
+                    let api = view.api.clone();
+                    view.store.update(cx, |s, cx| s.load(id, &api, cx));
+                }
+                cx.notify();
+                // 会话含未读 → 批量标已读（未读清零）；全读会话不重复触发
+                if rows.iter().any(|e| !e.is_read) {
+                    view.mark_timeline_read(thread_id, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 会话级标已读 + 列表/侧栏刷新：对齐既有标已读路径（email_list 行
+    /// 点击标已读）——列表侧本地补丁行数据（会话行 unread 归零 +
+    /// list_version 原位刷新，不重置滚动/选中），侧栏徽章走
+    /// `EmailsEvent::UnreadChanged`（宿主重载文件夹统计）。
+    fn mark_timeline_read(&mut self, thread_id: i64, cx: &mut Context<Self>) {
+        let api = self.api.clone();
+        let emails = self.emails.clone();
+        let rx = spawn_tokio(async move { api.mark_conversation_read(thread_id).await });
+        cx.spawn(async move |_, cx| {
+            if !matches!(rx.recv().await, Ok(Ok(()))) {
+                return;
+            }
+            let Some(list) = emails.upgrade() else { return };
+            list.update(cx, |s, cx| {
+                // 本地清会话行未读：时间线快照与列表行各自持有 DTO 副本，
+                // store 侧补丁 + list_version 令宿主原位刷新行数据
+                if let Some(conv) = s
+                    .conversations
+                    .iter_mut()
+                    .find(|c| c.thread_id == thread_id)
+                {
+                    conv.unread = 0;
+                    s.list_version += 1;
+                }
+                // 侧栏未读徽章（既有标已读同路径）
+                cx.emit(crate::stores::emails::EmailsEvent::UnreadChanged);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// 折叠卡点击：切换展开封（单展开态）——展开该封复用
+    /// `DetailStore::load` 装载完整详情，原展开封折叠回收为卡。详情操作
+    /// 按钮（回复/归档/删除等）读 store.detail，天然作用于新展开封。
+    fn expand_timeline_email(
+        &mut self,
+        email_id: i32,
+        _: &ClickEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.expanded_id == Some(email_id) {
+            return; // 已是展开封：store 已装载，不重复装载
+        }
+        self.expanded_id = Some(email_id);
+        // 换封清划选区（对齐平铺形态「视图重建即重置」的换邮件语义）
+        self.html_selection.clear();
+        let api = self.api.clone();
+        self.store.update(cx, |s, cx| s.load(email_id, &api, cx));
+        cx.notify();
+    }
 }
 
 fn spawn_tokok_delete(
@@ -527,6 +640,61 @@ fn no_selection_placeholder(cx: &gpui_kit::App) -> AnyElement {
         .into_any_element()
 }
 
+/// 详情面板外框（平铺/会话时间线两形态共用）：左侧分隔线 + 最小宽 +
+/// 高度链。显式 min_h_0：正文滚动区之上最后一级列容器——HTML 正文超
+/// 视口时 min-content 高度沿祖先链上泄（滚动区的 min_h_0 只封自己），
+/// 把主内容列撑满整窗、底部状态栏挤出窗口（线上反馈：显示邮件时
+/// 状态栏消失）。
+fn pane_chrome(inner: AnyElement, cx: &gpui_kit::App) -> AnyElement {
+    v_flex()
+        .flex_1()
+        .size_full()
+        .min_h_0()
+        .min_w(px(380.))
+        .border_l_1()
+        .border_color(cx.theme().border)
+        .child(inner)
+        .into_any_element()
+}
+
+/// 会话时间线装载中的整面板占位（点会话行后、时间线到达前——右侧不停
+/// 留旧邮件，T9 承接①）。
+fn loading_placeholder(cx: &gpui_kit::App) -> AnyElement {
+    pane_chrome(
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(t("email.loading")),
+            )
+            .into_any_element(),
+        cx,
+    )
+}
+
+/// 展开位在详情装载完成前的轻量占位（会话时间线形态内嵌）。
+fn timeline_slot_placeholder(loading: bool, cx: &gpui_kit::App) -> AnyElement {
+    div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(13.))
+        .text_color(cx.theme().muted_foreground)
+        .child(if loading {
+            t("email.loading")
+        } else {
+            t("email.noEmailSelected")
+        })
+        .into_any_element()
+}
+
 /// 详情面板被操作清空（归档/删除/标未读）后恢复主窗口默认标题。
 /// 这些路径不经过 DetailStore::load，不会发 DetailEvent::Loaded。
 fn restore_window_title(cx: &mut gpui_kit::AsyncApp) {
@@ -537,6 +705,132 @@ fn restore_window_title(cx: &mut gpui_kit::AsyncApp) {
             let _ = shell.update(app, |shell, cx| shell.update_window_title(cx));
         }
     });
+}
+
+impl EmailDetailView {
+    /// 无展开详情时的面板分流：会话形态渲染卡列 + 展开位占位；时间线
+    /// 装载中显示 loading（T9 承接①：点会话行后右侧不停留旧邮件）；
+    /// 平铺形态维持无选中占位（既有行为零变化）。
+    fn render_without_detail(&self, detail_loading: bool, cx: &mut Context<Self>) -> AnyElement {
+        if self.timeline.as_ref().is_some_and(|rows| !rows.is_empty()) {
+            return self.render_timeline(None, detail_loading, cx);
+        }
+        if self.thread_id.is_some() {
+            return loading_placeholder(cx);
+        }
+        no_selection_placeholder(cx)
+    }
+
+    /// 会话时间线形态渲染：折叠卡列（时间升序）+ 展开封按时间序占位嵌入
+    /// 完整单封详情（既有渲染原样复用）。卡列各自限高滚动，展开详情占
+    /// 余高——正文滚动/焦点/划选语义与单封形态完全一致。
+    fn render_timeline(
+        &self,
+        detail_el: Option<AnyElement>,
+        detail_loading: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // 调用方保证时间线非空（防御回落）
+        let Some(rows) = self.timeline.as_ref().filter(|rows| !rows.is_empty()) else {
+            return no_selection_placeholder(cx);
+        };
+        let (pre, post) = match rows.iter().position(|e| Some(e.id) == self.expanded_id) {
+            // 展开封按时间序占位：前段卡列在上、详情居中、后段卡列在下
+            Some(i) => (&rows[..i], &rows[i + 1..]),
+            // 展开封不在时间线（如已归置、快照刷新前）：全卡列 + 详情位
+            None => (&rows[..], &[] as &[EmailDto]),
+        };
+        let col = v_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .when(!pre.is_empty(), |this| {
+                this.child(Self::timeline_cards(pre, true, cx))
+            })
+            .child(detail_el.unwrap_or_else(|| timeline_slot_placeholder(detail_loading, cx)))
+            .when(!post.is_empty(), |this| {
+                this.child(Self::timeline_cards(post, false, cx))
+            });
+        pane_chrome(col.into_any_element(), cx)
+    }
+
+    /// 折叠卡列：发件人 + 日期（复用列表时间格式化 helper）+ 预览首行；
+    /// 点击切换展开封。e2e 探针：`thread-card-{email_id}`。
+    ///
+    /// `above_detail`：卡列位于展开详情上方（border-b 分隔）或下方
+    /// （border-t 分隔）。
+    fn timeline_cards(rows: &[EmailDto], above_detail: bool, cx: &mut Context<Self>) -> AnyElement {
+        let mut pane = v_flex()
+            // 滚动容器需有状态（overflow_y_scroll 在 Stateful 元素上）
+            .id(if above_detail {
+                "thread-cards-pre"
+            } else {
+                "thread-cards-post"
+            })
+            .flex_none()
+            .max_h(px(220.))
+            .overflow_y_scroll()
+            .children(rows.iter().map(|email| {
+                let id = email.id;
+                let time = crate::views::email_list::format_list_time(email.sent_at);
+                let sender = email
+                    .sender_name
+                    .clone()
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or_else(|| email.sender_email.clone());
+                let preview = email.preview.clone().unwrap_or_default();
+                h_flex()
+                    .id(SharedString::from(format!("thread-card-{id}")))
+                    .w_full()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
+                    .gap_2()
+                    .items_center()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(cx.theme().accent.opacity(0.08)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(180.))
+                            .overflow_hidden()
+                            .text_size(px(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(cx.theme().foreground)
+                            .whitespace_nowrap()
+                            .child(sender),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(11.5))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(time),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .whitespace_nowrap()
+                            .line_clamp(1)
+                            .child(preview),
+                    )
+                    .on_click(cx.listener(move |this: &mut Self, e, w, cx| {
+                        this.expand_timeline_email(id, e, w, cx);
+                    }))
+                    // e2e 探针（debug 构建记录 bounds，正式构建空操作）
+                    .debug_selector(move || format!("thread-card-{id}"))
+            }));
+        if above_detail {
+            pane = pane.border_b_1();
+        } else {
+            pane = pane.border_t_1();
+        }
+        pane.border_color(cx.theme().border).into_any_element()
+    }
 }
 
 impl Render for EmailDetailView {
@@ -550,8 +844,9 @@ impl Render for EmailDetailView {
                 .as_ref()
                 .map(|d| (d.email.id, store.html.clone().unwrap_or_default()))
         };
+        let detail_loading = self.store.read(cx).loading;
         let Some((email_id, body_html_str)) = body_input else {
-            return no_selection_placeholder(cx);
+            return self.render_without_detail(detail_loading, cx);
         };
 
         // 当前主题（T14 深色接线）：dark=true 时渲染入口取深色适配副本
@@ -609,7 +904,9 @@ impl Render for EmailDetailView {
 
         let store = self.store.read(cx);
         let Some(detail) = &store.detail else {
-            return no_selection_placeholder(cx);
+            // 装载输入读取与详情读取之间被并发清空（同帧理论不可达）：
+            // 与无详情分流同口径
+            return self.render_without_detail(detail_loading, cx);
         };
 
         let sent_time = chrono::DateTime::from_timestamp(detail.email.sent_at, 0)
@@ -621,17 +918,9 @@ impl Render for EmailDetailView {
             .clone()
             .unwrap_or_else(|| detail.email.sender_email.clone());
 
-        v_flex()
+        let detail_content = v_flex()
             .flex_1()
-            .size_full()
-            // 显式 min_h_0：正文滚动区之上最后一级列容器——HTML 正文超视口时
-            // min-content 高度沿祖先链上泄（滚动区的 min_h_0 只封自己），把
-            // 主内容列撑满整窗、底部状态栏挤出窗口（线上反馈：显示邮件时
-            // 状态栏消失）
             .min_h_0()
-            .min_w(px(380.))
-            .border_l_1()
-            .border_color(cx.theme().border)
             // 头部：主题 + 操作
             .child(
                 v_flex()
@@ -869,8 +1158,15 @@ impl Render for EmailDetailView {
                     .debug_selector(|| "email-html-fallback".to_string())
             }))
             // 正文
-            .child(body)
-            .into_any_element()
+            .child(body);
+
+        // 面板组装：会话时间线形态把完整详情嵌入展开位（上下卡列按时间序
+        // 排布）；平铺形态（timeline 置空）详情本体即面板，既有行为零变化
+        if self.timeline.as_ref().is_some_and(|rows| !rows.is_empty()) {
+            self.render_timeline(Some(detail_content.into_any_element()), detail_loading, cx)
+        } else {
+            pane_chrome(detail_content.into_any_element(), cx)
+        }
     }
 }
 

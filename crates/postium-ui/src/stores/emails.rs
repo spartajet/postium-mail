@@ -50,8 +50,8 @@ pub struct EmailsStore {
     pub selected_version: u32,
     /// 选中的线程 id（会话时间线用；与 selected 互斥）
     pub selected_thread: Option<i64>,
-    /// 会话选中变化计数（宿主据此装载会话时间线）
-    #[allow(dead_code)] // Task 10 起消费（宿主接线会话时间线）
+    /// 会话选中变化计数（宿主重建会话时间线视图时记录到
+    /// AppShell::detail_build_version，与 selected_version 单封路径对称）
     pub selected_thread_version: u32,
     /// 列表数据版本（每次数据变化 +1；宿主据此原位更新行数据）
     pub list_version: u64,
@@ -74,8 +74,8 @@ pub enum EmailsEvent {
     /// 选中邮件变化（详情据此装载）
     SelectionChanged(i32),
     /// 选中会话变化（时间线据此装载；与 SelectionChanged 互斥）。
-    /// 载荷 thread_id 由 T10 宿主时间线装载消费。
-    #[allow(dead_code)] // Task 10 起消费（宿主装载会话时间线读载荷）
+    /// 载荷 thread_id：宿主（app.rs）订阅后重建会话时间线详情视图
+    /// （Task 10 消费）。
     ThreadSelectionChanged(i64),
     /// 未读状态变化（标已读/未读后，侧栏徽章据此刷新文件夹统计）
     UnreadChanged,
@@ -169,11 +169,13 @@ impl EmailsStore {
     /// 当前列表上下文是否装载会话行（列表渲染层与宿主分派行数据源的
     /// 同一依据）：会话档 + 非搜索态 + 导航目标有对应会话数据。
     ///
-    /// 回退平铺的情形（T8 承接裁定，Task 9）：
+    /// 回退平铺的情形：
     /// - 标签视图：无会话聚合 API，v1 回退平铺装载；
-    /// - 草稿/垃圾/回收站（分类或具体文件夹）：上游会话查询恒过滤
-    ///   `is_draft = 0 AND is_deleted = 0`，这些视图的会话档结果恒为
-    ///   空——store 层直接保持平铺装载，列表才能看到数据。
+    /// - 草稿（分类或具体文件夹）：上游会话查询恒过滤 `is_draft = 0`，
+    ///   该视图的会话档结果**数据性恒空**，只能平铺装载；
+    /// - 垃圾/回收站：会话档结果并非恒空（IMAP 移动语义下存留件
+    ///   `is_deleted = 0`，仍可聚合），但产品裁量（T9 裁定）这两类
+    ///   维护型视图不做会话聚合，回退平铺——是产品决策而非数据必然。
     pub fn in_conversation_view(&self) -> bool {
         self.view_mode == EmailViewMode::Threaded
             && self.search_query.is_none()

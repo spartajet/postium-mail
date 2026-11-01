@@ -17,7 +17,7 @@ use crate::nav::NavTarget;
 use crate::stores::accounts::init_accounts_store;
 use crate::stores::detail::{DetailEvent, DetailStore};
 use crate::stores::sync::SyncStore;
-use crate::stores::emails::{EmailsEvent, EmailsStore};
+use crate::stores::emails::{EmailsEvent, EmailsStore, EmailViewMode};
 use crate::views::email_detail::EmailDetailView;
 use crate::views::status_bar::StatusBar;
 use crate::views::email_list::{EmailListView, rebuild_list_state};
@@ -120,6 +120,9 @@ pub struct AppShell {
     list_data_version: u64,
     pub(crate) detail_view: Option<gpui_kit::Entity<EmailDetailView>>,
     detail_build_version: u32,
+    /// 上次渲染观察到的列表档位：切档会清空选中但不发事件，据此在渲染期
+    /// 清理残留详情（T9 承接①防呆——含会话时间线形态的旧详情）
+    last_view_mode: Option<EmailViewMode>,
     /// 邮件详情「联系人」联动传递的待选邮箱：切到联系人页后由渲染期消费
     /// （视图可能尚未懒建，选中须等 store 首装完成）
     pub(crate) contacts_pending_email: Option<String>,
@@ -307,6 +310,9 @@ impl AppShell {
                         recipients_expanded: false,
                         html_selection: Default::default(),
                         body_focus: cx.focus_handle(),
+                        thread_id: None,
+                        timeline: None,
+                        expanded_id: None,
                     }));
                     this.detail_build_version = this.emails.read(cx).selected_version;
                     cx.notify();
@@ -318,8 +324,36 @@ impl AppShell {
                     });
                 }
                 EmailsEvent::Reloaded => {}
-                // 会话选中（T9 会话行点击已触达；T10 在此装载会话时间线）
-                EmailsEvent::ThreadSelectionChanged(_) => {}
+                // 会话选中（T9 会话行点击触达）：右侧重建为会话时间线形态
+                // ——先清旧详情（时间线到达前显示 loading 占位，右侧不停留
+                // 旧邮件，T9 承接①），新视图构造闭包内即装载 conversation_
+                // emails 时间线（默认展开最后一封 + 会话未读清零）
+                EmailsEvent::ThreadSelectionChanged(thread_id) => {
+                    this.detail.update(cx, |store, cx| {
+                        store.clear(cx);
+                    });
+                    this.update_window_title(cx);
+                    let detail = this.detail.clone();
+                    let api = this.api.clone();
+                    let emails = this.emails.downgrade();
+                    this.detail_view = Some(cx.new(|cx| {
+                        let mut view = EmailDetailView {
+                            store: detail,
+                            api,
+                            emails,
+                            recipients_expanded: false,
+                            html_selection: Default::default(),
+                            body_focus: cx.focus_handle(),
+                            thread_id: Some(*thread_id),
+                            timeline: None,
+                            expanded_id: None,
+                        };
+                        view.load_timeline(*thread_id, cx);
+                        view
+                    }));
+                    this.detail_build_version = this.emails.read(cx).selected_thread_version;
+                    cx.notify();
+                }
             }
         })
         .detach();
@@ -397,6 +431,7 @@ impl AppShell {
             list_data_version: 0,
             detail_view: None,
             detail_build_version: 0,
+            last_view_mode: None,
             contacts_pending_email: None,
             search_input,
             search_gen: 0,
@@ -495,6 +530,17 @@ impl Render for AppShell {
             let store = self.emails.read(cx);
             (store.list_version, store.nav_version)
         };
+        // 切档防呆（T9 承接①）：档位切换清空选中（set_view_mode →
+        // reset_and_load）但不发任何事件，右侧会残留旧详情（含会话时间线
+        // 形态）。渲染期按档位变化清理：详情清空 + 视图回落空占位。
+        // 首帧只记录不清理（启动无旧详情）；搜索/导航不清（平铺既有行为）。
+        let view_mode = self.emails.read(cx).view_mode;
+        if self.last_view_mode.is_some_and(|m| m != view_mode) {
+            self.detail.update(cx, |store, cx| store.clear(cx));
+            self.detail_view = None;
+            self.update_window_title(cx);
+        }
+        self.last_view_mode = Some(view_mode);
         if self.list_nav_version != nav_v {
             let state = rebuild_list_state(&self.emails, &self.api, window, cx);
             let api = self.api.clone();
@@ -620,6 +666,9 @@ impl Render for AppShell {
                                     recipients_expanded: false,
                                     html_selection: Default::default(),
                                     body_focus: cx.focus_handle(),
+                                    thread_id: None,
+                                    timeline: None,
+                                    expanded_id: None,
                                 });
                                 self.detail_view = Some(view.clone());
                                 view.into_any_element()

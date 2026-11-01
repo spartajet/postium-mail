@@ -29,6 +29,7 @@ use crate::service::{
         ConversationListResponse,
         EmailCategory,
         EmailDetail,
+        EmailDto,
         EmailListResponse,
         EmailService,
         ImportReport,
@@ -239,6 +240,16 @@ impl CoreApi {
         self.emails
             .list_conversations_by_category_for_all_accounts(category, page, limit, unread_only)
             .await
+    }
+
+    /// 会话时间线（Task 10 详情消费）：线程内可见邮件按时间升序。
+    pub async fn conversation_emails(&self, thread_id: i64) -> Result<Vec<EmailDto>, MailError> {
+        self.emails.conversation_emails(thread_id).await
+    }
+
+    /// 会话级批量标已读（Task 10 进入会话时未读清零）。
+    pub async fn mark_conversation_read(&self, thread_id: i64) -> Result<(), MailError> {
+        self.emails.mark_conversation_read(thread_id).await
     }
 
     pub async fn get_email(&self, id: i32) -> Result<EmailDetail, MailError> {
