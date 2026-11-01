@@ -121,7 +121,10 @@ pub struct AccountFolderFilter {
 ///
 /// 同时将整数形式的布尔标记字段转换为 `Option<bool>`，
 /// 并将 `uid` 从 `i64` 转换为 `u32`。
-fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
+///
+/// 按列名取值（`row.get("id")` 等），供本模块各查询与 thread_repo 的
+/// 会话查询共用（列集合一致即可复用）。
+pub(crate) fn map_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<emails::Model> {
     Ok(emails::Model {
         id: row.get("id")?,
         account_id: row.get("account_id")?,

@@ -101,6 +101,53 @@ pub enum EmailCategory {
     Archive,
 }
 
+/// 会话（线程）列表项摘要。
+///
+/// 会话聚合查询 [`crate::infrastructure::storage::repository::thread_repo::list_conversations`]
+/// 的出参（core 出参类型，UI 消费）。一个会话对应 `threads` 表一行：
+/// `total` / `unread` / `starred_any` 聚合自该线程下满足可见性过滤
+/// （非草稿、未软删除 + [`ConversationFilter`] 条件）的邮件；列表头字段
+/// （主题 / 发件人 / 预览）取线程内**最新一封可见邮件**。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationSummary {
+    /// 线程 ID（threads.id）
+    pub thread_id: i64,
+    /// 列表头主题（最新可见邮件的 subject）
+    pub subject: Option<String>,
+    /// 列表头发件人名（最新可见邮件的 sender_name）
+    pub sender_name: Option<String>,
+    /// 列表头发件人邮箱（最新可见邮件的 sender_email）
+    pub sender_email: String,
+    /// 列表头预览（最新可见邮件的 preview）
+    pub preview: Option<String>,
+    /// 线程最新邮件时间（threads.updated_at）
+    pub received_at: i64,
+    /// 会话内可见邮件封数
+    pub total: u64,
+    /// 会话内未读封数（只数可见邮件）
+    pub unread: u64,
+    /// 会话内任一可见邮件星标则为 true
+    pub starred_any: bool,
+}
+
+/// 会话查询过滤条件。
+///
+/// `category` 与 `folder` 描述同一层"看哪些邮件"的两个入口（二选一）：
+/// 前者是虚拟分类（Inbox / Starred / Sent…，复用 [`EmailCategory`] 的
+/// 分类 → 条件映射），后者是单账号的具体文件夹。二者同时给出时按
+/// AND 叠加（如 account_id + folder 组合）。
+#[derive(Debug, Clone, Default)]
+pub struct ConversationFilter<'a> {
+    /// 账号 ID；None = 全账号
+    pub account_id: Option<i32>,
+    /// 虚拟分类（Inbox / Starred / Sent…）
+    pub category: Option<EmailCategory>,
+    /// 单账号文件夹（与 category 二选一）
+    pub folder: Option<&'a str>,
+    /// 只看含未读邮件的会话
+    pub unread_only: bool,
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // 数据传输对象 (DTO)
 // ═════════════════════════════════════════════════════════════════════════

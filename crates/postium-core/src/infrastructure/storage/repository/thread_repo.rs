@@ -1,20 +1,31 @@
 //! 会话线程仓库（Thread Repository）
 //!
-//! 负责 `threads` 表的会话归组：将邮件按归组决策写入会话线程。
+//! 负责 `threads` 表的会话归组与聚合查询：将邮件按归组决策写入会话线程，
+//! 并提供会话列表 / 会话内邮件的聚合查询。
 //! 归组决策复用领域层纯函数 [`crate::domain::threading::resolve_thread`]，
 //! 本模块提供存储侧的 [`ThreadLookup`] 实现与会话写入：
 //!
 //! - 存量回填 [`backfill_threading`]：历史上未归组的邮件（`thread_id IS NULL`）
 //!   按“规范化主题 + 参与者交集”批量归组；
 //! - 运行期单封归组 [`assign`]：入库时在调用方事务内决定归属线程并返回
-//!   `thread_id`（调用方写入邮件行）。
+//!   `thread_id`（调用方写入邮件行）；
+//! - 会话聚合查询 [`list_conversations`] / [`conversation_emails`]：按
+//!   [`ConversationFilter`] 可见性过滤（账号 / 分类 / 文件夹 / 仅未读）
+//!   聚合线程列表（封数 / 未读 / 星标 + 最新一封列表头）与会话内邮件时间线。
 
 use std::collections::BTreeSet;
 
+use crate::domain::folders::FolderCategory;
 use crate::domain::threading::{
     ThreadLookup, ThreadResolution, ThreadingInput, normalize_subject, resolve_thread,
 };
+use crate::error::MailError;
+use crate::infrastructure::storage::database::DbConn;
+use crate::infrastructure::storage::models::emails;
+use crate::infrastructure::storage::repository::email_repo::map_email;
+use crate::service::email_service::{ConversationFilter, ConversationSummary, EmailCategory};
 use rusqlite::OptionalExtension;
+use rusqlite::types::Value;
 
 /// `threads.participants` 持久化集合的大小上限：达到后不再追加新参与者。
 const MAX_THREAD_PARTICIPANTS: usize = 64;
@@ -79,6 +90,235 @@ pub fn assign(
         }
         ThreadResolution::New => create_thread(conn, input, received_at),
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// 会话聚合查询（list_conversations / conversation_emails）
+// ═════════════════════════════════════════════════════════════════════════
+
+/// 会话可见性过滤的已解析形态（owned，供 async 闭包按值捕获）。
+///
+/// 由 [`ConversationFilter`] 一次性解析而来；分类 → 条件的映射**复用既有
+/// 同一套规则**，不另建第二份映射表：
+///
+/// - `Starred` → 跨文件夹 `is_starred = 1` 条件（与 `email_repo::list_starred*`
+///   的 WHERE 构造同一规则——星标是标志条件，不是文件夹名表）；
+/// - 其他分类 → 经 [`FolderCategory::from_email_category`] 归一后，与同步期
+///   `FolderRegistry` 落库到 `sync_state.folder_category` 的**同一份文件夹分类**
+///   （写入侧即 `FolderCategory::as_str()`，见 folder_sync_dispatcher）对齐：
+///   `folder IN (SELECT folder FROM sync_state WHERE folder_category = ? AND
+///   account_id = <本行账号>)`。服务层 `list_by_category` 的 FolderRegistry
+///   运行时解析同样以这份持久化分类为输入（`local_folder_registry_inputs`），
+///   两侧消费同一来源；
+/// - `unread_only` → `(? = 0 OR is_read = 0 OR is_read IS NULL)`，与
+///   `email_repo` 既有 list* 查询的未读条件写法一致（`is_read` 可空）。
+struct VisibilitySpec {
+    account_id: Option<i32>,
+    folder: Option<String>,
+    /// Starred 分类：`is_starred = 1` 条件（跨文件夹）。
+    starred_only: bool,
+    /// 非 Starred 分类的文件夹类别（`FolderCategory::as_str()` 持久化形态）。
+    folder_category: Option<&'static str>,
+    unread_only: bool,
+}
+
+impl From<&ConversationFilter<'_>> for VisibilitySpec {
+    fn from(filter: &ConversationFilter<'_>) -> Self {
+        Self {
+            account_id: filter.account_id,
+            folder: filter.folder.map(str::to_string),
+            starred_only: filter.category.as_ref() == Some(&EmailCategory::Starred),
+            folder_category: filter
+                .category
+                .as_ref()
+                .and_then(FolderCategory::from_email_category)
+                .map(FolderCategory::as_str),
+            unread_only: filter.unread_only,
+        }
+    }
+}
+
+impl VisibilitySpec {
+    /// 把可见性过滤下推为 emails 行（以 `alias` 为表别名）的条件片段。
+    ///
+    /// 返回 `(条件串, 绑定值)`；无条件时条件串为空。片段内 `?` 与绑定值
+    /// 按序对应，同一 spec 对不同别名生成的绑定值完全相同（仅别名文字不同）。
+    fn conditions(&self, alias: &str) -> (String, Vec<Value>) {
+        let mut conds: Vec<String> = Vec::new();
+        let mut values: Vec<Value> = Vec::new();
+        if let Some(account_id) = self.account_id {
+            conds.push(format!("{alias}.account_id = ?"));
+            values.push(Value::from(account_id));
+        }
+        if let Some(folder) = &self.folder {
+            conds.push(format!("{alias}.folder = ?"));
+            values.push(Value::from(folder.clone()));
+        }
+        if self.starred_only {
+            conds.push(format!("{alias}.is_starred = 1"));
+        }
+        if let Some(category) = self.folder_category {
+            // 关联子查询按本行账号取该账号自己的文件夹分类，账号过滤为 None
+            // （全账号）时仍然逐行对齐到所属账号的分类
+            conds.push(format!(
+                "{alias}.folder IN (
+                    SELECT s.folder FROM sync_state s
+                    WHERE s.folder_category = ? AND s.account_id = {alias}.account_id
+                )"
+            ));
+            values.push(Value::from(category.to_string()));
+        }
+        if self.unread_only {
+            conds.push(format!(
+                "(? = 0 OR {alias}.is_read = 0 OR {alias}.is_read IS NULL)"
+            ));
+            values.push(Value::from(1));
+        }
+        (conds.join(" AND "), values)
+    }
+}
+
+/// 条件串拼进 `JOIN … ON` / `WHERE` 尾部的前缀（空条件则空串）。
+fn conjunct(suffix_conditions: &str) -> String {
+    if suffix_conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {suffix_conditions}")
+    }
+}
+
+/// [`list_conversations`] 的同步内核：单条聚合查询 + 同条件总数。
+///
+/// SQL 形态对齐 brief 骨架：聚合侧 `JOIN emails e` 与最新一封选取子查询
+/// 应用同一可见性过滤；`ORDER BY t.updated_at DESC` 加 `t.id DESC`、
+/// 最新一封选取加 `id DESC` 作平局稳定化（对齐 email_repo 既有 list*
+/// 的 `sent_at DESC, id DESC` 惯例，保证分页确定性）。
+fn list_conversations_impl(
+    conn: &rusqlite::Connection,
+    spec: &VisibilitySpec,
+    page: usize,
+    limit: usize,
+) -> rusqlite::Result<(Vec<ConversationSummary>, u64)> {
+    let (e_cond, e_values) = spec.conditions("e");
+    let (le_cond, le_values) = spec.conditions("le");
+
+    // 总数：同 FROM/WHERE 的 COUNT(DISTINCT t.id)（e_last 由 e 的存在性保证，无需再 JOIN）
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT t.id)
+         FROM threads t
+         JOIN emails e ON e.thread_id = t.id AND e.is_draft = 0 AND e.is_deleted = 0{}",
+        conjunct(&e_cond)
+    );
+    let total = conn.query_row(
+        &count_sql,
+        rusqlite::params_from_iter(e_values.iter()),
+        |row| row.get::<_, i64>(0),
+    )? as u64;
+
+    let offset = page.saturating_sub(1).saturating_mul(limit) as i64;
+    let select_sql = format!(
+        "SELECT t.id AS thread_id,
+                latest.subject, latest.sender_name, latest.sender_email, latest.preview,
+                t.updated_at AS received_at,
+                COUNT(e.id) AS total,
+                SUM(CASE WHEN e.is_read = 0 OR e.is_read IS NULL THEN 1 ELSE 0 END) AS unread,
+                MAX(e.is_starred) AS starred_any
+         FROM threads t
+         JOIN emails e ON e.thread_id = t.id AND e.is_draft = 0 AND e.is_deleted = 0{}
+         JOIN emails latest ON latest.id = (
+             SELECT le.id FROM emails le
+             WHERE le.thread_id = t.id AND le.is_draft = 0 AND le.is_deleted = 0{}
+             ORDER BY le.received_at DESC, le.id DESC
+             LIMIT 1
+         )
+         GROUP BY t.id
+         ORDER BY t.updated_at DESC, t.id DESC
+         LIMIT ? OFFSET ?",
+        conjunct(&e_cond),
+        conjunct(&le_cond)
+    );
+    let mut values = e_values;
+    values.extend(le_values);
+    values.push(Value::from(limit as i64));
+    values.push(Value::from(offset));
+    let mut stmt = conn.prepare(&select_sql)?;
+    let items = stmt
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok(ConversationSummary {
+                thread_id: row.get("thread_id")?,
+                subject: row.get("subject")?,
+                sender_name: row.get("sender_name")?,
+                sender_email: row.get("sender_email")?,
+                preview: row.get("preview")?,
+                received_at: row.get("received_at")?,
+                total: row.get::<_, i64>("total")? as u64,
+                unread: row.get::<_, Option<i64>>("unread")?.unwrap_or(0) as u64,
+                starred_any: row.get::<_, Option<i64>>("starred_any")?.unwrap_or(0) != 0,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok((items, total))
+}
+
+/// [`conversation_emails`] 的同步内核：会话内可见邮件按时间升序。
+fn conversation_emails_impl(
+    conn: &rusqlite::Connection,
+    thread_id: i64,
+    spec: &VisibilitySpec,
+) -> rusqlite::Result<Vec<emails::Model>> {
+    let (e_cond, e_values) = spec.conditions("e");
+    let sql = format!(
+        "SELECT id, account_id, folder, uid, message_id, subject, sender_name, sender_email,
+                recipient_emails, cc_emails, bcc_emails, preview, body_text, body_html,
+                is_read, is_starred, is_draft, is_answered, is_deleted, thread_id, in_reply_to,
+                sent_at, received_at, created_at, updated_at
+         FROM emails e
+         WHERE e.thread_id = ? AND e.is_draft = 0 AND e.is_deleted = 0{}
+         ORDER BY e.received_at ASC, e.id ASC",
+        conjunct(&e_cond)
+    );
+    let mut values = vec![Value::from(thread_id)];
+    values.extend(e_values);
+    let mut stmt = conn.prepare(&sql)?;
+    let items = stmt
+        .query_map(rusqlite::params_from_iter(values.iter()), map_email)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(items)
+}
+
+/// 分页查询会话列表（聚合查询的 async 包装，经 [`DbConn::call`] 调度）。
+///
+/// # 参数
+///
+/// - `db`: 数据库连接
+/// - `filter`: 可见性过滤（账号 / 分类 / 文件夹 / 仅未读）
+/// - `page`: 页码（从 1 开始）
+/// - `limit`: 每页数量
+///
+/// # 返回
+///
+/// `(会话摘要列表, 符合条件的会话总数)`。列表按 `threads.updated_at` 降序。
+pub async fn list_conversations(
+    db: &DbConn,
+    filter: &ConversationFilter<'_>,
+    page: usize,
+    limit: usize,
+) -> Result<(Vec<ConversationSummary>, u64), MailError> {
+    let spec = VisibilitySpec::from(filter);
+    db.call(move |conn| list_conversations_impl(conn, &spec, page, limit))
+        .await
+}
+
+/// 查询一个会话内的可见邮件（非草稿、未软删除 + 同 [`ConversationFilter`]
+/// 可见性过滤），按 `received_at` 升序返回完整 [`emails::Model`]。
+pub async fn conversation_emails(
+    db: &DbConn,
+    thread_id: i64,
+    filter: &ConversationFilter<'_>,
+) -> Result<Vec<emails::Model>, MailError> {
+    let spec = VisibilitySpec::from(filter);
+    db.call(move |conn| conversation_emails_impl(conn, thread_id, &spec))
+        .await
 }
 
 /// 一封待归组邮件的快照（先整体读出再逐封处理，避免游标与回填写互相干扰）。
@@ -373,20 +613,40 @@ fn join_capped(participants: &BTreeSet<String>) -> String {
 mod tests {
     use super::*;
 
-    /// 手工建最小 emails + threads 表（不依赖 SCHEMA_SQL 全库）。
+    /// 手工建最小 emails + threads + sync_state 表（不依赖 SCHEMA_SQL 全库）。
+    ///
+    /// emails 列集合与生产 schema 对齐（省略 FK 与唯一索引——夹具不启用
+    /// foreign_keys，且旧行不带 uid 不能加 `(account_id, folder, uid)` 唯一约束），
+    /// 供归组测试与 [`super::list_conversations_impl`] 聚合查询测试共用。
     fn minimal_conn() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "
             CREATE TABLE emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL DEFAULT 1,
+                folder TEXT NOT NULL DEFAULT 'INBOX',
+                uid INTEGER NOT NULL DEFAULT 0,
                 message_id TEXT,
                 subject TEXT,
+                sender_name TEXT,
                 sender_email TEXT NOT NULL,
                 recipient_emails TEXT NOT NULL,
                 cc_emails TEXT,
+                bcc_emails TEXT,
+                preview TEXT,
+                body_text TEXT,
+                body_html TEXT,
+                is_read INTEGER DEFAULT 0,
+                is_starred INTEGER DEFAULT 0,
                 is_draft INTEGER DEFAULT 0,
+                is_answered INTEGER DEFAULT 0,
+                is_deleted INTEGER DEFAULT 0,
+                in_reply_to TEXT,
+                sent_at INTEGER NOT NULL DEFAULT 0,
                 received_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0,
                 thread_id INTEGER
             );
             CREATE TABLE threads (
@@ -395,6 +655,12 @@ mod tests {
                 participants TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE sync_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                folder TEXT NOT NULL,
+                folder_category TEXT
             );
             ",
         )
@@ -818,5 +1084,652 @@ mod tests {
         let (_, participants, _, updated_at) = thread_row(&conn, tid);
         assert_eq!(updated_at, 900);
         assert_eq!(participants, "a@x,new@x,old@x");
+    }
+
+    // ---------- list_conversations / conversation_emails 夹具 ----------
+
+    /// 直接落一封已归组、带可见性字段的邮件（布尔标记按 0/1 落库，uid 自增保唯一）。
+    #[allow(clippy::too_many_arguments)]
+    fn seed_conv_email(
+        conn: &rusqlite::Connection,
+        thread_id: i64,
+        account_id: i64,
+        folder: &str,
+        subject: Option<&str>,
+        sender_name: Option<&str>,
+        sender_email: &str,
+        preview: Option<&str>,
+        is_read: bool,
+        is_starred: bool,
+        is_deleted: bool,
+        received_at: i64,
+    ) -> i64 {
+        let uid = conn
+            .query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM emails", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap();
+        conn.execute(
+            "INSERT INTO emails (
+                account_id, folder, uid, subject, sender_name, sender_email,
+                recipient_emails, preview, is_read, is_starred, is_deleted,
+                is_draft, sent_at, received_at, created_at, updated_at, thread_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'r@x', ?7, ?8, ?9, ?10, 0, ?11, ?11, ?11, ?11, ?12)",
+            rusqlite::params![
+                account_id,
+                folder,
+                uid,
+                subject,
+                sender_name,
+                sender_email,
+                preview,
+                i64::from(is_read),
+                i64::from(is_starred),
+                i64::from(is_deleted),
+                received_at,
+                thread_id
+            ],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    /// 落一条 sync_state 文件夹分类（同步期 FolderRegistry 落库的持久化形态）。
+    fn seed_sync_category(
+        conn: &rusqlite::Connection,
+        account_id: i64,
+        folder: &str,
+        category: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO sync_state (account_id, folder, folder_category) VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, folder, category],
+        )
+        .unwrap();
+    }
+
+    fn base_filter() -> ConversationFilter<'static> {
+        ConversationFilter::default()
+    }
+
+    fn conv_ids(rows: &[ConversationSummary]) -> Vec<i64> {
+        rows.iter().map(|row| row.thread_id).collect()
+    }
+
+    // ---------- list_conversations：排序 / 聚合 / 可见性 ----------
+
+    #[test]
+    fn list_conversations_orders_threads_by_updated_at_desc() {
+        let conn = minimal_conn();
+        let t_old = seed_thread(&conn, "old", "a@x", 100, 100);
+        let t_new = seed_thread(&conn, "new", "a@x", 100, 300);
+        let t_mid = seed_thread(&conn, "mid", "a@x", 100, 200);
+        for (tid, at) in [(t_old, 100), (t_new, 300), (t_mid, 200)] {
+            seed_conv_email(
+                &conn,
+                tid,
+                1,
+                "INBOX",
+                Some("s"),
+                None,
+                "a@x",
+                None,
+                true,
+                false,
+                false,
+                at,
+            );
+        }
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 3);
+        assert_eq!(
+            conv_ids(&rows),
+            vec![t_new, t_mid, t_old],
+            "按 updated_at DESC 排序"
+        );
+        assert_eq!(rows[0].received_at, 300, "received_at 取线程 updated_at");
+    }
+
+    #[test]
+    fn list_conversations_aggregates_counts_and_latest_email_summary() {
+        let conn = minimal_conn();
+        let tid = seed_thread(&conn, "quarterly", "a@x,b@x", 100, 500);
+        seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("Kickoff"),
+            Some("Alice"),
+            "alice@x",
+            Some("第一封"),
+            false,
+            false,
+            false,
+            100,
+        );
+        // 最新的可见邮件（t=300）：列表头字段应取这一封
+        seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("Re: Kickoff"),
+            Some("Bob"),
+            "bob@x",
+            Some("最新一封"),
+            false,
+            false,
+            false,
+            300,
+        );
+        seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("Re: Kickoff"),
+            Some("Carol"),
+            "carol@x",
+            Some("星标已读"),
+            true,
+            true,
+            false,
+            200,
+        );
+        // 软删除/草稿不进聚合，也不得影响"最新可见邮件"的选取（t 更大也不算）
+        seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("已删除"),
+            None,
+            "d@x",
+            None,
+            false,
+            false,
+            true,
+            400,
+        );
+        conn.execute(
+            "INSERT INTO emails (account_id, folder, uid, subject, sender_email, recipient_emails,
+             is_draft, sent_at, received_at, created_at, updated_at, thread_id)
+             VALUES (1, 'INBOX', 99, '草稿', 'd@x', 'r@x', 1, 500, 500, 500, 500, ?1)",
+            [tid],
+        )
+        .unwrap();
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1);
+        let row = &rows[0];
+        assert_eq!(row.thread_id, tid);
+        assert_eq!(row.total, 3, "软删除/草稿不计入封数");
+        assert_eq!(row.unread, 2, "未读数只数可见邮件中的未读");
+        assert!(row.starred_any, "任一可见邮件星标则 starred_any");
+        assert_eq!(
+            row.subject.as_deref(),
+            Some("Re: Kickoff"),
+            "主题取最新可见邮件"
+        );
+        assert_eq!(
+            row.sender_name.as_deref(),
+            Some("Bob"),
+            "发件人名取最新可见邮件"
+        );
+        assert_eq!(row.sender_email, "bob@x");
+        assert_eq!(
+            row.preview.as_deref(),
+            Some("最新一封"),
+            "预览取最新可见邮件"
+        );
+        assert_eq!(
+            row.received_at, 500,
+            "received_at 取线程 updated_at（=最新邮件时间）"
+        );
+    }
+
+    #[test]
+    fn list_conversations_thread_with_only_deleted_emails_is_hidden() {
+        let conn = minimal_conn();
+        let t_alive = seed_thread(&conn, "alive", "a@x", 100, 100);
+        let t_dead = seed_thread(&conn, "dead", "a@x", 100, 200);
+        seed_conv_email(
+            &conn,
+            t_alive,
+            1,
+            "INBOX",
+            Some("alive"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            100,
+        );
+        seed_conv_email(
+            &conn,
+            t_dead,
+            1,
+            "INBOX",
+            Some("dead"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            true,
+            200,
+        );
+
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 50).unwrap();
+
+        assert_eq!(total, 1, "全部软删除的线程不进列表与总数");
+        assert_eq!(conv_ids(&rows), vec![t_alive]);
+    }
+
+    #[test]
+    fn list_conversations_inbox_category_uses_persisted_folder_categories() {
+        let conn = minimal_conn();
+        seed_sync_category(&conn, 1, "INBOX", "inbox");
+        seed_sync_category(&conn, 1, "Archive", "archive");
+        let t_inbox = seed_thread(&conn, "in", "a@x", 100, 200);
+        let t_archive = seed_thread(&conn, "arch", "a@x", 100, 300);
+        seed_conv_email(
+            &conn,
+            t_inbox,
+            1,
+            "INBOX",
+            Some("in"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            200,
+        );
+        seed_conv_email(
+            &conn,
+            t_archive,
+            1,
+            "Archive",
+            Some("arch"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+
+        let mut filter = base_filter();
+        filter.category = Some(EmailCategory::Inbox);
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&filter), 1, 50).unwrap();
+
+        assert_eq!(total, 1, "Inbox 分类只含持久化分类为 inbox 的文件夹线程");
+        assert_eq!(
+            conv_ids(&rows),
+            vec![t_inbox],
+            "Archive 线程不得混入 Inbox 分类"
+        );
+    }
+
+    #[test]
+    fn list_conversations_starred_category_crosses_folders_and_picks_latest_visible() {
+        let conn = minimal_conn();
+        let t_starred = seed_thread(&conn, "star", "a@x", 100, 200);
+        let t_plain = seed_thread(&conn, "plain", "a@x", 100, 300);
+        // 星标线程：可见（星标）邮件只有 t=200 这封；t=300 的未星标邮件不可见
+        seed_conv_email(
+            &conn,
+            t_starred,
+            1,
+            "INBOX",
+            Some("被星标的回信"),
+            Some("Bob"),
+            "bob@x",
+            Some("星标预览"),
+            false,
+            true,
+            false,
+            200,
+        );
+        seed_conv_email(
+            &conn,
+            t_starred,
+            1,
+            "INBOX",
+            Some("后到但未星标"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+        seed_conv_email(
+            &conn,
+            t_plain,
+            1,
+            "Sent",
+            Some("plain"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+
+        let mut filter = base_filter();
+        filter.category = Some(EmailCategory::Starred);
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&filter), 1, 50).unwrap();
+
+        assert_eq!(total, 1, "Starred 只含任一可见邮件星标的线程（跨文件夹）");
+        assert_eq!(conv_ids(&rows), vec![t_starred]);
+        let row = &rows[0];
+        assert!(row.starred_any);
+        assert_eq!(row.total, 1, "封数只数可见（星标）邮件");
+        assert_eq!(
+            row.subject.as_deref(),
+            Some("被星标的回信"),
+            "列表头取最新一封可见（星标）邮件"
+        );
+        assert_eq!(row.preview.as_deref(), Some("星标预览"));
+    }
+
+    #[test]
+    fn list_conversations_unread_only_keeps_threads_with_unread() {
+        let conn = minimal_conn();
+        let t_unread = seed_thread(&conn, "unread", "a@x", 100, 100);
+        let t_read = seed_thread(&conn, "read", "a@x", 100, 300);
+        seed_conv_email(
+            &conn,
+            t_unread,
+            1,
+            "INBOX",
+            Some("unread"),
+            None,
+            "a@x",
+            None,
+            false,
+            false,
+            false,
+            100,
+        );
+        seed_conv_email(
+            &conn,
+            t_read,
+            1,
+            "INBOX",
+            Some("read"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+
+        let mut filter = base_filter();
+        filter.unread_only = true;
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&filter), 1, 50).unwrap();
+
+        assert_eq!(total, 1);
+        assert_eq!(
+            conv_ids(&rows),
+            vec![t_unread],
+            "unread_only 只留含未读邮件的线程"
+        );
+    }
+
+    #[test]
+    fn list_conversations_filters_by_account_and_folder() {
+        let conn = minimal_conn();
+        let t_a1_inbox = seed_thread(&conn, "a1-in", "a@x", 100, 100);
+        let t_a1_sent = seed_thread(&conn, "a1-sent", "a@x", 100, 200);
+        let t_a2_inbox = seed_thread(&conn, "a2-in", "a@x", 100, 300);
+        seed_conv_email(
+            &conn,
+            t_a1_inbox,
+            1,
+            "INBOX",
+            Some("a1"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            100,
+        );
+        seed_conv_email(
+            &conn,
+            t_a1_sent,
+            1,
+            "Sent",
+            Some("a1s"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            200,
+        );
+        seed_conv_email(
+            &conn,
+            t_a2_inbox,
+            2,
+            "INBOX",
+            Some("a2"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+
+        let mut by_account = base_filter();
+        by_account.account_id = Some(2);
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&by_account), 1, 50).unwrap();
+        assert_eq!(
+            (total, conv_ids(&rows)),
+            (1, vec![t_a2_inbox]),
+            "account_id 过滤"
+        );
+
+        let mut by_folder = base_filter();
+        by_folder.account_id = Some(1);
+        by_folder.folder = Some("INBOX");
+        let (rows, total) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&by_folder), 1, 50).unwrap();
+        assert_eq!(
+            (total, conv_ids(&rows)),
+            (1, vec![t_a1_inbox]),
+            "单账号文件夹过滤"
+        );
+    }
+
+    #[test]
+    fn list_conversations_paginates_with_stable_total() {
+        let conn = minimal_conn();
+        let mut tids = Vec::new();
+        for (i, updated) in [100, 300, 200].into_iter().enumerate() {
+            let tid = seed_thread(&conn, &format!("t{i}"), "a@x", 100, updated);
+            seed_conv_email(
+                &conn,
+                tid,
+                1,
+                "INBOX",
+                Some("s"),
+                None,
+                "a@x",
+                None,
+                true,
+                false,
+                false,
+                updated,
+            );
+            tids.push(tid);
+        }
+        let newest_first = vec![tids[1], tids[2], tids[0]];
+
+        let (page1, total1) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 1, 2).unwrap();
+        let (page2, total2) =
+            list_conversations_impl(&conn, &VisibilitySpec::from(&base_filter()), 2, 2).unwrap();
+
+        assert_eq!((page1.len(), total1), (2, 3));
+        assert_eq!((page2.len(), total2), (1, 3), "总数不随页变化");
+        assert_eq!(conv_ids(&page1), newest_first[..2]);
+        assert_eq!(conv_ids(&page2), vec![tids[0]]);
+    }
+
+    // ---------- conversation_emails ----------
+
+    #[test]
+    fn conversation_emails_orders_ascending_and_excludes_deleted() {
+        let conn = minimal_conn();
+        let tid = seed_thread(&conn, "chrono", "a@x", 100, 300);
+        let e_mid = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("mid"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            200,
+        );
+        let e_last = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("last"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            300,
+        );
+        let e_first = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("first"),
+            None,
+            "a@x",
+            None,
+            false,
+            false,
+            false,
+            100,
+        );
+        let deleted = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("gone"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            true,
+            400,
+        );
+        let _ = deleted;
+        conn.execute(
+            "UPDATE emails SET in_reply_to = '<root@x>' WHERE id = ?1",
+            [e_first],
+        )
+        .unwrap();
+
+        let rows =
+            conversation_emails_impl(&conn, tid, &VisibilitySpec::from(&base_filter())).unwrap();
+
+        assert_eq!(
+            rows.iter().map(|m| m.id as i64).collect::<Vec<_>>(),
+            vec![e_first, e_mid, e_last],
+            "received_at 升序，软删除不返回"
+        );
+        assert_eq!(
+            rows[0].in_reply_to.as_deref(),
+            Some("<root@x>"),
+            "Model 透传 in_reply_to"
+        );
+        assert!(rows.iter().all(|m| m.thread_id == Some(tid)));
+    }
+
+    #[test]
+    fn conversation_emails_applies_visibility_filter() {
+        let conn = minimal_conn();
+        let tid = seed_thread(&conn, "cross", "a@x,b@x", 100, 300);
+        let mine = seed_conv_email(
+            &conn,
+            tid,
+            1,
+            "INBOX",
+            Some("mine"),
+            None,
+            "a@x",
+            None,
+            true,
+            false,
+            false,
+            100,
+        );
+        let other = seed_conv_email(
+            &conn,
+            tid,
+            2,
+            "INBOX",
+            Some("other"),
+            None,
+            "b@x",
+            None,
+            true,
+            false,
+            false,
+            200,
+        );
+
+        let mut filter = base_filter();
+        filter.account_id = Some(1);
+        let rows = conversation_emails_impl(&conn, tid, &VisibilitySpec::from(&filter)).unwrap();
+
+        assert_eq!(
+            rows.iter().map(|m| m.id as i64).collect::<Vec<_>>(),
+            vec![mine]
+        );
+        let _ = other;
     }
 }
