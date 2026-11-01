@@ -251,6 +251,12 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
     cx.spawn(async move |cx| {
         match rx.recv().await {
             Ok(Ok(detail)) => {
+                // 回信线程头：References = 原 In-Reply-To 链 + 原 Message-ID（去重 `<id>` 逗号串）
+                let message_id = detail.email.message_id.clone();
+                let references = crate::views::compose::reply_references(
+                    detail.email.in_reply_to.as_deref(),
+                    detail.email.message_id.as_deref(),
+                );
                 let mode = match kind {
                     ReplyKind::Reply => crate::views::compose::ComposeMode::Reply {
                         email_id: detail.email.id,
@@ -258,6 +264,8 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
                         to: detail.email.sender_email.clone(),
                         subject: detail.email.subject.clone().unwrap_or_default(),
                         original_html: detail.body_html.clone().unwrap_or_default(),
+                        message_id,
+                        references,
                     },
                     ReplyKind::ReplyAll => {
                         let mut to = vec![detail.email.sender_email.clone()];
@@ -273,6 +281,8 @@ fn fetch_and_open_compose(api: Arc<CoreApi>, id: i32, kind: ReplyKind, cx: &mut 
                             to: to.join(", "),
                             subject: detail.email.subject.clone().unwrap_or_default(),
                             original_html: detail.body_html.clone().unwrap_or_default(),
+                            message_id,
+                            references,
                         }
                     }
                     ReplyKind::Forward => crate::views::compose::ComposeMode::Forward {

@@ -2404,6 +2404,8 @@ fn html_email_oversize_falls_back(cx: &mut TestAppContext) {
             subject: "Oversize Fallback Probe".into(),
             body_html: format!("<p>{}</p>", "x".repeat(4 * 1024 * 1024 + 64)), // review M-7：上限 4MB
             body_text: "超大邮件降级后的纯文本正文".into(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         };
         crate::runtime::runtime()
@@ -2480,6 +2482,8 @@ fn plain_text_email_no_fallback_banner(cx: &mut TestAppContext) {
             subject: "Plain Text Probe".into(),
             body_html: String::new(),
             body_text: "纯文本邮件正文，不应出现降级提示条。".into(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         };
         crate::runtime::runtime()
@@ -2563,6 +2567,8 @@ fn html_cache_same_id_new_content_renders(cx: &mut TestAppContext) {
             subject: "Cache Content Probe".into(),
             body_html: "<p>CacheKeyAlpha</p>".into(),
             body_text: "CacheKeyAlpha".into(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         };
         crate::runtime::runtime()
@@ -2683,6 +2689,8 @@ fn html_email_display_keeps_status_bar(cx: &mut TestAppContext) {
             subject: "Status Bar Probe".into(),
             body_text: "状态栏回归探针正文".into(),
             body_html: real_body.to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         };
         let save_api = api.clone();
@@ -2859,6 +2867,8 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
                         <img src=\"https://tracking.example.test/pixel.png\" alt=\"远程图片探针\">"
                 .into(),
             body_text: "远程图片拦截探针正文".into(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         };
         crate::runtime::runtime()

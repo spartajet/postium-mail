@@ -735,6 +735,8 @@ fn blank_draft_request(account_id: i32) -> SaveDraftRequest {
         subject: "   ".to_string(),
         body_html: "".to_string(),
         body_text: " \n\t ".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
     }
 }
@@ -757,6 +759,8 @@ fn draft_with_attachment_is_saveable_even_without_subject_or_body() {
         subject: "".to_string(),
         body_html: "".to_string(),
         body_text: "".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![ComposeAttachmentInput {
             path: "/tmp/file.txt".to_string(),
             filename: Some("file.txt".to_string()),
@@ -796,6 +800,8 @@ async fn draft_save_persists_remote_and_local_draft() {
         subject: "".to_string(),
         body_html: "<p>draft body</p>".to_string(),
         body_text: "".to_string(),
+        in_reply_to: None,
+        references: None,
         attachments: vec![],
     };
 
@@ -822,6 +828,8 @@ async fn draft_save_replaces_previous_local_draft_and_attempts_remote_delete() {
             subject: "first".to_string(),
             body_html: "".to_string(),
             body_text: "first".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -838,6 +846,8 @@ async fn draft_save_replaces_previous_local_draft_and_attempts_remote_delete() {
             subject: "second".to_string(),
             body_html: "".to_string(),
             body_text: "second".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -867,6 +877,8 @@ async fn draft_save_reports_cleanup_error_and_keeps_old_local_when_old_remote_de
             subject: "first".to_string(),
             body_html: "".to_string(),
             body_text: "first".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -886,6 +898,8 @@ async fn draft_save_reports_cleanup_error_and_keeps_old_local_when_old_remote_de
             subject: "second".to_string(),
             body_html: "".to_string(),
             body_text: "second".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -918,6 +932,8 @@ async fn draft_delete_keeps_local_draft_when_remote_delete_fails() {
             subject: "keep me".to_string(),
             body_html: "".to_string(),
             body_text: "body".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -1256,6 +1272,8 @@ async fn send_email_deletes_source_draft_after_successful_send() {
             subject: "draft to send".to_string(),
             body_html: "<p>body</p>".to_string(),
             body_text: "body".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -1298,6 +1316,8 @@ async fn send_email_does_not_delete_draft_from_another_account() {
             subject: "other account draft".to_string(),
             body_html: "<p>body</p>".to_string(),
             body_text: "body".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await
@@ -1336,6 +1356,8 @@ async fn send_email_still_succeeds_when_source_draft_cleanup_fails() {
             subject: "draft cleanup failure".to_string(),
             body_html: "<p>body</p>".to_string(),
             body_text: "body".to_string(),
+            in_reply_to: None,
+            references: None,
             attachments: vec![],
         })
         .await

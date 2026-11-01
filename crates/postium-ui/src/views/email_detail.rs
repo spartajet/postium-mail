@@ -137,6 +137,11 @@ impl EmailDetailView {
         let to = to.join(", ");
         let subject = detail.email.subject.clone().unwrap_or_default();
         let original_html = detail.body_html.clone().unwrap_or_default();
+        let message_id = detail.email.message_id.clone();
+        let references = crate::views::compose::reply_references(
+            detail.email.in_reply_to.as_deref(),
+            detail.email.message_id.as_deref(),
+        );
         let api = self.api.clone();
         cx.defer(move |cx| {
             crate::views::compose::open_compose_window(
@@ -146,6 +151,8 @@ impl EmailDetailView {
                     to,
                     subject,
                     original_html,
+                    message_id,
+                    references,
                 },
                 &api,
                 cx,
@@ -216,6 +223,11 @@ impl EmailDetailView {
         let to = detail.email.sender_email.clone();
         let subject = detail.email.subject.clone().unwrap_or_default();
         let original_html = detail.body_html.clone().unwrap_or_default();
+        let message_id = detail.email.message_id.clone();
+        let references = crate::views::compose::reply_references(
+            detail.email.in_reply_to.as_deref(),
+            detail.email.message_id.as_deref(),
+        );
         let api = self.api.clone();
         cx.defer(move |cx| {
             crate::views::compose::open_compose_window(
@@ -225,6 +237,8 @@ impl EmailDetailView {
                     to,
                     subject,
                     original_html,
+                    message_id,
+                    references,
                 },
                 &api,
                 cx,

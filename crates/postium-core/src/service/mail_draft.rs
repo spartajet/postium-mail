@@ -11,7 +11,7 @@ use crate::service::email_service::{EmailService, local_folder_registry_inputs};
 use crate::service::mail_send::{ComposeAttachmentInput, describe_local_attachment_sync};
 use async_trait::async_trait;
 use lettre::Message;
-use lettre::message::header::{ContentType, Date, MessageId};
+use lettre::message::header::{ContentType, Date, InReplyTo, MessageId, References};
 use lettre::message::{Attachment, Body, Mailbox, MultiPart, SinglePart};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,6 +26,12 @@ pub struct SaveDraftRequest {
     pub subject: String,
     pub body_html: String,
     pub body_text: String,
+    /// In-Reply-To 头值（`<id>` 形态；回信草稿携带，普通草稿 None）
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    /// References 头值（`<id>` 逗号串，对齐线程化落库形态；回信草稿携带）
+    #[serde(default)]
+    pub references: Option<String>,
     #[serde(default)]
     pub attachments: Vec<ComposeAttachmentInput>,
 }
@@ -182,7 +188,7 @@ pub async fn save_draft(
             folder: folder.clone(),
             uid: remote_uid,
             message_id: Some(built.message_id.clone()),
-            in_reply_to: None,
+            in_reply_to: req.in_reply_to.clone(),
             subject: Some(req.subject.trim().to_string()),
             sender_name: account.display_name.clone(),
             sender_email: account.email.clone(),
@@ -436,6 +442,15 @@ fn build_draft_email(
         .header(Date::now())
         .subject(req.subject.trim());
 
+    // 线程头（回信草稿）：非空才写头——lettre 0.11 内置 InReplyTo/References
+    // 文本头类型，值按 `<id>`（逗号串）形态原样写入。
+    if let Some(value) = req.in_reply_to.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        builder = builder.header(InReplyTo::from(value.to_string()));
+    }
+    if let Some(value) = req.references.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        builder = builder.header(References::from(value.to_string()));
+    }
+
     let mut has_recipients = false;
     for addr in &req.to {
         if !addr.trim().is_empty() {
@@ -533,4 +548,96 @@ fn sanitize_attachment_filename(input: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_account() -> accounts::Model {
+        accounts::Model {
+            id: 1,
+            name: "测试账号".to_string(),
+            email: "user@example.com".to_string(),
+            display_name: Some("用户".to_string()),
+            provider: "custom".to_string(),
+            imap_host: None,
+            imap_port: None,
+            imap_ssl: None,
+            imap_ssl_mode: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_ssl: None,
+            smtp_ssl_mode: None,
+            color: None,
+            sync_enabled: None,
+            last_sync_at: None,
+            auth_type: None,
+            account_type: "personal".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn base_req() -> SaveDraftRequest {
+        SaveDraftRequest {
+            draft_id: None,
+            account_id: 1,
+            to: vec!["dest@example.com".to_string()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Re: 主题".to_string(),
+            body_html: "<p>hi</p>".to_string(),
+            body_text: "hi".to_string(),
+            in_reply_to: None,
+            references: None,
+            attachments: vec![],
+        }
+    }
+
+    #[test]
+    fn draft_email_includes_threading_headers_when_present() {
+        let req = SaveDraftRequest {
+            in_reply_to: Some("<orig@x.com>".to_string()),
+            references: Some("<root@x.com>,<orig@x.com>".to_string()),
+            ..base_req()
+        };
+        let built = build_draft_email(&test_account(), &req).expect("构建回信草稿应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(
+            raw.contains("In-Reply-To: <orig@x.com>"),
+            "raw 应含 In-Reply-To 头: {raw}"
+        );
+        assert!(
+            raw.contains("References: <root@x.com>,<orig@x.com>"),
+            "raw 应含 References 头: {raw}"
+        );
+    }
+
+    #[test]
+    fn draft_email_omits_threading_headers_when_absent() {
+        let built = build_draft_email(&test_account(), &base_req()).expect("构建普通草稿应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(!raw.contains("In-Reply-To:"), "无值不应带 In-Reply-To 头");
+        assert!(!raw.contains("References:"), "无值不应带 References 头");
+    }
+
+    #[test]
+    fn draft_email_blank_threading_values_omit_headers() {
+        let req = SaveDraftRequest {
+            in_reply_to: Some("   ".to_string()),
+            references: Some("".to_string()),
+            ..base_req()
+        };
+        let built = build_draft_email(&test_account(), &req).expect("构建草稿应成功");
+        let raw = String::from_utf8_lossy(&built.raw);
+        assert!(
+            !raw.contains("In-Reply-To:"),
+            "空白值不应带 In-Reply-To 头: {raw}"
+        );
+        assert!(
+            !raw.contains("References:"),
+            "空白值不应带 References 头: {raw}"
+        );
+    }
 }

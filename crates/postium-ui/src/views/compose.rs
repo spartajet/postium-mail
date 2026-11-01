@@ -33,6 +33,10 @@ pub enum ComposeMode {
         to: String,
         subject: String,
         original_html: String,
+        /// 原邮件 Message-ID（库内裸 id 形态；无头则 None——草稿不带回信头）
+        message_id: Option<String>,
+        /// 回信 References 头值（`<id>` 逗号串，email_detail/email_list 构造时合并）
+        references: Option<String>,
     },
     ReplyAll {
         #[allow(dead_code)]
@@ -41,6 +45,10 @@ pub enum ComposeMode {
         to: String,
         subject: String,
         original_html: String,
+        /// 原邮件 Message-ID（同 Reply.message_id）
+        message_id: Option<String>,
+        /// 回信 References 头值（同 Reply.references）
+        references: Option<String>,
     },
     Forward {
         #[allow(dead_code)]
@@ -51,19 +59,82 @@ pub enum ComposeMode {
     },
 }
 
-/// 去除主题的 Re:/Fwd: 前缀（对齐旧版 /^(Re|Fwd):\s*/i）。
+/// 主题前缀表（小写匹配；对齐 core `normalize_subject` 判定口径，中英文全/半角冒号）。
+const SUBJECT_PREFIXES: &[&str] = &[
+    "re:",
+    "fwd:",
+    "fw:",
+    "回复：",
+    "回复:",
+    "答复：",
+    "答复:",
+    "转发：",
+    "转发:",
+];
+
+/// 去除主题的 Re:/Fwd:/回复： 等前缀（循环剥离，允许嵌套混排）。
 fn strip_prefixes(subject: &str) -> String {
     let mut s = subject.trim().to_string();
     loop {
         let lower = s.to_ascii_lowercase();
-        if let Some(_rest) = lower.strip_prefix("re:") {
-            s = s[3..].trim_start().to_string();
-        } else if let Some(_rest) = lower.strip_prefix("fwd:") {
-            s = s[4..].trim_start().to_string();
-        } else {
+        let Some(prefix_len) = SUBJECT_PREFIXES
+            .iter()
+            .find_map(|prefix| lower.strip_prefix(prefix).map(|_| prefix.len()))
+        else {
             return s;
-        }
+        };
+        s = s[prefix_len..].trim_start().to_string();
     }
+}
+
+/// 回复主题：剥掉已有 Re:/回复： 等前缀后统一前置 `Re: `（已有回复前缀不重复加）。
+fn with_reply_prefix(subject: &str) -> String {
+    format!("Re: {}", strip_prefixes(subject))
+}
+
+/// References 头值上限字节数（对齐 core 落库串上限）。
+const MAX_REFERENCES_BYTES: usize = 2048;
+
+/// 回信 References 头值：原邮件 In-Reply-To 链 + 原 Message-ID 合并
+/// （`parse_message_ids` 归一去重保序），重组 `<id>` 逗号串，超 2048 字节
+/// 按 token 边界截断。原邮件两头皆缺 → None。
+pub(crate) fn reply_references(
+    in_reply_to: Option<&str>,
+    message_id: Option<&str>,
+) -> Option<String> {
+    use postium_core::domain::threading::parse_message_ids;
+
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(chain) = in_reply_to {
+        ids.extend(parse_message_ids(chain));
+    }
+    if let Some(id) = message_id {
+        ids.extend(parse_message_ids(id));
+    }
+    // 去重保序（parse_message_ids 已各自去重，此处跨两头再并一次）
+    let mut seen = std::collections::HashSet::new();
+    let mut joined = String::new();
+    for id in ids.iter().filter(|id| seen.insert((*id).clone())) {
+        let token = format!("<{id}>");
+        let separator_len = usize::from(!joined.is_empty());
+        if joined.len() + separator_len + token.len() > MAX_REFERENCES_BYTES {
+            break;
+        }
+        if !joined.is_empty() {
+            joined.push(',');
+        }
+        joined.push_str(&token);
+    }
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+/// Message-ID 规整为头值形态 `<id>`（库内 message_id 列为裸 id 形态）。
+fn bracket_message_id(id: &str) -> String {
+    format!("<{}>", id.trim().trim_matches(['<', '>']))
 }
 
 /// 打开独立写信窗口（居中 920×720）。
@@ -107,6 +178,11 @@ pub struct ComposeView {
     /// 收件人自动补全防抖代数（三字段共用；每次输入变更 +1，超时后比对丢弃过期查询）
     sugg_gen: u64,
     close_handle: Option<gpui_kit::AnyWindowHandle>,
+    /// 回信线程上下文（Reply/ReplyAll 携带原邮件 Message-ID；保存草稿时产出
+    /// In-Reply-To/References 头。New/Forward 为 None）
+    reply_message_id: Option<String>,
+    /// 回信 References 头值（`<id>` 逗号串，构造 ComposeMode 时已合并）
+    reply_references: Option<String>,
 }
 
 impl ComposeView {
@@ -115,17 +191,24 @@ impl ComposeView {
         let (to_init, subject_init, editor_html) = match &mode {
             ComposeMode::New => (String::new(), String::new(), String::new()),
             ComposeMode::Reply { to, subject, original_html, .. } => {
-                let clean = strip_prefixes(subject);
-                (to.clone(), format!("Re: {clean}"), original_html.clone())
+                (to.clone(), with_reply_prefix(subject), original_html.clone())
             }
             ComposeMode::ReplyAll { to, subject, original_html, .. } => {
-                let clean = strip_prefixes(subject);
-                (to.clone(), format!("Re: {clean}"), original_html.clone())
+                (to.clone(), with_reply_prefix(subject), original_html.clone())
             }
             ComposeMode::Forward { subject, original_html, .. } => {
                 let clean = strip_prefixes(subject);
                 (String::new(), format!("Fwd: {clean}"), original_html.clone())
             }
+        };
+
+        // 回信线程上下文：仅 Reply/ReplyAll 携带（Forward 不带线程头）
+        let (reply_message_id, reply_references) = match &mode {
+            ComposeMode::Reply { message_id, references, .. }
+            | ComposeMode::ReplyAll { message_id, references, .. } => {
+                (message_id.clone(), references.clone())
+            }
+            ComposeMode::New | ComposeMode::Forward { .. } => (None, None),
         };
 
         let editor = if editor_html.is_empty() {
@@ -167,6 +250,8 @@ impl ComposeView {
             selected_account: None,
             sugg_gen: 0,
             close_handle: None,
+            reply_message_id,
+            reply_references,
         };
 
         // 收件人字段：回车提交 chips（浮层开时先取第一项候选）；
@@ -520,6 +605,17 @@ impl ComposeView {
         let subject = Self::value_of(&self.subject, cx);
         let body_html = self.editor.read(cx).html(cx);
         let draft_id = self.draft_email_id;
+        // 回信线程头：原 Message-ID → `<id>` 形态 In-Reply-To；References 透传
+        let in_reply_to = self
+            .reply_message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(bracket_message_id);
+        let references = self
+            .reply_references
+            .clone()
+            .filter(|v| !v.trim().is_empty());
         self.draft_status = t("email.draftSaving").to_string().into();
         cx.notify();
         let rx = spawn_tokio(async move {
@@ -531,6 +627,8 @@ impl ComposeView {
                 subject,
                 body_html,
                 body_text: String::new(),
+                in_reply_to,
+                references,
                 attachments: Vec::new(),
                 draft_id,
             })
@@ -871,4 +969,107 @@ fn split_addresses(raw: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    // 不 `use super::*`：gpui_kit prelude 的宏链会让 #[test] 展开撞 recursion limit，
+    // 测试只按需引用被测私有函数。
+    use super::{reply_references, with_reply_prefix};
+
+    // ---------- with_reply_prefix：缺失前缀 → prepend ----------
+
+    #[test]
+    fn reply_prefix_prepends_when_missing() {
+        assert_eq!(with_reply_prefix("项目评审"), "Re: 项目评审");
+        assert_eq!(with_reply_prefix("  Hello World  "), "Re: Hello World");
+        assert_eq!(with_reply_prefix(""), "Re: ");
+    }
+
+    // ---------- with_reply_prefix：已有前缀 → 不重复加 ----------
+
+    #[test]
+    fn reply_prefix_not_duplicated_for_ascii() {
+        assert_eq!(with_reply_prefix("Re: Hello"), "Re: Hello");
+        assert_eq!(with_reply_prefix("RE: hello"), "Re: hello");
+        assert_eq!(with_reply_prefix("re:hello"), "Re: hello");
+        assert_eq!(with_reply_prefix("Re: Re: nested"), "Re: nested");
+    }
+
+    #[test]
+    fn reply_prefix_not_duplicated_for_cjk() {
+        assert_eq!(with_reply_prefix("回复：周报"), "Re: 周报");
+        assert_eq!(with_reply_prefix("回复:周报"), "Re: 周报");
+        assert_eq!(with_reply_prefix("答复：会议纪要"), "Re: 会议纪要");
+    }
+
+    #[test]
+    fn reply_prefix_strips_forward_markers_before_reply_prefix() {
+        // 回复一封转发邮件：Fwd:/转发： 前缀剥掉后统一为 Re:
+        assert_eq!(with_reply_prefix("Fwd: Hello"), "Re: Hello");
+        assert_eq!(with_reply_prefix("转发：周报"), "Re: 周报");
+        assert_eq!(with_reply_prefix("Re: 转发： mixed"), "Re: mixed");
+    }
+
+    #[test]
+    fn reply_prefix_keeps_non_prefix_lookalikes() {
+        assert_eq!(with_reply_prefix("reply: hello"), "Re: reply: hello");
+        assert_eq!(with_reply_prefix("reviews: top"), "Re: reviews: top");
+    }
+
+    // ---------- reply_references：原 In-Reply-To 链 + 原 Message-ID ----------
+
+    #[test]
+    fn reply_references_merges_chain_and_original_message_id() {
+        // 原邮件 in_reply_to 是 <id1> 链、message_id 是库里裸 id 形态
+        assert_eq!(
+            reply_references(Some("<id1@x.com>"), Some("id2@x.com")),
+            Some("<id1@x.com>,<id2@x.com>".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_references_dedupes_case_insensitively() {
+        assert_eq!(
+            reply_references(Some("<ID1@x.com>,<id2@x.com>"), Some("id1@x.com")),
+            Some("<id1@x.com>,<id2@x.com>".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_references_original_only_when_no_chain() {
+        // 顶级邮件回复：无链，References 只包含原 Message-ID
+        assert_eq!(
+            reply_references(None, Some("only@x.com")),
+            Some("<only@x.com>".to_string())
+        );
+    }
+
+    #[test]
+    fn reply_references_none_when_original_lacks_message_id() {
+        assert_eq!(reply_references(None, None), None);
+        assert_eq!(reply_references(Some("  "), Some("")), None);
+    }
+
+    #[test]
+    fn reply_references_truncates_to_2048_bytes_on_token_boundary() {
+        let long_chain = (0..200)
+            .map(|i| format!("<id{i:03}@example.com>"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let result =
+            reply_references(Some(&long_chain), Some("tail@x.com")).expect("应产出 References");
+        assert!(
+            result.len() <= 2048,
+            "应截断到 2048 字节内: len={}",
+            result.len()
+        );
+        assert!(
+            result.starts_with("<id000@example.com>"),
+            "截断保头部: {result}"
+        );
+        assert!(!result.ends_with(","), "截断不应落在分隔符上: {result}");
+        // 尾部 token（原 Message-ID）被挤掉时不残留半个尖括号形态
+        assert!(!result.ends_with("<"), "截断不应切半 token: {result}");
+    }
 }
