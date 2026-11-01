@@ -252,6 +252,12 @@ impl CoreApi {
         self.emails.mark_conversation_read(thread_id).await
     }
 
+    /// 会话级星标切换（Task 11 列表行消费）：作用于线程内最新一封可见邮件，
+    /// 返回该封切换后的星标状态。
+    pub async fn toggle_conversation_star(&self, thread_id: i64) -> Result<bool, MailError> {
+        self.emails.toggle_conversation_star(thread_id).await
+    }
+
     pub async fn get_email(&self, id: i32) -> Result<EmailDetail, MailError> {
         self.emails.get(id).await
     }

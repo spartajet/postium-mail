@@ -1195,6 +1195,230 @@ fn email_row_context_menu_actions_apply(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// threading Task 11 → 会话行级星标/删除（act_on_conversation 真实链路）
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn conversation_row_star_and_delete_apply(cx: &mut TestAppContext) {
+    // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    let (api, sync_rx) = boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        setup(cx);
+        AppShell::new(api, sync_rx, window, cx)
+    });
+    // 等账号装载 settle 后再切会话档
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (shell.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+
+    // 切会话档：直接写 view_mode + 导航重装（不经 set_view_mode——它会
+    // 持久化到并行测试共享的 ui-state.json，污染其他测试的默认平铺档）。
+    // 导航用具体账号 INBOX 文件夹（folder 直配，不依赖 sync_state.
+    // folder_category——e2e 种子库同步关闭，无文件夹分类行，聚合分类
+    // 会话查询会空）
+    let api2 = with_app(cx, |app| shell.read(app).api.clone());
+    let primary_account = crate::runtime::runtime()
+        .block_on(async { api2.list_accounts().await.unwrap() })
+        .into_iter()
+        .find(|a| a.email == "primary.e2e@postium.test")
+        .expect("种子主账号应存在")
+        .id;
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.view_mode = crate::stores::emails::EmailViewMode::Threaded;
+                store.navigate(
+                    NavTarget::AccountFolder {
+                        account_id: primary_account,
+                        folder: "INBOX".to_string(),
+                    },
+                    &api2,
+                    cx,
+                );
+            });
+        });
+    });
+    // 会话行装载（种子邮件启动期已回填归组到 threads）
+    let target = wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .find(|c| !c.starred_any)
+                .map(|c| c.thread_id)
+        })
+    });
+
+    // 会话星标（行级链路：toggle_conversation_star + 列表行聚合原位补丁）
+    with_app_mut(cx, |app| {
+        let store_weak = shell.read(app).emails.downgrade();
+        crate::views::email_list::test_hooks::act_on_conversation_for_test(
+            api2.clone(),
+            store_weak,
+            target,
+            crate::views::email_list::test_hooks::ConvActionForTest::ToggleStar,
+            app,
+        );
+    });
+    // 落库断言：作用于最新一封（后台真实异步，轮询至收敛）
+    let mut starred = false;
+    for _ in 0..30 {
+        cx.run_until_parked();
+        let rows = crate::runtime::runtime()
+            .block_on(async { api2.conversation_emails(target).await.unwrap() });
+        let latest = rows.iter().max_by_key(|e| e.sent_at).unwrap();
+        if latest.is_starred {
+            starred = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(starred, "会话星标应作用于最新一封并落库");
+    // 列表行聚合补丁：starred_any 置位（原位刷新，不动选中/滚动）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            shell
+                .read(app)
+                .emails
+                .read(app)
+                .conversations
+                .iter()
+                .find(|c| c.thread_id == target)
+                .filter(|c| c.starred_any)
+                .map(|_| ())
+        })
+    });
+
+    // 会话删除（行级链路：conversation_emails 取全部封 → 既有批量删除流
+    // → 会话档重载，线程从列表消失）
+    with_app_mut(cx, |app| {
+        let store_weak = shell.read(app).emails.downgrade();
+        crate::views::email_list::test_hooks::act_on_conversation_for_test(
+            api2.clone(),
+            store_weak,
+            target,
+            crate::views::email_list::test_hooks::ConvActionForTest::Delete,
+            app,
+        );
+    });
+    // 落库断言：线程内全部邮件移出 INBOX（第一阶段删除 = 移入 Trash，
+    // conversation_emails 文件夹无关仍会返回，按 folder 变化断言）
+    let mut moved_out = false;
+    for _ in 0..30 {
+        cx.run_until_parked();
+        let rows = crate::runtime::runtime()
+            .block_on(async { api2.conversation_emails(target).await.unwrap() });
+        if rows.iter().all(|e| e.folder != "INBOX") {
+            moved_out = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(moved_out, "会话删除应把线程内全部邮件移出 INBOX");
+    // 列表断言：重载完成后会话行集合不含目标线程（conversations 已重新
+    // 装载非空——避开 reset_and_load 清空间隙的假阳性）
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).emails.read(app);
+            (!store.conversations.is_empty()
+                && !store.conversations.iter().any(|c| c.thread_id == target))
+                .then_some(())
+        })
+    });
+}
+
+// ─── 时间线展开封相邻迁移纯函数（email_detail::neighbor_after_removal；
+// 单测不放 view 文件——其 GPUI builder 链过深，内联 #[test] 触顶宏展开
+// 递归上限）───
+
+fn tl_dto(id: i32, sent_at: i64) -> postium_core::service::email_service::EmailDto {
+    use postium_core::service::email_service::EmailDto;
+    EmailDto {
+        id,
+        account_id: 1,
+        folder: "INBOX".into(),
+        uid: id as u32,
+        subject: None,
+        sender_name: None,
+        sender_email: "a@b.c".into(),
+        account_email: None,
+        account_display_name: None,
+        preview: None,
+        is_read: true,
+        is_starred: false,
+        sent_at,
+        has_attachments: false,
+        message_id: None,
+        in_reply_to: None,
+    }
+}
+
+#[gpui_pre::test]
+fn timeline_neighbor_prefers_next_later_email(cx: &mut TestAppContext) {
+    let _ = cx;
+    let old = vec![tl_dto(1, 100), tl_dto(2, 200), tl_dto(3, 300)];
+    let new_rows = vec![tl_dto(1, 100), tl_dto(3, 300)]; // 删中位 2
+    assert_eq!(
+        crate::views::email_detail::neighbor_after_removal(&old, 2, &new_rows),
+        Some(3),
+        "中位被删应迁移到下一封（更晚）"
+    );
+}
+
+#[gpui_pre::test]
+fn timeline_neighbor_falls_back_to_previous_when_last_removed(cx: &mut TestAppContext) {
+    let _ = cx;
+    let old = vec![tl_dto(1, 100), tl_dto(2, 200), tl_dto(3, 300)];
+    let new_rows = vec![tl_dto(1, 100), tl_dto(2, 200)]; // 删末位 3
+    assert_eq!(
+        crate::views::email_detail::neighbor_after_removal(&old, 3, &new_rows),
+        Some(2),
+        "末位被删应迁移到上一封"
+    );
+}
+
+#[gpui_pre::test]
+fn timeline_neighbor_first_removed_goes_to_second(cx: &mut TestAppContext) {
+    let _ = cx;
+    let old = vec![tl_dto(1, 100), tl_dto(2, 200)];
+    let new_rows = vec![tl_dto(2, 200)]; // 删首封
+    assert_eq!(
+        crate::views::email_detail::neighbor_after_removal(&old, 1, &new_rows),
+        Some(2)
+    );
+}
+
+#[gpui_pre::test]
+fn timeline_neighbor_defensive_fallback_is_last(cx: &mut TestAppContext) {
+    let _ = cx;
+    let old = vec![tl_dto(1, 100)];
+    let new_rows = vec![tl_dto(5, 500), tl_dto(6, 600)]; // 旧快照定位失败
+    assert_eq!(
+        crate::views::email_detail::neighbor_after_removal(&old, 99, &new_rows),
+        Some(6),
+        "防御路径回落新快照最后一封"
+    );
+}
+
+#[gpui_pre::test]
+fn timeline_neighbor_none_when_conversation_emptied(cx: &mut TestAppContext) {
+    let _ = cx;
+    let old = vec![tl_dto(1, 100)];
+    assert_eq!(
+        crate::views::email_detail::neighbor_after_removal(&old, 1, &[]),
+        None,
+        "整组归置返回 None（调用方走清空分支）"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // contacts.e2e → 种子联系人装载 + 启动回填共存 + 星标过滤
 // ---------------------------------------------------------------------------
 #[gpui_pre::test]
@@ -2849,6 +3073,26 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
         with_app(cx, |app| {
             (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
         })
+    });
+
+    // 前置净化（T11 修复跨测试污染）：共享 ui-state.json 的放行记忆随进程
+    // 持久，其他并行测试（html_email_display_keeps_status_bar 放行主账号
+    // 发件人草稿）一旦先落记忆，本测试「默认拦截」前提即被击穿（自动放
+    // 行 → 无「加载图片」条 → wait_for 超时，偶发于并行调度）。此处持有
+    // UI_STATE_FILE_TESTS 互斥锁先摘除本测试发件人的记忆，使拦截断言确定
+    with_app(cx, |app| {
+        let email = shell.read(app).accounts.read(app).groups[0].account.email.clone();
+        let sender = crate::ui_state::normalize_sender(&email);
+        if !sender.is_empty() {
+            let mut state = crate::ui_state::load();
+            if let Some(senders) = state.remote_image_senders.as_mut() {
+                let before = senders.len();
+                senders.retain(|s| *s != sender);
+                if senders.len() != before {
+                    crate::ui_state::save(&state);
+                }
+            }
+        }
     });
 
     // 含远程图的 HTML 草稿（e2e_offline 本地落库，正文带跟踪像素形态远程图）

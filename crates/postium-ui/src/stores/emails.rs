@@ -224,6 +224,27 @@ impl EmailsStore {
         }
     }
 
+    /// 会话时间线形态的操作后刷新（Task 11）：与 [`Self::refresh_now`]
+    /// 同语义重载第一页，但**保留会话选中**（`selected_thread`）。
+    ///
+    /// 背景：`refresh_now` 走 [`Self::reset_and_load`] 会清空会话选中，
+    /// 而时间线详情仍挂在选中线程上——详情侧随后的时间线快照刷新
+    /// （`EmailDetailView::refresh_timeline`）以「列表选中仍是本线程」
+    /// 作竞态校验，选中被清会导致刷新结果被误判过期丢弃。调用方须在
+    /// [`Self::refresh_now`] 返回后立即恢复选中（本方法内完成，异装载
+    /// 完成前选中已就位，`rebuild_list_state` 亦能带回行高亮）。
+    ///
+    /// 语义边界：若刷新后该线程不再出现在行集合（如未读过滤下会话
+    /// 已读清零），列表交互层 `set_conversations` 会自行清行选中，属
+    /// 预期收敛；store 侧选中保留仅服务于时间线竞态校验。
+    pub fn refresh_now_preserving_selection(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
+        let keep = self.selected_thread;
+        self.refresh_now(api, cx);
+        if let Some(thread_id) = keep {
+            self.selected_thread = Some(thread_id);
+        }
+    }
+
     fn reset_and_load(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         self.nav_version += 1; // 上下文切换：宿主需重建列表
         self.emails.clear();

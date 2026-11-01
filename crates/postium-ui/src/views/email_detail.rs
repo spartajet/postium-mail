@@ -55,13 +55,20 @@ impl EmailDetailView {
         let api = self.api.clone();
         let rx = spawn_tokio(async move { api.toggle_star(id).await });
         let store = self.store.clone();
-        cx.spawn(async move |_, cx| {
+        let timeline_mode = self.thread_id.is_some();
+        cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(starred)) => {
                     store.update(cx, |s, cx| {
                         s.apply_star(starred);
                         cx.notify();
                     });
+                    // 时间线形态：刷新快照（折叠卡无星标视觉，刷新落点在
+                    // 列表行 starred_any 聚合 → 原位补丁，不重载列表）
+                    if timeline_mode {
+                        this.update(cx, |view, cx| view.refresh_timeline(false, None, cx))
+                            .ok();
+                    }
                 }
                 Ok(Err(e)) => tracing::warn!(target: "postium::ui", "切换星标失败: {e}"),
                 Err(_) => {}
@@ -79,9 +86,18 @@ impl EmailDetailView {
         let rx = spawn_tokio(async move { api.archive_email(detail.email.id).await });
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
-        cx.spawn(async move |_, cx| {
+        let timeline_mode = self.thread_id.is_some();
+        cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(())) => {
+                    if timeline_mode {
+                        // 时间线形态：归档封仍在会话内（conversation_emails
+                        // 仅除非草稿/未软删除，不按文件夹过滤），快照刷新
+                        // 保持展开封与详情，列表聚合走保留选中的重载
+                        this.update(cx, |view, cx| view.refresh_timeline(true, None, cx))
+                            .ok();
+                        return;
+                    }
                     store.update(cx, |s, cx| {
                         s.detail = None;
                         s.html = None;
@@ -108,12 +124,24 @@ impl EmailDetailView {
         };
         let api = self.api.clone();
         let store = self.store.clone();
-        let rx = spawn_tokok_delete(api, detail.email.id);
+        let deleted_id = detail.email.id;
+        let rx = spawn_tokok_delete(api, deleted_id);
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
-        cx.spawn(async move |_, cx| {
+        let timeline_mode = self.thread_id.is_some();
+        cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(_)) => {
+                    if timeline_mode {
+                        // 时间线形态：被删封退出会话（removed_id 显式摘除），
+                        // 快照刷新负责展开封相邻迁移/整组清空，列表聚合走
+                        // 保留选中的重载
+                        this.update(cx, |view, cx| {
+                            view.refresh_timeline(true, Some(deleted_id), cx)
+                        })
+                        .ok();
+                        return;
+                    }
                     store.update(cx, |s, cx| {
                         s.detail = None;
                         s.html = None;
@@ -182,9 +210,17 @@ impl EmailDetailView {
         let rx = spawn_tokio(async move { api.mark_as_read(id, false).await });
         let emails = self.emails.clone();
         let api_keep = self.api.clone();
-        cx.spawn(async move |_, cx| {
+        let timeline_mode = self.thread_id.is_some();
+        cx.spawn(async move |this, cx| {
             match rx.recv().await {
                 Ok(Ok(())) => {
+                    if timeline_mode {
+                        // 时间线形态：会话是当前阅读面，不撤详情——快照刷新
+                        // 更新列表行 unread 聚合（未读点回归）
+                        this.update(cx, |view, cx| view.refresh_timeline(true, None, cx))
+                            .ok();
+                        return;
+                    }
                     store.update(cx, |s, cx| {
                         s.detail = None;
                         s.html = None;
@@ -518,6 +554,144 @@ impl EmailDetailView {
         .detach();
     }
 
+    /// 时间线操作后刷新（T10 承接 I-1）：重拉 `conversation_emails` 快照
+    /// 应用到 [`Self::timeline`]（被删封移出、展开封相邻迁移等由
+    /// [`Self::apply_timeline_snapshot`] 处理）。
+    ///
+    /// `list_reload`：`true` = 列表聚合可能变化（封数/预览/未读/线程
+    /// 存续）→ `refresh_now_preserving_selection` 重载会话档（**保留会话
+    /// 选中**——本刷新完成回调的竞态校验依赖「列表选中仍是本线程」，
+    /// 普通 refresh_now 会清选中导致后续刷新被误判过期）；`false` = 仅
+    /// 星标变化 → 原位补丁该行 `starred_any`（T9 `mark_timeline_read`
+    /// 同路径，不动滚动/选中）。
+    ///
+    /// `removed_id`：本次操作**删除**的邮件 id——第一阶段删除 = 移入
+    /// Trash（文件夹移动，非软删），`conversation_emails` 不按文件夹过滤
+    /// 仍会返回它；时间线语义上被删封应退出会话，应用快照前显式摘除
+    /// （归档不移除——归档封保留在线程中，对齐会话语义）。
+    ///
+    /// 竞态防护与 [`Self::load_timeline`] 同口径：完成回调校验列表选中
+    /// 仍是本线程，过期结果整体丢弃。
+    pub(crate) fn refresh_timeline(
+        &mut self,
+        list_reload: bool,
+        removed_id: Option<i32>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread_id) = self.thread_id else { return; };
+        let api = self.api.clone();
+        let rx = spawn_tokio(async move { api.conversation_emails(thread_id).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(rows)) = rx.recv().await else {
+                tracing::warn!(target: "postium::ui", thread_id, "会话时间线刷新失败");
+                return;
+            };
+            this.update(cx, |view, cx| {
+                let still_selected = view
+                    .emails
+                    .upgrade()
+                    .is_some_and(|list| list.read(cx).selected_thread == Some(thread_id));
+                if !still_selected {
+                    return; // 过期结果：用户已切走
+                }
+                view.apply_timeline_snapshot(thread_id, rows, list_reload, removed_id, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// 应用新时间线快照：更新 [`Self::timeline`] + 展开封迁移 + 列表刷新。
+    ///
+    /// 展开封迁移（被删封是展开封时）：移到相邻封——优先**下一封**
+    /// （时间更晚 = 旧快照中被删位右侧，新快照同索引），无则上一封；
+    /// 并 `DetailStore::load` 装载新展开封。归档封仍在会话内
+    /// （`conversation_emails` 不按文件夹过滤），不触发迁移。
+    ///
+    /// 会话整组归置（快照为空）：清详情 + 清展开态，主窗口标题恢复默认，
+    /// 列表常规重载（`refresh_now`，选中随之清除——线程已不存在）。
+    fn apply_timeline_snapshot(
+        &mut self,
+        thread_id: i64,
+        rows: Vec<EmailDto>,
+        list_reload: bool,
+        removed_id: Option<i32>,
+        cx: &mut Context<Self>,
+    ) {
+        // 被删封显式摘除（删除 = 移 Trash，文件夹无关的会话查询仍返回它）
+        let rows = match removed_id {
+            Some(removed) if rows.iter().any(|e| e.id == removed) => rows
+                .into_iter()
+                .filter(|e| e.id != removed)
+                .collect::<Vec<_>>(),
+            _ => rows,
+        };
+        if rows.is_empty() {
+            self.timeline = Some(Vec::new());
+            self.expanded_id = None;
+            self.store.update(cx, |s, cx| {
+                s.detail = None;
+                s.html = None;
+                cx.notify();
+            });
+            restore_window_title_sync(cx);
+            if let Some(list) = self.emails.upgrade() {
+                let api = self.api.clone();
+                list.update(cx, |s, cx| {
+                    s.refresh_now(&api, cx);
+                });
+            }
+            cx.notify();
+            return;
+        }
+
+        let expanded_gone = self.expanded_id.is_some_and(|id| !rows.iter().any(|e| e.id == id));
+        if expanded_gone {
+            // 相邻封迁移：优先下一封（更晚），无则上一封（规则见纯函数）
+            let old = self.timeline.clone().unwrap_or_default();
+            let neighbor = self
+                .expanded_id
+                .and_then(|id| neighbor_after_removal(&old, id, &rows));
+            if let Some(id) = neighbor {
+                self.expanded_id = Some(id);
+                let api = self.api.clone();
+                self.store.update(cx, |s, cx| s.load(id, &api, cx));
+            }
+        } else if self.store.read(cx).detail.is_none() {
+            // 展开封仍在会话但详情被操作清空：重载展开封
+            if let Some(id) = self.expanded_id {
+                let api = self.api.clone();
+                self.store.update(cx, |s, cx| s.load(id, &api, cx));
+            }
+        }
+        let starred_any = rows.iter().any(|e| e.is_starred);
+        self.timeline = Some(rows);
+        cx.notify();
+
+        // 列表侧刷新（会话行聚合随快照真值收敛）
+        if let Some(list) = self.emails.upgrade() {
+            let api = self.api.clone();
+            if list_reload {
+                list.update(cx, |s, cx| {
+                    s.refresh_now_preserving_selection(&api, cx);
+                });
+            } else {
+                // 仅星标变化：原位补丁 starred_any（聚合真值取自新快照）
+                list.update(cx, |s, cx| {
+                    if let Some(conv) = s
+                        .conversations
+                        .iter_mut()
+                        .find(|c| c.thread_id == thread_id)
+                    {
+                        conv.starred_any = starred_any;
+                        s.list_version += 1;
+                        cx.notify();
+                    }
+                });
+            }
+        }
+    }
+
     /// 折叠卡点击：切换展开封（单展开态）——展开该封复用
     /// `DetailStore::load` 装载完整详情，原展开封折叠回收为卡。详情操作
     /// 按钮（回复/归档/删除等）读 store.detail，天然作用于新展开封。
@@ -707,16 +881,32 @@ fn restore_window_title(cx: &mut gpui_kit::AsyncApp) {
     });
 }
 
+/// [`restore_window_title`] 的同步形态（时间线快照应用路径在
+/// `Context<Self>` 内直调，无 AsyncApp 可借）。
+fn restore_window_title_sync(cx: &mut gpui_kit::App) {
+    if let Some(main) = cx.try_global::<crate::app::MainShell>()
+        && let Some(shell) = main.0.upgrade()
+    {
+        let _ = shell.update(cx, |shell, cx| shell.update_window_title(cx));
+    }
+}
+
 impl EmailDetailView {
     /// 无展开详情时的面板分流：会话形态渲染卡列 + 展开位占位；时间线
     /// 装载中显示 loading（T9 承接①：点会话行后右侧不停留旧邮件）；
-    /// 平铺形态维持无选中占位（既有行为零变化）。
+    /// 已装载但为空（会话整组归置后的快照刷新）回落无选中占位——
+    /// 线程已从列表消失，不再停留 loading；平铺形态维持无选中占位
+    /// （既有行为零变化）。
     fn render_without_detail(&self, detail_loading: bool, cx: &mut Context<Self>) -> AnyElement {
         if self.timeline.as_ref().is_some_and(|rows| !rows.is_empty()) {
             return self.render_timeline(None, detail_loading, cx);
         }
         if self.thread_id.is_some() {
-            return loading_placeholder(cx);
+            return if self.timeline.is_some() {
+                no_selection_placeholder(cx)
+            } else {
+                loading_placeholder(cx)
+            };
         }
         no_selection_placeholder(cx)
     }
@@ -1214,4 +1404,30 @@ fn separator(cx: &gpui_kit::App) -> impl IntoElement {
         .h(px(14.))
         .mx_1()
         .bg(gpui_kit::black().opacity(0.15))
+}
+
+/// 展开封被移出会话后的相邻封迁移目标（纯函数，Task 11；单测见
+/// e2e_tests.rs——本文件 GPUI builder 链过深，内联 `#[test]` 会触顶
+/// 宏展开递归上限）。
+///
+/// 旧快照 `old_rows` 与新快照 `new_rows` 均时间升序；`removed_id` 在
+/// 新快照中已不存在（软删/归置）。规则：优先**下一封**（时间更晚 =
+/// 新快照同索引位——删除使左移一位，原右侧那封补到被删位），无则
+/// **上一封**（被删的是最后一封），旧快照定位失败（防御）回落新快照
+/// 最后一封；新快照为空返回 `None`（整组归置，调用方另行处理）。
+pub(crate) fn neighbor_after_removal(
+    old_rows: &[EmailDto],
+    removed_id: i32,
+    new_rows: &[EmailDto],
+) -> Option<i32> {
+    old_rows
+        .iter()
+        .position(|e| e.id == removed_id)
+        .and_then(|pos| {
+            new_rows
+                .get(pos)
+                .map(|e| e.id)
+                .or_else(|| new_rows.get(pos.saturating_sub(1)).map(|e| e.id))
+        })
+        .or_else(|| new_rows.last().map(|e| e.id))
 }

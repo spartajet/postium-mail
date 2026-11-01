@@ -190,7 +190,19 @@ pub async fn seed_e2e_data(db: &DbConn) -> Result<(), MailError> {
 
         Ok(())
     })
-    .await
+    .await?;
+
+    // 种子邮件直插 SQL，不走入库归组（save_batch_emails 事务内的线程
+    // 归组），且 e2e 库单次启动（init 的 migrate/回填先于播种执行，空库
+    // 无可回填行）——种子行 thread_id 恒 NULL，会话查询（列表聚合/时间
+    // 线）在 e2e 库上恒空。补一次幂等回填（[thread_repo::
+    // backfill_threading]，同 migrate_threading 用的同一内核），使线程化
+    // UI 路径在 e2e 夹具上可测。
+    db.call(|conn| {
+        crate::infrastructure::storage::repository::thread_repo::backfill_threading(conn)
+    })
+    .await?;
+    Ok(())
 }
 
 /// 种子联系人夹具（契约见[模块文档](self)）。

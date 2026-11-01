@@ -203,11 +203,18 @@ impl RenderOnce for EmailRow {
 /// 与单封行的差异：无附件图标（`ConversationSummary` 不携带附件信息）；
 /// 第一行为线程最后发件人 + 封数角标（`total > 1`），第二行为主题，
 /// 第三行为最新邮件预览。e2e 探针：`conv-row-{thread_id}`。
+///
+/// 会话级操作（Task 11）：星标图标常驻可点（stop_propagation 防误触
+/// 行选中 → [`act_on_conversation`] 星标档）；右键菜单对齐平铺行形态
+/// （星标切换 ─ 删除会话）。
 #[derive(IntoElement)]
 pub struct ConversationRow {
     base: ListItem,
     conversation: Rc<ConversationSummary>,
     selected: bool,
+    /// 右键菜单与星标点击所需：核心 API 与列表 store（弱引用）
+    api: Option<Arc<CoreApi>>,
+    store: Option<gpui_kit::WeakEntity<EmailsStore>>,
 }
 
 impl Selectable for ConversationRow {
@@ -223,6 +230,7 @@ impl Selectable for ConversationRow {
 
 impl RenderOnce for ConversationRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let conv_rc = self.conversation.clone();
         let conv = &self.conversation;
         let time = format_list_time(conv.received_at);
         // 未读语义按会话聚合数（unread > 0）而非单封 is_read
@@ -282,19 +290,50 @@ impl RenderOnce for ConversationRow {
                 .child(time),
         );
 
-        // ② 星标（任一封星标）+ 主题；未读中粗
+        // ② 星标（可点，常驻显示：已星标金色 / 未星标淡化，点击切换会话
+        // 星标——stop_propagation 防误触行选中）+ 主题；未读中粗
+        let thread_for_star = conv.thread_id;
+        let starred_any = conv.starred_any;
+        let star_clickable = match (&self.api, &self.store) {
+            (Some(api), Some(store)) => Some((api.clone(), store.clone())),
+            _ => None,
+        };
+        let star_icon = gpui_kit::component::Icon::new(IconName::Star)
+            .size_3()
+            .flex_none()
+            .text_color(if starred_any {
+                gpui_kit::rgb(0xf59e0b).into()
+            } else {
+                cx.theme().muted_foreground.opacity(0.45)
+            });
+        let star_slot = match star_clickable {
+            Some((api, store)) => div()
+                .id("conv-star")
+                .flex_none()
+                .cursor_pointer()
+                .child(star_icon)
+                .on_click(move |_, _, cx| {
+                    // 防误触行选中（星标点击不打开会话时间线）
+                    cx.stop_propagation();
+                    act_on_conversation(
+                        api.clone(),
+                        store.clone(),
+                        thread_for_star,
+                        ConvAction::ToggleStar,
+                        cx,
+                    );
+                })
+                .into_any_element(),
+            // 无操作上下文（非列表宿主）：退化为纯指示（仅已星标显示）
+            None => starred_any
+                .then(|| star_icon.into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
+        };
         let row2 = h_flex()
             .w_full()
             .gap_2()
             .items_center()
-            .when(conv.starred_any, |this| {
-                this.child(
-                    gpui_kit::component::Icon::new(IconName::Star)
-                        .size_3()
-                        .flex_none()
-                        .text_color(gpui_kit::rgb(0xf59e0b)),
-                )
-            })
+            .child(star_slot)
             .child(
                 div()
                     .flex_1()
@@ -324,7 +363,8 @@ impl RenderOnce for ConversationRow {
             });
 
         let thread_id = conv.thread_id;
-        self.base
+        let row = self
+            .base
             .px(px(20.))
             .py(px(12.))
             .border_b_1()
@@ -333,7 +373,20 @@ impl RenderOnce for ConversationRow {
             .child(line(18.).mt(px(2.)).child(row2))
             .child(row3)
             // e2e 探针（debug 构建记录 bounds，正式构建空操作）
-            .debug_selector(move || format!("conv-row-{thread_id}"))
+            .debug_selector(move || format!("conv-row-{thread_id}"));
+
+        // 右键菜单（对齐平铺行菜单形态；单封语义操作——回复/转发/已读
+        // ——不适用于会话级，只保留星标切换与删除会话）
+        let menu_ctx = (self.api.clone(), self.store.clone());
+        match menu_ctx {
+            (Some(api), Some(store)) => div()
+                .child(row)
+                .context_menu(move |menu, _, _| {
+                    build_conv_menu(menu, conv_rc.clone(), api.clone(), store.clone())
+                })
+                .into_any_element(),
+            _ => row.into_any_element(),
+        }
     }
 }
 
@@ -421,6 +474,159 @@ fn act_on_email(
         }
     })
     .detach();
+}
+
+/// 会话行级操作类型（Task 11）。
+enum ConvAction {
+    /// 会话星标切换（`toggle_conversation_star`，作用于最新一封）
+    ToggleStar,
+    /// 删除整组会话（会话内全部邮件走既有删除流）
+    Delete,
+}
+
+/// 对指定会话执行异步操作，完成后刷新列表 store。
+///
+/// - **星标**：切换后重拉 `conversation_emails` 计算 `starred_any` 聚合
+///   真值（其他封可能仍有星标，单看切换返回值不够），随后**原位补丁**
+///   该行（对齐 T9 `mark_timeline_read` 路径：`list_version += 1` 原位
+///   刷新，不动滚动/选中/会话展开态）。
+/// - **删除**：`conversation_emails` 取会话内全部封，逐封走既有单封
+///   删除流（async 串联——mail_operation::delete 第一阶段仅支持单封）→
+///   `refresh_now` 重载会话档（INBOX 等文件夹过滤下封数归零的线程在
+///   repo GROUP BY 自然消失）。被删会话若正是当前展开的时间线，经
+///   MainShell 全局弱引用连带关闭详情面板。
+fn act_on_conversation(
+    api: Arc<CoreApi>,
+    store: gpui_kit::WeakEntity<EmailsStore>,
+    thread_id: i64,
+    action: ConvAction,
+    cx: &mut App,
+) {
+    let action_label = match action {
+        ConvAction::ToggleStar => "ConvToggleStar",
+        ConvAction::Delete => "ConvDelete",
+    };
+    let api_keep = api.clone();
+    // 显式错误类型：两分支均以 Ok(bool) 收尾，`?` 的 From 约束不足以定 E
+    let rx: smol::channel::Receiver<Result<bool, postium_core::error::MailError>> =
+        spawn_tokio(async move {
+            match action {
+                ConvAction::ToggleStar => {
+                    api.toggle_conversation_star(thread_id).await?;
+                    let rows = api.conversation_emails(thread_id).await?;
+                    Ok(rows.iter().any(|e| e.is_starred))
+                }
+                // 会话删除 = 对 conversation_emails 逐封走既有删除流
+                // （async 串联——mail_operation::delete 第一阶段仅支持单封）。
+                // 已在 Trash 等单封失败跳过续删（尽量收敛，不整体回滚）
+                ConvAction::Delete => {
+                    let rows = api.conversation_emails(thread_id).await?;
+                    let mut deleted = false;
+                    for email in rows {
+                        match api.delete_emails(vec![email.id]).await {
+                            Ok(_) => deleted = true,
+                            Err(e) => tracing::warn!(
+                                target: "postium::ui",
+                                "会话删除单封跳过（thread {thread_id} email {}）: {e}",
+                                email.id
+                            ),
+                        }
+                    }
+                    Ok(deleted)
+                }
+            }
+        });
+    cx.spawn(async move |cx| {
+        match rx.recv().await {
+            Ok(Ok(flag)) => {
+                if let Some(store) = store.upgrade() {
+                    let _ = cx.update(|cx: &mut App| match action_label {
+                        "ConvToggleStar" => {
+                            // 原位补丁 starred_any（聚合真值）
+                            store.update(cx, |s, cx| {
+                                if let Some(conv) = s
+                                    .conversations
+                                    .iter_mut()
+                                    .find(|c| c.thread_id == thread_id)
+                                {
+                                    conv.starred_any = flag;
+                                    s.list_version += 1;
+                                    cx.notify();
+                                }
+                            });
+                        }
+                        _ => {
+                            // 删除：会话档整体重载（线程自然消失；reset_and_load
+                            // 已清会话选中）。若被删线程正展开时间线 → 关详情
+                            let was_open = store.read(cx).selected_thread == Some(thread_id);
+                            store.update(cx, |s, cx| {
+                                s.refresh_now(&api_keep, cx);
+                            });
+                            if was_open {
+                                close_thread_detail(cx);
+                            }
+                        }
+                    });
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(target: "postium::ui", "会话行操作失败（{action_label}）: {e}")
+            }
+            Err(_) => {}
+        }
+    })
+    .detach();
+}
+
+/// 关闭会话时间线详情面板（被删会话正展开时）：经 MainShell 全局弱引用
+/// 清详情 store + 撤详情视图 + 恢复主窗口默认标题（对齐 app.rs 切档
+/// 清理路径的清理集）。
+fn close_thread_detail(cx: &mut App) {
+    let Some(shell) = cx
+        .try_global::<crate::app::MainShell>()
+        .and_then(|g| g.0.upgrade())
+    else {
+        return;
+    };
+    shell.update(cx, |shell, cx| {
+        shell.detail.update(cx, |s, cx| s.clear(cx));
+        shell.detail_view = None;
+        shell.update_window_title(cx);
+    });
+}
+
+/// 构造会话行右键菜单：星标切换 ─ 删除会话（对齐平铺行菜单形态；
+/// 回复/转发/标已读等单封语义操作不适用于会话级，不入菜单）。
+fn build_conv_menu(
+    menu: gpui_kit::component::menu::PopupMenu,
+    conv: Rc<ConversationSummary>,
+    api: Arc<CoreApi>,
+    store: gpui_kit::WeakEntity<EmailsStore>,
+) -> gpui_kit::component::menu::PopupMenu {
+    let thread_id = conv.thread_id;
+    let starred_any = conv.starred_any;
+
+    let star_item = {
+        let (api, store) = (api.clone(), store.clone());
+        PopupMenuItem::new(if starred_any {
+            t("email.unstar").to_string()
+        } else {
+            t("email.star").to_string()
+        })
+        .icon(IconName::Star)
+        .on_click(move |_, _, cx| {
+            act_on_conversation(api.clone(), store.clone(), thread_id, ConvAction::ToggleStar, cx);
+        })
+    };
+    let delete_item = {
+        PopupMenuItem::new(t("email.deleteThread").to_string())
+            .icon(IconName::Trash)
+            .on_click(move |_, _, cx| {
+                act_on_conversation(api.clone(), store.clone(), thread_id, ConvAction::Delete, cx);
+            })
+    };
+
+    menu.item(star_item).separator().item(delete_item)
 }
 
 /// 回复种类：取详情后打开对应模式的写信窗口。
@@ -726,6 +932,8 @@ impl ListDelegate for EmailListDelegate {
                 base: ListItem::new(ix).selected(Some(conv.thread_id) == self.selected_thread),
                 conversation: conv.clone(),
                 selected: Some(conv.thread_id) == self.selected_thread,
+                api: Some(self.api.clone()),
+                store: Some(self.store.clone()),
             })),
         }
     }
@@ -1146,5 +1354,26 @@ pub(crate) mod test_hooks {
         };
         // 悬空 store：DB 动作仍执行，仅跳过列表刷新
         act_on_email(api, gpui_kit::WeakEntity::new_invalid(), id, mapped, cx);
+    }
+
+    pub(crate) enum ConvActionForTest {
+        ToggleStar,
+        Delete,
+    }
+
+    /// 会话行动作测试钩子：直连 [`act_on_conversation`] 动作链路（真实
+    /// store 弱引用，星标原位补丁 / 删除 refresh_now 均可观测）。
+    pub(crate) fn act_on_conversation_for_test(
+        api: Arc<CoreApi>,
+        store: gpui_kit::WeakEntity<EmailsStore>,
+        thread_id: i64,
+        action: ConvActionForTest,
+        cx: &mut App,
+    ) {
+        let mapped = match action {
+            ConvActionForTest::ToggleStar => ConvAction::ToggleStar,
+            ConvActionForTest::Delete => ConvAction::Delete,
+        };
+        act_on_conversation(api, store, thread_id, mapped, cx);
     }
 }
