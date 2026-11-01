@@ -101,3 +101,9 @@ pub mod providers;
 ///
 /// 实现与邮件服务器的同步功能，包括全量同步、增量同步和进度通知。
 pub mod sync;
+
+/// 邮件会话线程化模块
+///
+/// 归组决策纯函数：头链（In-Reply-To/References）命中优先，主题 + 参与者
+/// 交集兜底，否则归入新会话。
+pub mod threading;
