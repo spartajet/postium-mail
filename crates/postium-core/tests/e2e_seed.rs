@@ -46,13 +46,14 @@ async fn test_seed_data_supports_category_queries_and_search() {
     // 24 固定 INBOX + 5 封今日锚定日历夹具
     assert_eq!(inbox.total, 29);
     assert_eq!(inbox.emails.len(), 29);
-    // 按时间倒序：最新一封是“后天”的日历夹具
+    // 按时间倒序：最新一封是“后天 15:00”与“本月 15 日 12:00”两夹具中较晚者
+    // （月初 1–12 号运行时本月 15 日更晚，月中之后“后天”更晚——期望随运行日期计算）
     assert_eq!(
         inbox
             .emails
             .first()
             .and_then(|email| email.subject.as_deref()),
-        Some("Calendar Future Delta")
+        Some(expected_latest_calendar_subject())
     );
     assert!(
         inbox
@@ -161,6 +162,26 @@ async fn count_all(svc: &TestServices, table: &'static str) -> i64 {
         })
         .await
         .unwrap()
+}
+
+/// 按 [`seed_e2e_data`] 日历夹具的时间规则（后天 15:00 vs 本月 15 日 12:00），
+/// 计算当前运行日期下 INBOX 最新一封日历夹具的主题。
+fn expected_latest_calendar_subject() -> &'static str {
+    use chrono::{Datelike, Duration, Local};
+
+    let today = Local::now().date_naive();
+    let midmonth = today.with_day(15).expect("构造本月 15 日失败");
+    let midmonth_ts = midmonth
+        .and_hms_opt(12, 0, 0)
+        .expect("构造夹具时间戳失败");
+    let future_ts = (today + Duration::days(2))
+        .and_hms_opt(15, 0, 0)
+        .expect("构造夹具时间戳失败");
+    if midmonth_ts > future_ts {
+        "Calendar Midmonth Epsilon"
+    } else {
+        "Calendar Future Delta"
+    }
 }
 
 async fn account_by_email(svc: &TestServices, email: &'static str) -> accounts::Model {
