@@ -9,6 +9,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
+
+use super::attach_style;
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::ContactWrite;
 
@@ -782,6 +784,14 @@ impl Render for EmailDetailView {
                             let filename = att.filename.clone();
                             let api = self.api.clone();
                             let _ = api;
+                            // 文件类型徽标（邮箱大师 AttachUtils 颜色表，MECHANICS.md §3）
+                            let kind = attach_style::file_kind(&att.filename);
+                            let color = attach_style::kind_color(kind);
+                            let label = if kind == "unknown" {
+                                "FILE".to_string()
+                            } else {
+                                kind.to_ascii_uppercase()
+                            };
                             h_flex()
                                 .gap_1()
                                 .px_2()
@@ -789,8 +799,28 @@ impl Render for EmailDetailView {
                                 .rounded(cx.theme().radius)
                                 .border_1()
                                 .border_color(cx.theme().border)
-                                .child(gpui_kit::component::Icon::new(IconName::Paperclip).size_3())
+                                .child(
+                                    div()
+                                        .id(("att-kind", att_id as u32))
+                                        .flex_none()
+                                        .px_1()
+                                        .rounded_sm()
+                                        .bg(gpui::rgb(u32::from_str_radix(&color[1..], 16).unwrap_or(0x8F96A5)))
+                                        .text_color(gpui::white())
+                                        .text_size(px(9.))
+                                        .child(label),
+                                )
                                 .child(div().text_size(px(12.)).child(format!("{}", att.filename)))
+                                // 大小（邮箱大师格式：B / x.x KB / x.x MB，MECHANICS.md §4）
+                                .when(att.size > 0, |this| {
+                                    this.child(
+                                        div()
+                                            .id(("att-size", att_id as u32))
+                                            .text_size(px(11.))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(attach_style::format_size(att.size)),
+                                    )
+                                })
                                 .child(
                                     Button::new(format!("open-att-{att_id}"))
                                         .ghost()

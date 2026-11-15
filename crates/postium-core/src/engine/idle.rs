@@ -33,10 +33,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 pub const IDLE_REISSUE: Duration = Duration::from_secs(25 * 60);
 /// 降级轮询间隔（SyncNow(folder) 即轮询语义）。
 pub const DEGRADE_POLL_INTERVAL: Duration = Duration::from_secs(90);
-/// 退避基数：第 n 次连续失败退避 5s*n。
-pub const BACKOFF_BASE: Duration = Duration::from_secs(5);
-/// 退避上限。
-pub const BACKOFF_CAP: Duration = Duration::from_secs(60);
+/// 退避基数：对齐网易邮箱大师 `mm::PushServiceIMAP::OnIdleDone`
+/// （mastercore.dll 0x106729e0，push_service_imap.cpp:0x80）：失败后首延 3s。
+pub const BACKOFF_BASE: Duration = Duration::from_secs(3);
+/// 退避上限：同一函数 `if (299 < delay) delay = 300` → 300s 封顶。
+pub const BACKOFF_CAP: Duration = Duration::from_secs(300);
 /// watch 上限：INBOX + 最多 2 个最近浏览的非 INBOX 文件夹。
 pub const MAX_WATCHED: usize = 3;
 
@@ -86,9 +87,15 @@ pub fn should_degrade(consecutive_failures: u32) -> bool {
     consecutive_failures >= 2
 }
 
-/// 第 n 次连续失败的退避时长（5s*n，封顶 60s）。
+/// 第 n 次连续失败的退避时长：3s 起步 ×2 指数退避，封顶 300s
+/// （对齐邮箱大师 `OnIdleDone`：`*p = 3` 初始，`*p * 2` 增长，`> 299 → 300`）。
 fn backoff(consecutive_failures: u32) -> Duration {
-    BACKOFF_CAP.min(BACKOFF_BASE.saturating_mul(consecutive_failures))
+    if consecutive_failures == 0 {
+        return BACKOFF_BASE;
+    }
+    // 3 << n（saturating），封顶 300s
+    let secs = BACKOFF_BASE.as_secs().saturating_mul(1u64 << consecutive_failures.min(16));
+    Duration::from_secs(secs.min(BACKOFF_CAP.as_secs()))
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -532,9 +539,12 @@ mod tests {
     // ---- backoff ----
 
     #[test]
-    fn backoff_grows_linearly_and_caps() {
-        assert_eq!(backoff(1), Duration::from_secs(5));
-        assert_eq!(backoff(2), Duration::from_secs(10));
+    fn backoff_exponential_caps_at_300s() {
+        // 邮箱大师 OnIdleDone：首延 3s，×2，封顶 300s
+        assert_eq!(backoff(0), Duration::from_secs(3));
+        assert_eq!(backoff(1), Duration::from_secs(6));
+        assert_eq!(backoff(2), Duration::from_secs(12));
         assert_eq!(backoff(100), BACKOFF_CAP);
+        assert_eq!(BACKOFF_CAP, Duration::from_secs(300));
     }
 }

@@ -87,6 +87,13 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
         },
         None => WindowOptions::default(),
     };
+    // 截图模式：窗口显示但不抢焦点（Craft Anything 检查期间不打扰用户）。
+    // 未聚焦窗口默认按 ~1fps 节流，会拖慢 120 帧目标 → 提到 60fps。
+    if crate::screenshot::enabled() {
+        options.focus = false;
+        options.show = true;
+        options.inactive_frame_interval = Some(std::time::Duration::from_millis(16));
+    }
     // 原生标题栏深浅只随系统外观（Windows 上无法应用内切换），改为透明 +
     // 应用自绘标题栏（views::title_bar，背景跟随主题 title_bar 色）
     options.titlebar = Some(TitlebarOptions {
@@ -99,7 +106,9 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
     .expect("打开主窗口失败");
     // 注册全局弱引用（窗口关闭后自动失效）
     cx.set_global(MainShell(shell_view.downgrade()));
-    cx.activate(true);
+    if !crate::screenshot::enabled() {
+        cx.activate(true);
+    }
 }
 
 /// 应用主壳实体。
@@ -502,6 +511,17 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // --screenshot 模式：每帧计数 + 自驱动画下一帧（窗口未聚焦时
+        // gpui 默认按事件驱动，不 notify 就停在第一帧）；截图线程完成后请求退出
+        if crate::screenshot::enabled() {
+            crate::screenshot::on_frame_tick();
+            if crate::screenshot::quit_requested() {
+                tracing::info!("screenshot 完成，退出");
+                cx.quit();
+            } else {
+                cx.notify();
+            }
+        }
         // 上下文切换（导航/搜索）→ 重建虚拟化列表；
         // 仅数据变化（翻页/操作后刷新）→ 原位更新行，保持滚动与选中
         let (data_v, nav_v) = {

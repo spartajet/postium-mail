@@ -1,3 +1,4 @@
+pub mod attach_style;
 pub mod calendar;
 pub mod compose;
 pub mod contacts;

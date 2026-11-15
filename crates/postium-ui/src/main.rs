@@ -5,6 +5,7 @@ mod i18n;
 mod nav;
 mod notify;
 mod runtime;
+mod screenshot;
 mod ui_state;
 mod stores;
 mod theme;
@@ -31,6 +32,10 @@ fn main() {
     postium_core::setup_logging();
     tracing::info!("Postium Mail (GPUI) 启动中...");
 
+    // --screenshot <file.png>：为 Craft Anything 构建检查输出截图后退出
+    let screenshot = screenshot::init_from_args();
+    let screenshot_mode = screenshot.is_some();
+
     let data_dir = resolve_data_dir();
     let e2e = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
     let e2e_truth = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
@@ -52,5 +57,9 @@ fn main() {
             postium_editor::init(cx);
             cx.set_global(i18n::I18nGlobal { lang: i18n::Lang::Zh });
             app::open_main_window(api, Some(sync_rx), cx);
+            // 截图模式：不激活应用（不抢用户焦点）
+            if screenshot_mode {
+                cx.activate(false);
+            }
         });
 }

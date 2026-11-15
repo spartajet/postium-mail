@@ -1,0 +1,85 @@
+# MECHANICS — 数值与规则清单（来源：网易邮箱大师 5.5.3.1009）
+
+本清单记录从目标程序中提取（反编译/静态读取）的具体数值与行为规则，
+postium-mail 依据本清单实现等价行为（等价换算允许，不复制任何代码）。
+
+## 1. IMAP IDLE 重连策略（mastercore.dll）
+
+反编译 `mm::PushServiceIMAP::OnIdleDone`（mastercore.dll @ `0x106729e0`，
+源码路径 `src/mailmaster/push_service/push_service_imap.cpp` 行 0x80–0x87）：
+
+| 规则 | 值 | 来源 |
+| --- | --- | --- |
+| IDLE 失败后首次重试延迟 | **3 秒** | `*piVar6 = 3`（初始 else 分支） |
+| 重试延迟增长 | **×2 指数退避** | `iVar4 = *piVar6 * 2` |
+| 重试延迟上限 | **300 秒** | `if (299 < iVar4) *piVar6 = 300` |
+| 成功（错误码 0）后 | 立即重启 IDLE，延迟复位 | `if (param_6 == 0) … FUN_106725a0` |
+| 错误码 0x2d（'-'，服务器拒绝） | 停止该账号 IDLE 服务 | `else if (param_6 == 0x2d) … FUN_10670100(0)` |
+
+日志格式（英文原文）：`IMAP: Account <id> try do idle failed with error <code>, retry in <delay> second(s).`
+
+## 2. 推送降级轮询（mastercore.dll）
+
+`mm::PushService::StartPoll`（mastercore.dll @ `0x106701b0`，
+`src/mailmaster/push_service/push_service.cpp` 行 0x48–0x51）：IDLE 不可用时遍历全部账号轮询；
+**轮询间隔由服务端配置下发，本地无字面量常量**（mastercore.dll 中无 `poll_interval` 字符串，已全文件搜索）。
+
+postium 现状：`crates/postium-core/src/engine/idle.rs` 的 `DEGRADE_POLL_INTERVAL = 90s`，行为等价（本地常量替代服务端下发）。
+
+## 3. 附件文件类型 → 图标颜色（webui.zip js/common.js `AttachUtils`）
+
+| 类型 | 颜色 | 扩展名（节选完整列表见 mechanics.json） |
+| --- | --- | --- |
+| excel | #2EB257 | xls xlsx csv xlsm … |
+| word | #3291FF | doc docx dot … |
+| ppt | #FF7421 | ppt pptx pot … |
+| zip | #2EB257 | 7z rar zip tar gz … |
+| mail | #F59C00 | eml |
+| html / js / css | #0DC4D1 | htm html js json css ini xml |
+| font | #8F96A5 | ttf fon |
+| pdf | #FF575C | pdf |
+| ps | #3291FF | psd pdd ps |
+| ai | #F59C00 | ai eps ait |
+| flash | #FF575C | fla swf flv |
+| txt | #3291FF | txt |
+| video | #0DC4D1 | mp4 avi mkv mov … |
+| music | #FF575C | mp3 flac wav ogg … |
+| img | #617EFF | jpg png gif bmp svg … |
+| dll | #8F96A5 | dll ocx |
+| vcf | #3291FF | vcf |
+| ics | #2EB257 | ics |
+| wps | #3291FF | wps wpt |
+| apk | #2EB257 | apk |
+| exe | #8F96A5 | exe dmg |
+| key | #F59C00 | key |
+| unknown | #8F96A5 | 其余全部 |
+
+## 4. 附件大小显示（webui.zip js/common.js `MailDataAccess`）
+
+- `< 1024` 字节 → `NNN B`
+- 否则 KB；`≥ 1024 KB` → MB；均 **1 位小数**（`toFixed(1)`）
+  - 即 `12.0 KB`、`1.5 MB`（不显示 `0.5 KB`，小于 1 KB 时显示字节数）
+
+## 5. 超大附件过期提示（同上）
+
+服务端返回 `hugeExpiredDate`（Unix 秒）时：
+
+| 剩余时间 | 显示 |
+| --- | --- |
+| `hugeExpiredDate == 0` | 长期有效 |
+| `< 0` | 不显示 |
+| 剩余 ≥ 1 天 | （N天后过期）/ N天有效 |
+| 剩余 ≥ 1 小时 | （N小时后过期）/ N小时有效 |
+| 剩余 ≥ 1 分钟 | （N分钟后过期）/ N分钟有效 |
+| 其余 | （N秒后过期）/ N秒有效 |
+
+## 6. 引用折叠（webui.zip js/viewer/viewer.js `checkQuote`）
+
+- 检测 BLOCKQUOTE（id `isReplyContent`、`gmail_quote`、`ntes-*-quote` 等 6 种特征）
+- 折叠面板：`font-size: 14px; color: #2a83f3`，切换文字 `12px`
+- **会话中后面还有邮件（`next().length > 0`）→ 默认折叠**；否则默认展开
+- 文案：展开引用 / 收起引用
+
+## 7. 未读邮件提醒（res/audio）
+
+`res/audio/` 含独立新邮件提示音（`newmail.wav` 等多国别版本）——邮件到达独立于系统通知播放提示音。
