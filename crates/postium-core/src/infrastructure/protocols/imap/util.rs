@@ -30,19 +30,24 @@ impl ImapClient {
     /// 成功时返回 TCP 流
     ///
     /// # 功能
-    /// - 解析主机名为 IPv4 地址
-    /// - 遍历所有 IPv4 地址尝试连接
+    /// - 解析主机名为地址列表（优先 IPv4，无 IPv4 时兜底 IPv6）
+    /// - 逐个地址尝试连接
     /// - 支持连接超时控制
     pub(crate) async fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, MailError> {
-        let addrs = tokio::net::lookup_host((host, port))
+        let all = tokio::net::lookup_host((host, port))
             .await
             .map_err(|e| MailError::ImapConnectionFailed(format!("解析 {host}:{port} 失败: {e}")))?
-            .filter(SocketAddr::is_ipv4)
             .collect::<Vec<SocketAddr>>();
+
+        // 优先 IPv4；一个都没有（IPv6-only 主机/网络）时退回全部地址。
+        let mut addrs: Vec<SocketAddr> = all.iter().filter(|a| a.is_ipv4()).copied().collect();
+        if addrs.is_empty() {
+            addrs = all;
+        }
 
         if addrs.is_empty() {
             return Err(MailError::ImapConnectionFailed(format!(
-                "解析 {host}:{port} 未返回可用 IPv4 地址"
+                "解析 {host}:{port} 未返回可用地址"
             )));
         }
 
@@ -54,7 +59,7 @@ impl ImapClient {
                     return Ok(tcp);
                 }
                 Ok(Err(error)) => {
-                    tracing::debug!(host, port, %addr, %error, "IMAP: IPv4 TCP 连接失败，尝试下一个地址");
+                    tracing::debug!(host, port, %addr, %error, "IMAP: TCP 连接失败，尝试下一个地址");
                     last_error = Some(error.to_string());
                 }
                 Err(_) => {
@@ -69,7 +74,7 @@ impl ImapClient {
 
         Err(MailError::ImapConnectionFailed(format!(
             "连接 {host}:{port} 失败: {}",
-            last_error.unwrap_or_else(|| "没有可用 IPv4 地址".to_string())
+            last_error.unwrap_or_else(|| "没有可用地址".to_string())
         )))
     }
 
@@ -106,13 +111,19 @@ impl ImapClient {
         tcp: tokio::net::TcpStream,
         host: &str,
     ) -> Result<tokio_native_tls::TlsStream<tokio::net::TcpStream>, MailError> {
-        let connector = tokio_native_tls::native_tls::TlsConnector::new()
-            .map_err(|e| MailError::ImapConnectionFailed(format!("TLS 构建失败: {e}")))?;
+        let connector = Self::tls_connector()?;
         let connector = tokio_native_tls::TlsConnector::from(connector);
         connector
             .connect(host, tcp)
             .await
             .map_err(|e| MailError::ImapConnectionFailed(format!("TLS 握手失败: {e}")))
+    }
+
+    /// 共用的 TLS 连接器（隐式 TLS 与 STARTTLS 同一套配置）。
+    pub(crate) fn tls_connector(
+    ) -> Result<tokio_native_tls::native_tls::TlsConnector, MailError> {
+        tokio_native_tls::native_tls::TlsConnector::new()
+            .map_err(|e| MailError::ImapConnectionFailed(format!("TLS 构建失败: {e}")))
     }
 }
 

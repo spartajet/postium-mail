@@ -3,6 +3,25 @@
 本清单记录从目标程序中提取（反编译/静态读取）的具体数值与行为规则，
 postium-mail 依据本清单实现等价行为（等价换算允许，不复制任何代码）。
 
+## 0. IMAP 服务器适配（按服务器软件分流）
+
+反编译 mastercore.dll `imap_session.cpp` 的 Connect 流程（FUN_10932230 @
+`0x10932230`）：登录前把服务器 greeting 与一张硬编码的服务器软件名单做
+子串匹配，按命中结果设置会话级兼容开关（0xf6/0xf8/0xf9/0xfb/0xfc/0x106/0x10d
+等布尔字段）。另有按域名的特殊名单（yahoo.com / qq.com / foxmail.com，
+@ `0x11110fac`）。
+
+| 规则 | 值 | 来源 |
+| --- | --- | --- |
+| greeting 指纹名单 | "Coremail System IMap Server Ready"（字符串表 @ `0x1119b2bc`）、"Courier-IMAP"（@ `0x1119b2e0`）、"Hermes"（@ `0x1119b2f0`）、"QIP IMAP server"（@ `0x1119b2f8`）、"WinWebMail"（@ `0x1119b308`）、"Microsoft Exchange IMAP4"（@ `0x1119b314`） | FUN_10932230 逐项 strstr |
+| 域名特殊名单 | yahoo.com / qq.com / foxmail.com | `0x11110fac` 字符串表 |
+| 匹配方式 | greeting 内大小写不敏感子串匹配 | FUN_10932230 反汇编 |
+| 未命中 | 会话按标准 RFC 行为走 | FUN_10932230 默认路径 |
+
+postium 实现：`server_fingerprint.rs` 的 `fingerprint_greeting()`（含 3 个
+单测）；命中的服务器软件记入日志（`software=Coremail` 等），便于按服务器
+归类排查连接问题。邮箱大师的具体兼容开关未观测到差异行为，暂不照搬。
+
 ## 1. IMAP IDLE 重连策略（mastercore.dll）
 
 反编译 `mm::PushServiceIMAP::OnIdleDone`（mastercore.dll @ `0x106729e0`，

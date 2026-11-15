@@ -28,9 +28,15 @@ use utf7_imap::decode_utf7_imap;
 pub mod fetch;
 pub mod parser;
 pub mod search;
+pub mod server_fingerprint;
 pub mod util;
 
 pub use util::Xoauth2Authenticator;
+
+/// greeting/untagged 响应中 `information` 文本的提取方式：
+/// `ResponseData` 是 async-imap 的 crate 私有类型，无法作为参数类型命名，
+/// 因此在调用点用局部闭包 `|d| …` 直接匹配（见 `connect` / `connect_xoauth2`）。
+fn _greeting_doc() {}
 
 // ─── DTO ───
 
@@ -124,16 +130,66 @@ impl ImapClient {
 
         tracing::info!(host, port, email, "IMAP: 正在连接");
 
-        let tcp = Self::connect_tcp_stream(host, port).await?;
-
-        tracing::debug!(host, "IMAP: TCP 连接成功，开始 TLS 握手");
-        let tls = Self::upgrade_tls(tcp, host).await?;
-        let mut client = async_imap::Client::new(tls);
-
-        let _greeting = client.read_response().await.map_err(|e| {
-            tracing::warn!(host, error = %e, "IMAP: 读取 greeting 失败");
-            MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
-        })?;
+        // 按 SSL 模式分流（此前无论配置为何都走隐式 TLS，143/STARTTLS 服务器必然失败）：
+        // - Implicit：TCP 后直接 TLS 握手（993 标准路径）
+        // - StartTls：先明文读 greeting + 指纹识别，再 STARTTLS 升级
+        // - None：保持明文（用户显式选择，仅本地/内网测试用）
+        let mut client = match config.ssl {
+            crate::domain::providers::SslMode::StartTls => {
+                let tcp = Self::connect_tcp_stream(host, port).await?;
+                let mut plain = async_imap::Client::new(tcp);
+                let greeting = plain.read_response().await.map_err(|e| {
+                    tracing::warn!(host, error = %e, "IMAP: 读取 greeting 失败");
+                    MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
+                })?;
+                if let Some(ref d) = greeting {
+                    if let Response::Data { information: Some(info), .. } = d.parsed() {
+                        let sw = server_fingerprint::fingerprint_greeting(info);
+                        tracing::info!(host, software = sw.label(), "IMAP: 服务器指纹");
+                    }
+                }
+                tracing::debug!(host, "IMAP: 发送 STARTTLS");
+                // async-imap 0.11 未提供 starttls()，手动走协议：
+                // 发 STARTTLS → 校验 OK → 取回裸 TCP → TLS 握手 → 重建 Client。
+                plain
+                    .run_command_and_check_ok("STARTTLS", None)
+                    .await
+                    .map_err(|e| {
+                        tracing::warn!(host, error = %e, "IMAP: STARTTLS 被拒绝");
+                        MailError::ImapConnectionFailed(format!(
+                            "服务器拒绝 STARTTLS（端口 {port} 可能不支持）: {e}"
+                        ))
+                    })?;
+                let raw_tcp = plain.into_inner();
+                let tls = Self::upgrade_tls(raw_tcp, host).await?;
+                async_imap::Client::new(tls)
+            }
+            crate::domain::providers::SslMode::None => {
+                // ImapClient.session 的类型是 Session<TlsStream<TcpStream>>，
+                // 明文会话无法存进去；加密是底线（邮箱大师同样默认强制 TLS），
+                // 这里直接报错引导用户改用 Implicit/StartTls。
+                return Err(MailError::ImapConnectionFailed(format!(
+                    "服务器 {host}:{port} 配置为明文（SslMode::None）不被支持：请使用 Implicit(993) 或 StartTls(143)"
+                )));
+            }
+            crate::domain::providers::SslMode::Implicit => {
+                let tcp = Self::connect_tcp_stream(host, port).await?;
+                tracing::debug!(host, "IMAP: TCP 连接成功，开始 TLS 握手");
+                let tls = Self::upgrade_tls(tcp, host).await?;
+                let mut c = async_imap::Client::new(tls);
+                let greeting = c.read_response().await.map_err(|e| {
+                    tracing::warn!(host, error = %e, "IMAP: 读取 greeting 失败");
+                    MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
+                })?;
+                if let Some(ref d) = greeting {
+                    if let Response::Data { information: Some(info), .. } = d.parsed() {
+                        let sw = server_fingerprint::fingerprint_greeting(info);
+                        tracing::info!(host, software = sw.label(), "IMAP: 服务器指纹");
+                    }
+                }
+                c
+            }
+        };
 
         // RFC 2971 ID：网易（163/126/yeah）要求 LOGIN 前自报客户端身份，
         // 否则以 "Unsafe Login" 拒绝登录；对其他服务器无害，失败可忽略。
@@ -182,7 +238,6 @@ impl ImapClient {
         let _greeting = client.read_response().await.map_err(|e| {
             MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
         })?;
-        tracing::debug!(email, "IMAP: 正在进行 XOAUTH2 认证");
         let authenticator = util::Xoauth2Authenticator {
             user: email.to_string(),
             access_token: access_token.to_string(),
