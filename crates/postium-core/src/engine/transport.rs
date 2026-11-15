@@ -31,13 +31,14 @@ pub trait ImapSession: Send {
         uidvalidity: u32,
         modseq: u64,
     ) -> Result<(), MailError>;
-    /// CHANGEDSINCE flag 拉取：返回自 modseq 以来标志变化的 (uid, flags) 列表。
+    /// CHANGEDSINCE flag 拉取：返回自 modseq 以来标志变化的 (uid, flags) 列表
+    /// 与同响应流中的单边 VANISHED 推送（QRESYNC 档，见 `FlagChanges`）。
     async fn fetch_flags_changed_since(
         &mut self,
         folder: &str,
         uid_set: &str,
         modseq: u64,
-    ) -> Result<Vec<(u32, Vec<String>)>, MailError>;
+    ) -> Result<crate::infrastructure::protocols::imap::FlagChanges, MailError>;
     /// UID SEARCH ALL：文件夹内全部 UID（vanished 对比/增量同步用）。
     async fn uid_search_all(&mut self, folder: &str) -> Result<Vec<u32>, MailError>;
     /// 获取邮件正文原文（BODY.PEEK[]）。
@@ -152,7 +153,7 @@ impl ImapSession for RealSession {
         folder: &str,
         uid_set: &str,
         modseq: u64,
-    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
+    ) -> Result<crate::infrastructure::protocols::imap::FlagChanges, MailError> {
         self.client
             .fetch_flags_changed_since(folder, uid_set, modseq)
             .await

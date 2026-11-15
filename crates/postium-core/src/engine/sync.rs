@@ -270,12 +270,24 @@ async fn execute_modseq_resync(
 
     // 2. flag 变更（本地无 modseq 时跳过，等价于退化为增量+vanished）
     if let Some(since_modseq) = local.highest_modseq {
-        let changed = session
+        let changes = session
             .fetch_flags_changed_since(folder, "1:*", since_modseq)
             .await?;
-        for (uid, flags) in &changed {
+        for (uid, flags) in &changes.changed {
             outcome.flag_updates +=
                 email_repo::update_flags_by_uid(&db, account_id, folder, *uid, flags).await?;
+        }
+        // QRESYNC 单边 VANISHED 推送：服务器明确告知已删的 UID，
+        // 无需等第 3 步 SEARCH 对账即可清理（早一步减少幽灵窗口）
+        if !changes.vanished_uids.is_empty() {
+            tracing::debug!(count = changes.vanished_uids.len(), folder, "sync: 处理 VANISHED 推送");
+            outcome.deleted_emails += email_repo::delete_by_uids(
+                &db,
+                account_id,
+                folder,
+                &changes.vanished_uids,
+            )
+            .await? as usize;
         }
     }
 

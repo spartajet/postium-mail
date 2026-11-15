@@ -150,8 +150,8 @@ impl ImapSession for MockSession {
         _folder: &str,
         _uid_set: &str,
         _modseq: u64,
-    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
-        Ok(Vec::new())
+    ) -> Result<crate::infrastructure::protocols::imap::FlagChanges, MailError> {
+        Ok(crate::infrastructure::protocols::imap::FlagChanges::default())
     }
     async fn uid_search_all(&mut self, _folder: &str) -> Result<Vec<u32>, MailError> {
         Ok(self.search_uids.clone())

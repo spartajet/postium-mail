@@ -99,6 +99,34 @@ pub struct MailboxInfo {
     pub highest_modseq: Option<u64>,
 }
 
+/// CHANGEDSINCE 拉取结果：flag 变更 + 同响应流中的单边 VANISHED 推送。
+///
+/// QRESYNC 档下服务器在 SELECT/UID FETCH 响应流里主动推送
+/// `* VANISHED (EARLIER) uid-set`（RFC 7162 §3.2.10），表示这些 UID
+/// 已在服务器端消失；此前实现把它和其他 untagged 响应一起静默丢弃，
+/// 已删邮件在本地成为幽灵记录。MailMaster 的未标签响应梯次
+/// （mastercore.dll 0x10a92ff0，含 EXPUNGE/FETCH 分支）同样不丢弃。
+#[derive(Debug)]
+pub struct FlagChanges {
+    /// 标志变化的 (uid, flags)
+    pub changed: Vec<(u32, Vec<String>)>,
+    /// 服务器单边 VANISHED 推送的 UID（空 = 无推送，上层照常 SEARCH 对账）
+    pub vanished_uids: Vec<u32>,
+}
+
+impl Default for FlagChanges {
+    fn default() -> Self {
+        Self { changed: Vec::new(), vanished_uids: Vec::new() }
+    }
+}
+
+impl FlagChanges {
+    /// 把 VANISHED uid-set 的区间展开为 UID 列表（QRESYNC 推送解析用）。
+    pub fn expand_vanished_ranges(ranges: &[std::ops::RangeInclusive<u32>]) -> Vec<u32> {
+        ranges.iter().flat_map(|r| r.clone()).collect()
+    }
+}
+
 /// IMAP 客户端
 ///
 /// 封装 async-imap 库，提供 TLS 连接和各种 IMAP 操作。
@@ -371,7 +399,9 @@ impl ImapClient {
     /// CHANGEDSINCE flag 拉取（RFC 7162 CONDSTORE 档）：
     /// `UID FETCH uid_set (UID FLAGS) (CHANGEDSINCE modseq)`。
     ///
-    /// 返回自 `modseq` 以来标志发生变化的 (uid, flags) 列表。
+    /// 返回自 `modseq` 以来标志发生变化的 (uid, flags) 列表，以及同一
+    /// 响应流中服务器单边推送的 VANISHED UID（QRESYNC 档；见
+    /// [`FlagChanges`]）。
     ///
     /// 实现说明：`run_command_and_check_ok` 会把 untagged 响应路由到
     /// unsolicited 通道后丢弃，因此这里用 `run_command` + 手动循环
@@ -382,7 +412,7 @@ impl ImapClient {
         folder: &str,
         uid_set: &str,
         modseq: u64,
-    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
+    ) -> Result<FlagChanges, MailError> {
         tracing::debug!(folder, uid_set, modseq, "IMAP: CHANGEDSINCE 拉取 flag 变更");
         self.select_folder(folder).await?;
 
@@ -394,6 +424,14 @@ impl ImapClient {
             .map_err(|e| MailError::ImapConnectionFailed(format!("命令 {cmd} 发送失败: {e}")))?;
 
         let mut results = Vec::new();
+        // QRESYNC/CHANGEDSINCE 期间服务器可单边推送 VANISHED（earlier 或即时）、
+        // EXPUNGE（序列号）。MailMaster 的解析梯次（mastercore.dll 0x10a92ff0，
+        // LIST→LSUB→SEARCH→EXISTS→RECENT→FETCH，字符串表 0x111e0174 含
+        // EXPUNGE/FETCH/ENVELOPE/INTERNALDATE）把这些响应也纳入处理而非丢弃；
+        // 此前我们 `_ => {}` 静默吞掉，服务器端已删的邮件在本地成为幽灵。
+        let mut vanished_uids: Vec<u32> = Vec::new();
+        // 传统 EXPUNGE 推送计数（序列号无法直接映射为 UID，只计数）
+        let mut vanished_expunged_seq: usize = 0;
         loop {
             let Some(response) = self
                 .session
@@ -406,6 +444,18 @@ impl ImapClient {
                 ));
             };
             match response.parsed() {
+                // QRESYNC 单边推送：VANISHED (EARLIER) uid-set（区间形式）
+                Response::Vanished { uids, .. } => {
+                    tracing::debug!(ranges = uids.len(), "IMAP: 收到 VANISHED 推送");
+                    for range in uids {
+                        vanished_uids.extend(range.clone());
+                    }
+                }
+                // 传统 CONDSTORE/普通会话：EXPUNGE 给的是序列号而非 UID，
+                // 无法直接映射，记录数量供上层触发一次 vanished 对账
+                Response::Expunge(_seq) => {
+                    vanished_expunged_seq += 1;
+                }
                 Response::Fetch(_seq, attrs) => {
                     let mut uid = None;
                     let mut flags = Vec::new();
@@ -440,8 +490,9 @@ impl ImapClient {
                     }
                     match status {
                         Status::Ok => {
-                            tracing::debug!(count = results.len(), "IMAP: CHANGEDSINCE 拉取完成");
-                            return Ok(results);
+                            tracing::debug!(count = results.len(), vanished = vanished_uids.len(),
+                                expunged_seq = vanished_expunged_seq, "IMAP: CHANGEDSINCE 拉取完成");
+                            return Ok(FlagChanges { changed: results, vanished_uids });
                         }
                         other => {
                             return Err(MailError::ImapConnectionFailed(format!(
@@ -450,7 +501,7 @@ impl ImapClient {
                         }
                     }
                 }
-                // EXISTS/RECENT/EXPUNGE 等服务器单边推送：跳过
+                // EXISTS/RECENT 等其他服务器单边推送：跳过（不在本命令语义内）
                 _ => {}
             }
         }
@@ -778,5 +829,21 @@ mod tests {
         let msg = login_error_message("imap.gmail.com", "AUTHENTICATIONFAILED");
         assert!(msg.starts_with("登录失败"));
         assert!(!msg.contains("授权码"));
+    }
+
+    #[test]
+    fn vanished_uid_set_ranges_expand_to_uids() {
+        // RFC 7162 §3.2.10：`* VANISHED (EARLIER) 41,43:116,119` 三段区间
+        let ranges = vec![41..=41, 43..=116, 119..=119];
+        let uids = FlagChanges::expand_vanished_ranges(&ranges);
+        assert_eq!(uids.len(), 1 + 74 + 1);
+        assert_eq!(uids.first(), Some(&41));
+        assert_eq!(uids.get(1), Some(&43));
+        assert_eq!(uids.last(), Some(&119));
+        // 单一长区间
+        let one = FlagChanges::expand_vanished_ranges(&[7..=9]);
+        assert_eq!(one, vec![7, 8, 9]);
+        // 空推送
+        assert!(FlagChanges::expand_vanished_ranges(&[]).is_empty());
     }
 }

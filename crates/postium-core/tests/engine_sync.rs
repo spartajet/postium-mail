@@ -171,8 +171,11 @@ impl ImapSession for MockSyncSession {
         _folder: &str,
         _uid_set: &str,
         _modseq: u64,
-    ) -> Result<Vec<(u32, Vec<String>)>, MailError> {
-        Ok(self.flag_changes.clone())
+    ) -> Result<postium_core::infrastructure::protocols::imap::FlagChanges, MailError> {
+        Ok(postium_core::infrastructure::protocols::imap::FlagChanges {
+            changed: self.flag_changes.clone(),
+            vanished_uids: Vec::new(),
+        })
     }
 
     async fn uid_search_all(&mut self, _folder: &str) -> Result<Vec<u32>, MailError> {
