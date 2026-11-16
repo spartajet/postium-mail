@@ -13,8 +13,8 @@ path = "src/main.rs"
 postium-core = { path = "../postium-core" }
 postium-editor = { path = "../postium-editor" }
 postium-html = { path = "../postium-html" }
-gpui-kit = "0.8"
-gpui-kit-assets = "0.8"
+gpui-kit = "0.10"
+gpui-kit-assets = "0.10"
 tokio.workspace = true
 smol.workspace = true
 serde.workspace = true
@@ -35,7 +35,7 @@ regex = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [dev-dependencies]
-gpui-pre = { version = "0.3.9", package = "gpui-pre", features = ["test-support"] }
+gpui-pre = { version = "0.3.12", package = "gpui-pre", features = ["test-support"] }
 tempfile = "3"
 
 [build-dependencies]
