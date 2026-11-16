@@ -66,6 +66,7 @@ fn with_window_mut<R>(
     cx.update(|window, app| f(window, app))
 }
 
+#[track_caller]
 fn wait_for<T>(
     cx: &mut VisualTestContext,
     mut f: impl FnMut(&mut VisualTestContext) -> Option<T>,
