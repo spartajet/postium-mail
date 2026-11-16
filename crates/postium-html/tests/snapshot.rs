@@ -248,3 +248,4 @@ fn doc_text(blocks: &[Block]) -> String {
     walk(blocks, &mut out);
     out
 }
+

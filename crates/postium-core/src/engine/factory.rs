@@ -1,0 +1,109 @@
+//! 连接工厂：绑定单个账号，凭据 + IMAP 配置 → 已认证会话（含能力探测与 ENABLE）。
+
+use crate::domain::auth::AuthManager;
+use crate::domain::auth::manager::Credentials;
+use crate::domain::providers::pool::PROVIDER_POOL;
+use crate::engine::capabilities::CapabilitySet;
+use crate::engine::idle::IdleConnect;
+use crate::engine::pool::{PooledSession, PoolConnect};
+use crate::engine::transport::{ImapSession, RealSession};
+use crate::error::MailError;
+use crate::infrastructure::protocols::imap::ImapClient;
+use crate::infrastructure::storage::models::accounts;
+use crate::service::account_connection::imap_config_from_account;
+use async_trait::async_trait;
+use std::sync::Arc;
+
+/// 会话工厂：绑定单个账号，产出已认证 + 已 ENABLE 的会话与能力集。
+#[async_trait]
+pub trait SessionFactory: Send + Sync {
+    async fn connect(&self) -> Result<(Box<dyn ImapSession>, CapabilitySet), MailError>;
+}
+
+/// 真实工厂：密码 / XOAUTH2 双路径（与 mail_operation.rs 连接逻辑一致）。
+pub struct RealSessionFactory {
+    pub auth: Arc<AuthManager>,
+    pub account: accounts::Model,
+}
+
+impl RealSessionFactory {
+    /// 建立已认证 + 已 ENABLE 的具体客户端与能力集（池会话与 IDLE 专属连接共用）。
+    async fn connect_client(&self) -> Result<(ImapClient, CapabilitySet), MailError> {
+        let account = &self.account;
+        let provider_pool = PROVIDER_POOL
+            .get()
+            .ok_or_else(|| MailError::ProviderNotSupported("未找到provider pool".to_string()))?;
+        let provider = provider_pool
+            .get(&account.provider)
+            .ok_or_else(|| MailError::ProviderNotSupported(account.provider.clone()))?;
+        let credentials = self
+            .auth
+            .get_credentials(
+                &account.email,
+                &provider.provider_info().auth_type,
+                Some(&account.provider),
+            )
+            .await?;
+        let imap_config = imap_config_from_account(account)?;
+        let mut client = match credentials {
+            Credentials::Password(password) => {
+                ImapClient::connect(&imap_config, &account.email, &password).await?
+            }
+            Credentials::OAuth2 { access_token } => {
+                ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await?
+            }
+        };
+        let caps_raw = CapabilitySet::parse(&client.capabilities().await?);
+        // 邮箱大师 FUN_10931bf0 能力协商门控：Hermes 服务器即使宣告
+        // CONDSTORE 也禁用（is_hermes && caps 含 CONDSTORE → 不启用）。
+        // postium 的同步档位决策由 CapabilitySet 驱动（decide_plan），故把
+        // CONDSTORE 从能力集中摘掉即可全链路生效，无需改各调用点。
+        let caps = if client.server_quirks.is_hermes {
+            if caps_raw.has_condstore() {
+                tracing::info!(
+                    host = %imap_config.host,
+                    "IMAP: Hermes 服务器，禁用 CONDSTORE（邮箱大师兼容规则）"
+                );
+                caps_raw.without_condstore()
+            } else {
+                caps_raw
+            }
+        } else {
+            caps_raw
+        };
+        // 与 RealSession::enable 一致：无可 ENABLE 的扩展时跳过命令
+        let enable = caps.enable_list();
+        if !enable.is_empty() {
+            client
+                .run_command_and_check_ok(&format!("ENABLE {}", enable.join(" ")))
+                .await?;
+        }
+        Ok((client, caps))
+    }
+}
+
+#[async_trait]
+impl SessionFactory for RealSessionFactory {
+    async fn connect(&self) -> Result<(Box<dyn ImapSession>, CapabilitySet), MailError> {
+        let (client, caps) = self.connect_client().await?;
+        let session: Box<dyn ImapSession> = Box::new(RealSession::new(client));
+        Ok((session, caps))
+    }
+}
+
+#[async_trait]
+impl PoolConnect for RealSessionFactory {
+    async fn connect(&self) -> Result<PooledSession, MailError> {
+        let (session, caps) = SessionFactory::connect(self).await?;
+        Ok(PooledSession { session, caps })
+    }
+}
+
+/// IDLE 专属连接：复用同一连接/能力探测逻辑，但保留具体 `ImapClient`
+/// （`into_idle` 消费会话所需，trait object 无法回退）。
+#[async_trait]
+impl IdleConnect for RealSessionFactory {
+    async fn connect_idle(&self) -> Result<(ImapClient, CapabilitySet), MailError> {
+        self.connect_client().await
+    }
+}

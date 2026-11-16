@@ -54,14 +54,28 @@ pub(crate) fn preprocess(html: &str) -> String {
 
 /// 完整渲染管线：原始 HTML → [`HtmlDocument`] 中间表示。
 ///
-/// 顺序见模块文档；超限错误（[`HtmlError::TooLarge`]）由调用方捕获并降级为纯文本。
+/// 在 **32MB 大栈线程**上执行（Windows 主线程默认仅 1MB）：管线内有多处
+/// 与输入嵌套深度成正比的递归——html5ever 解析产物 rcdom 的**递归 Drop**
+///（发生在我们的 [`crate::builder::MAX_TREE_DEPTH`] 剪枝之前）、css-inline
+/// 内部处理、树遍历自身——深嵌套邮件（如层层转发的引用链）在主线程直接
+/// 栈溢出。大栈线程承担全部解析侧递归；主线程只剩渲染层 ≤ `MAX_TREE_DEPTH`
+/// 的有界递归。
 pub fn render_pipeline(html: &str) -> Result<HtmlDocument, HtmlError> {
     let limits = Limits::default();
     if html.len() > limits.max_bytes {
         return Err(HtmlError::TooLarge(html.len()));
     }
-    let preprocessed = preprocess(html);
-    builder::build_document(&preprocessed, &limits)
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                let preprocessed = preprocess(html);
+                builder::build_document(&preprocessed, &limits)
+            })
+            .expect("管线线程启动失败")
+            .join()
+            .expect("管线线程 panic")
+    })
 }
 
 #[cfg(test)]
@@ -106,6 +120,25 @@ mod tests {
     }
 
     #[test]
+    fn deep_nesting_on_default_thread_no_stack_overflow() {
+        // 线上回归（Windows 主线程 1MB 栈溢出）：3000 层嵌套的转发链在
+        // 默认线程直接跑管线——解析侧递归（rcdom 递归 Drop 等）由 32MB
+        // 大栈线程承担，超 MAX_TREE_DEPTH 子树静默剪枝，不再溢出。
+        let depth = 3000usize;
+        let mut html = String::with_capacity(depth * 24);
+        for i in 0..depth {
+            html.push_str(&format!(
+                r##"<div class="q{i}" style="margin:2px"><div>第 {i} 层引用</div>"##
+            ));
+        }
+        for _ in 0..depth {
+            html.push_str("</div>");
+        }
+        let doc = render_pipeline(&html).expect("深嵌套应剪枝成功而非溢出");
+        assert!(!doc.blocks.is_empty());
+    }
+
+    #[test]
     fn pipeline_empty_html_is_empty_error() {
         assert!(matches!(render_pipeline(""), Err(HtmlError::Empty)));
     }
@@ -125,15 +158,19 @@ mod tests {
     #[test]
     fn pipeline_cid_image_reaches_builder() {
         // T5 评审裁定修复：cid: img src 经 sanitize 精细放行 → ImageRef::Cid
-        // 端到端可达（此前被 ammonia 默认 scheme 白名单剥成 Invalid 占位）
-        use crate::types::{Block, ImageRef};
+        // 端到端可达（此前被 ammonia 默认 scheme 白名单剥成 Invalid 占位）；
+        // 行内 run 形态（线上反馈③第二波：图片留在段落流内）
+        use crate::types::{Block, ImageRef, InlineRun};
         let doc = render_pipeline(r#"<img src="cid:Image001@ABC" alt="签章">"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
-        let Block::Image {
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image {
             src: ImageRef::Cid { content_id },
             alt,
             ..
-        } = &doc.blocks[0]
+        } = &runs[0]
         else {
             panic!("cid: 图片应以内嵌附件形态到达树构建")
         };
@@ -143,13 +180,16 @@ mod tests {
 
     #[test]
     fn pipeline_data_image_reaches_builder() {
-        use crate::types::{Block, ImageRef};
+        use crate::types::{Block, ImageRef, InlineRun};
         let doc = render_pipeline(r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
-        let Block::Image {
+        let Block::Paragraph { runs, .. } = &doc.blocks[0] else {
+            panic!("img 应物化为段落（行内 run 形态）")
+        };
+        let InlineRun::Image {
             src: ImageRef::DataUri { mime, bytes },
             ..
-        } = &doc.blocks[0]
+        } = &runs[0]
         else {
             panic!("data:image 图片应以 DataUri 形态到达树构建")
         };

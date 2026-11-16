@@ -40,7 +40,8 @@ fn insert_email_row(
 #[tokio::test]
 async fn contact_facade_chain_create_list_star_merge_groups() {
     let dir = tempfile::tempdir().unwrap();
-    let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
+    let (sync_tx, _sync_rx) = CoreApi::sync_event_channel();
+    let api = CoreApi::init(dir.path(), false, false, sync_tx).await.unwrap();
 
     // ===== create =====
     let alice = api
@@ -181,7 +182,8 @@ async fn contact_facade_chain_create_list_star_merge_groups() {
 #[tokio::test]
 async fn contact_facade_backfill_and_email_lookup() {
     let dir = tempfile::tempdir().unwrap();
-    let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
+    let (sync_tx, _sync_rx) = CoreApi::sync_event_channel();
+    let api = CoreApi::init(dir.path(), false, false, sync_tx).await.unwrap();
 
     // 空库回填：0 个地址
     assert_eq!(api.backfill_contacts().await.unwrap(), 0);
@@ -221,7 +223,8 @@ async fn contact_facade_backfill_and_email_lookup() {
 #[tokio::test]
 async fn contact_facade_vcard_and_csv_import_export() {
     let dir = tempfile::tempdir().unwrap();
-    let (api, _rx) = CoreApi::init(dir.path(), false, false).await.unwrap();
+    let (sync_tx, _sync_rx) = CoreApi::sync_event_channel();
+    let api = CoreApi::init(dir.path(), false, false, sync_tx).await.unwrap();
 
     // ===== vCard 导入 / 重复跳过 =====
     let vcard_text = concat!(

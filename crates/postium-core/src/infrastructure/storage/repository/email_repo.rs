@@ -1548,6 +1548,120 @@ pub async fn delete_one_with_attachments(db: &DbConn, email_id: i32) -> Result<b
     .await
 }
 
+/// 按 UID 更新邮件标志（SyncEngine 的 CHANGEDSINCE 同步路径）。
+///
+/// IMAP FETCH 返回的 flags 是该邮件的**完整**标志集合（替换语义）：
+/// 含 `\Seen` 即已读，含 `\Flagged` 即星标；两个标志同时覆盖写入。
+/// 邮件不存在（uid 未入库/已被删除）时受影响行数为 0，不视为错误。
+///
+/// # 返回
+///
+/// 受影响的行数（0 或 1）。
+pub async fn update_flags_by_uid(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    uid: u32,
+    flags: &[String],
+) -> Result<usize, MailError> {
+    let is_read = flags.iter().any(|flag| flag.eq_ignore_ascii_case("\\Seen"));
+    let is_starred = flags
+        .iter()
+        .any(|flag| flag.eq_ignore_ascii_case("\\Flagged"));
+    let now = chrono::Utc::now().timestamp();
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        conn.execute(
+            "UPDATE emails
+             SET is_read = ?1, is_starred = ?2, updated_at = ?3
+             WHERE account_id = ?4 AND folder = ?5 AND uid = ?6",
+            rusqlite::params![
+                bool_to_int(is_read),
+                bool_to_int(is_starred),
+                now,
+                account_id,
+                folder,
+                i64::from(uid)
+            ],
+        )
+    })
+    .await
+}
+
+/// 查询指定账号文件夹下全部邮件的 UID（含软删除行）。
+///
+/// vanished 对比（SyncEngine Condstore/Qresync 路径）使用：本地任何一条
+/// 记录都代表服务器侧曾存在的邮件，因此不过滤 `is_deleted`。
+pub async fn list_uids_by_folder(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+) -> Result<Vec<u32>, MailError> {
+    let folder = folder.to_string();
+    db.call(move |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT uid
+             FROM emails
+             WHERE account_id = ?1 AND folder = ?2
+             ORDER BY uid ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![account_id, folder], |row| {
+            row.get::<_, i64>(0)
+        })?;
+        let uids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(uids.into_iter().map(|uid| uid as u32).collect())
+    })
+    .await
+}
+
+/// 按 UID 集合物理删除邮件及其附件元数据（vanished 同步路径）。
+///
+/// 在事务中先删除这些邮件的附件元数据，再删除邮件本身。空列表直接返回 0。
+///
+/// # 返回
+///
+/// 被删除的邮件行数。
+pub async fn delete_by_uids(
+    db: &DbConn,
+    account_id: i32,
+    folder: &str,
+    uids: &[u32],
+) -> Result<u64, MailError> {
+    if uids.is_empty() {
+        return Ok(0);
+    }
+
+    let uid_values: Vec<i64> = uids.iter().map(|&uid| i64::from(uid)).collect();
+    let in_clause = placeholders(uid_values.len());
+    let folder = folder.to_string();
+    db.transaction(move |tx| {
+        let build_params = || {
+            let mut values = Vec::with_capacity(uid_values.len() + 2);
+            values.push(Value::from(account_id));
+            values.push(Value::from(folder.clone()));
+            values.extend(uid_values.iter().copied().map(Value::from));
+            values
+        };
+
+        tx.execute(
+            &format!(
+                "DELETE FROM attachments
+                 WHERE email_id IN (
+                    SELECT id FROM emails
+                    WHERE account_id = ?1 AND folder = ?2 AND uid IN ({in_clause})
+                 )"
+            ),
+            rusqlite::params_from_iter(build_params().iter()),
+        )?;
+        let deleted = tx.execute(
+            &format!("DELETE FROM emails WHERE account_id = ?1 AND folder = ?2 AND uid IN ({in_clause})"),
+            rusqlite::params_from_iter(build_params().iter()),
+        )?;
+        Ok(deleted as u64)
+    })
+    .await
+}
+
 /// 根据 account_id + folder + uid 更新邮件正文。
 ///
 /// 同步正文后回填 `body_text`、`body_html` 和自动生成的 `preview`（取正文前 200 字符）。

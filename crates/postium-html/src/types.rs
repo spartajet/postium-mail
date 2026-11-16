@@ -170,7 +170,9 @@ pub enum Block {
         /// 子块序列。
         children: Vec<Block>,
     },
-    /// 块级图片（行内 img 也提升为块级，简化布局，plan Task 5）。
+    /// 块级图片（直构文档/兼容保留变体；builder 产出的行内图片保留在
+    /// 段落 runs 内——`InlineRun::Image`，渲染层 wrap-flow 横向消费，
+    /// 线上反馈③第二波：块级提升会把图文混排的横向菜单拆成竖排）。
     Image {
         /// 图片来源（终审白名单后）。
         src: ImageRef,
@@ -197,6 +199,10 @@ pub struct TableCell {
     pub blocks: Vec<Block>,
     /// 跨列数（colspan，默认 1，上限 16）。
     pub colspan: u8,
+    /// 跨行数（rowspan，默认 1，上限 16；线上反馈②）。树构建期的网格
+    /// 归一化消费它生成占位单元格对齐列位；渲染层不拉伸（span 单元格
+    /// 只在起始行渲染，内容不跨行垂直居中——已知近似）。
+    pub rowspan: u8,
     /// 单元格宽度（width 属性 / style，转 flex-basis）。
     pub width: Option<Width>,
     /// 单元格样式。
@@ -220,7 +226,8 @@ pub enum InlineRun {
         /// 链接内 run 序列。
         runs: Vec<InlineRun>,
     },
-    /// 行内图片。
+    /// 行内图片（图文同段，渲染层 wrap-flow 横向消费——线上反馈③第二波，
+    /// 不再提升为块级拆散混排流）。
     Image {
         /// 图片来源（终审白名单后）。
         src: ImageRef,

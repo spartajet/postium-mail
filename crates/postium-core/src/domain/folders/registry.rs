@@ -5,6 +5,35 @@ use crate::domain::providers::StandardFolder;
 use std::collections::{HashMap, HashSet};
 use utf7_imap::decode_utf7_imap;
 
+/// 大师已知 wire 名表（mastercore.dll 0x11162600，fnd_14）：服务器端
+/// mUTF-7 编码名直接命中——&g0l6P3ux-=草稿箱、&XfJT0ZAB-=已发送、
+/// &V4NXPpCuTvY-=已删除、&j,dg0TDhMPww6w-=垃圾邮件等。服务器没给
+/// SPECIAL-USE 属性时这层比关键词更可靠（编码名是服务器自报的）。
+const MASTER_WIRE_NAMES: &[(&str, FolderCategory)] = &[
+    // ── Drafts（大师角色 02）──
+    ("Draft", FolderCategory::Drafts),
+    ("Brouillon", FolderCategory::Drafts),
+    ("&Tgtm+DBN-", FolderCategory::Drafts), // 下書き
+    ("&g0l6P3ux-", FolderCategory::Drafts), // 草稿箱（网易）
+    ("&kAFP4W4IMH8-", FolderCategory::Drafts), //俄语 Черновики
+    ("Drafts", FolderCategory::Drafts),
+    // ── Sent（大师角色 03）──
+    ("&XfJT0ZAB-", FolderCategory::Sent), // 已发送
+    ("&XfJ2fJAB-", FolderCategory::Sent), // 已发出
+    ("&XfJSIJZk-", FolderCategory::Sent), // 已发送(变体)
+    ("&XfJSKpZk-", FolderCategory::Sent), // 已发送(变体)
+    // ── Trash（大师角色 04）──
+    ("&V4NXPpCuTvY-", FolderCategory::Trash), // 已删除
+    ("&V4NXPpD1TvY-", FolderCategory::Trash), // 已删除邮件
+    ("&UkqWZG4IMH8-", FolderCategory::Trash), //俄语 Корзина
+    // ── Junk（大师角色 05）──
+    ("&j,dg0TDhMPww6w-", FolderCategory::Junk), // 垃圾邮件
+    ("&dcVr0mWHTvZZOQ-", FolderCategory::Junk), // 垃圾邮件(变体)
+    ("&dcVr0mqUaEhZPg-", FolderCategory::Junk), // 垃圾邮件(变体)
+    // ── Archive（大师表无 06/12 对应，All Mail 归 Archive）──
+    ("&WkBHCG-7zTXhZg-", FolderCategory::Archive), // 所有邮件
+];
+
 /// 一个远程文件夹的原始输入（LIST 返回，name 为 IMAP-UTF-7 编码 + 属性）
 #[derive(Debug, Clone)]
 pub struct RemoteFolder {
@@ -222,6 +251,15 @@ fn classify_protocol_folder(folder: &RemoteFolder) -> Option<FolderCategory> {
     if let Some(cat) = folder.special_use.iter().find_map(|f| f.to_category()) {
         return Some(cat);
     }
+    // 第一层（大师 wire 名表，0x11162600）：服务器没给 SPECIAL-USE 时，
+    // 已知 mUTF-7 wire 名直接命中（比解码后关键词更可靠）
+    if let Some(cat) = MASTER_WIRE_NAMES
+        .iter()
+        .find(|(n, _)| folder.name.eq_ignore_ascii_case(n))
+        .map(|(_, c)| *c)
+    {
+        return Some(cat);
+    }
     None
 }
 
@@ -277,6 +315,27 @@ mod tests {
         }
     }
 
+    /// 大师 wire 名表（0x11162600，fnd_14）：服务器没给 SPECIAL-USE 时，
+    /// 网易系 mUTF-7 wire 名直接命中类别
+    #[test]
+    fn master_wire_names_hit_without_special_use() {
+        let cases: &[(&str, FolderCategory)] = &[
+            ("&XfJT0ZAB-", FolderCategory::Sent),     // 已发送
+            ("&XfJ2fJAB-", FolderCategory::Sent),     // 已发出
+            ("&g0l6P3ux-", FolderCategory::Drafts),   // 草稿箱
+            ("&Tgtm+DBN-", FolderCategory::Drafts),   // 下書き
+            ("&V4NXPpCuTvY-", FolderCategory::Trash), // 已删除
+            ("&V4NXPpD1TvY-", FolderCategory::Trash), // 已删除邮件
+            ("&j,dg0TDhMPww6w-", FolderCategory::Junk), // 垃圾邮件
+            ("&dcVr0mWHTvZZOQ-", FolderCategory::Junk), // 垃圾邮件(变体)
+            ("&dcVr0mqUaEhZPg-", FolderCategory::Junk), // 垃圾邮件(变体)
+        ];
+        for (name, want) in cases {
+            let got = classify_protocol_folder(&folder(name));
+            assert_eq!(got.as_ref(), Some(want), "wire 名 {name} 应命中 {want:?}");
+        }
+    }
+
     #[test]
     fn special_use_layer_identifies_gmail_sent() {
         let reg = FolderRegistry::builder()
@@ -289,6 +348,56 @@ mod tests {
         assert_eq!(
             reg.resolve_one(FolderCategory::Sent).as_deref(),
             Some("[Gmail]/Sent Mail")
+        );
+    }
+
+    /// SPECIAL-USE 标注与名字启发式冲突时，标注胜出（服务器标注优先）。
+    #[test]
+    fn special_use_beats_keyword_heuristic_on_conflict() {
+        // 名字 "Sent" 会被关键词层判为 Sent，但服务器标注 \Trash：必须按 Trash 归类，
+        // 且关键词层不得再把它认成 Sent。
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "Sent".into(),
+                special_use: vec![SpecialUseFlag::Trash],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(reg.classify("Sent"), Some(FolderCategory::Trash));
+        assert!(reg.resolve(FolderCategory::Sent).is_empty());
+        assert_eq!(reg.resolve(FolderCategory::Trash), vec!["Sent".to_string()]);
+    }
+
+    /// \All（Gmail All Mail）经 registry 整体链路归为 Archive。
+    #[test]
+    fn all_flag_classifies_gmail_all_mail_as_archive() {
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "[Gmail]/All Mail".into(),
+                special_use: vec![SpecialUseFlag::All],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(
+            reg.resolve_one(FolderCategory::Archive).as_deref(),
+            Some("[Gmail]/All Mail")
+        );
+    }
+
+    /// \Flagged 不映射类别：该文件夹仍按名字启发式识别，不因携带标注而跳过。
+    #[test]
+    fn flagged_only_folder_falls_through_to_keyword_layer() {
+        // "&XfJT0ZAB-" 解码为 "已发送"（关键词层可识别），但服务器只给了 \Flagged
+        let reg = FolderRegistry::builder()
+            .remote_folders(vec![RemoteFolder {
+                name: "&XfJT0ZAB-".into(),
+                special_use: vec![SpecialUseFlag::Flagged],
+                no_select: false,
+            }])
+            .build();
+        assert_eq!(
+            reg.resolve_one(FolderCategory::Sent).as_deref(),
+            Some("&XfJT0ZAB-")
         );
     }
 

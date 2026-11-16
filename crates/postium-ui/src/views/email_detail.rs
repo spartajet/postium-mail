@@ -9,6 +9,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use gpui_kit_assets::IconName;
+
+use super::attach_style;
 use postium_core::api::CoreApi;
 use postium_core::service::email_service::ContactWrite;
 
@@ -18,12 +20,20 @@ use crate::runtime::spawn_tokio;
 use crate::stores::detail::DetailStore;
 use crate::views::email_html::{ImageCtx, collect_remote_image_urls, render_html_document};
 
+// 正文划选动作（EmailHtmlBody key_context 内派发）：Ctrl+C 复制 / Esc 清选区。
+gpui_kit::actions!([CopyHtmlSelection, ClearHtmlSelection]);
+
 pub struct EmailDetailView {
     pub store: gpui_kit::Entity<DetailStore>,
     pub api: Arc<CoreApi>,
     /// 邮件列表弱引用：归档/删除/标未读后刷新列表（已删邮件不再留在列表）
     pub emails: gpui_kit::WeakEntity<crate::stores::emails::EmailsStore>,
     pub recipients_expanded: bool,
+    /// 正文划选状态（线上反馈①）：视图重建即重置（换邮件清选区），
+    /// Ctrl+C 复制选中文本（html_body_copy 动作）。
+    pub html_selection: crate::views::html_selection::HtmlSelection,
+    /// 正文滚动区焦点（划选复制动作的派发锚点）。
+    pub body_focus: gpui_kit::FocusHandle,
 }
 
 impl EmailDetailView {
@@ -282,6 +292,23 @@ impl EmailDetailView {
     /// 状态与拉取编排都在 DetailStore（[`DetailStore::allow_remote_images`]）。
     /// 文档按浅色通道取（Remote 图 URL 不受深色适配影响，`ImageRef` 无颜色）。
     fn enable_remote_images(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.load_remote_images_now(cx);
+    }
+
+    /// 「始终加载」按钮（对齐 MailMaster「始终加载」，fnd_23）：本封加载
+    /// + 全局设置持久化（后续所有邮件装载期自动放行，大师
+    /// setReadSetting({autoDownloadMailImages:!0}) 语义）。先
+    /// cx.stop_propagation() 阻止冒泡到整条的「仅本封」动作——Button
+    /// 点击本就在子元素命中，父 div 的 on_click 监听会随后收到同一事件，
+    /// 不拦截则两动作都触发（重复无实害但状态翻两番不干净）。
+    fn always_load_remote_images(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        crate::ui_state::always_download_mail_images();
+        self.load_remote_images_now(cx);
+    }
+
+    /// 「加载图片」/「始终加载」共用的本封放行执行体。
+    fn load_remote_images_now(&mut self, cx: &mut Context<Self>) {
         let Some((email_id, html)) = ({
             let store = self.store.read(cx);
             store
@@ -304,6 +331,24 @@ impl EmailDetailView {
     }
 
     /// 浏览器精确查看（table 布局保真兜底）。
+    /// 划选复制（线上反馈①）：Ctrl+C 在正文滚动区焦点上派发，选中文本写
+    /// 剪贴板并 toast 反馈；无选区时不动作（不清系统剪贴板）。
+    fn copy_html_selection(&mut self, _: &CopyHtmlSelection, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.html_selection.is_selecting() {
+            return; // 无选区不动作（不清系统剪贴板）
+        }
+        if let Some(text) = self.html_selection.selected_text() {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
+            crate::notify::toast(t("email.selectionCopied"));
+        }
+    }
+
+    /// Esc 清空划选（浏览器一致语义）。
+    fn clear_html_selection(&mut self, _: &ClearHtmlSelection, _: &mut Window, cx: &mut Context<Self>) {
+        self.html_selection.clear();
+        cx.notify();
+    }
+
     fn open_in_browser(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(detail) = self.store.read(cx).detail.clone() else {
             return;
@@ -434,11 +479,27 @@ fn html_body(
     email_id: i32,
     dark: bool,
     images: ImageCtx,
+    selection: crate::views::html_selection::HtmlSelection,
     cx: &mut gpui_kit::App,
 ) -> Option<(AnyElement, Vec<String>)> {
     let doc = store.update(cx, |store, _| store.cached_doc(email_id, html, dark))?;
     let remote_urls = collect_remote_image_urls(&doc);
-    let el = render_html_document(&doc, dark, images, open_safe_url, cx);
+    // 引用折叠上下文（邮箱大师 viewer.js，MECHANICS.md §6）：展开集合快照 +
+    // 切换回调（回写 store + notify）。渲染闭包只持有 weak entity，视图
+    // 重建不延长 store 生命周期。
+    let snapshot = store.read(cx).quote_expanded.clone();
+    let expanded = std::sync::Arc::new(std::sync::Mutex::new(snapshot));
+    let weak = store.downgrade();
+    let on_toggle = std::sync::Arc::new(
+        move |qid: u64, cx: &mut gpui_kit::App| {
+            let _ = weak.update(cx, |s: &mut DetailStore, cx: &mut gpui_kit::Context<DetailStore>| {
+                s.toggle_quote(email_id, qid, cx);
+            });
+        },
+    )
+        as std::sync::Arc<dyn Fn(u64, &mut gpui_kit::App) + Send + Sync>;
+    let quotes = crate::views::email_html::QuoteFold { expanded, on_toggle };
+    let el = render_html_document(&doc, dark, images, selection, Some(quotes), open_safe_url, cx);
     Some((el, remote_urls))
 }
 
@@ -533,7 +594,15 @@ impl Render for EmailDetailView {
                 Vec::new(),
             )
         } else {
-            match html_body(&self.store, &body_html_str, email_id, dark, image_ctx, cx) {
+            match html_body(
+                &self.store,
+                &body_html_str,
+                email_id,
+                dark,
+                image_ctx,
+                self.html_selection.clone(),
+                cx,
+            ) {
                 Some((el, urls)) => (
                     div()
                         .id("email-html-body")
@@ -541,6 +610,12 @@ impl Render for EmailDetailView {
                         .min_h_0()
                         .overflow_y_scroll()
                         .p_4()
+                        // 划选复制（线上反馈①）：正文滚动区可聚焦（点击文本即
+                        // 焦点），Ctrl+C 在 key_context 内派发 copy_html_selection
+                        .track_focus(&self.body_focus)
+                        .key_context("EmailHtmlBody")
+                        .on_action(cx.listener(Self::copy_html_selection))
+                        .on_action(cx.listener(Self::clear_html_selection))
                         .child(el)
                         .into_any_element(),
                     false,
@@ -567,6 +642,11 @@ impl Render for EmailDetailView {
         v_flex()
             .flex_1()
             .size_full()
+            // 显式 min_h_0：正文滚动区之上最后一级列容器——HTML 正文超视口时
+            // min-content 高度沿祖先链上泄（滚动区的 min_h_0 只封自己），把
+            // 主内容列撑满整窗、底部状态栏挤出窗口（线上反馈：显示邮件时
+            // 状态栏消失）
+            .min_h_0()
             .min_w(px(380.))
             .border_l_1()
             .border_color(cx.theme().border)
@@ -736,6 +816,14 @@ impl Render for EmailDetailView {
                             let filename = att.filename.clone();
                             let api = self.api.clone();
                             let _ = api;
+                            // 文件类型徽标（邮箱大师 AttachUtils 颜色表，MECHANICS.md §3）
+                            let kind = attach_style::file_kind(&att.filename);
+                            let color = attach_style::kind_color(kind);
+                            let label = if kind == "unknown" {
+                                "FILE".to_string()
+                            } else {
+                                kind.to_ascii_uppercase()
+                            };
                             h_flex()
                                 .gap_1()
                                 .px_2()
@@ -743,8 +831,46 @@ impl Render for EmailDetailView {
                                 .rounded(cx.theme().radius)
                                 .border_1()
                                 .border_color(cx.theme().border)
-                                .child(gpui_kit::component::Icon::new(IconName::Paperclip).size_3())
+                                .child(
+                                    div()
+                                        .id(("att-kind", att_id as u32))
+                                        .flex_none()
+                                        .px_1()
+                                        .rounded_sm()
+                                        .bg(gpui::rgb(u32::from_str_radix(&color[1..], 16).unwrap_or(0x8F96A5)))
+                                        .text_color(gpui::white())
+                                        .text_size(px(9.))
+                                        .child(label),
+                                )
                                 .child(div().text_size(px(12.)).child(format!("{}", att.filename)))
+                                // 大小（邮箱大师格式：B / x.x KB / x.x MB，MECHANICS.md §4）
+                                .when(att.size > 0, |this| {
+                                    this.child(
+                                        div()
+                                            .id(("att-size", att_id as u32))
+                                            .text_size(px(11.))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(attach_style::format_size(att.size)),
+                                    )
+                                })
+                                // 超大附件过期倒计时（邮箱大师 hugeExpiredDate，
+                                // MECHANICS.md §5）——当前模型无过期字段时
+                                // 经 content_id 侧带（暂不显示）；有则显示
+                                // 「N天N小时后过期 / 长期有效」
+                                .when(
+                                    attach_style::attachment_expiry_secs(att).is_some(),
+                                    |this| {
+                                        this.child(
+                                            div()
+                                                .id(("att-expiry", att_id as u32))
+                                                .text_size(px(11.))
+                                                .text_color(gpui::rgb(0xF59C00))
+                                                .child(attach_style::format_expiry(
+                                                    attach_style::attachment_expiry_secs(att),
+                                                )),
+                                        )
+                                    },
+                                )
                                 .child(
                                     Button::new(format!("open-att-{att_id}"))
                                         .ghost()
@@ -773,8 +899,11 @@ impl Render for EmailDetailView {
                 )
             })
             // 「加载图片」条：正文含远程图且未放行时显示（spec §4.4 隐私默认
-            // 拦截）。整条可点击 → allow_remote_images（翻转放行态 + 逐图后台
-            // 拉取）；放行后本条不再构建（重渲染消失）
+            // 拦截）。两个动作对齐 MailMaster（fnd_23）：「加载」=仅本封
+            // allow_remote_images（翻转放行态 + 逐图后台拉取 + 发件人记忆）；
+            // 「始终加载」=同本封加载 + 全局设置持久化
+            // （大师 setReadSetting({autoDownloadMailImages:!0})）。放行后
+            // 本条不再构建（重渲染消失）
             .children((!remote_urls.is_empty() && !images_enabled).then(|| {
                 div()
                     .id("load-images")
@@ -786,12 +915,17 @@ impl Render for EmailDetailView {
                     .px_3()
                     .py_1p5()
                     .bg(cx.theme().secondary)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(cx.theme().accent.opacity(0.12)))
                     .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
                     .child(gpui_kit::component::Icon::new(IconName::Ban).size_3())
                     .child(t("email.loadImages"))
+                    .child(
+                        Button::new("always-load-images")
+                            .ghost()
+                            .xsmall()
+                            .label(t("email.alwaysLoadImages"))
+                            .on_click(cx.listener(Self::always_load_remote_images)),
+                    )
                     .on_click(cx.listener(Self::enable_remote_images))
                     .debug_selector(|| "email-load-images".to_string())
             }))

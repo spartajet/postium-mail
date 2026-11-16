@@ -166,6 +166,7 @@ async fn init_database_migrates_legacy_sync_state_history_columns() {
     assert!(columns.contains(&"history_synced_since".to_string()));
     assert!(columns.contains(&"history_before_uid".to_string()));
     assert!(columns.contains(&"history_exhausted".to_string()));
+    assert!(columns.contains(&"highest_modseq".to_string()));
 }
 
 #[tokio::test]
@@ -452,4 +453,90 @@ async fn sync_repo_history_state_upserts_and_maps_history_fields() {
         .unwrap();
 
     assert_eq!(row_count_after_second_write, 1);
+}
+
+#[tokio::test]
+async fn sync_repo_upserts_and_maps_highest_modseq() {
+    let db = DbConn::open_in_memory_for_test().await.unwrap();
+
+    db.call(|conn| {
+        conn.execute(
+            "INSERT INTO accounts (
+                id, name, email, provider, auth_type, account_type, created_at, updated_at
+            ) VALUES (1, 'Sync Test', 'sync-test@example.com', 'custom', 'password', 'personal', 1, 1)",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    // 新行：写入 highest_modseq
+    sync_repo::upsert_sync_state(
+        &db,
+        1,
+        "INBOX",
+        Some(100),
+        Some(1),
+        Some(50),
+        Some(4294967296),
+    )
+    .await
+    .unwrap();
+
+    let state = sync_repo::get_sync_state(&db, 1, "INBOX")
+        .await
+        .unwrap()
+        .expect("sync_state row should be created");
+
+    // u64 高位值（超过 i32/u32 范围）应原样读回
+    assert_eq!(state.highest_modseq, Some(4294967296));
+
+    // 传 None 时保留原值（COALESCE 语义）
+    sync_repo::upsert_sync_state(&db, 1, "INBOX", Some(200), Some(1), Some(60), None)
+        .await
+        .unwrap();
+
+    let updated = sync_repo::get_sync_state(&db, 1, "INBOX")
+        .await
+        .unwrap()
+        .expect("sync_state row should be updated in place");
+
+    assert_eq!(updated.highest_modseq, Some(4294967296));
+    assert_eq!(updated.last_sync_uid, Some(60));
+    assert_eq!(updated.uidnext, Some(200));
+
+    // 更新为新值
+    sync_repo::upsert_sync_state(
+        &db,
+        1,
+        "INBOX",
+        Some(300),
+        Some(1),
+        Some(70),
+        Some(4294967300),
+    )
+    .await
+    .unwrap();
+
+    let latest = sync_repo::get_sync_state(&db, 1, "INBOX")
+        .await
+        .unwrap()
+        .expect("sync_state row should be updated in place");
+
+    assert_eq!(latest.highest_modseq, Some(4294967300));
+    assert_eq!(latest.last_sync_uid, Some(70));
+
+    // 全部传 None 的 upsert 不触碰已有 highest_modseq
+    sync_repo::upsert_sync_state(&db, 1, "INBOX", None, None, None, None)
+        .await
+        .unwrap();
+
+    let preserved = sync_repo::get_sync_state(&db, 1, "INBOX")
+        .await
+        .unwrap()
+        .expect("sync_state row should be preserved");
+
+    assert_eq!(preserved.highest_modseq, Some(4294967300));
+    assert_eq!(preserved.last_sync_uid, Some(70));
 }

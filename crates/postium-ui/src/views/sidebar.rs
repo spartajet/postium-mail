@@ -14,7 +14,7 @@ use gpui_kit_assets::IconName;
 use postium_core::service::email_service::EmailCategory;
 
 use crate::i18n::t;
-use crate::nav::{NavTarget, category_label_key, folder_label_key};
+use crate::nav::{NavTarget, category_label_key, folder_display_name, folder_label_key, folder_sort_key};
 use crate::stores::accounts::AccountsStore;
 
 /// 侧栏对外事件：导航目标变化。
@@ -145,7 +145,7 @@ impl Render for Sidebar {
             (EmailCategory::Starred, IconName::Star),
             (EmailCategory::Sent, IconName::Send),
             (EmailCategory::Drafts, IconName::FileText),
-            (EmailCategory::Spam, IconName::Ban),
+            (EmailCategory::Spam, IconName::Trash),
         ]
         .into_iter()
         .enumerate()
@@ -185,6 +185,10 @@ impl Render for Sidebar {
             .sum();
         let trash_unread = if trash_unread > 0 { Some(trash_unread) } else { None };
         for (gi, group) in store_groups.iter().enumerate() {
+            // 文件夹排序（对照大师 Qt 角色键，fnd_14）：先复制再排序，
+            // 不动 store 里的原序（统计仍按 core 层类别序）
+            let mut stats: Vec<&postium_core::domain::sync::FolderStat> = group.stats.iter().collect();
+            stats.sort_by(|a, b| folder_sort_key(&a.folder).cmp(&folder_sort_key(&b.folder)));
             scroll = scroll.child(
                 div()
                     .px_2()
@@ -196,17 +200,19 @@ impl Render for Sidebar {
                     .line_clamp(1)
                     .child(group.account.email.clone()),
             );
-            for (fi, stat) in group.stats.iter().enumerate() {
-                let label = match folder_label_key(&stat.folder) {
-                    Some(key) => t(key),
-                    None => stat.folder.clone().into(),
+            for (fi, stat) in stats.iter().enumerate() {
+                let label: SharedString = match folder_label_key(&stat.folder) {
+                    Some(key) => t(key).into(),
+                    None => folder_display_name(&stat.folder).into(),
                 };
                 let icon = match stat.folder.to_ascii_uppercase().as_str() {
                     "INBOX" => IconName::Inbox,
                     f if f.contains("SENT") => IconName::Send,
                     f if f.contains("DRAFT") => IconName::FileText,
-                    "JUNK" | "SPAM" => IconName::Ban,
+                    "JUNK" | "SPAM" => IconName::Trash,
                     f if f.contains("TRASH") || f.contains("DELETED") => IconName::Trash,
+                    // 角色文件夹（\All 等）经 get_folder_stats 归一为类别键 "archive"
+                    "ARCHIVE" => IconName::Archive,
                     _ => IconName::Folder,
                 };
                 scroll = scroll.child(nav!(

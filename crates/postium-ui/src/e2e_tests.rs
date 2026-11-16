@@ -16,10 +16,38 @@ use crate::app::AppShell;
 use crate::nav::NavTarget;
 
 fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx) {
-    crate::runtime::runtime()
-        .block_on(async { CoreApi::init(dir, true, false).await })
-        .expect("核心服务初始化失败")
+    let (sync_tx, sync_rx) = smol::channel::bounded(256);
+    let api = crate::runtime::runtime()
+        .block_on(async { CoreApi::init(dir, true, false, sync_tx).await })
+        .expect("核心服务初始化失败");
+    (api, sync_rx)
 }
+
+/// 进程级一次初始化的 E2E 数据目录（POSTIUM_E2E=1 + POSTIUM_DATA_DIR）。
+///
+/// ui-state 等持久化路径经 `resolve_data_dir` 读进程全局环境变量——并行测试
+/// 各自 set_var 会在毫秒窗口内互相翻转（写与读落在不同 tempdir，断言偶发击穿，
+/// 线上反馈①的放行记忆断言实测踩中）。改为首个调用者一次设定、全进程共享
+/// 同一目录：各测试的 DB 仍用独立 tempdir，ui-state.json 字段互不相干
+/// （theme/lang 与 remote_image_senders 不重叠，读改写交错最坏丢一次对方
+/// 字段写入，不破坏各自断言）。目录句柄泄漏持有——进程存活期间不得回收。
+static E2E_DATA_DIR: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+fn force_e2e_data_dir() {
+    E2E_DATA_DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().expect("E2E 数据目录创建失败");
+        let path = dir.path().to_path_buf();
+        std::mem::forget(dir);
+        unsafe {
+            std::env::set_var("POSTIUM_E2E", "1");
+            std::env::set_var("POSTIUM_DATA_DIR", path.to_str().unwrap());
+        }
+    });
+}
+
+/// 共享 ui-state.json 的测试间串行化（theme 持久化 × 放行记忆）：读改写
+/// 整份文件的两组写者并行交错会丢对方字段（OnceLock 只稳定目录，不序列化
+/// 文件写）。锁只在这两个测试体内持有，测试结束随 guard 释放。
+static UI_STATE_FILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn with_app<R>(cx: &mut VisualTestContext, f: impl FnOnce(&gpui_pre::App) -> R) -> R {
     cx.update(|_, app| f(app))
@@ -38,6 +66,7 @@ fn with_window_mut<R>(
     cx.update(|window, app| f(window, app))
 }
 
+#[track_caller]
 fn wait_for<T>(
     cx: &mut VisualTestContext,
     mut f: impl FnMut(&mut VisualTestContext) -> Option<T>,
@@ -543,11 +572,13 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
     cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
-    // ui-state 持久化路径走 resolve_data_dir：测试内强制 E2E 目录
-    unsafe {
-        std::env::set_var("POSTIUM_E2E", "1");
-        std::env::set_var("POSTIUM_DATA_DIR", dir.path().to_str().unwrap());
-    }
+    // ui-state 持久化路径走 resolve_data_dir：强制进程级共享 E2E 目录
+    //（此前各测试自行 set_var，并行下毫秒窗口内互相翻转——见 force_e2e_data_dir）。
+    // 与放行记忆测试共享同一 ui-state.json，串行化防读改写交错丢字段
+    force_e2e_data_dir();
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let ui_state_path =
+        std::path::PathBuf::from(std::env::var("POSTIUM_DATA_DIR").unwrap()).join("ui-state.json");
 
     let (api, sync_rx) = boot(dir.path());
 
@@ -571,7 +602,7 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
     });
     assert_ne!(mode(cx), initial_dark, "第一次切换应翻转主题");
 
-    let saved = std::fs::read_to_string(dir.path().join("ui-state.json")).unwrap_or_default();
+    let saved = std::fs::read_to_string(&ui_state_path).unwrap_or_default();
     assert!(saved.contains("theme"), "主题应写入 ui-state.json: {saved}");
 
     with_window_mut(cx, |window, app| {
@@ -580,11 +611,8 @@ fn toggles_theme_and_persists(cx: &mut TestAppContext) {
         });
     });
     assert_eq!(mode(cx), initial_dark, "第二次切换应回到原主题");
-
-    unsafe {
-        std::env::remove_var("POSTIUM_E2E");
-        std::env::remove_var("POSTIUM_DATA_DIR");
-    }
+    // 环境变量不回收：OnceLock 语义下进程内首个设定全程稳定，其他测试
+    //（放行记忆等 ui-state 写读）依赖它定位共享目录
 }
 
 // ---------------------------------------------------------------------------
@@ -1920,6 +1948,10 @@ impl gpui_kit::Render for HtmlRenderProbe {
             &self.doc,
             false,
             crate::views::email_html::ImageCtx::default(),
+            crate::views::html_selection::HtmlSelection::default(),
+            // 引用折叠：e2e 探针不接折叠交互（None = 引用块仍按原样整段渲染，
+            // 但保留左边线视觉；折叠行为在 email_detail 主路径覆盖）
+            None,
             move |url: &postium_html::SafeUrl| on_link(url),
             cx,
         );
@@ -2110,12 +2142,14 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("单元格甲")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("单元格乙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2128,6 +2162,7 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("跨列前段")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2137,6 +2172,7 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                                 runs: vec![text("表格链接文字")],
                             }])],
                             colspan: 2,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2148,18 +2184,21 @@ fn html_render_table_and_link(cx: &mut TestAppContext) {
                         TableCell {
                             blocks: vec![para(vec![text("三等分甲")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("三等分乙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
                         TableCell {
                             blocks: vec![para(vec![text("三等分丙")])],
                             colspan: 1,
+                            rowspan: 1,
                             width: None,
                             style: BlockStyle::default(),
                         },
@@ -2591,6 +2630,201 @@ fn html_cache_same_id_new_content_renders(cx: &mut TestAppContext) {
 }
 
 // ---------------------------------------------------------------------------
+// 线上反馈（状态栏消失）：显示 HTML 邮件（图文混排导航 + border 表格）后，
+// 底部状态栏不可见。回归锚点：打开邮件前后状态栏探针 bounds 恒在窗口内
+// 且高度 > 0。
+// ---------------------------------------------------------------------------
+#[gpui_pre::test]
+fn html_email_display_keeps_status_bar(cx: &mut TestAppContext) {
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    force_e2e_data_dir();
+    // 放行段（store.allow_remote_images）经 remember_remote_image_sender 写
+    // 进程共享 ui-state.json——与放行记忆/主题持久化测试串行化，否则并行
+    // 交错会把白名单写回对方刚重置的 ui-state（CI 双平台确定性复现，
+    // 本地高核并行因时序侥幸通过）。
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let (api, sync_rx) = boot(dir.path());
+
+    // 用户实测窗口尺寸（window-state.json：1636×847）——布局敏感回归按真实
+    // 尺寸复现（add_window_view 默认最大化尺寸，宽高差异即漏报面）
+    let (shell, cx) = {
+        let handle = cx.open_window(
+            gpui_kit::size(gpui_kit::px(1636.), gpui_kit::px(847.)),
+            |window, cx| {
+                setup(cx);
+                AppShell::new(api.clone(), sync_rx, window, cx)
+            },
+        );
+        let shell = handle.root(cx).expect("窗口根视图应可获取");
+        let cx = gpui_pre::VisualTestContext::from_window(handle.into(), cx).into_mut();
+        (shell, cx)
+    };
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 打开邮件前：状态栏可见（height > 0）
+    cx.refresh().expect("测试窗口重绘调度失败");
+    let bar_before = cx
+        .debug_bounds("app-status-bar")
+        .expect("无邮件时状态栏应在渲染树中");
+    assert!(
+        bar_before.size.height > gpui_kit::px(0.),
+        "无邮件时状态栏高度应 > 0，实际 {:?}",
+        bar_before.size
+    );
+
+    // 用户实测邮件原文（本地 DB 提取的阿里云续费通知——状态栏消失的实际
+    // 复现载体：inline-block 导航 + 分隔图 + border 表格 + 百分比布局样式。
+    // e2e 草稿远端固定 UID 同账号仅一封，直接用最复杂形态）
+    let real_body = include_str!("e2e_fixtures/aliyun_renewal.html");
+    let draft_id = {
+        let account_id = with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Status Bar Probe".into(),
+            body_text: "状态栏回归探针正文".into(),
+            body_html: real_body.to_string(),
+            attachments: vec![],
+        };
+        let save_api = api.clone();
+        crate::runtime::runtime()
+            .block_on(async move { save_api.save_draft(req).await })
+            .expect("草稿应保存成功")
+            .draft_id
+    };
+
+    for id in [draft_id] {
+        with_app_mut(cx, |app| {
+            shell.update(app, |shell, cx| {
+                shell.emails.update(cx, |store, cx| {
+                    store.selected = Some(id);
+                    store.selected_version += 1;
+                    cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(id));
+                    cx.notify();
+                });
+            });
+        });
+        wait_for(cx, |cx| {
+            with_app(cx, |app| {
+                let view = shell.read(app).detail_view.clone()?;
+                let detail = view.read(app).store.read(app).detail.clone()?;
+                (detail.email.id == id).then_some(())
+            })
+        });
+        cx.run_until_parked();
+        cx.refresh().expect("测试窗口重绘调度失败");
+
+        let bar = cx
+            .debug_bounds("app-status-bar")
+            .unwrap_or_else(|| panic!("打开邮件 {id} 后状态栏应仍在渲染树中"));
+        assert!(
+            bar.size.height > gpui_kit::px(0.),
+            "邮件 {id}：状态栏高度应 > 0，实际 {:?}",
+            bar.size
+        );
+        // 在窗口可视范围内（被挤出窗口底部 = 用户看到的现象）
+        let window_h = cx.update(|window, _| window.bounds().size.height);
+        assert!(
+            bar.origin.y + bar.size.height <= window_h,
+            "邮件 {id}：状态栏应完整落在窗口内（y={:?}, h={:?}, 窗口高 {window_h:?}）",
+            bar.origin.y,
+            bar.size.height
+        );
+
+        // ---- banner 几何（线上反馈③第三波，拦截形态）----
+        // 导航 7 个链接（12px，与链接间空白异字号 → 各自成组）应全部同行横排，
+        // 且与 logo（占位 alt 探针）同一行（float 列并排）；逐块竖排的旧形态
+        // 里链接逐行堆叠、logo 在导航上方，y 带不重叠
+        let logo_alt = cx
+            .debug_bounds("html-txt-阿里云logo")
+            .expect("logo 占位 alt 探针应存在");
+        let nav_keys = [
+            "html-txt-产品",
+            "html-txt-解决方案",
+            "html-txt-文档与社区",
+            "html-txt-免费试用",
+            "html-txt-定价",
+            "html-txt-云市场",
+            "html-txt-了解阿里云",
+        ];
+        let nav_bounds: Vec<_> = nav_keys
+            .iter()
+            .map(|k| {
+                cx.debug_bounds(k)
+                    .unwrap_or_else(|| panic!("导航链接探针应存在: {k}"))
+            })
+            .collect();
+        let nav_top = nav_bounds
+            .iter()
+            .map(|b| b.origin.y)
+            .fold(gpui_kit::px(f32::MAX), |a, b| a.min(b));
+        let nav_bottom = nav_bounds
+            .iter()
+            .map(|b| b.origin.y + b.size.height)
+            .fold(gpui_kit::px(0.), |a, b| a.max(b));
+        let nav_height = nav_bottom - nav_top;
+        assert!(
+            nav_height < gpui_kit::px(40.),
+            "7 个导航链接应在同一行（y 跨度 {nav_height:?}）: {nav_bounds:?}"
+        );
+        let overlap_top = nav_top.max(logo_alt.origin.y);
+        let overlap_bottom = nav_bottom.min(logo_alt.origin.y + logo_alt.size.height);
+        assert!(
+            overlap_bottom > overlap_top,
+            "banner 的 logo 列与导航列应同行并排（logo y={:?}..{:?}, nav y={nav_top:?}..{nav_bottom:?}）",
+            logo_alt.origin.y,
+            logo_alt.origin.y + logo_alt.size.height
+        );
+
+        // ---- 放行 + 已加载真图形态（用户实测状态：发件人白名单记忆后自动放行）----
+        with_app_mut(cx, |app| {
+            shell.update(app, |shell, cx| {
+                shell.detail.update(cx, |store, cx| {
+                    let html = store.html.clone().unwrap_or_default();
+                    let doc = store.cached_doc(id, &html, false).expect("文档应可解析");
+                    let urls = crate::views::email_html::collect_remote_image_urls(&doc);
+                    store.allow_remote_images(urls.clone(), &api, cx);
+                    let mut resolved = store.images.resolved.lock().unwrap();
+                    for (ix, url) in urls.into_iter().enumerate() {
+                        // 首图按真实 logo 尺寸 212×48，其余 600×200 横幅
+                        let (w, h) = if ix == 0 { (212, 48) } else { (600, 200) };
+                        resolved.insert(url, Some(synthetic_render_image(w, h)));
+                    }
+                });
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        cx.refresh().expect("测试窗口重绘调度失败");
+        let bar = cx
+            .debug_bounds("app-status-bar")
+            .expect("真图形态下状态栏应在渲染树中");
+        assert!(
+            bar.size.height > gpui_kit::px(0.),
+            "真图形态：状态栏高度应 > 0，实际 {:?}",
+            bar.size
+        );
+    }
+    cx.run_until_parked();
+}
+
+/// 合成固定尺寸的已解码图片（wrap-flow 真图形态的布局压力载体）。
+fn synthetic_render_image(w: u32, h: u32) -> Arc<gpui_kit::RenderImage> {
+    let buffer = image::RgbaImage::from_pixel(w, h, image::Rgba([120, 120, 220, 255]));
+    Arc::new(gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)]))
+}
+
+// ---------------------------------------------------------------------------
 // Task 13：图片管线 UI——含远程图邮件打开后默认拦截（占位框出现、无已加载
 // 真图、「加载图片」条可见）；点击加载按钮 → images_enabled 翻转；e2e_offline
 // 下 fetch_image 短路 Err → resolved 记录失败（None）→ 占位框保留（无网络
@@ -2601,7 +2835,20 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     // 真实 I/O（tokio 桥）与确定性调度器混用：允许跨线程唤醒
     cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
+    // 放行记忆走 ui-state.json 持久化（线上反馈①）：E2E 数据目录进程级共享
+    //（见 force_e2e_data_dir），不得写入真实 ~/.postium（否则下一次运行的
+    // 默认拦截断言会被记忆击穿）；与主题持久化测试串行化防文件写交错
+    force_e2e_data_dir();
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    // 前置隔离：同进程早先的测试（如状态栏回归的放行段）可能已把本账户
+    // 地址（seed.e2e@postium.test——同账户草稿的 sender_email 相同）记入
+    // 放行白名单，自动放行会让「加载图片」条永不出现（:2907 超时，CI 双
+    // 平台确定性复现）。默认拦截断言的前提必须自持：重置 ui-state，而非
+    // 假设进程干净。
+    crate::ui_state::save(&crate::ui_state::UiState::default());
     let (api, sync_rx) = boot(dir.path());
+    // 草稿保存的 async move 会移走 api；重装载体用提前克隆（放行记忆段用）
+    let reload_api = api.clone();
 
     let (shell, cx) = cx.add_window_view(|window, cx| {
         setup(cx);
@@ -2729,6 +2976,43 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("html-img-loaded").is_none(),
         "e2e_offline 下不得出现已加载真图"
+    );
+
+    // ---- 放行记忆（线上反馈①）----
+    // 1) ui-state.json 已记下发件人；
+    // 2) 重开同一封邮件（force 走重装载路径）：放行态从持久化恢复，不再询问
+    let sender = with_app(cx, |app| {
+        shell.read(app)
+            .detail
+            .read(app)
+            .detail
+            .as_ref()
+            .map(|d| crate::ui_state::normalize_sender(&d.email.sender_email))
+            .filter(|s| !s.is_empty())
+            .expect("详情应带发件人")
+    });
+    let state = crate::ui_state::load();
+    assert!(
+        state.allows_remote_images_from(&sender),
+        "点击放行后应按发件人持久化记忆"
+    );
+    with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell
+                .detail
+                .update(cx, |store, cx| store.force_load(draft_id, &reload_api, cx))
+        });
+    });
+    wait_for(cx, |cx| {
+        with_app(cx, |app| {
+            let store = shell.read(app).detail.read(app);
+            (store.images.enabled && !store.loading).then_some(())
+        })
+    });
+    cx.refresh().expect("测试窗口重绘调度失败");
+    assert!(
+        cx.debug_bounds("email-load-images").is_none(),
+        "已放行发件人的邮件重开不得再询问"
     );
     cx.run_until_parked();
 }

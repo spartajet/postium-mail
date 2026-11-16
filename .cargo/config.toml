@@ -1,0 +1,6 @@
+# Windows 主线程默认栈仅 1MB（PE 头 SizeOfStackReserve），对递归式 UI 渲染
+# 引擎（GPUI 元素树构建/绘制/Drop 逐层递归）过小——邮件正文深嵌套会打爆。
+# 提到 32MB（Zed/GPUI 生态对深 UI 树的标准余量）；仅影响最终二进制链接。
+# MSVC 链接器语法；GNU 工具链不在支持矩阵内。
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "link-args=/STACK:33554432"]

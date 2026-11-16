@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
     uidnext INTEGER,
     synced_at INTEGER,
     last_sync_uid INTEGER,
+    highest_modseq INTEGER,
     history_synced_since INTEGER,
     history_before_uid INTEGER,
     history_exhausted INTEGER DEFAULT 0,

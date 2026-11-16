@@ -1,26 +1,33 @@
-use crate::domain::auth::AuthManager;
 use crate::domain::sync::SyncEventTx;
-use crate::domain::sync::SyncProgressEmitter;
-use crate::domain::sync::folder_sync_dispatcher::SyncOrchestrator;
+use crate::engine::commands::EngineCommand;
+use crate::error::MailError;
 use crate::infrastructure::storage::database::DbConn;
+use crate::infrastructure::storage::models::accounts;
 use crate::infrastructure::storage::repository::account_repo;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// 后台定时同步调度器
+/// 后台定时同步调度器：每周期对所有启用同步的账号向引擎发 `SyncNow`。
+///
+/// 同步执行由每账号 `AccountEngine` 承担（三档策略），本调度器只负责
+/// 定时触发与失败日志。
 pub struct SyncScheduler {
     db: DbConn,
-    auth: Arc<AuthManager>,
+    engine: Arc<dyn crate::engine::EngineAccess>,
     event_tx: Option<SyncEventTx>,
     interval_minutes: u64,
     running: Arc<AtomicBool>,
 }
 
 impl SyncScheduler {
-    pub fn new(db: DbConn, auth: Arc<AuthManager>, event_tx: Option<SyncEventTx>) -> Self {
+    pub fn new(
+        db: DbConn,
+        engine: Arc<dyn crate::engine::EngineAccess>,
+        event_tx: Option<SyncEventTx>,
+    ) -> Self {
         Self {
             db,
-            auth,
+            engine,
             event_tx,
             interval_minutes: 5,
             running: Arc::new(AtomicBool::new(false)),
@@ -40,7 +47,7 @@ impl SyncScheduler {
         self.running.store(true, Ordering::Relaxed);
 
         let db = self.db.clone();
-        let auth = self.auth.clone();
+        let engine = self.engine.clone();
         let event_tx = self.event_tx.clone();
         let interval = self.interval_minutes;
         let running = self.running.clone();
@@ -65,11 +72,6 @@ impl SyncScheduler {
                     }
                 };
 
-                let mut orchestrator = SyncOrchestrator::new(db.clone(), auth.clone());
-                if let Some(tx) = event_tx.clone() {
-                    orchestrator = orchestrator.with_emitter(SyncProgressEmitter::new(tx));
-                }
-
                 for account in &accounts {
                     if !running.load(Ordering::Relaxed) {
                         return;
@@ -77,7 +79,9 @@ impl SyncScheduler {
                     if !account.sync_enabled.unwrap_or(true) {
                         continue;
                     }
-                    if let Err(e) = orchestrator.sync_account(account.id).await {
+                    if let Err(e) =
+                        sync_account_via_engine(&engine, account, event_tx.as_ref()).await
+                    {
                         tracing::warn!(
                             "SyncScheduler: 同步账号 {} ({}) 失败: {e}",
                             account.id,
@@ -95,6 +99,26 @@ impl SyncScheduler {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
     }
+}
+
+/// 向账号引擎发 SyncNow（`event_tx` 为 Some 时本次进度发往该 channel）。
+async fn sync_account_via_engine(
+    engine: &Arc<dyn crate::engine::EngineAccess>,
+    account: &accounts::Model,
+    event_tx: Option<&SyncEventTx>,
+) -> Result<(), MailError> {
+    let handle = engine.imap_engine(account).await?;
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    handle
+        .send(EngineCommand::SyncNow {
+            folder: None,
+            events: event_tx.cloned(),
+            reply: reply_tx,
+        })
+        .await?;
+    reply_rx
+        .await
+        .map_err(|_| MailError::ImapConnectionFailed("引擎已关闭".into()))?
 }
 
 impl Drop for SyncScheduler {

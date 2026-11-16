@@ -1,0 +1,98 @@
+//! 引擎命令与事件。
+
+use crate::domain::sync::SyncEventTx;
+use crate::error::MailError;
+use crate::infrastructure::protocols::types::{FetchedBodySection, WholeEmailDto};
+use tokio::sync::oneshot;
+
+/// 引擎命令（账号内串行执行）。
+#[derive(Debug)]
+pub enum EngineCommand {
+    /// 立即同步指定文件夹（None = 服务器全部可选文件夹）。
+    ///
+    /// `events`：本次同步的进度事件出口覆盖；`None` 时走引擎默认出口
+    /// （`CoreApi.sync_tx`）。首同步向导（settings begin_sync）传入自带
+    /// channel，使实时进度按既有链路展示。
+    SyncNow {
+        folder: Option<String>,
+        events: Option<SyncEventTx>,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 获取邮件正文原文（BODY.PEEK[]）。
+    FetchBody {
+        folder: String,
+        uid: u32,
+        reply: oneshot::Sender<Result<String, MailError>>,
+    },
+    /// 移动邮件到其他文件夹（服务器支持 MOVE 扩展时用 MOVE，否则 COPY+DELETE）。
+    Move {
+        folder: String,
+        uid: u32,
+        to_folder: String,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 设置 flags（替换语义：最终 flags = flags）。
+    SetFlags {
+        folder: String,
+        uid: u32,
+        flags: Vec<String>,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 添加单条 flag（STORE +FLAGS，不动其他标志；已读/星标切换用）。
+    AddFlags {
+        folder: String,
+        uid: u32,
+        flag: String,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 移除单条 flag（STORE -FLAGS，不动其他标志）。
+    RemoveFlags {
+        folder: String,
+        uid: u32,
+        flag: String,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 追加邮件到文件夹（发信归档/草稿保存到服务器用）。
+    Append {
+        folder: String,
+        email: String, // RFC822 原文
+        flags: Vec<String>,
+        /// 传入时追加后按 Message-ID SEARCH 确认 UID（APPEND 响应不回带 UID）；
+        /// 找不到时报 ImapSearchFailed。
+        message_id: Option<String>,
+        /// 返回新 UID（未传 message_id 时为 0）。
+        reply: oneshot::Sender<Result<u32, MailError>>,
+    },
+    /// 删除邮件（\Deleted + EXPUNGE）。
+    Delete {
+        folder: String,
+        uid: u32,
+        reply: oneshot::Sender<Result<(), MailError>>,
+    },
+    /// 按 UID 拉取一封完整邮件（含正文与附件元信息），用于"刷新"。
+    FetchEmailByUid {
+        folder: String,
+        uid: u32,
+        reply: oneshot::Sender<Result<Option<WholeEmailDto>, MailError>>,
+    },
+    /// 下载指定 MIME section 的附件原始字节（带 Content-Transfer-Encoding）。
+    FetchBodySection {
+        folder: String,
+        uid: u32,
+        section_path: String,
+        reply: oneshot::Sender<Result<Option<FetchedBodySection>, MailError>>,
+    },
+    /// UI 浏览文件夹：更新 IDLE watch requested 集合（最近使用序，IdleManager
+    /// 据此启停文件夹的 IDLE 任务——INBOX 恒定 watch）。
+    WatchFolder { folder: String },
+    /// 关闭引擎（账号删除/退出）。
+    Shutdown,
+}
+
+/// 引擎事件（转发给 UI 层）。
+#[derive(Debug, Clone)]
+pub enum EngineEvent {
+    Progress { account_id: i32, message: String },
+    Disconnected { account_id: i32 },
+    CredentialsNeeded { account_id: i32 },
+}

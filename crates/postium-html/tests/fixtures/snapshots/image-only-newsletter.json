@@ -32,23 +32,6 @@
         },
         "children": [
           {
-            "Image": {
-              "src": {
-                "Remote": {
-                  "url": "https://cdn.postium.example/issues/43/hero.png"
-                }
-              },
-              "alt": "第 43 期头图：渲染性能特辑",
-              "style": {
-                "width": {
-                  "Px": 600.0
-                },
-                "height": null,
-                "max_width": null
-              }
-            }
-          },
-          {
             "Paragraph": {
               "style": {
                 "background_color": null,
@@ -78,68 +61,22 @@
               },
               "runs": [
                 {
-                  "Text": {
-                    "text": " ",
+                  "Image": {
+                    "src": {
+                      "Remote": {
+                        "url": "https://cdn.postium.example/issues/43/hero.png"
+                      }
+                    },
+                    "alt": "第 43 期头图：渲染性能特辑",
                     "style": {
-                      "color": null,
-                      "font_size": null,
-                      "bold": false,
-                      "italic": false,
-                      "underline": false,
-                      "strikethrough": false
+                      "width": {
+                        "Px": 600.0
+                      },
+                      "height": null,
+                      "max_width": null
                     }
                   }
-                }
-              ],
-              "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": {
-                "Remote": {
-                  "url": "https://cdn.postium.example/issues/43/bench-chart.png"
-                }
-              },
-              "alt": "500KB 语料管线耗时对比",
-              "style": {
-                "width": {
-                  "Px": 600.0
                 },
-                "height": null,
-                "max_width": null
-              }
-            }
-          },
-          {
-            "Paragraph": {
-              "style": {
-                "background_color": null,
-                "color": null,
-                "text_align": null,
-                "margin": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "margin_auto": false,
-                "padding": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "width": null,
-                "height": null,
-                "max_width": null,
-                "border_top": null,
-                "border_right": null,
-                "border_bottom": null,
-                "border_left": null,
-                "hidden": false
-              },
-              "runs": [
                 {
                   "Text": {
                     "text": " ",
@@ -152,57 +89,24 @@
                       "strikethrough": false
                     }
                   }
-                }
-              ],
-              "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": {
-                "Remote": {
-                  "url": "https://cdn.postium.example/issues/43/screenshot-dark.png"
-                }
-              },
-              "alt": "深色模式实机截图",
-              "style": {
-                "width": {
-                  "Px": 600.0
                 },
-                "height": null,
-                "max_width": null
-              }
-            }
-          },
-          {
-            "Paragraph": {
-              "style": {
-                "background_color": null,
-                "color": null,
-                "text_align": null,
-                "margin": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "margin_auto": false,
-                "padding": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "width": null,
-                "height": null,
-                "max_width": null,
-                "border_top": null,
-                "border_right": null,
-                "border_bottom": null,
-                "border_left": null,
-                "hidden": false
-              },
-              "runs": [
+                {
+                  "Image": {
+                    "src": {
+                      "Remote": {
+                        "url": "https://cdn.postium.example/issues/43/bench-chart.png"
+                      }
+                    },
+                    "alt": "500KB 语料管线耗时对比",
+                    "style": {
+                      "width": {
+                        "Px": 600.0
+                      },
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
+                },
                 {
                   "Text": {
                     "text": " ",
@@ -215,26 +119,56 @@
                       "strikethrough": false
                     }
                   }
+                },
+                {
+                  "Image": {
+                    "src": {
+                      "Remote": {
+                        "url": "https://cdn.postium.example/issues/43/screenshot-dark.png"
+                      }
+                    },
+                    "alt": "深色模式实机截图",
+                    "style": {
+                      "width": {
+                        "Px": 600.0
+                      },
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
+                },
+                {
+                  "Text": {
+                    "text": " ",
+                    "style": {
+                      "color": null,
+                      "font_size": null,
+                      "bold": false,
+                      "italic": false,
+                      "underline": false,
+                      "strikethrough": false
+                    }
+                  }
+                },
+                {
+                  "Image": {
+                    "src": {
+                      "Remote": {
+                        "url": "https://cdn.postium.example/issues/43/footer-strip.png"
+                      }
+                    },
+                    "alt": "",
+                    "style": {
+                      "width": {
+                        "Percent": 50.0
+                      },
+                      "height": null,
+                      "max_width": null
+                    }
+                  }
                 }
               ],
               "align": "Left"
-            }
-          },
-          {
-            "Image": {
-              "src": {
-                "Remote": {
-                  "url": "https://cdn.postium.example/issues/43/footer-strip.png"
-                }
-              },
-              "alt": "",
-              "style": {
-                "width": {
-                  "Percent": 50.0
-                },
-                "height": null,
-                "max_width": null
-              }
             }
           },
           {

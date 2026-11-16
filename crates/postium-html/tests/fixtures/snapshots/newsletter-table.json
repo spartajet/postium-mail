@@ -160,6 +160,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": [
@@ -359,24 +360,58 @@
                                         }
                                       },
                                       {
-                                        "Image": {
-                                          "src": {
-                                            "Cid": {
-                                              "content_id": "banner@postium.mail"
-                                            }
-                                          },
-                                          "alt": "本期头图",
+                                        "Paragraph": {
                                           "style": {
-                                            "width": {
-                                              "Px": 280.0
-                                            },
+                                            "background_color": null,
+                                            "color": null,
+                                            "text_align": null,
+                                            "margin": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "margin_auto": false,
+                                            "padding": [
+                                              0.0,
+                                              0.0,
+                                              0.0,
+                                              0.0
+                                            ],
+                                            "width": null,
                                             "height": null,
-                                            "max_width": null
-                                          }
+                                            "max_width": null,
+                                            "border_top": null,
+                                            "border_right": null,
+                                            "border_bottom": null,
+                                            "border_left": null,
+                                            "hidden": false
+                                          },
+                                          "runs": [
+                                            {
+                                              "Image": {
+                                                "src": {
+                                                  "Cid": {
+                                                    "content_id": "banner@postium.mail"
+                                                  }
+                                                },
+                                                "alt": "本期头图",
+                                                "style": {
+                                                  "width": {
+                                                    "Px": 280.0
+                                                  },
+                                                  "height": null,
+                                                  "max_width": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "align": "Left"
                                         }
                                       }
                                     ],
                                     "colspan": 1,
+                                    "rowspan": 1,
                                     "width": {
                                       "Px": 300.0
                                     },
@@ -573,6 +608,7 @@
                                       }
                                     ],
                                     "colspan": 1,
+                                    "rowspan": 1,
                                     "width": {
                                       "Px": 300.0
                                     },
@@ -610,6 +646,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": null,
@@ -724,6 +761,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": null,

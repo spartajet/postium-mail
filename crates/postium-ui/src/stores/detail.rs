@@ -15,7 +15,10 @@ use postium_core::service::email_service::EmailDetail;
 use postium_html::{HtmlDocument, HtmlError, adapt_document, needs_dark_adapt, render_pipeline};
 
 use crate::runtime::spawn_tokio;
-use crate::views::email_html::{HtmlRenderState, decode_render_image, normalize_content_id};
+use crate::ui_state;
+use crate::views::email_html::{
+    HtmlRenderState, collect_remote_image_urls, decode_render_image, normalize_content_id,
+};
 
 pub struct DetailStore {
     pub email_id: Option<i32>,
@@ -23,8 +26,9 @@ pub struct DetailStore {
     /// 可渲染 HTML 原文（图片三源由渲染层按 ImageRef 消费，不再注入改写）
     pub html: Option<String>,
     pub loading: bool,
-    /// 图片渲染状态（按邮件维度：每次装载重置——放行态不跨邮件残留，
-    /// spec §4.4「放行状态按邮件维度存内存，不持久化」）。
+    /// 图片渲染状态（按邮件维度：每次装载重置；放行态的持久记忆在装载回调
+    /// 按 ui-state.json 的发件人白名单恢复——线上反馈①推翻终审 M-6 的
+    /// 「不持久化」裁定，Gmail「始终显示此发件人的图片」语义）。
     pub images: HtmlRenderState,
     /// 正文 HTML 文档缓存（spec §7：LRU 8，浅色/深色双通道，深色副本按需
     /// 生成）。T14 从 email_detail.rs 的进程级静态（static + Mutex）迁入：
@@ -32,6 +36,11 @@ pub struct DetailStore {
     /// 视图重建存活，T11 裁定），缓存随实体生命周期生灭，免 static 与锁。
     /// 注意：导航切换 `clear` 不清缓存——LRU 8 跨邮件翻看复用（spec §7）。
     html_cache: EmailHtmlCache,
+    /// 引用折叠展开集合（邮箱大师 viewer.js 引用折叠，MECHANICS.md §6）：
+    /// 键 = email_id ×1000 + quote_id（渲染期文档遍历序号，同一缓存文档内
+    /// 确定稳定），值 = 展开。默认不在集合 = 折叠。换邮件/重解析后 id 语义
+    /// 不变（Quote 块遍历顺序由文档结构决定）。
+    pub quote_expanded: std::collections::HashSet<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +59,7 @@ impl DetailStore {
             loading: false,
             images: HtmlRenderState::default(),
             html_cache: EmailHtmlCache::default(),
+            quote_expanded: std::collections::HashSet::new(),
         }
     }
 
@@ -73,6 +83,16 @@ impl DetailStore {
         cx.notify();
     }
 
+    /// 切换引用块折叠态（邮箱大师「展开引用/收起引用」，MECHANICS.md §6）。
+    /// 键：email_id ×1000 + quote_id。折叠为默认态。
+    pub fn toggle_quote(&mut self, email_id: i32, quote_id: u64, cx: &mut Context<Self>) {
+        let key = email_id as u64 * 1000 + quote_id;
+        if !self.quote_expanded.remove(&key) {
+            self.quote_expanded.insert(key);
+        }
+        cx.notify();
+    }
+
     fn load_impl(
         &mut self,
         email_id: i32,
@@ -92,6 +112,7 @@ impl DetailStore {
         cx.notify();
 
         let api = api.clone();
+        let allow_api = api.clone();
         let rx = spawn_tokio(async move {
             let detail = api.get_email(email_id).await;
             // 内联附件字节（CID 图片数据源）：筛选+缓存落盘在 core，解码
@@ -118,10 +139,32 @@ impl DetailStore {
                     }
                     match detail {
                         Ok(detail) => {
+                            // 远程图片自动放行（对齐 MailMaster fnd_23）：无按
+                            // 文件夹性质门——①全局读信设置
+                            //   auto_download_mail_images（大师
+                            //   autoDownloadMailImages，默认 true）或②发件人
+                            //   白名单记忆（ui-state.json，线上反馈①）命中即
+                            //   自动放行；两者皆否走渲染层占位 +「加载图片」
+                            //   手动条（email_detail.rs）。
+                            let sender =
+                                ui_state::normalize_sender(&detail.email.sender_email);
+                            let sender_allowed = !sender.is_empty()
+                                && ui_state::load().allows_remote_images_from(&sender);
                             // 正文 HTML 原文透传（图片三源由渲染层按 ImageRef 消费）
                             store.html = Some(detail.body_html.clone().unwrap_or_default());
                             store.detail = Some(detail);
                             store.images.attachments = attachments;
+                            let auto_allow =
+                                ui_state::auto_download_mail_images() || sender_allowed;
+                            if auto_allow {
+                                let html = store.html.clone().unwrap_or_default();
+                                // URL 收集走浅色通道（Remote URL 不受深色适配影响），
+                                // cached_doc 首帧渲染同键命中零重复解析
+                                if let Some(doc) = store.cached_doc(email_id, &html, false) {
+                                    let urls = collect_remote_image_urls(&doc);
+                                    store.allow_remote_images(urls, &allow_api, cx);
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::warn!(target: "postium::ui", email_id, "加载邮件详情失败: {e}")
@@ -143,6 +186,11 @@ impl DetailStore {
     /// 去重后）逐图后台拉取 → 解码 → 写入 `images.resolved` → notify
     /// 重渲染。resolved 键即 URL：已记录（成功/失败）的键不再重复拉取。
     /// 每个拉取结果带 email_id 竞态防护——切换邮件后的迟到结果直接丢弃。
+    ///
+    /// 发件人记忆（线上反馈①）：放行同时按发件人持久化（ui-state.json），
+    /// 后续该发件人的邮件在装载期自动放行（见 [`DetailStore::load_impl`]；
+    /// 「始终加载」另走全局设置记忆，见
+    /// [`crate::ui_state::always_download_mail_images`]）。
     pub fn allow_remote_images(
         &mut self,
         urls: Vec<String>,
@@ -156,6 +204,14 @@ impl DetailStore {
             return;
         }
         self.images.enabled = true;
+        if let Some(sender) = self
+            .detail
+            .as_ref()
+            .map(|d| ui_state::normalize_sender(&d.email.sender_email))
+            .filter(|s| !s.is_empty())
+        {
+            ui_state::remember_remote_image_sender(&sender);
+        }
         cx.notify();
 
         for url in urls {

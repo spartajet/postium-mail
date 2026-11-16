@@ -160,6 +160,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": [
@@ -353,7 +354,10 @@
                                       }
                                     ],
                                     "colspan": 1,
-                                    "width": null,
+                                    "rowspan": 1,
+                                    "width": {
+                                      "Percent": 73.04965
+                                    },
                                     "style": {
                                       "background_color": null,
                                       "color": null,
@@ -445,7 +449,10 @@
                                       }
                                     ],
                                     "colspan": 1,
-                                    "width": null,
+                                    "rowspan": 1,
+                                    "width": {
+                                      "Percent": 26.950356
+                                    },
                                     "style": {
                                       "background_color": [
                                         124,
@@ -541,6 +548,7 @@
                         }
                       ],
                       "colspan": 1,
+                      "rowspan": 1,
                       "width": null,
                       "style": {
                         "background_color": null,

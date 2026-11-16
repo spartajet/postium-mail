@@ -124,3 +124,13 @@ pub mod csv_contacts;
 /// 提供受限 GET（15s 超时 / 10MB 上限 / `image/*` Content-Type 校验），
 /// 不含缓存——缓存编排在 service 层 `ImageFetchService`。
 pub mod image_fetch;
+
+/// 应用运行时设置（`settings.json`，数据目录下）。
+///
+/// 对照网易邮箱大师：降级轮询间隔由服务端配置下发（fnd_4，
+/// `mm::PushService::StartPoll` @ mastercore.dll 0x106701b0，本地无
+/// poll_interval 常量）。postium 无配置服务，等价做法是本地配置文件：
+/// `~/.postium/settings.json` 的 `poll_interval_secs`（默认 90，与大师
+/// 观察到的轮询节奏一致的兜底值）。读失败/文件缺失 → 全默认值；写失败
+/// 仅记日志不阻断。
+pub mod settings;

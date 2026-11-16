@@ -87,6 +87,13 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
         },
         None => WindowOptions::default(),
     };
+    // 截图模式：窗口显示但不抢焦点（Craft Anything 检查期间不打扰用户）。
+    // 未聚焦窗口默认按 ~1fps 节流，会拖慢 120 帧目标 → 提到 60fps。
+    if crate::screenshot::enabled() {
+        options.focus = false;
+        options.show = true;
+        options.inactive_frame_interval = Some(std::time::Duration::from_millis(16));
+    }
     // 原生标题栏深浅只随系统外观（Windows 上无法应用内切换），改为透明 +
     // 应用自绘标题栏（views::title_bar，背景跟随主题 title_bar 色）
     options.titlebar = Some(TitlebarOptions {
@@ -99,14 +106,14 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
     .expect("打开主窗口失败");
     // 注册全局弱引用（窗口关闭后自动失效）
     cx.set_global(MainShell(shell_view.downgrade()));
-    cx.activate(true);
+    if !crate::screenshot::enabled() {
+        cx.activate(true);
+    }
 }
 
 /// 应用主壳实体。
 pub struct AppShell {
     pub api: Arc<CoreApi>,
-    #[allow(dead_code)] // Task 7 起消费
-    pub sync_rx: SyncEventRx,
     pub accounts: gpui_kit::Entity<crate::stores::accounts::AccountsStore>,
     pub sidebar: gpui_kit::Entity<Sidebar>,
     pub emails: gpui_kit::Entity<EmailsStore>,
@@ -183,6 +190,19 @@ impl AppShell {
 
         // Toast 总线 + 关闭主窗口 → 隐藏到托盘（退出走托盘菜单）
         crate::notify::setup(window, cx);
+        // 正文划选复制（线上反馈①）：Ctrl+C 在 EmailHtmlBody 焦点上下文内派发
+        cx.bind_keys([
+            gpui_kit::KeyBinding::new(
+                "ctrl-c",
+                crate::views::email_detail::CopyHtmlSelection,
+                Some("EmailHtmlBody"),
+            ),
+            gpui_kit::KeyBinding::new(
+                "escape",
+                crate::views::email_detail::ClearHtmlSelection,
+                Some("EmailHtmlBody"),
+            ),
+        ]);
         // gpui-pre 0.3.9 无窗口 hide API：点关闭 = 保存状态后最小化（退出走托盘菜单）
         // 关闭行为：托盘可用 → 保存状态并最小化（退出走托盘菜单）；
         // 托盘不可用（如无 appindicator 的环境）→ 真关闭，否则应用无法退出
@@ -215,15 +235,22 @@ impl AppShell {
         let sync_store = cx.new(|cx| {
             let mut store = SyncStore::new(cx);
             let weak = cx.entity().downgrade();
-            SyncStore::spawn_consumer(weak, sched_rx, cx);
+            SyncStore::spawn_consumer(weak.clone(), sched_rx, cx);
+            // 引擎默认事件出口（CoreApi.sync_tx 的 rx）：IDLE EXISTS 触发与
+            // 手动/定时 SyncNow 的进度事件都发到这里，并入同一消费端驱动
+            // SyncEvent::Progress → 节流刷新（此前该 rx 无消费者，事件被丢弃）
+            SyncStore::spawn_consumer(weak, sync_rx, cx);
             store.progress.clear();
             store
         });
         // e2e 离线模式跳过后台调度（避免真实网络连接破坏测试确定性）
         if !api.is_e2e_offline() {
             let db = api.db.clone();
-            let auth = api.auth.clone();
-            let mut scheduler = postium_core::domain::sync::SyncScheduler::new(db, auth, Some(sched_tx));
+            let mut scheduler = postium_core::domain::sync::SyncScheduler::new(
+                db,
+                api.engine.clone(),
+                Some(sched_tx),
+            );
             scheduler = scheduler.with_interval(5);
             scheduler.start();
             std::mem::forget(scheduler); // 调度器随进程存活（Drop 会停止）
@@ -246,6 +273,17 @@ impl AppShell {
             match event {
                 SidebarEvent::Navigate(target) => {
                     this.nav = target.clone();
+                    // 浏览具体文件夹 → 通知该账号引擎 IDLE watch（最近浏览 LRU，
+                    // 新邮件秒级推送；fire-and-forget，失败不影响导航）
+                    if let NavTarget::AccountFolder { account_id, folder } = &target {
+                        let api = this.api.clone();
+                        let (account_id, folder) = (*account_id, folder.clone());
+                        crate::runtime::spawn_tokio(async move {
+                            if let Err(e) = api.watch_folder(account_id, folder).await {
+                                tracing::debug!(target: "postium::ui", "WatchFolder 发送失败: {e}");
+                            }
+                        });
+                    }
                     this.emails.update(cx, |store, cx| {
                         store.navigate(target.clone(), &this.api, cx);
                     });
@@ -287,11 +325,13 @@ impl AppShell {
                     this.detail.update(cx, |store, cx| {
                         store.load(*id, &this.api, cx);
                     });
-                    this.detail_view = Some(cx.new(|_| EmailDetailView {
+                    this.detail_view = Some(cx.new(|cx| EmailDetailView {
                         store: this.detail.clone(),
                         api: this.api.clone(),
                         emails: this.emails.downgrade(),
                         recipients_expanded: false,
+                        html_selection: Default::default(),
+                        body_focus: cx.focus_handle(),
                     }));
                     this.detail_build_version = this.emails.read(cx).selected_version;
                     cx.notify();
@@ -369,7 +409,6 @@ impl AppShell {
 
         let shell = Self {
             api,
-            sync_rx,
             accounts,
             sidebar,
             emails,
@@ -472,6 +511,17 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // --screenshot 模式：每帧计数 + 自驱动画下一帧（窗口未聚焦时
+        // gpui 默认按事件驱动，不 notify 就停在第一帧）；截图线程完成后请求退出
+        if crate::screenshot::enabled() {
+            crate::screenshot::on_frame_tick();
+            if crate::screenshot::quit_requested() {
+                tracing::info!("screenshot 完成，退出");
+                cx.quit();
+            } else {
+                cx.notify();
+            }
+        }
         // 上下文切换（导航/搜索）→ 重建虚拟化列表；
         // 仅数据变化（翻页/操作后刷新）→ 原位更新行，保持滚动与选中
         let (data_v, nav_v) = {
@@ -507,7 +557,12 @@ impl Render for AppShell {
         let nav_label: SharedString = match &self.nav {
             NavTarget::AllInbox => i18n::t("sidebar.inbox"),
             NavTarget::Category(c) => i18n::t(crate::nav::category_label_key(c)),
-            NavTarget::AccountFolder { folder, .. } => folder.clone().into(),
+            NavTarget::AccountFolder { folder, .. } => {
+                // 角色文件夹的类别键（"sent" 等）显示标准标签，原始名原样显示
+                crate::nav::folder_label_key(folder)
+                    .map(i18n::t)
+                    .unwrap_or_else(|| folder.clone().into())
+            }
             NavTarget::Label(id) => format!("标签 #{id}").into(),
             NavTarget::Calendar => i18n::t("sidebar.calendar"),
             NavTarget::Workflow => i18n::t("sidebar.workflow"),
@@ -568,11 +623,13 @@ impl Render for AppShell {
                             Some(view) => view.into_any_element(),
                             None => {
                                 // 首帧兜底：建一次并缓存（后续由 SelectionChanged 重建）
-                                let view = cx.new(|_| EmailDetailView {
+                                let view = cx.new(|cx| EmailDetailView {
                                     store: self.detail.clone(),
                                     api: self.api.clone(),
                                     emails: self.emails.downgrade(),
                                     recipients_expanded: false,
+                                    html_selection: Default::default(),
+                                    body_focus: cx.focus_handle(),
                                 });
                                 self.detail_view = Some(view.clone());
                                 view.into_any_element()
@@ -615,6 +672,7 @@ impl Render for AppShell {
                     .relative()
                     .flex_1()
                     .size_full()
+                    .min_h_0()
                     .p_2()
                     .gap_2()
                     // 顶栏：搜索 + 当前视图标题 + 语言/主题
