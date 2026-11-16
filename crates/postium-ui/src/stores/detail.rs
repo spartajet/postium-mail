@@ -36,6 +36,11 @@ pub struct DetailStore {
     /// 视图重建存活，T11 裁定），缓存随实体生命周期生灭，免 static 与锁。
     /// 注意：导航切换 `clear` 不清缓存——LRU 8 跨邮件翻看复用（spec §7）。
     html_cache: EmailHtmlCache,
+    /// 引用折叠展开集合（邮箱大师 viewer.js 引用折叠，MECHANICS.md §6）：
+    /// 键 = email_id ×1000 + quote_id（渲染期文档遍历序号，同一缓存文档内
+    /// 确定稳定），值 = 展开。默认不在集合 = 折叠。换邮件/重解析后 id 语义
+    /// 不变（Quote 块遍历顺序由文档结构决定）。
+    pub quote_expanded: std::collections::HashSet<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,6 +59,7 @@ impl DetailStore {
             loading: false,
             images: HtmlRenderState::default(),
             html_cache: EmailHtmlCache::default(),
+            quote_expanded: std::collections::HashSet::new(),
         }
     }
 
@@ -74,6 +80,16 @@ impl DetailStore {
         self.html = None;
         self.loading = false;
         self.images = HtmlRenderState::default();
+        cx.notify();
+    }
+
+    /// 切换引用块折叠态（邮箱大师「展开引用/收起引用」，MECHANICS.md §6）。
+    /// 键：email_id ×1000 + quote_id。折叠为默认态。
+    pub fn toggle_quote(&mut self, email_id: i32, quote_id: u64, cx: &mut Context<Self>) {
+        let key = email_id as u64 * 1000 + quote_id;
+        if !self.quote_expanded.remove(&key) {
+            self.quote_expanded.insert(key);
+        }
         cx.notify();
     }
 

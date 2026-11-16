@@ -85,6 +85,50 @@ pub fn format_size(bytes: i64) -> String {
     }
 }
 
+/// 超大附件过期倒计时格式化 —— 数值来源：邮箱大师 webui.zip `js/common.js`
+/// AttachUtils（MECHANICS.md §5）。
+///
+/// 规则：`None`/0/负值 → `长期有效`（大师：`hugeExpiredDate == 0` =
+/// 长期有效）；正值 → 非零最高两级「N天N小时后过期 / N小时N分后过期 /
+/// N分N秒后过期 / N秒后过期」。
+///
+/// 显示框架先行：postium 无网易中转服务，附件模型暂无过期字段
+/// （[`attachment_expiry_secs`] 现恒 None，UI 不渲染）；将来协议/服务端
+/// 提供数据源时填入该函数即可点亮显示。
+pub fn format_expiry(remaining_secs: Option<i64>) -> String {
+    let Some(s) = remaining_secs else {
+        return "长期有效".to_string();
+    };
+    if s <= 0 {
+        return "长期有效".to_string();
+    }
+    let days = s / 86_400;
+    let hours = (s % 86_400) / 3_600;
+    let minutes = (s % 3_600) / 60;
+    let secs = s % 60;
+    if days > 0 {
+        format!("{days}天{hours}小时后过期")
+    } else if hours > 0 {
+        format!("{hours}小时{minutes}分后过期")
+    } else if minutes > 0 {
+        format!("{minutes}分{secs}秒后过期")
+    } else {
+        format!("{secs}秒后过期")
+    }
+}
+
+/// 附件过期剩余秒数数据源（邮箱大师 `hugeExpiredDate`，MECHANICS.md §5）。
+///
+/// postium 附件模型（`AttachmentDto`，attachment_service.rs）暂无该字段，
+/// 当前恒返回 `None`（UI 相应不渲染过期条）。数据来源候选（将来任一可用
+/// 即接入）：网易系超大附件中转 URL 的 `hugeExpiredDate` 私有字段（仅
+/// 大师服务）；或 Content-Disposition 中的私有后缀。
+pub fn attachment_expiry_secs(
+    _att: &postium_core::service::attachment_service::AttachmentDto,
+) -> Option<i64> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +157,18 @@ mod tests {
         assert_eq!(format_size(1024), "1.0 KB");
         assert_eq!(format_size(12 * 1024), "12.0 KB");
         assert_eq!(format_size(1536 * 1024), "1.5 MB");
+    }
+
+    #[test]
+    fn expiry_formatting_follows_master() {
+        // 0 / None / 负值 → 长期有效（大师：0 = 长期有效）
+        assert_eq!(format_expiry(Some(0)), "长期有效");
+        assert_eq!(format_expiry(None), "长期有效");
+        assert_eq!(format_expiry(Some(-5)), "长期有效");
+        // 逐级显示
+        assert_eq!(format_expiry(Some(45)), "45秒后过期");
+        assert_eq!(format_expiry(Some(125)), "2分5秒后过期");
+        assert_eq!(format_expiry(Some(3_725)), "1小时2分后过期"); // 1h2m5s
+        assert_eq!(format_expiry(Some(90061)), "1天1小时后过期"); // 1d1h1m1s
     }
 }

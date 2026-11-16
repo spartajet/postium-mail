@@ -26,6 +26,7 @@ pub fn ensure_engine<F>(
     factory: Arc<F>,
     db: DbConn,
     events: SyncEventTx,
+    poll_interval: std::time::Duration,
 ) -> Result<EngineHandle, MailError>
 where
     F: PoolConnect + IdleConnect + 'static,
@@ -36,7 +37,8 @@ where
     }
     let idle_factory: Arc<dyn IdleConnect> = factory.clone();
     let pool = ConnectionPool::new(factory, Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-    let (handle, engine) = AccountEngine::new(account.clone(), pool, db, 32, Some(idle_factory));
+    let (handle, engine) =
+        AccountEngine::new(account.clone(), pool, db, 32, Some(idle_factory), poll_interval);
     tokio::spawn(engine.run(events));
     map.insert(account.id, handle.clone());
     Ok(handle)

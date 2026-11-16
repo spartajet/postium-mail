@@ -467,7 +467,22 @@ fn html_body(
 ) -> Option<(AnyElement, Vec<String>)> {
     let doc = store.update(cx, |store, _| store.cached_doc(email_id, html, dark))?;
     let remote_urls = collect_remote_image_urls(&doc);
-    let el = render_html_document(&doc, dark, images, selection, open_safe_url, cx);
+    // 引用折叠上下文（邮箱大师 viewer.js，MECHANICS.md §6）：展开集合快照 +
+    // 切换回调（回写 store + notify）。渲染闭包只持有 weak entity，视图
+    // 重建不延长 store 生命周期。
+    let snapshot = store.read(cx).quote_expanded.clone();
+    let expanded = std::sync::Arc::new(std::sync::Mutex::new(snapshot));
+    let weak = store.downgrade();
+    let on_toggle = std::sync::Arc::new(
+        move |qid: u64, cx: &mut gpui_kit::App| {
+            let _ = weak.update(cx, |s: &mut DetailStore, cx: &mut gpui_kit::Context<DetailStore>| {
+                s.toggle_quote(email_id, qid, cx);
+            });
+        },
+    )
+        as std::sync::Arc<dyn Fn(u64, &mut gpui_kit::App) + Send + Sync>;
+    let quotes = crate::views::email_html::QuoteFold { expanded, on_toggle };
+    let el = render_html_document(&doc, dark, images, selection, Some(quotes), open_safe_url, cx);
     Some((el, remote_urls))
 }
 
@@ -821,6 +836,24 @@ impl Render for EmailDetailView {
                                             .child(attach_style::format_size(att.size)),
                                     )
                                 })
+                                // 超大附件过期倒计时（邮箱大师 hugeExpiredDate，
+                                // MECHANICS.md §5）——当前模型无过期字段时
+                                // 经 content_id 侧带（暂不显示）；有则显示
+                                // 「N天N小时后过期 / 长期有效」
+                                .when(
+                                    attach_style::attachment_expiry_secs(att).is_some(),
+                                    |this| {
+                                        this.child(
+                                            div()
+                                                .id(("att-expiry", att_id as u32))
+                                                .text_size(px(11.))
+                                                .text_color(gpui::rgb(0xF59C00))
+                                                .child(attach_style::format_expiry(
+                                                    attach_style::attachment_expiry_secs(att),
+                                                )),
+                                        )
+                                    },
+                                )
                                 .child(
                                     Button::new(format!("open-att-{att_id}"))
                                         .ghost()

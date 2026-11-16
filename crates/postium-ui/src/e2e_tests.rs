@@ -1948,6 +1948,9 @@ impl gpui_kit::Render for HtmlRenderProbe {
             false,
             crate::views::email_html::ImageCtx::default(),
             crate::views::html_selection::HtmlSelection::default(),
+            // 引用折叠：e2e 探针不接折叠交互（None = 引用块仍按原样整段渲染，
+            // 但保留左边线视觉；折叠行为在 email_detail 主路径覆盖）
+            None,
             move |url: &postium_html::SafeUrl| on_link(url),
             cx,
         );

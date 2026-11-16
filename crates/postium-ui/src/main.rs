@@ -6,6 +6,7 @@ mod nav;
 mod notify;
 mod runtime;
 mod screenshot;
+mod sound;
 mod ui_state;
 mod stores;
 mod theme;

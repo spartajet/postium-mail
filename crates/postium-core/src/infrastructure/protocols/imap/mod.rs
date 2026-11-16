@@ -134,6 +134,10 @@ impl FlagChanges {
 #[derive(Debug)]
 pub struct ImapClient {
     session: async_imap::Session<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+    /// 连接期服务器指纹 + 兼容开关（greeting 命中；邮箱大师 Connect
+    /// FUN_10932230 同源输入）。Hermes 禁 CONDSTORE 等差异在能力协商层
+    /// 生效（见 factory.rs connect_client）。
+    pub server_quirks: crate::infrastructure::protocols::imap::server_fingerprint::ServerQuirks,
 }
 
 impl ImapClient {
@@ -162,6 +166,9 @@ impl ImapClient {
         // - Implicit：TCP 后直接 TLS 握手（993 标准路径）
         // - StartTls：先明文读 greeting + 指纹识别，再 STARTTLS 升级
         // - None：保持明文（用户显式选择，仅本地/内网测试用）
+        // greeting 指纹结果写入 server_quirks（邮箱大师 Connect 的 7 个
+        // 兼容开关位；Hermes 禁 CONDSTORE 等差异在能力协商层生效）
+        let mut quirks = server_fingerprint::ServerQuirks::default();
         let mut client = match config.ssl {
             crate::domain::providers::SslMode::StartTls => {
                 let tcp = Self::connect_tcp_stream(host, port).await?;
@@ -173,7 +180,8 @@ impl ImapClient {
                 if let Some(ref d) = greeting {
                     if let Response::Data { information: Some(info), .. } = d.parsed() {
                         let sw = server_fingerprint::fingerprint_greeting(info);
-                        tracing::info!(host, software = sw.label(), "IMAP: 服务器指纹");
+                        quirks = server_fingerprint::ServerQuirks::detect(info, Some(host));
+                        tracing::info!(host, software = sw.label(), quirks = ?quirks, "IMAP: 服务器指纹");
                     }
                 }
                 tracing::debug!(host, "IMAP: 发送 STARTTLS");
@@ -212,7 +220,8 @@ impl ImapClient {
                 if let Some(ref d) = greeting {
                     if let Response::Data { information: Some(info), .. } = d.parsed() {
                         let sw = server_fingerprint::fingerprint_greeting(info);
-                        tracing::info!(host, software = sw.label(), "IMAP: 服务器指纹");
+                        quirks = server_fingerprint::ServerQuirks::detect(info, Some(host));
+                        tracing::info!(host, software = sw.label(), quirks = ?quirks, "IMAP: 服务器指纹");
                     }
                 }
                 c
@@ -240,7 +249,7 @@ impl ImapClient {
                 MailError::AuthFailed(msg)
             })?;
         tracing::info!(host, email, "IMAP: 连接并登录成功");
-        Ok(Self { session })
+        Ok(Self { session, server_quirks: quirks })
     }
 
     /// 使用 XOAUTH2 认证连接 IMAP 服务器
@@ -266,6 +275,19 @@ impl ImapClient {
         let _greeting = client.read_response().await.map_err(|e| {
             MailError::ImapConnectionFailed(format!("读取 IMAP greeting 失败: {e}"))
         })?;
+        // XOAUTH2 路径同样做 greeting 指纹（与密码路径同源差异）
+        let mut quirks = server_fingerprint::ServerQuirks::default();
+        if let Some(ref d) = _greeting {
+            if let Response::Data { information: Some(info), .. } = d.parsed() {
+                quirks = server_fingerprint::ServerQuirks::detect(info, Some(config.host.as_str()));
+                tracing::info!(
+                    host = %config.host,
+                    software = server_fingerprint::fingerprint_greeting(info).label(),
+                    quirks = ?quirks,
+                    "IMAP: 服务器指纹"
+                );
+            }
+        }
         let authenticator = util::Xoauth2Authenticator {
             user: email.to_string(),
             access_token: access_token.to_string(),
@@ -278,7 +300,7 @@ impl ImapClient {
                 MailError::AuthFailed(format!("XOAUTH2 认证失败: {e}"))
             })?;
         tracing::info!(email, "IMAP: XOAUTH2 认证成功");
-        Ok(Self { session })
+        Ok(Self { session, server_quirks: quirks })
     }
 
     // ─── 文件夹操作 ───
@@ -736,10 +758,12 @@ impl ImapClient {
     }
 
     /// 从 `Handle::done()` 返回的会话重建客户端（IDLE 专属连接跨轮复用）。
+    /// 指纹在原连接建立时已识别，此处保留原 quirks（IDLE 轮次不重连新服务器）。
     pub(crate) fn from_idle_session(
         session: async_imap::Session<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+        quirks: crate::infrastructure::protocols::imap::server_fingerprint::ServerQuirks,
     ) -> Self {
-        Self { session }
+        Self { session, server_quirks: quirks }
     }
 
     /// 发送任意命令并检查 OK（引擎 ENABLE 用）。

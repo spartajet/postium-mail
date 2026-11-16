@@ -27,11 +27,19 @@ pub struct RegistryEngineAccess {
     auth: Arc<AuthManager>,
     db: DbConn,
     sync_tx: SyncEventTx,
+    /// 降级轮询间隔（settings.json `poll_interval_secs`；None = 默认 90s）。
+    poll_interval: Option<std::time::Duration>,
 }
 
 impl RegistryEngineAccess {
     pub fn new(auth: Arc<AuthManager>, db: DbConn, sync_tx: SyncEventTx) -> Self {
-        Self { auth, db, sync_tx }
+        Self { auth, db, sync_tx, poll_interval: None }
+    }
+
+    /// 注入可配置轮询间隔（CoreApi 装配处读 settings.json 后调用）。
+    pub fn with_poll_interval(mut self, interval: std::time::Duration) -> Self {
+        self.poll_interval = Some(interval);
+        self
     }
 }
 
@@ -46,6 +54,8 @@ impl EngineAccess for RegistryEngineAccess {
             }),
             self.db.clone(),
             self.sync_tx.clone(),
+            self.poll_interval
+                .unwrap_or(crate::engine::idle::DEGRADE_POLL_INTERVAL),
         )
     }
 }

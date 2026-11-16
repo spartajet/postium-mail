@@ -53,7 +53,24 @@ impl RealSessionFactory {
                 ImapClient::connect_xoauth2(&imap_config, &account.email, &access_token).await?
             }
         };
-        let caps = CapabilitySet::parse(&client.capabilities().await?);
+        let caps_raw = CapabilitySet::parse(&client.capabilities().await?);
+        // 邮箱大师 FUN_10931bf0 能力协商门控：Hermes 服务器即使宣告
+        // CONDSTORE 也禁用（is_hermes && caps 含 CONDSTORE → 不启用）。
+        // postium 的同步档位决策由 CapabilitySet 驱动（decide_plan），故把
+        // CONDSTORE 从能力集中摘掉即可全链路生效，无需改各调用点。
+        let caps = if client.server_quirks.is_hermes {
+            if caps_raw.has_condstore() {
+                tracing::info!(
+                    host = %imap_config.host,
+                    "IMAP: Hermes 服务器，禁用 CONDSTORE（邮箱大师兼容规则）"
+                );
+                caps_raw.without_condstore()
+            } else {
+                caps_raw
+            }
+        } else {
+            caps_raw
+        };
         // 与 RealSession::enable 一致：无可 ENABLE 的扩展时跳过命令
         let enable = caps.enable_list();
         if !enable.is_empty() {

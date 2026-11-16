@@ -5,6 +5,8 @@ use crate::domain::providers::pool::PROVIDER_POOL;
 use crate::domain::sync::{SyncEventTx, SyncProgress, SyncProgressEvent, SyncStage};
 use crate::engine::commands::EngineCommand;
 use crate::engine::idle::{IdleConnect, IdleSupervisor};
+#[cfg(test)]
+use crate::engine::idle::DEGRADE_POLL_INTERVAL;
 use crate::engine::pool::ConnectionPool;
 use crate::engine::sync::{
     FolderSyncOutcome, LocalSyncState, ServerMailboxMeta, decide_plan, execute_plan,
@@ -55,6 +57,8 @@ pub struct AccountEngine {
     pub db: DbConn,
     /// IDLE 专属连接工厂（生产注入；测试传 None——不启动 idle 任务）。
     idle_factory: Option<Arc<dyn IdleConnect>>,
+    /// 降级轮询间隔（settings.json 可配置，默认 90s）。
+    poll_interval: std::time::Duration,
 }
 
 impl AccountEngine {
@@ -64,13 +68,14 @@ impl AccountEngine {
         db: DbConn,
         buffer: usize,
         idle_factory: Option<Arc<dyn IdleConnect>>,
+        poll_interval: std::time::Duration,
     ) -> (EngineHandle, Self) {
         let account_id = account.id;
         let (tx, rx) = mpsc::channel(buffer.max(16));
         let self_tx = tx.clone();
         (
             EngineHandle { account_id, tx },
-            Self { account, rx, self_tx, pool, db, idle_factory },
+            Self { account, rx, self_tx, pool, db, idle_factory, poll_interval },
         )
     }
 
@@ -82,7 +87,7 @@ impl AccountEngine {
         let mut supervisor = self
             .idle_factory
             .take()
-            .map(|f| IdleSupervisor::new(self.account.clone(), f, self.self_tx.clone()));
+            .map(|f| IdleSupervisor::new(self.account.clone(), f, self.self_tx.clone(), self.poll_interval));
         if let Some(sup) = supervisor.as_mut() {
             sup.watch_folder(&events, "INBOX".to_string());
         }
@@ -240,6 +245,7 @@ impl AccountEngine {
                     folder_display_name: None,
                     current: idx + 1,
                     total,
+                    new_emails: 0,
                     message: format!("正在同步 {target} ({}/{})", idx + 1, total),
                 },
             });
@@ -526,6 +532,7 @@ mod tests {
             db,
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -547,6 +554,7 @@ mod tests {
             db,
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -576,6 +584,7 @@ mod tests {
             db,
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, _event_rx) =
             smol::channel::bounded::<crate::domain::sync::SyncProgressEvent>(16);
@@ -614,6 +623,7 @@ mod tests {
             db.clone(),
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx.clone()));
@@ -688,6 +698,7 @@ mod tests {
             db.clone(),
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, _event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx));
@@ -734,6 +745,7 @@ mod tests {
             db.clone(),
             16,
             None,
+            DEGRADE_POLL_INTERVAL,
         );
         let (event_tx, _event_rx) = progress_channel();
         let task = tokio::spawn(engine.run(event_tx));

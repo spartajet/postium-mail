@@ -274,6 +274,10 @@ pub struct SyncProgress {
     pub current: usize,
     /// 总数量（当前任务的总数）
     pub total: usize,
+    /// 本次事件涉及的新邮件数（Completed 事件 = 该文件夹本轮新增；
+    /// SyncingEmails 阶段为 0）。UI 据此决定是否播提示音
+    /// （对照邮箱大师：来新信响一声，MECHANICS.md §7）。
+    pub new_emails: usize,
     /// 进度描述消息
     pub message: String,
 }

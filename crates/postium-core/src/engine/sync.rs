@@ -389,6 +389,7 @@ fn emit_done(events: &SyncEventTx, account_id: i32, folder: &str, outcome: &Fold
             folder_display_name: Some(folder.to_string()),
             current: processed,
             total: processed,
+            new_emails: outcome.new_emails,
             message: format!(
                 "同步完成: 新增 {} 标志更新 {} 删除 {}",
                 outcome.new_emails, outcome.flag_updates, outcome.deleted_emails

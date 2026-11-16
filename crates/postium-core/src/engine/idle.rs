@@ -31,8 +31,13 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 /// IDLE 重发间隔：服务器普遍 29 分钟超时，25 分钟主动重发留足余量。
 pub const IDLE_REISSUE: Duration = Duration::from_secs(25 * 60);
-/// 降级轮询间隔（SyncNow(folder) 即轮询语义）。
-pub const DEGRADE_POLL_INTERVAL: Duration = Duration::from_secs(90);
+/// 降级轮询间隔默认值（`SyncNow(folder)` 即轮询语义）。
+/// 实际值可经 `settings.json` 的 `poll_interval_secs` 配置（对照大师：
+/// 轮询间隔由服务端配置下发 fnd_4；postium 等价实现为本地配置文件，
+/// 见 `infrastructure::settings`）。
+pub const DEGRADE_POLL_INTERVAL: Duration = Duration::from_secs(
+    crate::infrastructure::settings::DEFAULT_POLL_INTERVAL_SECS,
+);
 /// 退避基数：对齐网易邮箱大师 `mm::PushServiceIMAP::OnIdleDone`
 /// （mastercore.dll 0x106729e0，push_service_imap.cpp:0x80）：失败后首延 3s。
 pub const BACKOFF_BASE: Duration = Duration::from_secs(3);
@@ -131,8 +136,14 @@ pub async fn run_idle_loop(
     sync_tx: SyncEventTx,
     engine_tx: mpsc::Sender<EngineCommand>,
     mut shutdown: watch::Receiver<bool>,
+    poll_interval: Duration,
 ) {
     let account_id = account.id;
+    // 配置钳制（settings 加载时已钳一次，此处防御误传）
+    let poll_interval = poll_interval.clamp(
+        Duration::from_secs(crate::infrastructure::settings::MIN_POLL_INTERVAL_SECS),
+        Duration::from_secs(crate::infrastructure::settings::MAX_POLL_INTERVAL_SECS),
+    );
     let mut consecutive_failures = 0u32;
     // 专属连接跨轮复用（`idle_round` 成功时经 done() 归还）
     let mut client: Option<ImapClient> = None;
@@ -168,14 +179,14 @@ pub async fn run_idle_loop(
             }
         }
 
-        // 降级轮询：连续失败 ≥2 或服务器不支持 IDLE
+        // 降级轮询：连续失败 ≥2 或服务器不支持 IDLE（间隔可配置，默认 90s）
         if should_degrade(consecutive_failures) || !supports_idle {
             if poll_once(&folder, &sync_tx, &engine_tx, &mut consecutive_failures).await.is_none()
             {
                 // 引擎已关闭 → 循环随之退出
                 break;
             }
-            if sleep_or_shutdown(DEGRADE_POLL_INTERVAL, &mut shutdown).await {
+            if sleep_or_shutdown(poll_interval, &mut shutdown).await {
                 break;
             }
             continue;
@@ -287,6 +298,8 @@ async fn idle_round(
     engine_tx: &mpsc::Sender<EngineCommand>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<ImapClient, MailError> {
+    // into_idle 消费 client；先把指纹开关取出，DONE 后原样归还
+    let client_quirks = client.server_quirks;
     let mut handle: Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>> =
         client.into_idle();
     handle
@@ -329,7 +342,7 @@ async fn idle_round(
         IdleResponse::Timeout | IdleResponse::ManualInterrupt => {}
     }
 
-    finish_idle(handle).await
+    finish_idle(handle, client_quirks).await
 }
 
 /// EXISTS 推送 → 进度事件（try_send：通道满/关闭静默丢弃，不阻塞 IDLE 循环）。
@@ -342,6 +355,7 @@ fn emit_new_mail_progress(account_id: i32, folder: &str, sync_tx: &SyncEventTx) 
             folder_display_name: None,
             current: 0,
             total: 0,
+            new_emails: 0,
             message: "新邮件到达".to_string(),
         },
     });
@@ -365,14 +379,16 @@ async fn trigger_sync(
 }
 
 /// 发 DONE 结束 IDLE 并取回会话，重建客户端（专属连接跨轮复用）。
+/// quirks 沿用连接建立时的指纹结果（同一条连接，服务器没变）。
 async fn finish_idle(
     handle: Handle<tokio_native_tls::TlsStream<tokio::net::TcpStream>>,
+    quirks: crate::infrastructure::protocols::imap::server_fingerprint::ServerQuirks,
 ) -> Result<ImapClient, MailError> {
     let session = handle
         .done()
         .await
         .map_err(|e| MailError::ImapConnectionFailed(format!("IDLE DONE 失败: {e}")))?;
-    Ok(ImapClient::from_idle_session(session))
+    Ok(ImapClient::from_idle_session(session, quirks))
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -385,6 +401,8 @@ pub struct IdleSupervisor {
     account: accounts::Model,
     factory: Arc<dyn IdleConnect>,
     engine_tx: mpsc::Sender<EngineCommand>,
+    /// 降级轮询间隔（settings.json 可配置，默认 90s；见 infrastructure::settings）。
+    poll_interval: Duration,
     /// 最近浏览的非 INBOX 文件夹（头部 = 最近）。
     requested: Vec<String>,
     /// 已 spawn 的任务（folder → 专属 shutdown 发送端）。
@@ -396,11 +414,13 @@ impl IdleSupervisor {
         account: accounts::Model,
         factory: Arc<dyn IdleConnect>,
         engine_tx: mpsc::Sender<EngineCommand>,
+        poll_interval: Duration,
     ) -> Self {
         Self {
             account,
             factory,
             engine_tx,
+            poll_interval,
             requested: Vec::new(),
             tasks: HashMap::new(),
         }
@@ -437,6 +457,7 @@ impl IdleSupervisor {
             sync_tx.clone(),
             self.engine_tx.clone(),
             rx,
+            self.poll_interval,
         ));
     }
 

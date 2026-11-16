@@ -103,7 +103,10 @@ impl CoreApi {
             AuthManager::default()
         });
         let engine_access: Arc<dyn crate::engine::EngineAccess> = Arc::new(
-            crate::engine::RegistryEngineAccess::new(auth.clone(), db.clone(), sync_tx.clone()),
+            crate::engine::RegistryEngineAccess::new(auth.clone(), db.clone(), sync_tx.clone())
+                .with_poll_interval(
+                    crate::infrastructure::settings::load(data_dir).poll_interval(),
+                ),
         );
         let accounts = if e2e && !e2e_truth {
             AccountService::new_with_imap_verifier(

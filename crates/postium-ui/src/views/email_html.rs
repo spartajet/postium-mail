@@ -34,7 +34,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, LayoutId, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement as _, RenderImage, SharedString,
     StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun, UnderlineStyle, div,
-    font as base_font, img, px, relative, rgba,
+    font as base_font, img, px, relative, rgba, StatefulInteractiveElement as _,
 };
 use postium_html::{
     Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Rgba,
@@ -131,14 +131,23 @@ struct RenderCtx {
     images: ImageCtx,
     /// 文本划选状态（组注册表 + 锚点/游标，线上反馈①）。
     selection: HtmlSelection,
+    /// 引用折叠上下文（邮箱大师引用折叠；None = 无折叠交互）。
+    quotes: Option<QuoteFold>,
 }
 
 impl RenderCtx {
+    /// 引用块 id 计数（文档遍历序，每帧重置由 new() 创建新 ctx 保证）。
+    fn next_quote_id(&self) -> u64 {
+        // 借渲染期计数器：放 thread_local 太脆，改走 Cell on RenderCtx 更纯；
+        // 但 RenderCtx 是 &self 传入——用 atomic relaxed 递增。
+        QUOTE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
     fn new(
         dark: bool,
         on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
         images: ImageCtx,
         selection: HtmlSelection,
+        quotes: Option<QuoteFold>,
         cx: &App,
     ) -> Self {
         let theme = cx.theme();
@@ -154,6 +163,7 @@ impl RenderCtx {
             on_link,
             images,
             selection,
+            quotes,
         }
     }
 
@@ -180,6 +190,24 @@ struct Inherited {
     depth: usize,
 }
 
+/// 引用折叠上下文（邮箱大师 viewer.js 引用折叠，MECHANICS.md §6）。
+///
+/// - `expanded`：已展开的引用块 id 集合（文档遍历序号，每封邮件确定）；
+///   默认（不在集合中）= 折叠 —— 大师「会话中旧信默认折叠」的 postium
+///   简化：无会话概念，有引用块即默认折叠。
+/// - `on_toggle`：切换回调（qid + App 句柄 → DetailStore::toggle_quote +
+///   notify）。App 由点击事件处理器传入。
+///
+/// id 分配：渲染期按「遇到 Quote 的先后」递增计数（同一文档缓存条目
+/// 内确定；文档变更 → 重新解析 → 顺序稳定，折叠集合按 email_id 隔离）。
+pub struct QuoteFold {
+    /// 当前邮件已展开引用 id（DetailStore 持有，Arc 共享进渲染）。
+    pub expanded: Arc<std::sync::Mutex<std::collections::HashSet<u64>>>,
+    /// 切换回调：qid → DetailStore::toggle_quote + notify（App 由点击
+    /// 处理器传入——WeakEntity::update 需要它）。
+    pub on_toggle: Arc<dyn Fn(u64, &mut App) + Send + Sync>,
+}
+
 /// 渲染整封 HTML 邮件文档（spec §5 GPUI 渲染层入口）。
 ///
 /// - `dark`：调用方按主题传入；颜色消费的是已适配文档的字面值（见模块注释）。
@@ -194,15 +222,22 @@ pub fn render_html_document(
     dark: bool,
     images: ImageCtx,
     selection: HtmlSelection,
+    quotes: Option<QuoteFold>,
     on_link: impl Fn(&SafeUrl) + 'static,
     cx: &mut App,
 ) -> AnyElement {
     selection.begin_frame();
-    let rcx = RenderCtx::new(dark, Arc::new(on_link), images, selection, cx);
+    // 引用 id 计数重置：每帧从 0 重新分配（文档缓存条目内遍历顺序确定）
+    QUOTE_ID.store(0, std::sync::atomic::Ordering::Relaxed);
+    let rcx = RenderCtx::new(dark, Arc::new(on_link), images, selection, quotes, cx);
     render_blocks(&doc.blocks, Inherited::default(), &rcx)
         .when_probe("html-root")
         .into_any_element()
 }
+
+/// 引用块 id 计数器（每帧从 QUOTE_FRAME_BASE 起点递增；render_html_document
+/// 每帧开头重置，同一文档内顺序稳定 → id 稳定）。
+static QUOTE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// 块级序列 → 纵向 flex 列。
 fn render_blocks(blocks: &[Block], inh: Inherited, rcx: &RenderCtx) -> gpui_kit::Div {
@@ -272,13 +307,67 @@ fn render_block(block: &Block, inh: Inherited, rcx: &RenderCtx) -> AnyElement {
                 .into_any_element()
         }
         Block::List { ordered, items } => render_list(*ordered, items, inh, rcx),
-        Block::Quote { children } => v_flex()
-            .w_full()
-            .border_l(px(3.))
-            .border_color(rcx.border)
-            .pl(px(12.))
-            .child(render_blocks(children, inh, rcx))
-            .into_any_element(),
+        Block::Quote { children } => {
+            // 引用折叠（邮箱大师 viewer.js，MECHANICS.md §6）：默认折叠，
+            // 点击「展开引用/收起引用」切换。大师样式：折叠面板边框
+            // #2a83f3（链接蓝）、切换文字 12px、折叠时面板仍显示 3px 左边线。
+            let qid = rcx.next_quote_id();
+            let expanded = rcx
+                .quotes
+                .as_ref()
+                .and_then(|q| q.expanded.lock().ok().map(|m| m.contains(&qid)))
+                .unwrap_or(false);
+            let has_fold_ctx = rcx.quotes.is_some();
+            let mut col = v_flex().w_full().border_l(px(3.));
+            // 折叠时左边线用链接蓝（大师折叠面板色），展开后回归主题边框
+            col = if expanded {
+                col.border_color(rcx.border)
+            } else {
+                col.border_color(rcx.link)
+            };
+            // 折叠态：只渲染头部切换条，子块不渲染（大师：折叠时正文隐藏）
+            if !expanded && has_fold_ctx {
+                let label = "展开引用";
+                let on_toggle = rcx.quotes.as_ref().map(|q| q.on_toggle.clone());
+                return col
+                    .pl(px(12.))
+                    .child(
+                        h_flex()
+                            .id(("quote-toggle", qid as u32))
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .text_color(rcx.link)
+                            .child(label)
+                            .when_some(on_toggle, |this, cb| {
+                                this.on_click(move |_, _, cx| cb(qid, cx))
+                            }),
+                    )
+                    .into_any_element();
+            }
+            col.pl(px(12.))
+                .when(has_fold_ctx, |this| {
+                    let on_toggle = rcx.quotes.as_ref().map(|q| q.on_toggle.clone());
+                    let label = if expanded {
+                        "收起引用"
+                    } else {
+                        "展开引用"
+                    };
+                    let qid2 = qid;
+                    this.child(
+                        h_flex()
+                            .id(("quote-toggle", qid2 as u32))
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .text_color(rcx.link)
+                            .child(label)
+                            .when_some(on_toggle, |this, cb| {
+                                this.on_click(move |_, _, cx| cb(qid2, cx))
+                            }),
+                    )
+                })
+                .child(render_blocks(children, inh, rcx))
+                .into_any_element()
+        }
         Block::Table { style, rows } => {
             let child_inh = Inherited {
                 color: style.color.map(ir_color).or(inh.color),

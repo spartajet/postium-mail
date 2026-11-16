@@ -61,6 +61,21 @@ impl CapabilitySet {
         }
         out
     }
+
+    /// 服务器是否宣告 CONDSTORE 或 QRESYNC（指纹门控的输入，
+    /// 见 factory.rs：Hermes 时摘除）。
+    pub fn has_condstore(&self) -> bool {
+        self.condstore()
+    }
+
+    /// 返回摘除 CONDSTORE/QRESYNC 的能力集（邮箱大师 Hermes 规则：
+    /// FUN_10931bf0 中非 Hermes 且 capability 含 CONDSTORE(0x1000) 才启用）。
+    pub fn without_condstore(self) -> Self {
+        let mut caps = self.caps;
+        caps.remove("CONDSTORE");
+        caps.remove("QRESYNC");
+        Self { caps }
+    }
 }
 
 #[cfg(test)]
