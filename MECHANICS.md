@@ -15,7 +15,8 @@ postium-mail 依据本清单实现等价行为（等价换算允许，不复制�
 | --- | --- | --- |
 | greeting 指纹名单 | "Coremail System IMap Server Ready"（字符串表 @ `0x1119b2bc`）、"Courier-IMAP"（@ `0x1119b2e0`）、"Hermes"（@ `0x1119b2f0`）、"QIP IMAP server"（@ `0x1119b2f8`）、"WinWebMail"（@ `0x1119b308`）、"Microsoft Exchange IMAP4"（@ `0x1119b314`） | FUN_10932230 逐项 strstr |
 | 位 ↔ 匹配串 | 0xf6=Hermes、0xf8=QIP、0xf9=域名 yahoo/qq/foxmail、0xfb=Coremail、0xfc=Exchange、0x106=Courier、0x10d=**反相**（非 WinWebMail 才置位） | FUN_10932230 打包指针 `(len<<32)\|addr` 逐位解码 |
-| 读点（已证实用途） | 0xf6→FUN_10931bf0：**非 Hermes 且 capability 含 CONDSTORE(0x1000) 才启用 CONDSTORE**；0x106→FUN_109372a0：Courier 连接清理强制收尾挂起命令；0xfc→FUN_10acbd40/10acc380：Exchange 单独通知分支（0x2714 网络重试）；0xf9→FUN_10acbd40：清延迟旗标；f8 无消费者；0x10d 读点仅在 Qt 树模型（QStandardItem） | 各读点函数反编译 |
+| 读点（已证实用途） | 0xf6→FUN_10931bf0：**非 Hermes 且 capability 含 CONDSTORE(0x1000) 才启用 CONDSTORE**；0x106→FUN_109372a0：Courier 连接清理强制收尾挂起命令；0xfc→FUN_10acbd40/10acc380：Exchange 单独通知分支（0x2714 网络重试，一次性：清 0xfc 后不再走）；0xf9→FUN_10acbd40：清延迟旗标；f8 无消费者；0x10d 读点仅在 Qt 树模型（QStandardItem） | 各读点函数反编译 |
+| 通知合并（挂起位） | FUN_10acbd40/10acbea0：通知发送中到达的新事件不堆队列——记一个挂起位，完成后只补发一次（清位） | fnd_13 |
 | 域名特殊名单 | yahoo.com / qq.com / foxmail.com | `0x11110fac` 字符串表 |
 | 匹配方式 | greeting 内大小写不敏感子串匹配 | FUN_10932230 反汇编 |
 | 未命中 | 会话按标准 RFC 行为走 | FUN_10932230 默认路径 |
@@ -28,6 +29,11 @@ CONDSTORE/QRESYNC（大师 FUN_10931bf0 能力协商门控：`f6==0 && caps &
 0x1000`），postium 在 factory.rs 连接后用 `caps.without_condstore()` 摘除，
 同步档位决策（decide_plan）随之退到 UID 增量。其余位的读点未在
 imap_session 内证实有差异行为（f8 无消费者；0x10d 仅 Qt 树模型），暂不照搬。
+
+**通知合并**（fnd_13 对照 FUN_10acbea0）：SyncNow 执行前排干通道积压并合并
+（`merge_sync_scope`：全量吸收一切且清挂起位 / 同文件夹吞并 / 不同文件夹记
+唯一挂起位），本轮完成后只补发一次——IDLE EXISTS 连发或轮询叠加时只做一
+轮 IMAP 同步，不堆队列。
 
 ## 1. IMAP IDLE 重连策略（mastercore.dll）
 

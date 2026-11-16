@@ -44,6 +44,41 @@ impl EngineHandle {
     }
 }
 
+/// 合并两个 SyncNow 的同步范围（大师 FUN_10acbea0 挂起位语义的纯函数化）。
+///
+/// - `None`（全量）吸收任何范围 → 仍为 `None`；
+/// - 同文件夹 → 吞并（返回合并后的当前范围，挂起位不动）；
+/// - 不同文件夹 → 当前范围保留执行，新范围记入挂起位（已有挂起则新范围
+///   替换——挂起位只有一个，后来的范围同样只补发一次）。
+///
+/// 返回 `Some(scope)` 为本轮执行范围；`None` 表示本轮范围已是全量。
+fn merge_sync_scope(
+    current: Option<String>,
+    incoming: Option<String>,
+    pending: &mut Option<Option<String>>,
+) -> Option<String> {
+    match (current, incoming) {
+        // 全量吸收一切（含已有挂起——全量同步覆盖任何范围）
+        (None, _) => {
+            *pending = None;
+            None
+        }
+        (_cur, None) => {
+            *pending = None; // 来的范围是全量 → 本轮升级为全量，挂起位无意义
+            None
+        }
+        (Some(cur), Some(next)) => {
+            if cur == next {
+                Some(cur)
+            } else {
+                // 不同文件夹：当前保留，next 进挂起位（只补发一次）
+                *pending = Some(Some(next));
+                Some(cur)
+            }
+        }
+    }
+}
+
 /// 引擎主体。工厂经 `ConnectionPool` 内部 `Arc<dyn PoolConnect>` 注入
 /// （池去泛型化 → `run` future 单态化，Send 证明走具体类型路径）。
 pub struct AccountEngine {
@@ -91,6 +126,15 @@ impl AccountEngine {
         if let Some(sup) = supervisor.as_mut() {
             sup.watch_folder(&events, "INBOX".to_string());
         }
+
+        // 同文件夹 SyncNow 合并位（对照大师 FUN_10acbea0 挂起通知语义：
+        // 同步进行中到达的事件只记一个挂起位，完成后补发一次，绝不堆队列）。
+        // postium 等价物：执行前把通道里积压的 SyncNow 排干合并——
+        // 多条 IDLE EXISTS / 轮询触发叠在一起时只做一轮 IMAP 同步。
+        let mut pending_sync: Option<Option<String>> = None;
+        // 排干 SyncNow 时遇到的非 SyncNow 命令（按序补执行）
+        let mut deferred: std::collections::VecDeque<EngineCommand> =
+            std::collections::VecDeque::new();
 
         while let Some(cmd) = self.rx.recv().await {
             match cmd {
@@ -187,11 +231,55 @@ impl AccountEngine {
                     let _ = reply.send(result);
                 }
                 EngineCommand::SyncNow { folder, events: events_override, reply } => {
+                    // ── 合并积压 SyncNow（对照大师 FUN_10acbea0：挂起位 + 补发一次，不堆队列）──
+                    // 排干通道中已积压的 SyncNow：None（全量）吸收 Some；不同
+                    // 文件夹各留一条（记入 pending，完成后补发）；同文件夹吞并。
+                    // 被吞并命令的回执通道已由发送方（IDLE trigger_sync /
+                    // poll_once）主动关闭或丢弃，不会有人等它——若仍开着，
+                    // 以合并轮的结果回执（无语义损失：同步结果一致）。
+                    let mut scope = folder;
+                    while let Ok(queued) = self.rx.try_recv() {
+                        match queued {
+                            EngineCommand::SyncNow { folder: next, events: _, reply: r } => {
+                                if let Some(merged) = merge_sync_scope(scope.take(), next, &mut pending_sync) {
+                                    scope = Some(merged);
+                                }
+                                // 被吞并命令的回执：发送方通常已丢弃（IDLE
+                                // trigger_sync / poll_once 各自处理）；仍开着就
+                                // 以合并轮结果回执，语义一致
+                                let _ = r;
+                            }
+                            // 非 SyncNow 命令不能丢：按序补执行
+                            other => deferred.push_back(other),
+                        }
+                    }
                     let result = match events_override {
-                        Some(tx) => self.sync_folders(folder, tx).await,
-                        None => self.sync_folders(folder, events.clone()).await,
+                        Some(tx) => self.sync_folders(scope, tx).await,
+                        None => self.sync_folders(scope, events.clone()).await,
                     };
                     let _ = reply.send(result);
+                    // 补发挂起（清挂起位；大师 0xf9 语义：只补发一次）
+                    if let Some(pending) = pending_sync.take() {
+                        tracing::info!(
+                            account_id = self.account.id,
+                            pending = ?pending,
+                            "补发挂起的 SyncNow（合并）"
+                        );
+                        let _ = self.sync_folders(pending, events.clone()).await;
+                    }
+                    // 按序执行排干时遇到的非 SyncNow 命令
+                    while let Some(cmd) = deferred.pop_front() {
+                        match cmd {
+                            EngineCommand::WatchFolder { folder } => {
+                                if let Some(sup) = supervisor.as_mut() {
+                                    sup.watch_folder(&events, folder);
+                                }
+                            }
+                            // 带回执的命令不能积压后静默丢弃：同步前排干阶段
+                            // 不会遇到（排干只收 SyncNow），防御性兜底走回执
+                            other => self.reply_dropped(other).await,
+                        }
+                    }
                 }
                 EngineCommand::WatchFolder { folder } => {
                     if let Some(sup) = supervisor.as_mut() {
@@ -211,6 +299,45 @@ impl AccountEngine {
             sup.shutdown_all();
         }
         self.pool.shutdown().await;
+    }
+
+    /// 排干阶段兜底：把不该出现在 deferred 里的带回执命令以引擎错误回执，
+    /// 避免调用方在 oneshot 上永久挂起。正常路径不会走到（排干只吸收 SyncNow）。
+    async fn reply_dropped(&mut self, cmd: EngineCommand) {
+        let err = || MailError::SyncFailed("命令在 SyncNow 合并期间被丢弃".into());
+        match cmd {
+            EngineCommand::FetchBody { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::Move { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::SetFlags { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::AddFlags { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::RemoveFlags { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::Append { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::Delete { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::FetchEmailByUid { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::FetchBodySection { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::SyncNow { reply, .. } => {
+                let _ = reply.send(Err(err()));
+            }
+            EngineCommand::WatchFolder { .. } | EngineCommand::Shutdown => {}
+        }
     }
 
     /// SyncNow：同步指定文件夹（`Some`）或服务器全部可选文件夹（`None`）。
@@ -409,6 +536,53 @@ async fn local_sync_state_from_db(
 mod tests {
     use super::*;
     use crate::engine::pool::{MockFactory, MockSession};
+
+    // ---- merge_sync_scope（SyncNow 合并；对照大师 FUN_10acbea0 挂起位语义）----
+
+    #[test]
+    fn merge_same_folder_is_absorbed() {
+        let mut pending = None;
+        let out = merge_sync_scope(Some("INBOX".into()), Some("INBOX".into()), &mut pending);
+        assert_eq!(out.as_deref(), Some("INBOX"));
+        assert!(pending.is_none(), "同文件夹吞并不产生挂起");
+    }
+
+    #[test]
+    fn merge_full_sync_absorbs_any_scope() {
+        let mut pending = Some(Some("INBOX".into())); // 已有挂起
+        let out = merge_sync_scope(None, Some("INBOX".into()), &mut pending);
+        assert!(out.is_none(), "全量范围保持全量");
+        assert!(pending.is_none(), "全量覆盖挂起位");
+    }
+
+    #[test]
+    fn merge_different_folder_defers_once() {
+        let mut pending = None;
+        let out = merge_sync_scope(Some("INBOX".into()), Some("Archive".into()), &mut pending);
+        assert_eq!(out.as_deref(), Some("INBOX"), "当前范围保留");
+        assert_eq!(
+            pending.clone().flatten(),
+            Some("Archive".into()),
+            "不同文件夹进挂起位（只补发一次）"
+        );
+        // 第三个文件夹再来：挂起位被替换（仍然只有一个）
+        let out2 = merge_sync_scope(Some("INBOX".into()), Some("Sent".into()), &mut pending);
+        assert_eq!(out2.as_deref(), Some("INBOX"));
+        assert_eq!(
+            pending.clone().flatten(),
+            Some("Sent".into()),
+            "挂起位只有一个，后来的范围替换"
+        );
+    }
+
+    #[test]
+    fn merge_none_scope_from_incoming_upgrades_to_full() {
+        let mut pending = None;
+        let out = merge_sync_scope(Some("INBOX".into()), None, &mut pending);
+        assert!(out.is_none(), "来的范围是全量 → 本轮升级为全量");
+        assert!(pending.is_none());
+    }
+
     use crate::infrastructure::protocols::imap::FolderInfo;
     use crate::infrastructure::protocols::types::WholeEmailDto;
     use std::sync::atomic::AtomicUsize;
