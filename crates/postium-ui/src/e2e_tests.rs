@@ -2639,6 +2639,11 @@ fn html_email_display_keeps_status_bar(cx: &mut TestAppContext) {
     cx.dispatcher.allow_parking();
     let dir = tempfile::tempdir().unwrap();
     force_e2e_data_dir();
+    // 放行段（store.allow_remote_images）经 remember_remote_image_sender 写
+    // 进程共享 ui-state.json——与放行记忆/主题持久化测试串行化，否则并行
+    // 交错会把白名单写回对方刚重置的 ui-state（CI 双平台确定性复现，
+    // 本地高核并行因时序侥幸通过）。
+    let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let (api, sync_rx) = boot(dir.path());
 
     // 用户实测窗口尺寸（window-state.json：1636×847）——布局敏感回归按真实
