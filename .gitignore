@@ -13,3 +13,25 @@
 .claude/
 /.cache/
 /target
+
+# Ad-hoc build/test logs from shell redirects (agent sessions run cargo > *.log in repo root)
+*.log
+
+# Scratch dump targets left by agent sessions
+/fnlist.txt
+/structs.txt
+/lockout.txt
+
+# External RE/agent tool session state (cany/"anything" writes these into CWD).
+# Kept on disk but not tracked; delete manually once that session is finished.
+/investigation.cany/
+/capture/
+/checks/
+/inbox/
+/pinned/
+/shots/
+/craft.json
+/feed.json
+/transcript.json
+/usage.json
+/questions.json
