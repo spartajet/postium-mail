@@ -41,6 +41,10 @@ pub struct DetailStore {
     /// 确定稳定），值 = 展开。默认不在集合 = 折叠。换邮件/重解析后 id 语义
     /// 不变（Quote 块遍历顺序由文档结构决定）。
     pub quote_expanded: std::collections::HashSet<u64>,
+    /// MailView TextViewState 缓存（S1）：键与 html_cache 同源（内容感知二元
+    /// 组），容量 8 FIFO 逐出。标记 HTML 只含块索引占位——深浅通道共用同一
+    /// 宿主态（块内容渲染期经闭包回读当前通道文档），主题切换零重建。
+    mail_view_states: std::collections::VecDeque<(i32, u64, gpui_kit::Entity<gpui_kit::base::TextViewState>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -60,6 +64,7 @@ impl DetailStore {
             images: HtmlRenderState::default(),
             html_cache: EmailHtmlCache::default(),
             quote_expanded: std::collections::HashSet::new(),
+            mail_view_states: std::collections::VecDeque::new(),
         }
     }
 
@@ -266,6 +271,35 @@ impl DetailStore {
     /// 副本）。渲染入口按当前主题传 `dark`（email_detail 接线，T14）。
     pub fn cached_doc(&mut self, email_id: i32, html: &str, dark: bool) -> Option<HtmlDocument> {
         self.html_cache.doc_for(content_key(email_id, html), html, dark)
+    }
+
+    /// MailView 宿主态取用（S1）：内容感知键命中直接返回；未命中经
+    /// [`crate::views::mail_view::build_text_view_state`] 构造（认领解析器参与
+    /// 首次解析），入缓存并 FIFO 逐出（容量 8，与 html_cache 口径一致）。
+    pub fn mail_text_view_state(
+        &mut self,
+        email_id: i32,
+        html: &str,
+        doc: &HtmlDocument,
+        cx: &mut gpui_kit::App,
+    ) -> gpui_kit::Entity<gpui_kit::base::TextViewState> {
+        let key = content_key(email_id, html);
+        if let Some(pos) = self
+            .mail_view_states
+            .iter()
+            .position(|(id, hash, _)| *id == key.0 && *hash == key.1)
+        {
+            // 命中提升为最近使用（队尾）
+            let entry = self.mail_view_states.remove(pos).expect("pos 来自 iter().position()");
+            self.mail_view_states.push_back(entry.clone());
+            return entry.2.clone();
+        }
+        let state = crate::views::mail_view::build_text_view_state(doc, cx);
+        self.mail_view_states.push_back((key.0, key.1, state.clone()));
+        while self.mail_view_states.len() > 8 {
+            self.mail_view_states.pop_front();
+        }
+        state
     }
 }
 

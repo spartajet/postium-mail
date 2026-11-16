@@ -81,7 +81,7 @@ fn wait_for<T>(
     panic!("等待条件超时");
 }
 
-fn setup(cx: &mut gpui_pre::App) {
+pub(crate) fn setup(cx: &mut gpui_pre::App) {
     gpui_kit::init(cx);
     postium_editor::init(cx);
     cx.set_global(crate::i18n::I18nGlobal {
@@ -1931,7 +1931,8 @@ fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
 struct HtmlRenderProbe {
     doc: postium_html::HtmlDocument,
     /// 链接点击回调（Task 10：e2e 注入捕获闭包断言 SafeUrl 通路）。
-    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + 'static>,
+    /// `Send + Sync`：渲染管线回调口径（MailView 渲染闭包跨线程句柄，S1）。
+    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + Send + Sync + 'static>,
 }
 
 impl gpui_kit::Render for HtmlRenderProbe {

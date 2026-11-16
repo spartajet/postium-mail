@@ -15,6 +15,8 @@ mod views;
 mod window_state;
 
 #[cfg(test)]
+mod e2e_mail_view_tests;
+#[cfg(test)]
 mod e2e_tests;
 
 use std::path::PathBuf;

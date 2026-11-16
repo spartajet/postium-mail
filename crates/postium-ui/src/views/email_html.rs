@@ -113,7 +113,10 @@ impl HtmlRenderState {
 }
 
 /// 渲染期常量：主题衍生默认色板 + 主题字体 + 链接回调，一次取齐（帧内不可变）。
-struct RenderCtx {
+///
+/// `pub(crate)`：MailView 编排层（mail_view.rs）复用同一渲染内核——TextView
+/// 宿主路径的块渲染器直接消费本 ctx（S1 起）。
+pub(crate) struct RenderCtx {
     dark: bool,
     font_family: SharedString,
     foreground: Hsla,
@@ -126,7 +129,9 @@ struct RenderCtx {
     selection_bg: Hsla,
     /// 链接点击回调（SelectableText hitbox → 调用方打开动作；email_detail
     /// 侧为 open::that_detached 系统处理，见其 open_safe_url）。
-    on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+    /// `Send + Sync`：MailView 的块渲染闭包经 TextView 注册为跨线程句柄，
+    /// 回调须随 RenderCtx 整体满足（与 QuoteFold.on_toggle 同口径）。
+    pub(crate) on_link: Arc<dyn Fn(&SafeUrl) + Send + Sync + 'static>,
     /// 图片三源上下文（Remote 查 resolved / Cid 扫 attachments / DataUri 解码）。
     images: ImageCtx,
     /// 文本划选状态（组注册表 + 锚点/游标，线上反馈①）。
@@ -144,7 +149,7 @@ impl RenderCtx {
     }
     fn new(
         dark: bool,
-        on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+        on_link: Arc<dyn Fn(&SafeUrl) + Send + Sync + 'static>,
         images: ImageCtx,
         selection: HtmlSelection,
         quotes: Option<QuoteFold>,
@@ -223,7 +228,7 @@ pub fn render_html_document(
     images: ImageCtx,
     selection: HtmlSelection,
     quotes: Option<QuoteFold>,
-    on_link: impl Fn(&SafeUrl) + 'static,
+    on_link: impl Fn(&SafeUrl) + Send + Sync + 'static,
     cx: &mut App,
 ) -> AnyElement {
     selection.begin_frame();
@@ -233,6 +238,31 @@ pub fn render_html_document(
     render_blocks(&doc.blocks, Inherited::default(), &rcx)
         .when_probe("html-root")
         .into_any_element()
+}
+
+/// MailView 编排层帧入口（S1）：帧初始化（划选组注册表清零 + 引用 id 计数
+/// 重置，与 [`render_html_document`] 同语义）+ 渲染内核 ctx 构造。
+///
+/// MailView 路径下块的渲染顺序由 TextView 决定（标记序 = 文档序），帧首
+/// 初始化语义不变。
+pub(crate) fn mail_frame_ctx(
+    dark: bool,
+    on_link: Arc<dyn Fn(&SafeUrl) + Send + Sync + 'static>,
+    images: ImageCtx,
+    selection: HtmlSelection,
+    quotes: Option<QuoteFold>,
+    cx: &App,
+) -> RenderCtx {
+    selection.begin_frame();
+    QUOTE_ID.store(0, std::sync::atomic::Ordering::Relaxed);
+    RenderCtx::new(dark, on_link, images, selection, quotes, cx)
+}
+
+/// MailView 块渲染器入口（S1）：单块 → GPUI 元素（复用渲染内核全部保真
+/// 逻辑：富样式 runs / 图片三源 / 探针）。容器内继承链从文档根默认值起
+/// （宿主路径块均为顶层块，语义等价 [`render_html_document`] 的根遍历）。
+pub(crate) fn mail_render_block(block: &Block, rcx: &RenderCtx) -> AnyElement {
+    render_block(block, Inherited::default(), rcx)
 }
 
 /// 引用块 id 计数器（每帧从 QUOTE_FRAME_BASE 起点递增；render_html_document
@@ -822,7 +852,7 @@ struct SelectableText {
     selection: HtmlSelection,
     ranges: Vec<Range<usize>>,
     urls: Vec<SafeUrl>,
-    on_link: Arc<dyn Fn(&SafeUrl) + 'static>,
+    on_link: Arc<dyn Fn(&SafeUrl) + Send + Sync + 'static>,
 }
 
 #[derive(Default)]
@@ -1367,8 +1397,9 @@ fn heading_size(level: u8) -> f32 {
 // ---------------------------------------------------------------------------
 // 测试探针（仅测试构建生效）：块级锚点与行内文本段以选择器写入渲染树，
 // e2e 经 `VisualTestContext::debug_bounds` 查询；正常构建直通零开销。
+// `pub(crate)`：mail_view 宿主路径同用（html-root 根锚点等，S1）。
 // ---------------------------------------------------------------------------
-trait ProbeExt: Sized {
+pub(crate) trait ProbeExt: Sized {
     fn when_probe(self, selector: &str) -> Self;
 }
 

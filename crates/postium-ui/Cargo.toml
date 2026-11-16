@@ -33,6 +33,9 @@ regex = "1"
 # 默认全家桶，feature 统一后实际编译集为并集——此处声明的是本 crate 自身
 # 的最小契约，gpui-pre 若将来裁剪不至连带放大。
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# MailView 标记认领解析器（S1）：闭包签名引用 gpui-base html 管线的 RcDom
+# Node 类型——与 base 同版本（Cargo.lock 统一实例），仅类型对齐无额外逻辑。
+markup5ever_rcdom = "0.3"
 
 [dev-dependencies]
 gpui-pre = { version = "0.3.12", package = "gpui-pre", features = ["test-support"] }
