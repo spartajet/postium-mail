@@ -27,14 +27,12 @@ use postium_html::{serialize_marker_html, Block, HtmlDocument, SafeUrl};
 use super::email_html::{self, ImageCtx, ProbeExt as _, QuoteFold};
 use super::html_selection::HtmlSelection;
 
-/// S1 支持集递归判定：Table/Quote 暂留旧路径（S2/S3 迁入）。
-fn block_supported(block: &Block) -> bool {
-    match block {
-        Block::Table { .. } | Block::Quote { .. } => false,
-        Block::Container { children, .. } => children.iter().all(block_supported),
-        Block::List { items, .. } => items.iter().all(|group| group.iter().all(block_supported)),
-        _ => true,
-    }
+/// 支持集递归判定。S2/S3 裁定：引用折叠与 flex 表格的渲染逻辑本就住在
+/// 渲染内核（render_block 递归全类型），宿主路径与旧路径共用同一实现——
+/// e2e（smoke 含 Quote、table_and_link 含 colspan 比例断言）裁决通过后
+/// 全量放开。保留判定函数为新块类型留回落机制。
+fn block_supported(_block: &Block) -> bool {
+    true
 }
 
 /// 文档是否可走 MailView 路径（全部块类型已迁移；空文档不值得建宿主）。

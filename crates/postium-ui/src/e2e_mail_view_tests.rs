@@ -139,7 +139,8 @@ fn mail_view_renders_blocks_inside_text_view_host(cx: &mut gpui_pre::TestAppCont
     };
     assert!(mail_view::supported(&img_doc), "块级图片应在支持集内");
 
-    // 回落判定：Table/Quote → 旧路径
+    // 全量路由（S2/S3）：引用与表格块同走宿主路径（渲染内核共用，e2e
+    // smoke/table_and_link 裁决）；空文档仍不值得建宿主。
     let quote_doc = HtmlDocument {
         blocks: vec![Block::Quote {
             children: vec![Block::Paragraph {
@@ -149,5 +150,9 @@ fn mail_view_renders_blocks_inside_text_view_host(cx: &mut gpui_pre::TestAppCont
             }],
         }],
     };
-    assert!(!mail_view::supported(&quote_doc), "引用块应回落旧路径（S2 迁入）");
+    assert!(mail_view::supported(&quote_doc), "引用块应走宿主路径（S2 已迁入）");
+    assert!(
+        !mail_view::supported(&HtmlDocument { blocks: vec![] }),
+        "空文档不应建宿主（纯文本兜底）"
+    );
 }
