@@ -2834,6 +2834,12 @@ fn html_images_blocked_until_allowed(cx: &mut TestAppContext) {
     // 默认拦截断言会被记忆击穿）；与主题持久化测试串行化防文件写交错
     force_e2e_data_dir();
     let _guard = UI_STATE_FILE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    // 前置隔离：同进程早先的测试（如状态栏回归的放行段）可能已把本账户
+    // 地址（seed.e2e@postium.test——同账户草稿的 sender_email 相同）记入
+    // 放行白名单，自动放行会让「加载图片」条永不出现（:2907 超时，CI 双
+    // 平台确定性复现）。默认拦截断言的前提必须自持：重置 ui-state，而非
+    // 假设进程干净。
+    crate::ui_state::save(&crate::ui_state::UiState::default());
     let (api, sync_rx) = boot(dir.path());
     // 草稿保存的 async move 会移走 api；重装载体用提前克隆（放行记忆段用）
     let reload_api = api.clone();
