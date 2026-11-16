@@ -139,17 +139,26 @@ impl DetailStore {
                     }
                     match detail {
                         Ok(detail) => {
-                            // 远程图片放行按发件人记忆（线上反馈①）：已放行过的
-                            // 发件人自动放行并直接拉取，不再每次询问
+                            // 远程图片放行（线上反馈① + 邮件性质门）：
+                            // 双门判定——①性质门（nav::folder_image_policy，
+                            //   Sent/Drafts=自动放行、Junk/Trash=永不自动放行、
+                            //   其余=看发件人门）；②发件人白名单门
+                            //   （ui-state.json 记忆，Gmail「始终显示此发件人
+                            //   的图片」语义）。性质门优先：垃圾箱邮件即使
+                            //   发件人白名单命中也不自动放行（追踪像素高发区，
+                            //   手动「加载图片」仍可用）。
                             let sender =
                                 ui_state::normalize_sender(&detail.email.sender_email);
+                            let folder = detail.email.folder.clone();
+                            let sender_allowed = !sender.is_empty()
+                                && ui_state::load().allows_remote_images_from(&sender);
                             // 正文 HTML 原文透传（图片三源由渲染层按 ImageRef 消费）
                             store.html = Some(detail.body_html.clone().unwrap_or_default());
                             store.detail = Some(detail);
                             store.images.attachments = attachments;
-                            if !sender.is_empty()
-                                && ui_state::load().allows_remote_images_from(&sender)
-                            {
+                            let auto_allow = crate::nav::folder_image_policy(&folder)
+                                .allows_auto(sender_allowed);
+                            if auto_allow {
                                 let html = store.html.clone().unwrap_or_default();
                                 // URL 收集走浅色通道（Remote URL 不受深色适配影响），
                                 // cached_doc 首帧渲染同键命中零重复解析
@@ -181,7 +190,9 @@ impl DetailStore {
     /// 每个拉取结果带 email_id 竞态防护——切换邮件后的迟到结果直接丢弃。
     ///
     /// 发件人记忆（线上反馈①）：放行同时按发件人持久化（ui-state.json），
-    /// 后续该发件人的邮件在装载期自动放行（见 [`DetailStore::load_impl`]）。
+    /// 后续该发件人的邮件在装载期自动放行（见 [`DetailStore::load_impl`]；
+    /// 垃圾/已删除文件夹受性质门 `nav::folder_image_policy` 约束不自动放行，
+    /// 但本手动路径不受限）。
     pub fn allow_remote_images(
         &mut self,
         urls: Vec<String>,
