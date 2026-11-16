@@ -2821,8 +2821,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f4e5aff50636223b268a687ad5788ec54fa77c8e57ca9e53d158f19e0425d95"
+source = "git+https://github.com/spartajet/gpui-kit?branch=mailview-ext#c29c7fb2b6ee34568fbdc09feaf462957e1b2768"
 dependencies = [
  "aho-corasick",
  "anyhow",
