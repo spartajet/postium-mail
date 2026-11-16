@@ -5,6 +5,35 @@ use crate::domain::providers::StandardFolder;
 use std::collections::{HashMap, HashSet};
 use utf7_imap::decode_utf7_imap;
 
+/// 大师已知 wire 名表（mastercore.dll 0x11162600，fnd_14）：服务器端
+/// mUTF-7 编码名直接命中——&g0l6P3ux-=草稿箱、&XfJT0ZAB-=已发送、
+/// &V4NXPpCuTvY-=已删除、&j,dg0TDhMPww6w-=垃圾邮件等。服务器没给
+/// SPECIAL-USE 属性时这层比关键词更可靠（编码名是服务器自报的）。
+const MASTER_WIRE_NAMES: &[(&str, FolderCategory)] = &[
+    // ── Drafts（大师角色 02）──
+    ("Draft", FolderCategory::Drafts),
+    ("Brouillon", FolderCategory::Drafts),
+    ("&Tgtm+DBN-", FolderCategory::Drafts), // 下書き
+    ("&g0l6P3ux-", FolderCategory::Drafts), // 草稿箱（网易）
+    ("&kAFP4W4IMH8-", FolderCategory::Drafts), //俄语 Черновики
+    ("Drafts", FolderCategory::Drafts),
+    // ── Sent（大师角色 03）──
+    ("&XfJT0ZAB-", FolderCategory::Sent), // 已发送
+    ("&XfJ2fJAB-", FolderCategory::Sent), // 已发出
+    ("&XfJSIJZk-", FolderCategory::Sent), // 已发送(变体)
+    ("&XfJSKpZk-", FolderCategory::Sent), // 已发送(变体)
+    // ── Trash（大师角色 04）──
+    ("&V4NXPpCuTvY-", FolderCategory::Trash), // 已删除
+    ("&V4NXPpD1TvY-", FolderCategory::Trash), // 已删除邮件
+    ("&UkqWZG4IMH8-", FolderCategory::Trash), //俄语 Корзина
+    // ── Junk（大师角色 05）──
+    ("&j,dg0TDhMPww6w-", FolderCategory::Junk), // 垃圾邮件
+    ("&dcVr0mWHTvZZOQ-", FolderCategory::Junk), // 垃圾邮件(变体)
+    ("&dcVr0mqUaEhZPg-", FolderCategory::Junk), // 垃圾邮件(变体)
+    // ── Archive（大师表无 06/12 对应，All Mail 归 Archive）──
+    ("&WkBHCG-7zTXhZg-", FolderCategory::Archive), // 所有邮件
+];
+
 /// 一个远程文件夹的原始输入（LIST 返回，name 为 IMAP-UTF-7 编码 + 属性）
 #[derive(Debug, Clone)]
 pub struct RemoteFolder {
@@ -222,6 +251,15 @@ fn classify_protocol_folder(folder: &RemoteFolder) -> Option<FolderCategory> {
     if let Some(cat) = folder.special_use.iter().find_map(|f| f.to_category()) {
         return Some(cat);
     }
+    // 第一层（大师 wire 名表，0x11162600）：服务器没给 SPECIAL-USE 时，
+    // 已知 mUTF-7 wire 名直接命中（比解码后关键词更可靠）
+    if let Some(cat) = MASTER_WIRE_NAMES
+        .iter()
+        .find(|(n, _)| folder.name.eq_ignore_ascii_case(n))
+        .map(|(_, c)| *c)
+    {
+        return Some(cat);
+    }
     None
 }
 
@@ -274,6 +312,27 @@ mod tests {
             name: name.into(),
             special_use: vec![],
             no_select: false,
+        }
+    }
+
+    /// 大师 wire 名表（0x11162600，fnd_14）：服务器没给 SPECIAL-USE 时，
+    /// 网易系 mUTF-7 wire 名直接命中类别
+    #[test]
+    fn master_wire_names_hit_without_special_use() {
+        let cases: &[(&str, FolderCategory)] = &[
+            ("&XfJT0ZAB-", FolderCategory::Sent),     // 已发送
+            ("&XfJ2fJAB-", FolderCategory::Sent),     // 已发出
+            ("&g0l6P3ux-", FolderCategory::Drafts),   // 草稿箱
+            ("&Tgtm+DBN-", FolderCategory::Drafts),   // 下書き
+            ("&V4NXPpCuTvY-", FolderCategory::Trash), // 已删除
+            ("&V4NXPpD1TvY-", FolderCategory::Trash), // 已删除邮件
+            ("&j,dg0TDhMPww6w-", FolderCategory::Junk), // 垃圾邮件
+            ("&dcVr0mWHTvZZOQ-", FolderCategory::Junk), // 垃圾邮件(变体)
+            ("&dcVr0mqUaEhZPg-", FolderCategory::Junk), // 垃圾邮件(变体)
+        ];
+        for (name, want) in cases {
+            let got = classify_protocol_folder(&folder(name));
+            assert_eq!(got.as_ref(), Some(want), "wire 名 {name} 应命中 {want:?}");
         }
     }
 

@@ -17,6 +17,8 @@ postium-mail 依据本清单实现等价行为（等价换算允许，不复制�
 | 位 ↔ 匹配串 | 0xf6=Hermes、0xf8=QIP、0xf9=域名 yahoo/qq/foxmail、0xfb=Coremail、0xfc=Exchange、0x106=Courier、0x10d=**反相**（非 WinWebMail 才置位） | FUN_10932230 打包指针 `(len<<32)\|addr` 逐位解码 |
 | 读点（已证实用途） | 0xf6→FUN_10931bf0：**非 Hermes 且 capability 含 CONDSTORE(0x1000) 才启用 CONDSTORE**；0x106→FUN_109372a0：Courier 连接清理强制收尾挂起命令；0xfc→FUN_10acbd40/10acc380：Exchange 单独通知分支（0x2714 网络重试，一次性：清 0xfc 后不再走）；0xf9→FUN_10acbd40：清延迟旗标；f8 无消费者；0x10d 读点仅在 Qt 树模型（QStandardItem） | 各读点函数反编译 |
 | 通知合并（挂起位） | FUN_10acbd40/10acbea0：通知发送中到达的新事件不堆队列——记一个挂起位，完成后只补发一次（清位） | fnd_13 |
+| 文件夹名解析（wire 名表） | 0x11162600 表：wire 名（含 mUTF-7 编码 &g0l6P3ux-=草稿箱、&XfJT0ZAB-=已发送、&V4NXPpCuTvY-=已删除、&j,dg0TDhMPww6w-=垃圾 + 英/法/日/俄变体）直接映射角色码 02=Drafts/03=Sent/04=Trash/05=Junk/06=Virus/12=Subscribe；mUTF-7 编码器 sub_108d7a40 查 0x111955c0 字母表，0x11195600 为 256 字节逆向解码表 | fnd_14 |
+| 文件夹排序（角色键） | 0x113e2230 数组：INBOX=10、红旗=20、Sent=30、Trash=40、Junk=50、Virus=60、广告=90、订阅=120；本地虚拟文件夹负数键 -10/-20/-21/-22（FUN_109ce230） | fnd_14 |
 | 域名特殊名单 | yahoo.com / qq.com / foxmail.com | `0x11110fac` 字符串表 |
 | 匹配方式 | greeting 内大小写不敏感子串匹配 | FUN_10932230 反汇编 |
 | 未命中 | 会话按标准 RFC 行为走 | FUN_10932230 默认路径 |
@@ -34,6 +36,17 @@ imap_session 内证实有差异行为（f8 无消费者；0x10d 仅 Qt 树模型
 （`merge_sync_scope`：全量吸收一切且清挂起位 / 同文件夹吞并 / 不同文件夹记
 唯一挂起位），本轮完成后只补发一次——IDLE EXISTS 连发或轮询叠加时只做一
 轮 IMAP 同步，不堆队列。
+
+**文件夹名显示与排序**（fnd_14 对照 0x11162600 wire 名表 + 0x113e2230 角色键）：
+- core：`FolderRegistry` 新增第一层 MASTER_WIRE_NAMES——服务器未给
+  SPECIAL-USE 时，已知 wire 名（含 mUTF-7 编码名）直接映射类别（比解码后
+  关键词更可靠，编码名是服务器自报的）；
+- ui：`folder_display_name`（nav.rs）两步法——wire 名先精确命中本地化表
+  （mUTF-7 base64 大小写敏感，先精确匹配再 ASCII 大写匹配），未命中则按
+  RFC 3502 modified UTF-7 解码（&Wo… → 中文），IMAP 操作仍用 wire 名；
+- ui：`folder_sort_key` 对照大师角色键 INBOX=10 < Sent=30 < Drafts=32 <
+  Trash=40 < Junk=50 < Archive=55 < 自定义=90；core 聚合排序同样按
+  FolderCategory::priority，未分类在已分类之后。
 
 ## 1. IMAP IDLE 重连策略（mastercore.dll）
 

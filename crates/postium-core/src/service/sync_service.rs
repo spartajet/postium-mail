@@ -553,7 +553,20 @@ fn aggregate_folder_stats_by_category(
     }
 
     let mut stats = grouped.into_values().collect::<Vec<_>>();
-    stats.sort_by(|a, b| a.folder.cmp(&b.folder));
+    // 排序对照大师 Qt 树模型（0x113e2230 键序列，fnd_14）：
+    // INBOX=10 → Sent=30 → Drafts → Junk(垃圾)=50 → Trash=40 之后、
+    // 未知文件夹按解码名混排。类别键用 FolderCategory::priority，
+    // 未分类文件夹排在已分类之后（大师里自定义文件夹也在标准文件夹后面）。
+    stats.sort_by(|a, b| {
+        let rank = |s: &FolderStat| {
+            FolderCategory::parse(&s.folder)
+                .map(|c| (0, c.priority()))
+                .unwrap_or((1, 0))
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a.folder.cmp(&b.folder))
+    });
     stats
 }
 
