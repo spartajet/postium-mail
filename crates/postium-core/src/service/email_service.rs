@@ -125,7 +125,7 @@ pub enum EmailCategory {
 /// - `is_starred`: 是否星标
 /// - `sent_at`: 发送时间（Unix 时间戳，秒）
 /// - `has_attachments`: 是否有附件（根据附件表真实计算）
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 pub struct EmailDto {
     /// 数据库主键
     pub id: i32,

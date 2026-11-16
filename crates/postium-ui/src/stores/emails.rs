@@ -86,11 +86,15 @@ impl EmailsStore {
     }
 
     /// 按当前上下文（导航或搜索）重载第一页（操作后刷新）。
+    ///
+    /// 非搜索路径走**原位刷新**：不清空 `emails`、不 bump `nav_version`
+    /// （宿主不重建列表视图），结果回来后整页替换并按需清选中——
+    /// 同步期间无论有无新邮件，列表都不再闪烁（滚动/选中保持）。
     pub fn refresh_now(&mut self, api: &Arc<CoreApi>, cx: &mut Context<Self>) {
         if let Some(q) = self.search_query.clone() {
             self.search(&q, api, cx);
         } else {
-            self.reset_and_load(api, cx);
+            self.load(0, api, cx);
         }
     }
 
@@ -264,13 +268,26 @@ impl EmailsStore {
                 match result {
                     Some(resp) => {
                         if page == 0 {
-                            store.emails = resp.emails;
+                            // 原位整页替换（refresh_now 语义）：若数据没变就不 bump
+                            // 版本、不清选中——同步空转时列表零重绘（不闪烁）
+                            let changed = store.emails != resp.emails;
+                            if changed {
+                                // 选中邮件已不在结果中（被删/移走）→ 数据驱动清选中
+                                if let Some(sel) = store.selected {
+                                    if !resp.emails.iter().any(|e| e.id == sel) {
+                                        store.selected = None;
+                                        store.selected_version += 1;
+                                    }
+                                }
+                                store.emails = resp.emails;
+                                store.list_version += 1;
+                            }
                         } else {
                             store.emails.extend(resp.emails);
+                            store.list_version += 1;
                         }
                         store.total = resp.total;
                         store.page = page;
-                        store.list_version += 1;
                     }
                     None => {
                         // 失败：保持现有数据，仅复位 loading（下次可重试）
