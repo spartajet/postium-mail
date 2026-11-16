@@ -11,6 +11,13 @@ pub struct UiState {
     /// （Gmail「始终显示来自此发件人的图片」语义，线上反馈①——此前
     /// 放行态随邮件装载生灭，每次打开都要重新点击）。
     pub remote_image_senders: Option<Vec<String>>,
+    /// 自动加载邮件远程图片（全局读信设置，规则形状对齐 MailMaster
+    /// autoDownloadMailImages，fnd_23）：postium 保持隐私默认拦截
+    /// （spec §4.4）——缺省 false；「始终加载」按钮持久化为 true 后，
+    /// 后续所有邮件装载期自动放行（大师 setReadSetting 语义）。大师 JS
+    /// 侧 reducer 初始值为 !0（true），其 native 存储默认未证实，此处
+    /// 取保守拦截默认。
+    pub auto_download_mail_images: Option<bool>,
 }
 
 impl UiState {
@@ -19,6 +26,11 @@ impl UiState {
         self.remote_image_senders
             .as_ref()
             .is_some_and(|v| v.iter().any(|s| s == sender))
+    }
+
+    /// 自动加载远程图片（缺省 false：postium 隐私默认拦截，spec §4.4）。
+    pub fn auto_download_mail_images(&self) -> bool {
+        self.auto_download_mail_images.unwrap_or(false)
     }
 }
 
@@ -65,6 +77,21 @@ pub fn remember_remote_image_sender(sender: &str) {
     }
 }
 
+/// 「始终加载」按钮（对齐大师 setReadSetting({autoDownloadMailImages:!0})，
+/// fnd_23）：全局持久化自动加载远程图片。读改写整份 ui-state.json。
+pub fn always_download_mail_images() {
+    let mut state = load();
+    if state.auto_download_mail_images != Some(true) {
+        state.auto_download_mail_images = Some(true);
+        save(&state);
+    }
+}
+
+/// 自动加载远程图片的全局读信设置（缺省 false：postium 隐私默认拦截）。
+pub fn auto_download_mail_images() -> bool {
+    load().auto_download_mail_images()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,5 +113,23 @@ mod tests {
         state.remote_image_senders = Some(vec!["a@b".into(), "c@d".into()]);
         assert!(state.allows_remote_images_from("a@b"));
         assert!(!state.allows_remote_images_from("e@f"));
+    }
+
+    /// 全局自动下载设置：postium 隐私默认拦截（spec §4.4，缺省 false）；
+    /// 「始终加载」持久化 Some(true) 后开启（大师 fnd_23 的规则形状：
+    /// 全局开关 + 单封提示 + 始终加载按钮，无按文件夹/发件人的门）。
+    #[test]
+    fn auto_download_mail_images_defaults_false() {
+        assert!(!UiState::default().auto_download_mail_images());
+        assert!(!UiState {
+            auto_download_mail_images: None,
+            ..Default::default()
+        }
+        .auto_download_mail_images());
+        assert!(UiState {
+            auto_download_mail_images: Some(true),
+            ..Default::default()
+        }
+        .auto_download_mail_images());
     }
 }

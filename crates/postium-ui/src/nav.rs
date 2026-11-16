@@ -125,74 +125,10 @@ pub fn folder_sort_key(folder: &str) -> (u8, String) {
     (rank, folder_display_name(folder))
 }
 
-/// 远程图片自动下载策略（按邮件所在文件夹的性质）。
-///
-/// 双门语义（性质门优先于发件人白名单门）：
-/// - [`FolderImagePolicy::Always`]（Sent）：自有已发邮件——自己发出的
-///   正文远程图多为收件方回显内容，追踪像素风险低，自动放行；
-///   （Drafts 不归此类：转发/嵌入的草稿可能携带第三方追踪内容，维持
-///   白名单语义，见 [`FolderImagePolicy::SenderAllowed`]。）
-/// - [`FolderImagePolicy::NeverAuto`]（Junk/Trash）：营销/垃圾邮件是追踪
-///   像素高发区，已删邮件同理——**永不自动放行**（「加载图片」手动放行
-///   仍然可用，见 email_detail.rs 提示条——性质门只管自动路径）；
-/// - [`FolderImagePolicy::SenderAllowed`]（其余：Inbox/Drafts/Archive/自定义）：
-///   维持发件人白名单语义（线上反馈①，ui-state.json 记忆）。
-///
-/// wire 名识别与 [`folder_sort_key`] 同口径（英文变体 contains + 网易系
-/// mUTF-7 编码名精确匹配，fnd_14 大师表）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FolderImagePolicy {
-    /// 始终自动放行（自有已发邮件：Sent）
-    Always,
-    /// 永不自动放行（仍可手动）：Junk/Trash
-    NeverAuto,
-    /// 按发件人白名单（sender_allowed 时放行）
-    SenderAllowed,
-}
-
-impl FolderImagePolicy {
-    /// 自动放行判定：性质门 + 发件人门（白名单查询结果由调用方传入，
-    /// 本函数纯判定可单测）。
-    pub fn allows_auto(self, sender_allowed: bool) -> bool {
-        match self {
-            Self::Always => true,
-            Self::NeverAuto => false,
-            Self::SenderAllowed => sender_allowed,
-        }
-    }
-}
-
-/// 文件夹（IMAP wire 名）→ 远程图片自动下载策略。
-pub fn folder_image_policy(folder: &str) -> FolderImagePolicy {
-    let lower = folder.to_ascii_lowercase();
-    // 自有已发邮件：sent（英文变体 + 网易系 wire 名，与 folder_sort_key 同表）。
-    // Drafts 不在此列（转发草稿可携带第三方内容，维持白名单门）。
-    if lower.contains("sent")
-        || matches!(
-            lower.as_str(),
-            "&xfjt0zab-" | "&xfj2fjab-" | "&xfjsijzk-" | "&xfjskpzk-"
-        )
-    {
-        FolderImagePolicy::Always
-    } else if lower.contains("junk")
-        || lower.contains("spam")
-        || lower.contains("trash")
-        || lower.contains("deleted")
-        || matches!(
-            lower.as_str(),
-            "&j,dg0tdhmpww6w-"
-                | "&dcvr0mwhtvzzoq-"
-                | "&dcvr0mquaehzpg-"
-                | "&v4nxppcutvy-"
-                | "&v4nxppd1tvy-"
-                | "&ukqwzg4imh8-"
-        )
-    {
-        FolderImagePolicy::NeverAuto
-    } else {
-        FolderImagePolicy::SenderAllowed
-    }
-}
+/// 远程图片自动放行策略（对齐 MailMaster，fnd_23）：
+/// 不按文件夹性质判定——唯一开关是全局读信设置
+/// `auto_download_mail_images`（默认 true，详见 [`crate::ui_state`]），
+/// 叠加发件人白名单记忆（线上反馈①）。此处不再提供按文件夹的门控函数。
 
 #[cfg(test)]
 mod tests {
@@ -247,53 +183,5 @@ mod tests {
                 "自定义项目".to_string(),
             ]
         );
-    }
-
-    /// 远程图片自动下载策略（性质门）：已发邮件自动放行、垃圾/已删除
-    /// 永不自动放行、其余（含草稿——转发可携带第三方内容）走发件人白名单；
-    /// wire 名与 folder_sort_key 同口径。
-    #[test]
-    fn image_policy_by_folder_nature() {
-        // 已发邮件：Sent 全变体 → Always（发件人门无关）
-        for f in [
-            "Sent",
-            "Sent Messages",
-            "Sent Items",
-            "&XfJT0ZAB-",
-            "&XfJ2fJAB-",
-        ] {
-            assert_eq!(folder_image_policy(f), FolderImagePolicy::Always, "{f}");
-            assert!(folder_image_policy(f).allows_auto(false), "{f} 白名单外也放行");
-        }
-        // 垃圾/已删除：NeverAuto——发件人白名单命中也不自动放行
-        for f in [
-            "Junk",
-            "Spam",
-            "&j,dg0TDhMPww6w-",
-            "&dcVr0mWHTvZZOQ-",
-            "Trash",
-            "Deleted Messages",
-            "&V4NXPpCuTvY-",
-        ] {
-            assert_eq!(folder_image_policy(f), FolderImagePolicy::NeverAuto, "{f}");
-            assert!(
-                !folder_image_policy(f).allows_auto(true),
-                "{f} 白名单命中也不自动放行（仍可手动）"
-            );
-        }
-        // 收件箱/草稿/归档/自定义：SenderAllowed（白名单决定）——草稿不归
-        // Always（转发草稿可携带第三方追踪内容，默认拦截语义保留）
-        for f in [
-            "INBOX",
-            "Drafts",
-            "&g0l6P3ux-",
-            "Archive",
-            "&WkBHCG-7zTXhZg-",
-            "Projects",
-        ] {
-            assert_eq!(folder_image_policy(f), FolderImagePolicy::SenderAllowed, "{f}");
-            assert!(!folder_image_policy(f).allows_auto(false), "{f} 白名单外拦截");
-            assert!(folder_image_policy(f).allows_auto(true), "{f} 白名单命中放行");
-        }
     }
 }

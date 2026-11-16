@@ -292,6 +292,23 @@ impl EmailDetailView {
     /// 状态与拉取编排都在 DetailStore（[`DetailStore::allow_remote_images`]）。
     /// 文档按浅色通道取（Remote 图 URL 不受深色适配影响，`ImageRef` 无颜色）。
     fn enable_remote_images(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.load_remote_images_now(cx);
+    }
+
+    /// 「始终加载」按钮（对齐 MailMaster「始终加载」，fnd_23）：本封加载
+    /// + 全局设置持久化（后续所有邮件装载期自动放行，大师
+    /// setReadSetting({autoDownloadMailImages:!0}) 语义）。先
+    /// cx.stop_propagation() 阻止冒泡到整条的「仅本封」动作——Button
+    /// 点击本就在子元素命中，父 div 的 on_click 监听会随后收到同一事件，
+    /// 不拦截则两动作都触发（重复无实害但状态翻两番不干净）。
+    fn always_load_remote_images(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        crate::ui_state::always_download_mail_images();
+        self.load_remote_images_now(cx);
+    }
+
+    /// 「加载图片」/「始终加载」共用的本封放行执行体。
+    fn load_remote_images_now(&mut self, cx: &mut Context<Self>) {
         let Some((email_id, html)) = ({
             let store = self.store.read(cx);
             store
@@ -882,8 +899,11 @@ impl Render for EmailDetailView {
                 )
             })
             // 「加载图片」条：正文含远程图且未放行时显示（spec §4.4 隐私默认
-            // 拦截）。整条可点击 → allow_remote_images（翻转放行态 + 逐图后台
-            // 拉取）；放行后本条不再构建（重渲染消失）
+            // 拦截）。两个动作对齐 MailMaster（fnd_23）：「加载」=仅本封
+            // allow_remote_images（翻转放行态 + 逐图后台拉取 + 发件人记忆）；
+            // 「始终加载」=同本封加载 + 全局设置持久化
+            // （大师 setReadSetting({autoDownloadMailImages:!0})）。放行后
+            // 本条不再构建（重渲染消失）
             .children((!remote_urls.is_empty() && !images_enabled).then(|| {
                 div()
                     .id("load-images")
@@ -895,12 +915,17 @@ impl Render for EmailDetailView {
                     .px_3()
                     .py_1p5()
                     .bg(cx.theme().secondary)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(cx.theme().accent.opacity(0.12)))
                     .text_size(px(12.))
                     .text_color(cx.theme().muted_foreground)
                     .child(gpui_kit::component::Icon::new(IconName::Ban).size_3())
                     .child(t("email.loadImages"))
+                    .child(
+                        Button::new("always-load-images")
+                            .ghost()
+                            .xsmall()
+                            .label(t("email.alwaysLoadImages"))
+                            .on_click(cx.listener(Self::always_load_remote_images)),
+                    )
                     .on_click(cx.listener(Self::enable_remote_images))
                     .debug_selector(|| "email-load-images".to_string())
             }))
