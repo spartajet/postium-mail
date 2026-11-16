@@ -78,3 +78,30 @@ crates/postium-ui/src/views/mail_text_view.rs（新文件，约 900-1200 行）
 
 1. **先批 P0**（右键菜单+下载，小、独立、用户可立即感知），完成后再评估 P1/P2。
 2. P1 动手前建议先写 3-5 个 fixture 快照基线（现有路径渲染），作为替换后的回归护栏。
+
+## 六、FAQ：现在用的是 GPUI 的 TextView 吗？（2026-11-17 复核）
+
+**不是。** 当前邮件正文渲染 = `postium-html`（sanitize → IR）→ `email_html.rs`
+递归映射 GPUI div 树（文本组 `StyledText` + 自研 `SelectableText` Element），
+见 fnd_17。gpui-base 0.8 的 `TextView`（`gpui_kit::base::TextView`）在立项时
+评估过并否决，本轮重读 0.8.0 源码结论不变：
+
+- **自定义 run 无注入口**：`TextViewState` 的 TextRun 管线为 `pub(super)`
+  内部实现，`TextView::html(id, html)` 只吃原始 HTML 字符串，无法投喂
+  已 sanitize 的 IR（email_html.rs 模块头实现记录）。
+- **绕过 sanitize 边界**：其 html 解析器（text/format/html.rs，html5ever
+  RcDom）直接解析原文，`<a href>` 原样进 `LinkMark`（无 SafeUrl 白名单）、
+  `<img src>` 原样进 `ImageNode`——接进来等于绕开 postium-html 的 URL
+  白名单与图片放行门控，违反本分支「不动 sanitize 安全边界」约束。
+- **样式面窄**：inline marks 仅 bold/italic/strike/underline/code/mark/link
+  （mark 仅认 color/background-color 少数色值）；邮件常见的 font-family/
+  size/color/align/table colspan 等全部丢失。
+- **e2e 探针依赖自研路径**：`html-txt-*`/`html-img`/`email-html-fallback`
+  debug_bounds 探针由 `email_html.rs` 的 `when_probe` 产出，TextView 路径
+  无对应物，切换即 20+ 条 e2e 断言失败。
+
+0.8 新增的两个 API 让 TextView 比立项时更可用，但仍不足以接管邮件渲染：
+`image_source`（图片源覆盖，权威不再回退文档 URL——可用来做放行门控）与
+`on_link_click`（链接点击回调）。缺的仍是 IR 注入与富样式 run。若将来走
+TextView 路线，正确姿势是 fork/上游扩展其 run 注入，而非 `html()` 直喂
+原文——即 P1 自研 MailTextView 的理由依旧成立。
