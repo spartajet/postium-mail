@@ -383,6 +383,7 @@ fn mail_header_subject_selectable(cx: &mut gpui_pre::TestAppContext) {
                     14.5,
                     gpui_kit::FontWeight::SEMIBOLD,
                     subject,
+                    cx.theme().selection,
                     &self.selection,
                 ))
         }
@@ -431,5 +432,136 @@ fn mail_header_subject_selectable(cx: &mut gpui_pre::TestAppContext) {
         selection.selected_text().as_deref(),
         Some("季度Report总结v2"),
         "三击应选中整行主题"
+    );
+}
+
+/// 真实应用路径（AppShell → 详情视图）：头部主题拖选、游离抬起守卫、
+/// 选区跨右键存活（复制菜单不误灰的根因回归）。
+#[gpui_pre::test]
+fn mail_header_drag_select_in_real_view(cx: &mut gpui_pre::TestAppContext) {
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    crate::e2e_tests::force_e2e_data_dir();
+    let (api, sync_rx) = crate::e2e_tests::boot(dir.path());
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        crate::e2e_tests::setup(cx);
+        crate::app::AppShell::new(api.clone(), sync_rx, window, cx)
+    });
+    crate::e2e_tests::wait_for(cx, |cx| {
+        crate::e2e_tests::with_app(cx, |app| {
+            (!shell.read(app).accounts.read(app).groups.is_empty()).then_some(())
+        })
+    });
+
+    // 带主题的草稿（行选中同款接缝）
+    let draft_id = {
+        let account_id = crate::e2e_tests::with_app(cx, |app| {
+            shell.read(app).accounts.read(app).groups[0].account.id
+        });
+        let req = postium_core::service::mail_draft::SaveDraftRequest {
+            draft_id: None,
+            account_id,
+            to: vec!["e2e.user@postium.test".into()],
+            cc: vec![],
+            bcc: vec![],
+            subject: "HeaderDragProbe Subject Words".into(),
+            body_html: "<p>HeaderDragBody</p>".into(),
+            body_text: "正文".into(),
+            attachments: vec![],
+        };
+        crate::runtime::runtime()
+            .block_on(async move { api.save_draft(req).await })
+            .expect("草稿应保存成功")
+            .draft_id
+    };
+    crate::e2e_tests::with_app_mut(cx, |app| {
+        shell.update(app, |shell, cx| {
+            shell.emails.update(cx, |store, cx| {
+                store.selected = Some(draft_id);
+                store.selected_version += 1;
+                cx.emit(crate::stores::emails::EmailsEvent::SelectionChanged(draft_id));
+                cx.notify();
+            });
+        });
+    });
+    crate::e2e_tests::wait_for(cx, |cx| {
+        crate::e2e_tests::with_app(cx, |app| {
+            let view = shell.read(app).detail_view.clone()?;
+            let detail = view.read(app).store.read(app).detail.clone()?;
+            (detail.email.id == draft_id).then_some(())
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    // 主题探针（内容前 16 个字母数字 = HeaderDragProbeSu）
+    let bounds = cx
+        .debug_bounds("html-txt-HeaderDragProbeS")
+        .expect("主题探针应存在（头部字段经 selectable_header_text 注册）");
+    let start = gpui_pre::point(bounds.left() + px(6.), bounds.center().y);
+    let end = gpui_pre::point(bounds.left() + px(90.), bounds.center().y);
+
+    // 拖选：按下 → 移动 → 抬起
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: start,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui_pre::MouseMoveEvent {
+        position: end,
+        modifiers: gpui_pre::Modifiers::default(),
+        pressed_button: Some(gpui_kit::MouseButton::Left),
+    });
+    cx.simulate_event(gpui_pre::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: end,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 1,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    let header_sel = crate::e2e_tests::with_app(cx, |app| {
+        let view = shell.read(app).detail_view.clone().expect("详情视图应存在");
+        view.read(app).header_selection.clone()
+    });
+    let selected = header_sel.selected_text();
+    assert!(
+        selected.as_deref().is_some_and(|s| s.contains("Header")),
+        "拖选主题应产生选区，实际 {selected:?}"
+    );
+
+    // 游离抬起守卫：无按下的左键抬起（浮层点击泄漏形态）不得清选区
+    cx.simulate_event(gpui_pre::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: end,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 1,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(
+        header_sel.is_selecting(),
+        "游离抬起（无配对按下）不得清选区"
+    );
+
+    // 右键命中记录：主题文本（无链接 → 文本菜单，复制项可用）
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Right,
+        position: end,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(
+        header_sel.is_selecting() && header_sel.right_click_link().is_none(),
+        "右键后选区应存活且命中为纯文本（复制菜单可用）"
     );
 }

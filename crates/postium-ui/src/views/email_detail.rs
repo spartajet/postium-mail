@@ -703,6 +703,7 @@ impl Render for EmailDetailView {
                                     14.5,
                                     FontWeight::SEMIBOLD,
                                     cx.theme().foreground,
+                                    cx.theme().selection,
                                     &self.header_selection,
                                 )),
                             )
@@ -805,6 +806,7 @@ impl Render for EmailDetailView {
                                 12.5,
                                 FontWeight::default(),
                                 cx.theme().muted_foreground,
+                                cx.theme().selection,
                                 &self.header_selection,
                             ))
                             .child("·")
@@ -1023,6 +1025,7 @@ fn recipients_display(
         12.5,
         FontWeight::default(),
         cx.theme().muted_foreground,
+        cx.theme().selection,
         selection,
     )
 }
@@ -1045,6 +1048,7 @@ fn cc_display(
                 12.5,
                 FontWeight::default(),
                 cx.theme().muted_foreground,
+                cx.theme().selection,
                 selection,
             )
         })

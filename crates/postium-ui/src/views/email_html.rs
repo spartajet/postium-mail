@@ -1036,6 +1036,12 @@ impl Element for SelectableText {
                             {
                                 return;
                             }
+                            // 配对守卫：本组无按下记录且无进行中的拖选（跨组拖
+                            // 选的抬起落在止组）→ 游离抬起（如浮层元素上的点击
+                            // 泄漏），不得当作选区交互处理。
+                            if down_index.get().is_none() && !selection.is_dragging() {
+                                return;
+                            }
                             if hitbox.is_hovered(window)
                                 && let Ok(up_ix) = layout.index_for_position(event.position)
                                 && let Some(down) = down_index.get()
@@ -1484,7 +1490,9 @@ pub(crate) fn safe_url_string(url: &SafeUrl) -> String {
 }
 
 /// 头部字段（主题/发件人/收件人/抄送）可选中化（P0 续）：注册文本组 +
-/// [`SelectableText`]（划选/双击词选/三击段选）+ 右键菜单（复制/全选）。
+/// [`SelectableText`]（划选/双击词选/三击段选）+ 右键菜单（复制/全选）+
+/// **选中高亮**（`selection_bg` 切分 run——无高亮则选区不可见，用户无法
+/// 感知划选/词选结果）。
 ///
 /// 与正文划选**隔离**：调用方持有独立 [`HtmlSelection`]（正文渲染每帧
 /// `begin_frame` 会清空共享实例的组注册表，头部字段必须独立成组表；帧首
@@ -1496,6 +1504,7 @@ pub(crate) fn selectable_header_text(
     font_size: f32,
     weight: FontWeight,
     color: Hsla,
+    selection_bg: Hsla,
     selection: &HtmlSelection,
 ) -> AnyElement {
     if text.trim().is_empty() {
@@ -1512,12 +1521,17 @@ pub(crate) fn selectable_header_text(
         underline: None,
         strikethrough: None,
     };
+    // 选中区间切分（与正文 flush_text_group 同语义）：选中段施加高亮底色
+    let runs = match selection.range_for_group(group) {
+        Some(range) => apply_selection_background(vec![run], range, selection_bg),
+        None => vec![run],
+    };
     let el = div()
         .text_size(px(font_size))
         .line_height(relative(BASE_LINE_HEIGHT))
         .child(SelectableText {
             id: ElementId::Name(id.into()),
-            text: StyledText::new(SharedString::from(text.to_string())).with_runs(vec![run]),
+            text: StyledText::new(SharedString::from(text.to_string())).with_runs(runs),
             group,
             selection: selection.clone(),
             ranges: Vec::new(),
