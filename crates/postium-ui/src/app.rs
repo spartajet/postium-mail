@@ -76,12 +76,79 @@ pub(crate) fn window_title_for(
     }
 }
 
+/// 启动预载首屏数据（线上反馈⑥）：主窗口打开前取入内存，首帧即有侧栏
+/// 账号/统计与收件箱列表——免「窗口空白约两秒等查询回填」（全部查询经
+/// 单条 tokio_rusqlite 连接 FIFO，启动期与其他写入竞争时首屏回填更慢）。
+///
+/// 空结果（无账号/查询失败）等价 [`PreloadedHome::default`]，构造侧回退
+/// 懒加载路径，行为与预载前一致。
+pub(crate) struct PreloadedHome {
+    pub groups: Vec<crate::stores::accounts::AccountNode>,
+    pub inbox: Option<postium_core::service::email_service::EmailListResponse>,
+}
+
+impl Default for PreloadedHome {
+    fn default() -> Self {
+        Self {
+            groups: Vec::new(),
+            inbox: None,
+        }
+    }
+}
+
+/// 预载查询：与 AccountsStore::reload / EmailsStore 首次 navigate 完全
+/// 同序列（账号 → 每账号统计/标签 → 收件箱首页）。
+pub(crate) async fn preload_home(api: &Arc<CoreApi>) -> PreloadedHome {
+    use crate::stores::emails::PAGE_LIMIT;
+    let accounts = api.list_accounts().await.unwrap_or_default();
+    let mut groups = Vec::with_capacity(accounts.len());
+    for account in accounts {
+        let stats = api
+            .get_folder_stats(account.id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(target: "postium::ui", id = account.id, "预载文件夹统计失败: {e}");
+                Vec::new()
+            });
+        let labels = api.list_labels(account.id).await.unwrap_or_else(|e| {
+            tracing::warn!(target: "postium::ui", id = account.id, "预载标签失败: {e}");
+            Vec::new()
+        });
+        groups.push(crate::stores::accounts::AccountNode {
+            account,
+            stats,
+            labels,
+        });
+    }
+    let inbox = api
+        .list_emails_by_category_for_all_accounts(
+            postium_core::service::email_service::EmailCategory::Inbox,
+            0,
+            PAGE_LIMIT,
+            false,
+        )
+        .await
+        .ok();
+    PreloadedHome { groups, inbox }
+}
+
 /// 打开主窗口。
 ///
 /// `sync_rx` 为主窗口的同步事件接收端；`None` 时（托盘重建已关闭的
 /// 主窗口）使用空通道占位——后台调度的消费循环随旧窗口销毁，重建窗口
 /// 不再接收调度事件（同步状态以列表轮询刷新为准）。
 pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mut App) {
+    // 启动预载（线上反馈⑥）：窗口出现即带数据。此时尚无窗口，block_on
+    // 不冻结任何 UI；预载耗时入日志（后续性能观察锚点）。
+    let preload_started = std::time::Instant::now();
+    let preload = crate::runtime::runtime().block_on(preload_home(&api));
+    tracing::info!(
+        target: "postium::ui",
+        "启动预载完成：账号组 {} / 收件箱首页 {} 封（{:?}）",
+        preload.groups.len(),
+        preload.inbox.as_ref().map(|r| r.emails.len()).unwrap_or(0),
+        preload_started.elapsed()
+    );
     let sync_rx = sync_rx
         .unwrap_or_else(|| crate::stores::sync::sync_event_channel().1);
     let mut options = match crate::window_state::saved_bounds() {
@@ -105,7 +172,7 @@ pub fn open_main_window(api: Arc<CoreApi>, sync_rx: Option<SyncEventRx>, cx: &mu
         ..Default::default()
     });
     let (_handle, shell_view) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| AppShell::new(api, sync_rx, window, cx))
+        cx.new(|cx| AppShell::new_with_preload(api, sync_rx, preload, window, cx))
     })
     .expect("打开主窗口失败");
     // 注册全局弱引用（窗口关闭后自动失效）
@@ -163,6 +230,18 @@ impl AppShell {
     pub(crate) fn new(
         api: Arc<CoreApi>,
         sync_rx: SyncEventRx,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_preload(api, sync_rx, PreloadedHome::default(), window, cx)
+    }
+
+    /// [`Self::new`] 的预载形态（线上反馈⑥）：主窗口打开前已取好的首屏
+    /// 数据直接注入 store，首帧即有内容；空预载回退懒加载（e2e 同路径）。
+    pub(crate) fn new_with_preload(
+        api: Arc<CoreApi>,
+        sync_rx: SyncEventRx,
+        preload: PreloadedHome,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -226,17 +305,28 @@ impl AppShell {
             }
         });
 
-        let accounts = init_accounts_store(&api, cx);
+        // 启动预载注入（线上反馈⑥）：有种子 → 首帧即有数据（免 reload/
+        // navigate 异步回填的空白窗口）；空种子 → 懒加载原路径。
+        let accounts = if preload.groups.is_empty() {
+            init_accounts_store(&api, cx)
+        } else {
+            cx.new(|_cx| crate::stores::accounts::AccountsStore::with_preloaded(preload.groups))
+        };
         let sidebar = cx.new(|_cx| Sidebar {
             accounts: accounts.clone(),
             current: NavTarget::AllInbox,
         });
 
-        let emails = cx.new(|cx| {
-            let mut store = EmailsStore::new(cx);
-            store.navigate(NavTarget::AllInbox, &api, cx);
-            store
-        });
+        let emails = match preload.inbox {
+            Some(resp) if !resp.emails.is_empty() => {
+                cx.new(|_cx| EmailsStore::seeded_inbox(resp))
+            }
+            _ => cx.new(|cx| {
+                let mut store = EmailsStore::new(cx);
+                store.navigate(NavTarget::AllInbox, &api, cx);
+                store
+            }),
+        };
         let detail = cx.new(|cx| DetailStore::new(cx));
 
         // 同步事件消费（core 返回的接收端）+ 后台调度器

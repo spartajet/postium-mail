@@ -646,3 +646,41 @@ fn settings_close_behavior_persists(cx: &mut gpui_pre::TestAppContext) {
     // 收尾归零（Ask 清除记忆，防污染进程内后续测试）
     crate::ui_state::set_close_behavior(crate::ui_state::CloseBehavior::Ask);
 }
+
+/// 启动预载种子（线上反馈⑥）：注入预载数据的 AppShell **首帧**即有账号组
+/// 与收件箱列表——只 draw 不 park（懒加载的异步任务尚未执行），证明数据
+/// 来自种子注入而非异步回填。
+#[gpui_pre::test]
+fn preloaded_shell_first_frame_has_data(cx: &mut gpui_pre::TestAppContext) {
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    crate::e2e_tests::force_e2e_data_dir();
+    let (api, sync_rx) = crate::e2e_tests::boot(dir.path());
+
+    // 预载查询（与 open_main_window 同函数）：e2e 种子账号应取到非空数据
+    let preload =
+        crate::runtime::runtime().block_on(crate::app::preload_home(&api));
+    assert!(!preload.groups.is_empty(), "种子账号应预载出账号组");
+    let inbox_len = preload.inbox.as_ref().map(|r| r.emails.len()).unwrap_or(0);
+    assert!(inbox_len > 0, "种子 INBOX 应预载出首页邮件");
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        crate::e2e_tests::setup(cx);
+        crate::app::AppShell::new_with_preload(api, sync_rx, preload, window, cx)
+    });
+    // 只 draw 不 run_until_parked：懒加载 spawn 尚未跑，store 数据只能来自种子
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let (groups, emails) = cx.update(|_window: &mut gpui_kit::Window, app: &mut gpui_kit::App| {
+        let shell_ref = shell.read(app);
+        (
+            shell_ref.accounts.read(app).groups.len(),
+            shell_ref.emails.read(app).emails.len(),
+        )
+    });
+    assert!(groups > 0, "首帧账号组应来自种子（实际 {groups}）");
+    assert!(emails > 0, "首帧收件箱列表应来自种子（实际 {emails}）");
+    assert!(
+        !cx.update(|_w: &mut gpui_kit::Window, app: &mut gpui_kit::App| shell.read(app).emails.read(app).loading),
+        "种子路径不应处于 loading 态"
+    );
+}

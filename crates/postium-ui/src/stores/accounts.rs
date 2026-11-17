@@ -25,6 +25,18 @@ pub struct AccountsStore {
     pending_reload: bool,
 }
 
+impl AccountsStore {
+    /// 启动预载种子构造（线上反馈⑥）：groups 已在主窗口打开前取好——首帧
+    /// 侧栏即有账号/文件夹统计，免「窗口空白等 reload 回填」。
+    pub fn with_preloaded(groups: Vec<AccountNode>) -> Self {
+        Self {
+            groups,
+            loading: false,
+            pending_reload: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum AccountsEvent {
     Reloaded,
