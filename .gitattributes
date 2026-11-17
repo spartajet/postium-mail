@@ -3,3 +3,6 @@
 crates/postium-html/tests/fixtures/snapshots/*.json text eol=lf
 # fixture 语料同样固定 LF，保证管线输入跨平台一致（空白折叠语义不受影响，双保险）
 crates/postium-html/tests/fixtures/*.html text eol=lf
+# 标记序列化快照（markers.rs 逐字节比对）：Windows runner checkout 转 CRLF
+# 会与 '\n' join 的序列化产物不一致（PR #13 CI 实测踩中）
+crates/postium-html/tests/fixtures/markers/*.txt text eol=lf
