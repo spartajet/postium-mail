@@ -499,9 +499,10 @@ fn html_body(
     )
         as std::sync::Arc<dyn Fn(u64, &mut gpui_kit::App) + Send + Sync>;
     let quotes = crate::views::email_html::QuoteFold { expanded, on_toggle };
-    // 路由（S1 渐进切换）：全部块类型已迁移 → MailView（TextView 宿主 + 自有
-    // 块渲染器，mail_view.rs）；含 Table/Quote（S2/S3 迁入）→ 旧路径整篇渲染，
-    // 行为零变。两路径共用同一渲染内核与探针键。
+    // 路由（S2/S3 已全量迁入）：可解析文档 → MailView（TextView 宿主 + 自有
+    // 块渲染器，mail_view.rs——富样式/表格/折叠/图片门控零降级）；空文档/
+    // 管线超限由上游分支走纯文本兜底。旧 render_html_document 仅 e2e 探针
+    // 直驱内核在用（回归基线）。
     let el = if crate::views::mail_view::supported(&doc) {
         let state = store.update(cx, |store, cx| {
             store.mail_text_view_state(email_id, html, &doc, cx)
