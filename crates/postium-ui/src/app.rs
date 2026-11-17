@@ -331,6 +331,7 @@ impl AppShell {
                         emails: this.emails.downgrade(),
                         recipients_expanded: false,
                         html_selection: Default::default(),
+                        header_selection: Default::default(),
                         body_focus: cx.focus_handle(),
                     }));
                     this.detail_build_version = this.emails.read(cx).selected_version;
@@ -629,6 +630,7 @@ impl Render for AppShell {
                                     emails: self.emails.downgrade(),
                                     recipients_expanded: false,
                                     html_selection: Default::default(),
+                                    header_selection: Default::default(),
                                     body_focus: cx.focus_handle(),
                                 });
                                 self.detail_view = Some(view.clone());

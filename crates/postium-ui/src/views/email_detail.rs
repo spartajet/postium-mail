@@ -32,6 +32,10 @@ pub struct EmailDetailView {
     /// 正文划选状态（线上反馈①）：视图重建即重置（换邮件清选区），
     /// Ctrl+C 复制选中文本（html_body_copy 动作）。
     pub html_selection: crate::views::html_selection::HtmlSelection,
+    /// 头部字段（主题/发件人/收件人/抄送）划选状态（P0 续）：与正文实例
+    /// 隔离——正文渲染每帧 begin_frame 会清共享组表，头部独立成表；右键
+    /// 菜单/双击词选与正文同款交互。
+    pub header_selection: crate::views::html_selection::HtmlSelection,
     /// 正文滚动区焦点（划选复制动作的派发锚点）。
     pub body_focus: gpui_kit::FocusHandle,
 }
@@ -660,6 +664,10 @@ impl Render for EmailDetailView {
             .clone()
             .unwrap_or_else(|| detail.email.sender_email.clone());
 
+        // 头部字段（主题/发件人/收件人/抄送）可选中化（P0 续）：帧首清组
+        // 注册表，各字段渲染期按序注册（与正文选择实例隔离）。
+        self.header_selection.begin_frame();
+
         v_flex()
             .flex_1()
             .size_full()
@@ -684,17 +692,19 @@ impl Render for EmailDetailView {
                             .items_center()
                             .gap_2()
                             .child(
-                                div()
-                                    .text_size(px(14.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .flex_1()
-                                    .child(
-                                        detail
-                                            .email
-                                            .subject
-                                            .clone()
-                                            .unwrap_or_else(|| "（无主题）".into()),
-                                    ),
+                                div().flex_1().child(crate::views::email_html::selectable_header_text(
+                                    "mail-subject",
+                                    detail
+                                        .email
+                                        .subject
+                                        .as_deref()
+                                        .unwrap_or("（无主题）"),
+                                    cx.theme().font_family.clone(),
+                                    14.5,
+                                    FontWeight::SEMIBOLD,
+                                    cx.theme().foreground,
+                                    &self.header_selection,
+                                )),
                             )
                             // 操作分组：主操作（回复/全部回复/转发）｜邮件态（星标/已读/重载）｜归置（归档/删除）｜浏览器
                             .child(
@@ -788,13 +798,26 @@ impl Render for EmailDetailView {
                             .flex_wrap()
                             .text_size(px(12.5))
                             .text_color(cx.theme().muted_foreground)
-                            .child(sender)
+                            .child(crate::views::email_html::selectable_header_text(
+                                "mail-sender",
+                                &sender,
+                                cx.theme().font_family.clone(),
+                                12.5,
+                                FontWeight::default(),
+                                cx.theme().muted_foreground,
+                                &self.header_selection,
+                            ))
                             .child("·")
                             .child(sent_time)
                             .child("·")
                             .child(t("email.to"))
-                            .child(recipients_display(detail, self.recipients_expanded, cx))
-                            .when_some(cc_display(detail), |this, cc| {
+                            .child(recipients_display(
+                                detail,
+                                self.recipients_expanded,
+                                &self.header_selection,
+                                cx,
+                            ))
+                            .when_some(cc_display(detail, &self.header_selection, cx), |this, cc| {
                                 this.child("·").child(t("email.cc")).child(cc)
                             })
                             .when(recipient_count(detail) > 2, |this| {
@@ -978,8 +1001,9 @@ fn recipient_count(detail: &postium_core::service::email_service::EmailDetail) -
 fn recipients_display(
     detail: &postium_core::service::email_service::EmailDetail,
     expanded: bool,
+    selection: &crate::views::html_selection::HtmlSelection,
     cx: &gpui_kit::App,
-) -> SharedString {
+) -> AnyElement {
     let list: Vec<&str> = detail
         .recipient_emails
         .split([',', ';'])
@@ -987,20 +1011,43 @@ fn recipients_display(
         .filter(|s| !s.is_empty())
         .collect();
     let _ = cx;
-    if expanded || list.len() <= 2 {
-        list.join(", ").into()
+    let joined = if expanded || list.len() <= 2 {
+        list.join(", ")
     } else {
-        format!("{}, {}", list[0], list[1]).into()
-    }
+        format!("{}, {}", list[0], list[1])
+    };
+    crate::views::email_html::selectable_header_text(
+        "mail-recipients",
+        &joined,
+        cx.theme().font_family.clone(),
+        12.5,
+        FontWeight::default(),
+        cx.theme().muted_foreground,
+        selection,
+    )
 }
 
-fn cc_display(detail: &postium_core::service::email_service::EmailDetail) -> Option<SharedString> {
+fn cc_display(
+    detail: &postium_core::service::email_service::EmailDetail,
+    selection: &crate::views::html_selection::HtmlSelection,
+    cx: &gpui_kit::App,
+) -> Option<AnyElement> {
     detail
         .cc_emails
         .as_ref()
         .map(|cc| cc.trim())
         .filter(|cc| !cc.is_empty())
-        .map(|cc| cc.into())
+        .map(|cc| {
+            crate::views::email_html::selectable_header_text(
+                "mail-cc",
+                cc,
+                cx.theme().font_family.clone(),
+                12.5,
+                FontWeight::default(),
+                cx.theme().muted_foreground,
+                selection,
+            )
+        })
 }
 
 /// 工具条分组竖分隔线。

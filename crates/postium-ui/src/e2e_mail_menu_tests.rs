@@ -258,3 +258,178 @@ fn mail_menu_image_bytes_and_file_name(cx: &mut gpui_pre::TestAppContext) {
     let raw_payload = email_html::image_payload_for(&raw, &rendered);
     assert_eq!(email_html::image_save_file_name("photo", &raw_payload), "photo.jpg");
 }
+
+/// 双击词选 / 三击段选（浏览器语义）+ 多击不触发链接打开。
+#[gpui_pre::test]
+fn mail_body_double_click_selects_word_not_link(cx: &mut gpui_pre::TestAppContext) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let link_opens = Arc::new(AtomicUsize::new(0));
+    struct Probe {
+        doc: HtmlDocument,
+        selection: HtmlSelection,
+        link_opens: Arc<AtomicUsize>,
+    }
+    impl Render for Probe {
+        fn render(
+            &mut self,
+            _: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            let opens = Arc::clone(&self.link_opens);
+            let el = email_html::render_html_document(
+                &self.doc,
+                false,
+                ImageCtx::default(),
+                self.selection.clone(),
+                None,
+                move |_: &SafeUrl| {
+                    opens.fetch_add(1, Ordering::Relaxed);
+                },
+                cx,
+            );
+            div().w(px(400.)).h(px(400.)).child(el)
+        }
+    }
+    let selection = HtmlSelection::default();
+    let sel = selection.clone();
+    let (_root, cx) = cx.add_window_view(|_, cx| {
+        crate::e2e_tests::setup(cx);
+        Probe {
+            doc: link_doc(),
+            selection: sel,
+            link_opens: Arc::clone(&link_opens),
+        }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    // 双击链接词「MenuLinkText」（组文本 "前缀MenuLinkText"，链接段从
+    // 第 7 字节起）：词选中，链接不打开
+    let bounds = cx
+        .debug_bounds("html-txt-前缀MenuLinkText")
+        .expect("链接组探针应存在");
+    let word_point = gpui_pre::point(bounds.left() + px(40.), bounds.center().y);
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: word_point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui_pre::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: word_point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 2,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("MenuLinkText"),
+        "双击应选中链接词（四类词模型：ASCII 词独立于 CJK 前缀）"
+    );
+    assert_eq!(link_opens.load(Ordering::Relaxed), 0, "双击不得触发链接打开");
+
+    // 三击同组：整组段选
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: word_point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 3,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui_pre::MouseUpEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: word_point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 3,
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("前缀MenuLinkText"),
+        "三击应选中整组"
+    );
+    assert_eq!(link_opens.load(Ordering::Relaxed), 0, "三击不得触发链接");
+}
+
+/// 头部字段（主题）可选中：双击词选 + 三击整行（P0 续）。
+#[gpui_pre::test]
+fn mail_header_subject_selectable(cx: &mut gpui_pre::TestAppContext) {
+    use gpui_kit::component::ActiveTheme as _;
+    struct HeaderProbe {
+        selection: HtmlSelection,
+    }
+    impl Render for HeaderProbe {
+        fn render(
+            &mut self,
+            _: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl IntoElement {
+            self.selection.begin_frame();
+            let subject = cx.theme().foreground;
+            let family = cx.theme().font_family.clone();
+            div()
+                .w(px(400.))
+                .h(px(200.))
+                .p_3()
+                .child(email_html::selectable_header_text(
+                    "mail-subject",
+                    "季度Report总结v2",
+                    family,
+                    14.5,
+                    gpui_kit::FontWeight::SEMIBOLD,
+                    subject,
+                    &self.selection,
+                ))
+        }
+    }
+    let selection = HtmlSelection::default();
+    let sel = selection.clone();
+    let (_root, cx) = cx.add_window_view(|_, cx| {
+        crate::e2e_tests::setup(cx);
+        HeaderProbe { selection: sel }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    let bounds = cx
+        .debug_bounds("html-txt-季度Report总结v2")
+        .expect("主题探针应存在（内容前缀键）");
+
+    // 双击 ASCII 段（Report 起于 2 个 CJK 后 ≈29px）：只选 ASCII 词
+    let point = gpui_pre::point(bounds.left() + px(40.), bounds.center().y);
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let selected = selection.selected_text();
+    assert!(
+        selected.as_deref().is_some_and(|s| s.contains("Report")),
+        "双击主题应选中 Report 词，实际 {selected:?}"
+    );
+
+    // 三击整行（混合文本全组）
+    cx.simulate_event(gpui_pre::MouseDownEvent {
+        button: gpui_kit::MouseButton::Left,
+        position: point,
+        modifiers: gpui_pre::Modifiers::default(),
+        click_count: 3,
+        first_mouse: false,
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        selection.selected_text().as_deref(),
+        Some("季度Report总结v2"),
+        "三击应选中整行主题"
+    );
+}

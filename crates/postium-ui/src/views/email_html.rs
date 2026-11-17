@@ -956,8 +956,19 @@ impl Element for SelectableText {
                                 && hitbox.is_hovered(window)
                                 && let Ok(ix) = layout.index_for_position(event.position)
                             {
-                                down_index.set(Some(ix));
-                                selection.on_down(group, ix);
+                                if event.click_count >= 3 {
+                                    // 三击段选（浏览器语义）：整组。多击不设
+                                    // down_index——抬起时不得触发链接打开。
+                                    selection.select_group(group);
+                                } else if event.click_count == 2 {
+                                    // 双击词选（浏览器语义）：围绕命中点的
+                                    // 同词类连串（词字符含 @._-+#，邮箱/域名
+                                    // 整体一词）。
+                                    selection.select_word(group, ix);
+                                } else {
+                                    down_index.set(Some(ix));
+                                    selection.on_down(group, ix);
+                                }
                                 window.refresh();
                             }
                         },
@@ -1470,6 +1481,65 @@ pub(crate) fn safe_url_string(url: &SafeUrl) -> String {
     match url {
         SafeUrl::Http(u) | SafeUrl::Mailto(u) => u.clone(),
     }
+}
+
+/// 头部字段（主题/发件人/收件人/抄送）可选中化（P0 续）：注册文本组 +
+/// [`SelectableText`]（划选/双击词选/三击段选）+ 右键菜单（复制/全选）。
+///
+/// 与正文划选**隔离**：调用方持有独立 [`HtmlSelection`]（正文渲染每帧
+/// `begin_frame` 会清空共享实例的组注册表，头部字段必须独立成组表；帧首
+/// 由调用方对同一实例 `begin_frame` 一次）。空文本直通纯 div（不注册组）。
+pub(crate) fn selectable_header_text(
+    id: &'static str,
+    text: &str,
+    font_family: SharedString,
+    font_size: f32,
+    weight: FontWeight,
+    color: Hsla,
+    selection: &HtmlSelection,
+) -> AnyElement {
+    if text.trim().is_empty() {
+        return div().into_any_element();
+    }
+    let group = selection.register_group(text);
+    let mut font = base_font(font_family);
+    font.weight = weight;
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let el = div()
+        .text_size(px(font_size))
+        .line_height(relative(BASE_LINE_HEIGHT))
+        .child(SelectableText {
+            id: ElementId::Name(id.into()),
+            text: StyledText::new(SharedString::from(text.to_string())).with_runs(vec![run]),
+            group,
+            selection: selection.clone(),
+            ranges: Vec::new(),
+            urls: Vec::new(),
+            on_link: Arc::new(|_: &SafeUrl| {}),
+        });
+    // 探针沿正文组同款键（内容前缀），e2e 可断言头部字段可见性
+    #[cfg(test)]
+    let key = {
+        let mut probe = String::new();
+        for c in text.chars().filter(|c| c.is_alphanumeric()).take(16) {
+            probe.push(c);
+        }
+        format!("html-txt-{probe}")
+    };
+    #[cfg(test)]
+    let el = el.when_probe(&key);
+    el.context_menu(build_text_menu(
+        selection.clone(),
+        Arc::new(|_: &SafeUrl| {}),
+    ))
+    .into_any_element()
 }
 
 /// 文本/链接右键菜单 builder（flush_text_group 的 context_menu 挂接）。
