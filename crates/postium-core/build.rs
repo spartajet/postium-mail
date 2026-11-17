@@ -5,7 +5,6 @@
 //! `.env` 不进版本库（见 .gitignore）；模板见 `.env.example`。
 
 use std::path::PathBuf;
-use std::process::exit;
 
 fn main() {
     // 从本 crate 目录向上逐级查找 .env（约定放工作区根）
@@ -98,12 +97,10 @@ fn main() {
         .iter()
         .any(|k| injected_keys.contains(*k));
     if !injected_any {
-        eprintln!(
-            "build.rs: 工作区根 .env 中未找到有效的 OAuth2 客户端 ID\n\
-             （需要 MICROSOFT_CLIENT_ID / GOOGLE_CLIENT_ID）。\n\
-             OAuth2 登录将在启动授权时返回明确错误；密码型登录不受影响。"
+        // cargo:warning：进编译日志（CI 可观测「凭据未注入」——值不回显）。
+        // 不视为构建失败：保持其他功能可构建/可测试。
+        println!(
+            "cargo:warning=build.rs: 未注入任何 OAuth2 客户端 ID（需要 MICROSOFT_CLIENT_ID / GOOGLE_CLIENT_ID，来源 .env 文件或环境变量）。OAuth2 登录将在启动授权时报错；密码型登录不受影响"
         );
-        // 不 exit(1)：保持其他功能可构建/可测试
-        let _ = exit;
     }
 }
