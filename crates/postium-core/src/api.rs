@@ -219,7 +219,9 @@ impl CoreApi {
         page: usize,
         limit: usize,
     ) -> Result<EmailListResponse, MailError> {
-        self.emails.list(account_id, folder, page, limit).await
+        // INBOX 保留名归一（线上反馈⑧）：原名精确匹配入口与库内规范形态对齐
+        let folder = crate::domain::folders::normalize_imap_folder(folder);
+        self.emails.list(account_id, &folder, page, limit).await
     }
 
     pub async fn list_emails_by_category(

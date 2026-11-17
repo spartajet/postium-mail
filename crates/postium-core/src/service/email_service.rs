@@ -1214,7 +1214,15 @@ async fn resolve_category_folders_for_account(
         Some(cat) => cat,
         None => return Ok(Vec::new()),
     };
-    Ok(registry.resolve(cat))
+    // INBOX 保留名归一（线上反馈⑧）：库里 folder 值统一规范形态（引擎写入
+    // 侧 + 存量迁移），查询侧同口径才能命中
+    let mut seen = std::collections::HashSet::new();
+    Ok(registry
+        .resolve(cat)
+        .into_iter()
+        .map(|name| crate::domain::folders::normalize_imap_folder(&name))
+        .filter(|name| seen.insert(name.clone()))
+        .collect())
 }
 
 // ═════════════════════════════════════════════════════════════════════════

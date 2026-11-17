@@ -73,6 +73,7 @@ impl DbConn {
             conn.execute_batch(SCHEMA_SQL)?;
             migrate_sync_state_history_columns(conn)?;
             migrate_sync_state_highest_modseq_column(conn)?;
+            merge_inbox_folder_case_variants(conn)?;
             Ok(())
         })
         .await
@@ -189,6 +190,108 @@ fn migrate_sync_state_highest_modseq_column(conn: &rusqlite::Connection) -> rusq
             [],
         )?;
     }
+    Ok(())
+}
+
+/// 合并 INBOX 大小写变体行（线上反馈⑧，幂等迁移）。
+///
+/// 背景：IMAP 全量同步按 LIST 原名落库（163/Outlook 实测小写 `inbox`），
+/// IDLE 定向同步按保留名 `INBOX` 落库——`(account_id, folder, uid)` 唯一键
+/// 大小写敏感，同一封邮件双行（列表每封显示两次）。写入/查询侧已统一走
+/// [`crate::domain::folders::normalize_imap_folder`]，本迁移把存量归一：
+///
+/// - `emails`：每个 `(account_id, uid)` 组保留 id 最小的行（浏览历史/已读/
+///   附件缓存多数挂在先行上，attachments 级联删除兜底），其余变体行删除，
+///   保留行 folder 改为规范形态 `INBOX`；
+/// - `sync_state`：同法保留最小 id 行并归一（变体高水位丢失可接受——下轮
+///   同步按 UID 增量重拉一次，无数据损失）。
+fn merge_inbox_folder_case_variants(conn: &mut rusqlite::Connection) -> rusqlite::Result<()> {
+    // 快速幂等出口：无非规范变体即空转
+    let variant_emails: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM emails WHERE folder <> 'INBOX' AND folder = 'inbox'",
+        [],
+        |row| row.get(0),
+    )?;
+    let variant_state: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sync_state WHERE folder <> 'INBOX' AND folder = 'inbox'",
+        [],
+        |row| row.get(0),
+    )?;
+    if variant_emails == 0 && variant_state == 0 {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()?;
+    // 1) 删除同 (account, uid) 组内非最小 id 的 inbox 变体行
+    let removed_emails = tx.execute(
+        "DELETE FROM emails
+         WHERE folder = 'inbox'
+           AND EXISTS (
+             SELECT 1 FROM emails e2
+             WHERE e2.account_id = emails.account_id
+               AND e2.uid = emails.uid
+               AND e2.id < emails.id
+           )",
+        [],
+    )?;
+    // 2) 删除保留行若为变体时将冲突的 INBOX 行去掉（inbox 行 id 更小的组）：
+    //    组内 inbox 行保留 → 删同组 id 更大的 INBOX 行
+    let removed_upper = tx.execute(
+        "DELETE FROM emails
+         WHERE folder = 'INBOX'
+           AND EXISTS (
+             SELECT 1 FROM emails e2
+             WHERE e2.account_id = emails.account_id
+               AND e2.uid = emails.uid
+               AND e2.folder = 'inbox'
+               AND e2.id < emails.id
+           )",
+        [],
+    )?;
+    // 3) 剩余 inbox 变体行（该组最早行）改名为规范形态
+    let renamed_emails = tx.execute(
+        "UPDATE emails SET folder = 'INBOX' WHERE folder = 'inbox'",
+        [],
+    )?;
+    // sync_state 同法
+    let removed_state = tx.execute(
+        "DELETE FROM sync_state
+         WHERE folder = 'inbox'
+           AND EXISTS (
+             SELECT 1 FROM sync_state s2
+             WHERE s2.account_id = sync_state.account_id
+               AND s2.id < sync_state.id
+               AND (s2.folder = 'inbox' OR s2.folder = 'INBOX')
+           )",
+        [],
+    )?;
+    let removed_state_upper = tx.execute(
+        "DELETE FROM sync_state
+         WHERE folder = 'INBOX'
+           AND EXISTS (
+             SELECT 1 FROM sync_state s2
+             WHERE s2.account_id = sync_state.account_id
+               AND s2.folder = 'inbox'
+               AND s2.id < sync_state.id
+           )",
+        [],
+    )?;
+    let renamed_state = tx.execute(
+        "UPDATE sync_state SET folder = 'INBOX' WHERE folder = 'inbox'",
+        [],
+    )?;
+    tx.commit()?;
+
+    tracing::info!(
+        "迁移：INBOX 大小写变体合并完成——emails 删除 {}+{} 行 / 改名 {} 行；\
+         sync_state 删除 {}+{} 行 / 改名 {} 行",
+        removed_emails,
+        removed_upper,
+        renamed_emails,
+        removed_state,
+        removed_state_upper,
+        renamed_state,
+    );
     Ok(())
 }
 
@@ -445,5 +548,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(tables.len(), 4, "联系人四表应存在: {tables:?}");
+    }
+
+    /// INBOX 大小写变体合并（线上反馈⑧）：双形态同 UID → 保留最小 id 行、
+    /// folder 归一 INBOX；仅小写 → 改名；sync_state 同法；幂等重跑零变化。
+    #[tokio::test]
+    async fn inbox_case_variants_merge_to_single_canonical_row() {
+        let db = DbConn::open_in_memory_for_test().await.unwrap();
+        // 账号 1：双形态同 UID（inbox id 小 / INBOX id 大 → 保留 inbox 行改名）
+        // 账号 2：仅小写形态
+        db.call(|conn| {
+            conn.execute("INSERT INTO accounts (email, name, provider, created_at, updated_at) VALUES ('a@t', 'A', 'custom', 0, 0), ('b@t', 'B', 'custom', 0, 0)", [])?;
+            for (acc, folder, uid, subj) in [
+                (1, "inbox", 100, "first-path"),
+                (1, "INBOX", 100, "idle-path"),
+                (2, "inbox", 200, "solo"),
+            ] {
+                conn.execute(
+                    "INSERT INTO emails (account_id, folder, uid, sender_email, recipient_emails, subject, is_deleted, sent_at, received_at, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 's@t', 'r@t', ?4, 0, 1000, 1000, 0, 0)",
+                    rusqlite::params![acc, folder, uid, subj],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO sync_state (account_id, folder, synced_at) VALUES (1, 'inbox', 1), (1, 'INBOX', 2)",
+                [],
+            )?;
+            super::merge_inbox_folder_case_variants(conn)
+        })
+        .await
+        .unwrap();
+
+        let rows: Vec<(i32, String, i32, String)> = db
+            .call(|conn| {
+                Ok(conn
+                    .prepare("SELECT account_id, folder, uid, subject FROM emails ORDER BY account_id")?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, "INBOX".into(), 100, "first-path".into()),
+                (2, "INBOX".into(), 200, "solo".into()),
+            ],
+            "变体组保留最小 id 行且归一 INBOX；独行仅改名"
+        );
+        let states: Vec<String> = db
+            .call(|conn| {
+                Ok(conn
+                    .prepare("SELECT folder FROM sync_state ORDER BY id")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(states, vec!["INBOX".to_string()], "sync_state 单形态");
+
+        // 幂等：重跑无变化
+        db.call(|conn| super::merge_inbox_folder_case_variants(conn))
+            .await
+            .unwrap();
+        let count: i64 = db
+            .call(|conn| conn.query_row("SELECT COUNT(*) FROM emails", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(count, 2, "幂等重跑不得再删/改行");
     }
 }

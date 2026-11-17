@@ -408,15 +408,23 @@ impl AccountEngine {
         folder: Option<String>,
         db: DbConn,
     ) -> Result<Vec<String>, MailError> {
-        let Some(listed) = folder.map(|name| vec![name]) else {
+        // INBOX 保留名归一（线上反馈⑧）：LIST 原名（163/Outlook 实测小写
+        // `inbox`）与 IDLE 定向同步的保留名（`INBOX`）会以不同 folder 值
+        // 落库——同一封邮件双行。同步目标统一规范形态后，写入与
+        // sync_state 键都单形态。
+        let Some(listed) = folder.map(|name| {
+            vec![crate::domain::folders::normalize_imap_folder(&name)]
+        }) else {
             let listed = self
                 .pool
                 .with_control(&|s| Box::pin(async move { s.session.list_folders().await }))
                 .await?;
+            let mut seen = std::collections::HashSet::new();
             let targets: Vec<String> = listed
                 .iter()
                 .filter(|f| !f.no_select)
-                .map(|f| f.name.clone())
+                .map(|f| crate::domain::folders::normalize_imap_folder(&f.name))
+                .filter(|name| seen.insert(name.clone()))
                 .collect();
 
             // 标准类别回写（沿用旧 dispatcher：供侧栏分类 / get_folder_stats 解析）。
@@ -470,8 +478,10 @@ impl AccountEngine {
         target: &str,
     ) -> Result<FolderSyncOutcome, MailError> {
         let account_id = self.account.id;
-        let local = local_sync_state_from_db(&db, account_id, target).await?;
-        let target = target.to_string();
+        // 双保险：INBOX 保留名归一（discover_folders 已归一，定向入口直调
+        // 时兜底——sync_state 与 emails 的 folder 键保持单形态）
+        let target = crate::domain::folders::normalize_imap_folder(target);
+        let local = local_sync_state_from_db(&db, account_id, &target).await?;
 
         // with_control 闭包为 Fn（失败重建重试会再次调用）：捕获值在闭包体内
         // clone 后再移入 async 块
