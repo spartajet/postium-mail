@@ -565,3 +565,84 @@ fn mail_header_drag_select_in_real_view(cx: &mut gpui_pre::TestAppContext) {
         "右键后选区应存活且命中为纯文本（复制菜单可用）"
     );
 }
+
+/// 关闭窗口行为设置（线上反馈⑤）：设置页三段选择点击即持久化，
+/// ui-state.json 串行域内往返断言。
+#[gpui_pre::test]
+fn settings_close_behavior_persists(cx: &mut gpui_pre::TestAppContext) {
+    cx.dispatcher.allow_parking();
+    let dir = tempfile::tempdir().unwrap();
+    crate::e2e_tests::force_e2e_data_dir();
+    let _guard = crate::e2e_tests::ui_state_lock();
+    // 前置归零（防止进程内其他测试的残留）
+    crate::ui_state::set_close_behavior(crate::ui_state::CloseBehavior::Ask);
+    assert_eq!(
+        crate::ui_state::close_behavior(),
+        crate::ui_state::CloseBehavior::Ask
+    );
+
+    let (api, _sync_rx) = crate::e2e_tests::boot(dir.path());
+    let api_for_view = api.clone();
+    let (settings, cx) = cx.add_window_view(|window, cx| {
+        crate::e2e_tests::setup(cx);
+        let sync_store = cx.new(|cx| crate::stores::sync::SyncStore::new(cx));
+        let accounts = crate::stores::accounts::init_accounts_store(&api_for_view, cx);
+        crate::views::settings::SettingsView::new(accounts, sync_store, api_for_view, window, cx)
+    });
+    crate::e2e_tests::wait_for(cx, |cx| {
+        crate::e2e_tests::with_app(cx, |app| {
+            (settings.read(app).accounts.read(app).groups.len() >= 1).then_some(())
+        })
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    // 切到外观分区（关闭行为行与主题/语言行同域渲染）——直驱视图状态
+    // （导航 div 无 debug_selector，分区切换非本断言目标）
+    crate::e2e_tests::with_app_mut(cx, |app| {
+        settings.update(app, |view, cx| {
+            view.active_section = crate::views::settings::SettingsSection::Appearance;
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    for key in ["close-ask", "close-tray", "close-quit"] {
+        assert!(
+            cx.debug_bounds(key).is_some(),
+            "关闭行为段 {key} 应存在（外观分区）"
+        );
+    }
+
+    // 点击「最小化到托盘」→ 持久化 + 高亮切换
+    let tray_bounds = cx.debug_bounds("close-tray").expect("tray 段应有 bounds");
+    cx.simulate_click(
+        gpui_pre::point(tray_bounds.center().x, tray_bounds.center().y),
+        gpui_pre::Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert_eq!(
+        crate::ui_state::close_behavior(),
+        crate::ui_state::CloseBehavior::ToTray,
+        "点击托盘段应持久化关闭行为"
+    );
+
+    // 「退出程序」段同理
+    let quit_bounds = cx.debug_bounds("close-quit").expect("quit 段应有 bounds");
+    cx.simulate_click(
+        gpui_pre::point(quit_bounds.center().x, quit_bounds.center().y),
+        gpui_pre::Modifiers::default(),
+    );
+    cx.run_until_parked();
+    assert_eq!(
+        crate::ui_state::close_behavior(),
+        crate::ui_state::CloseBehavior::Quit
+    );
+
+    // 收尾归零（Ask 清除记忆，防污染进程内后续测试）
+    crate::ui_state::set_close_behavior(crate::ui_state::CloseBehavior::Ask);
+}

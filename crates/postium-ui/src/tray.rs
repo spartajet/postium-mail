@@ -21,6 +21,27 @@ struct TrayActions {
 
 static ACTIONS_ID: u32 = 1;
 
+/// 托盘「显示窗口」/左键单击共享：主窗口存活 → 激活置前；已关闭（关闭到
+/// 托盘）→ 重建主窗口。
+fn show_main_window(api: &Arc<CoreApi>, cx: &mut App) {
+    let shell_alive = cx
+        .try_global::<crate::app::MainShell>()
+        .and_then(|main| main.0.upgrade())
+        .is_some();
+    if shell_alive {
+        if let Some(handle) = cx.active_window() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.activate_window();
+            });
+        }
+    } else {
+        let api = api.clone();
+        cx.defer(move |cx| {
+            crate::app::open_main_window(api, None, cx);
+        });
+    }
+}
+
 /// 装配托盘并启动事件消费循环。
 ///
 /// 托盘是可选能力：Linux 无 appindicator/无会话总线等环境下
@@ -71,15 +92,13 @@ fn setup_tray_inner(
         let menu_rx = MenuEvent::receiver();
         let tray_rx = tray_icon::TrayIconEvent::receiver();
         loop {
-            // 左键单击托盘 → 显示主窗口
+            // 左键单击托盘 → 显示主窗口（与菜单「显示窗口」同逻辑——线上
+            // 反馈⑤前左键只激活 active_window，主窗口销毁（关闭到托盘）后
+            // 点左键无响应）
             while let Ok(event) = tray_rx.try_recv() {
                 if let tray_icon::TrayIconEvent::Click { button: tray_icon::MouseButton::Left, .. } = event {
                     cx.update(|cx| {
-                        if let Some(handle) = cx.active_window() {
-                            let _ = handle.update(cx, |_, window, _| {
-                                window.activate_window();
-                            });
-                        }
+                        show_main_window(&api, cx);
                     });
                 }
             }
@@ -88,23 +107,7 @@ fn setup_tray_inner(
                 match id {
                     "show" => {
                         cx.update(|cx| {
-                            // 主窗口存活 → 激活置前；已关闭（X）→ 重建主窗口
-                            let shell_alive = cx
-                                .try_global::<crate::app::MainShell>()
-                                .and_then(|main| main.0.upgrade())
-                                .is_some();
-                            if shell_alive {
-                                if let Some(handle) = cx.active_window() {
-                                    let _ = handle.update(cx, |_, window, _| {
-                                        window.activate_window();
-                                    });
-                                }
-                            } else {
-                                let api = api.clone();
-                                cx.defer(move |cx| {
-                                    crate::app::open_main_window(api, None, cx);
-                                });
-                            }
+                            show_main_window(&api, cx);
                         });
                     }
                     "compose" => {

@@ -49,6 +49,14 @@ pub(crate) fn force_e2e_data_dir() {
 /// 文件写）。锁只在这两个测试体内持有，测试结束随 guard 释放。
 static UI_STATE_FILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// ui-state.json 写者串行锁的进程外取用（e2e_mail_menu_tests 等新增写者
+/// 测试纳入同一串行域，防并行交错丢写）。
+pub(crate) fn ui_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    UI_STATE_FILE_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 pub(crate) fn with_app<R>(cx: &mut VisualTestContext, f: impl FnOnce(&gpui_pre::App) -> R) -> R {
     cx.update(|_, app| f(app))
 }

@@ -3,12 +3,16 @@
 use std::sync::Arc;
 
 use gpui_kit::component::{
+    button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     resizable::{h_resizable, resizable_panel},
     v_flex,
+    ActiveTheme as _, Sizable as _,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use gpui_kit_assets::IconName;
 
 use postium_core::api::{CoreApi, SyncEventRx};
 
@@ -144,6 +148,11 @@ pub struct AppShell {
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
     /// 主窗口句柄：选中邮件时更新窗口标题用
     pub(crate) window_handle: gpui_kit::AnyWindowHandle,
+    /// 关闭选择弹窗（线上反馈⑤）：关闭行为未记忆时，X 按钮弹窗询问
+    /// 托盘驻留还是退出。弹窗期间阻断窗口关闭动作本体。
+    close_dialog: bool,
+    /// 弹窗「记住我的选择」勾选态（每次打开重置）。
+    close_dialog_remember: bool,
     /// 同步中节流刷新：上次刷新时刻 / 到期未刷标记
     sync_refresh_at: Option<std::time::Instant>,
     sync_refresh_pending: bool,
@@ -430,6 +439,8 @@ impl AppShell {
             contacts_view: None,
             workflow_view: None,
             status_bar: None,
+            close_dialog: false,
+            close_dialog_remember: false,
             window_handle: window.window_handle(),
             sync_refresh_at: None,
             sync_refresh_pending: false,
@@ -507,6 +518,71 @@ impl AppShell {
     /// 深浅主题互切（e2e 主题持久化测试与状态栏按钮共用逻辑入口）。
     pub(crate) fn toggle_theme(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         crate::theme::toggle_theme_mode(cx);
+    }
+
+    // -----------------------------------------------------------------
+    // 关闭主窗口行为（线上反馈⑤）：托盘驻留 / 退出 / 每次询问弹窗
+    // -----------------------------------------------------------------
+
+    /// 标题栏 X：按持久化行为分流。
+    pub(crate) fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match crate::ui_state::close_behavior() {
+            crate::ui_state::CloseBehavior::Quit => self.close_quit(window, cx),
+            crate::ui_state::CloseBehavior::ToTray => self.close_to_tray(window, cx),
+            crate::ui_state::CloseBehavior::Ask => {
+                self.close_dialog = true;
+                self.close_dialog_remember = false;
+                cx.notify();
+            }
+        }
+    }
+
+    /// 最小化到托盘：保存窗口状态后销毁窗口——应用驻留（QuitMode::
+    /// Explicit 下无窗口不退出），托盘「显示窗口」重建主窗口。销毁需
+    /// 异步（事件分发栈上同步移除自身窗口不安全）。
+    fn close_to_tray(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::window_state::save(window);
+        let handle = window.window_handle();
+        cx.spawn(async move |_, cx| {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        })
+        .detach();
+    }
+
+    /// 退出程序：保存窗口状态后显式退出（托盘菜单退出同款路径）。
+    fn close_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::window_state::save(window);
+        cx.quit();
+    }
+
+    /// 关闭选择弹窗——「最小化到托盘」。
+    pub(crate) fn dialog_close_to_tray(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.close_dialog_remember {
+            crate::ui_state::set_close_behavior(crate::ui_state::CloseBehavior::ToTray);
+        }
+        self.close_dialog = false;
+        self.close_to_tray(window, cx);
+    }
+
+    /// 关闭选择弹窗——「退出程序」。
+    pub(crate) fn dialog_close_quit(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.close_dialog_remember {
+            crate::ui_state::set_close_behavior(crate::ui_state::CloseBehavior::Quit);
+        }
+        self.close_dialog = false;
+        self.close_quit(window, cx);
+    }
+
+    /// 关闭选择弹窗——「取消」。
+    pub(crate) fn dialog_close_cancel(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.close_dialog = false;
+        cx.notify();
+    }
+
+    /// 关闭选择弹窗——勾选「记住我的选择」。
+    pub(crate) fn dialog_toggle_remember(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.close_dialog_remember = !self.close_dialog_remember;
+        cx.notify();
     }
 }
 
@@ -643,7 +719,7 @@ impl Render for AppShell {
         };
 
         // 根布局：自定义标题栏（跟随主题深浅）+ 侧栏/内容列（拖把手可调宽）
-        v_flex()
+        let root = v_flex()
             .size_full()
             .child(crate::views::title_bar::render(self, window, cx))
             .child(
@@ -711,7 +787,117 @@ impl Render for AppShell {
                     .into_any_element(),
             ),
                     ),
-            )
+            );
+
+        // 关闭选择弹窗（线上反馈⑤）：全屏遮罩 + 居中卡片（Z 序在内容之上）
+        div()
+            .relative()
+            .size_full()
+            .child(root)
+            .when(self.close_dialog, |d| {
+                let theme = cx.theme().clone();
+                let remember = self.close_dialog_remember;
+                d.child(
+                    div()
+                        .id("close-dialog-mask")
+                        .absolute()
+                        .size_full()
+                        .top_0()
+                        .left_0()
+                        .bg(gpui_kit::black().opacity(0.45))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            v_flex()
+                                .id("close-dialog")
+                                .w(px(380.))
+                                .p_5()
+                                .gap_3()
+                                .rounded(px(12.))
+                                .bg(theme.background)
+                                .border_1()
+                                .border_color(theme.border)
+                                .shadow_lg()
+                                .child(
+                                    div()
+                                        .text_size(px(14.5))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme.foreground)
+                                        .child(i18n::t("app.closeDialogTitle")),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(12.5))
+                                        .text_color(theme.muted_foreground)
+                                        .child(i18n::t("app.closeDialogText")),
+                                )
+                                // 记住我的选择（勾选框）
+                                .child(
+                                    h_flex()
+                                        .id("close-dialog-remember")
+                                        .gap_2()
+                                        .items_center()
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(Self::dialog_toggle_remember))
+                                        .child(
+                                            div()
+                                                .w(px(14.))
+                                                .h(px(14.))
+                                                .rounded(px(3.))
+                                                .border_1()
+                                                .border_color(theme.border)
+                                                .when(remember, |d| {
+                                                    d.bg(theme.accent)
+                                                        .border_color(theme.accent)
+                                                })
+                                                .when(remember, |d| {
+                                                    d.child(
+                                                        gpui_kit::component::Icon::new(
+                                                            IconName::Check,
+                                                        )
+                                                        .size_3()
+                                                        .text_color(theme.accent_foreground),
+                                                    )
+                                                }),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(12.))
+                                                .text_color(theme.foreground)
+                                                .child(i18n::t("app.closeRemember")),
+                                        ),
+                                )
+                                // 动作行：取消 / 最小化到托盘 / 退出程序
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .justify_end()
+                                        .child(
+                                            Button::new("close-dialog-cancel")
+                                                .ghost()
+                                                .small()
+                                                .label(i18n::t("app.closeCancel"))
+                                                .on_click(cx.listener(Self::dialog_close_cancel)),
+                                        )
+                                        .child(
+                                            Button::new("close-dialog-tray")
+                                                .primary()
+                                                .small()
+                                                .label(i18n::t("app.closeToTray"))
+                                                .on_click(cx.listener(Self::dialog_close_to_tray)),
+                                        )
+                                        .child(
+                                            Button::new("close-dialog-quit")
+                                                .ghost()
+                                                .small()
+                                                .label(i18n::t("app.closeQuit"))
+                                                .on_click(cx.listener(Self::dialog_close_quit)),
+                                        ),
+                                ),
+                        ),
+                )
+            })
     }
 }
 

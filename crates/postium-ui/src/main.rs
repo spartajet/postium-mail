@@ -60,6 +60,11 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             postium_editor::init(cx);
+            // 窗口全关后应用驻留（线上反馈⑤：关闭到托盘）——非 macOS 的
+            // QuitMode::Default 在最后一个窗口关闭时直接退出进程（托盘
+            // 一并带走）。改 Explicit：仅显式 cx.quit() 退出（托盘菜单/
+            // 关闭行为=退出）。
+            cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
             cx.set_global(i18n::I18nGlobal { lang: i18n::Lang::Zh });
             app::open_main_window(api, Some(sync_rx), cx);
             // 截图模式：不激活应用（不抢用户焦点）
