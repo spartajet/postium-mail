@@ -10,6 +10,8 @@
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
+use postium_html::SafeUrl;
+
 /// 跨帧共享的划选状态（渲染只读 + 鼠标事件读写）。
 #[derive(Clone, Default)]
 pub struct HtmlSelection {
@@ -24,6 +26,11 @@ struct SelState {
     head: Option<SelPos>,
     /// 本帧文本组注册表（文档序）：组文本，划选复制与区间展开的依据。
     groups: Vec<String>,
+    /// 右键命中上下文（右键菜单，P0）：Some=命中链接（携带 URL），None=纯
+    /// 文本命中。右键按下时由 SelectableText 写入；左键按下清除（浏览器语
+    /// 义：右键不破坏选区，左键开始新交互即失效）。菜单在 window.defer 的
+    /// 下一帧构建——载体必须是本结构这类跨帧状态而非每帧重建的 RenderCtx。
+    right_hit: Option<SafeUrl>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -63,6 +70,41 @@ impl HtmlSelection {
         state.dragging = true;
         state.anchor = Some(pos);
         state.head = Some(pos);
+        state.right_hit = None;
+    }
+
+    /// 右键按下：记录命中上下文（Some=链接，None=纯文本）。不清选区、不进
+    /// 拖选态——右键菜单（P0）读取，左键按下时自然失效。
+    pub fn on_right_down(&self, link: Option<SafeUrl>) {
+        self.lock().right_hit = link;
+    }
+
+    /// 右键菜单构建期读取：Some(&SafeUrl)=链接命中（链接菜单），None=文本
+    /// 命中（文本菜单）。
+    pub fn right_click_link(&self) -> Option<SafeUrl> {
+        self.lock().right_hit.clone()
+    }
+
+    /// 全选（右键菜单 P0）：锚点=文档首，游标=末组末偏移。组注册表为空
+    /// （无文本组）时无操作。
+    pub fn select_all(&self) {
+        let mut state = self.lock();
+        let Some((last_ix, last_len)) = state
+            .groups
+            .last()
+            .map(|text| (state.groups.len() - 1, text.len()))
+        else {
+            return;
+        };
+        state.dragging = false;
+        state.anchor = Some(SelPos {
+            group: 0,
+            offset: 0,
+        });
+        state.head = Some(SelPos {
+            group: last_ix,
+            offset: last_len,
+        });
     }
 
     /// 拖动：更新游标（仅拖选态；组内偏移钳制到文本长度）。
@@ -234,5 +276,44 @@ mod tests {
         sel.on_move(ids[0], 999);
         sel.on_up();
         assert_eq!(sel.selected_text().as_deref(), Some("第一组文本"));
+    }
+
+    #[test]
+    fn right_hit_lifecycle() {
+        let (sel, ids) = setup();
+        // 右键链接命中 → 读取可见；右键纯文本 → None；右键不破坏既有选区
+        sel.on_down(ids[0], 0);
+        sel.on_move(ids[1], 3);
+        sel.on_up();
+        assert!(sel.is_selecting());
+        sel.on_right_down(Some(SafeUrl::Http("https://a.test/x".into())));
+        assert_eq!(
+            sel.right_click_link(),
+            Some(SafeUrl::Http("https://a.test/x".into()))
+        );
+        assert!(sel.is_selecting(), "右键不得破坏选区");
+        sel.on_right_down(None);
+        assert_eq!(sel.right_click_link(), None, "纯文本右键覆盖链接命中");
+        // 左键按下清除命中
+        sel.on_right_down(Some(SafeUrl::Http("https://b.test".into())));
+        sel.on_down(ids[0], 0);
+        assert_eq!(sel.right_click_link(), None, "左键按下应清除右键命中");
+    }
+
+    #[test]
+    fn select_all_spans_all_groups() {
+        let (sel, _ids) = setup();
+        sel.select_all();
+        assert!(sel.is_selecting());
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("第一组文本\n第二组\n第三组尾巴"),
+            "全选应覆盖首组到末组全部文本"
+        );
+        // 空注册表：无操作
+        let empty = HtmlSelection::default();
+        empty.begin_frame();
+        empty.select_all();
+        assert!(!empty.is_selecting());
     }
 }

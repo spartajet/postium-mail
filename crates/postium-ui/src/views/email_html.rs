@@ -26,21 +26,25 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, CursorStyle, DispatchPhase, Element, ElementId, FontStyle,
-    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    InteractiveElement as _, IntoElement, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, RenderImage, SharedString,
-    StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun, UnderlineStyle, div,
-    font as base_font, img, px, relative, rgba, StatefulInteractiveElement as _,
+    AnyElement, App, ClipboardItem, CursorStyle, DispatchPhase, Element, ElementId, FontStyle,
+    FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, Image, ImageFormat,
+    InspectorElementId, InteractiveElement as _, IntoElement, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, RenderImage,
+    SharedString, StrikethroughStyle, Styled as _, StyledText, TextAlign, TextRun,
+    UnderlineStyle, Window, div, font as base_font, img, px, relative, rgba,
+    StatefulInteractiveElement as _,
 };
+use gpui_kit_assets::IconName;
 use postium_html::{
     Align, Block, BlockStyle, HtmlDocument, ImageRef, ImageStyle, InlineRun, InlineStyle, Rgba,
     SafeUrl, TableCell, TableRow, Width,
 };
 
+use crate::i18n::t;
 use crate::views::html_selection::HtmlSelection;
 
 /// 正文基础字号（px）。邮件作者未声明字号时的兜底。
@@ -793,7 +797,17 @@ fn flush_text_group(
         });
         d.debug_selector(move || key)
     };
-    els.push(d.into_any_element());
+    // 右键菜单（P0）：文本组挂 ContextMenu 包裹（无 id 模式——同调用点共享
+    // 状态 + hovered 守卫只让被按压的组弹菜单，email_list 行菜单同款）。
+    // 命中上下文由 SelectableText 的 Right 分支写入 selection.right_hit，
+    // 本 builder 在 defer 下一帧读。
+    els.push(
+        d.context_menu(build_text_menu(
+            rcx.selection.clone(),
+            Arc::clone(&rcx.on_link),
+        ))
+        .into_any_element(),
+    );
 }
 
 /// 选中区间切分 [`TextRun`]：交叠 run 拆为 前/选中/后 三段，选中段施加
@@ -950,6 +964,39 @@ impl Element for SelectableText {
                     );
                 }
                 {
+                    // 右键命中解析（右键菜单 P0）：游标判定的同款 containment 检查
+                    // ——命中链接则记 URL（链接菜单），否则记纯文本（文本菜单）。
+                    // 不清选区、不 stop_propagation：放行给外层 ContextMenu 包裹
+                    // 层开菜单（包裹层自身只认 Right + hovered）。
+                    let hitbox = hitbox.clone();
+                    let layout = text_layout.clone();
+                    let selection = selection.clone();
+                    let ranges = ranges.clone();
+                    let urls = urls.clone();
+                    window.on_mouse_event(
+                        move |event: &MouseDownEvent, phase, window: &mut gpui_kit::Window, _| {
+                            if phase != DispatchPhase::Bubble
+                                || event.button != MouseButton::Right
+                                || !hitbox.is_hovered(window)
+                            {
+                                return;
+                            }
+                            // hover 即写命中：index 解析失败（组内边距/边缘）按
+                            // 纯文本处理——不写会让菜单读到陈旧命中。
+                            let link = layout
+                                .index_for_position(event.position)
+                                .ok()
+                                .and_then(|ix| {
+                                    ranges
+                                        .iter()
+                                        .position(|r| r.contains(&ix))
+                                        .and_then(|i| urls.get(i).cloned())
+                                });
+                            selection.on_right_down(link);
+                        },
+                    );
+                }
+                {
                     let hitbox = hitbox.clone();
                     let layout = text_layout.clone();
                     let selection = selection.clone();
@@ -1074,19 +1121,23 @@ fn render_image_ref(src: &ImageRef, alt: &str, style: &ImageStyle, rcx: &RenderC
         ImageRef::Remote { .. } | ImageRef::Invalid => None,
     };
     match resolved {
-        Some(img) => render_loaded_image(&img, style, rcx),
+        Some(img) => render_loaded_image(&img, src, alt, style),
         None => image_placeholder(style, alt, rcx),
     }
 }
 
-/// 已解析图片 → GPUI [`img`] 元素（宽度取 style.width、高度取 style.height、
-/// max_width 钳制，与占位框同口径防布局跳动，spec §5）。
+/// 已解析图片 → GPUI [`img`] 元素 + 右键菜单包裹（宽度取 style.width、高度取
+/// style.height、max_width 钳制，与占位框同口径防布局跳动，spec §5；右键
+/// 菜单 P0）。菜单闭包只捕获廉价句柄（`Arc<RenderImage>` / DataUri 字节
+/// `Arc`）——PNG 重编码留给点击时一次性执行，不进每帧渲染路径。
 fn render_loaded_image(
     image: &Arc<RenderImage>,
+    src: &ImageRef,
+    alt: &str,
     style: &ImageStyle,
-    rcx: &RenderCtx,
 ) -> AnyElement {
-    let _ = rcx;
+    let payload = image_payload_for(src, image);
+    let alt = alt.to_string();
     // 尺寸样式直接落在 Img（Styled）上：无显式宽时保持图片固有尺寸。
     let mut el = img(image.clone()).overflow_hidden();
     match style.width {
@@ -1105,7 +1156,11 @@ fn render_loaded_image(
         None => {}
     }
     // 已加载真图探针：e2e 断言「无真图渲染」的负向键（占位框为 html-img）。
-    el.debug_selector(|| "html-img-loaded".to_string())
+    div()
+        .child(
+            el.debug_selector(|| "html-img-loaded".to_string()),
+        )
+        .context_menu(move |menu, _, _| build_image_menu(menu, payload.clone(), alt.clone()))
         .into_any_element()
 }
 
@@ -1401,6 +1456,207 @@ fn heading_size(level: u8) -> f32 {
 // ---------------------------------------------------------------------------
 pub(crate) trait ProbeExt: Sized {
     fn when_probe(self, selector: &str) -> Self;
+}
+
+// ---------------------------------------------------------------------------
+// 右键菜单（P0，可行性文档 §4/§5）：文本（复制/全选）、链接（打开/复制
+// 链接地址）、图片（复制图片/另存为）。菜单 UI 走 gpui-kit ContextMenuExt
+// （右键检测/定位/焦点恢复/点外消失全自动，email_list 同款）；命中上下文
+// 经 HtmlSelection.right_hit 跨帧传递（菜单在 window.defer 下一帧构建）。
+// ---------------------------------------------------------------------------
+
+/// [`SafeUrl`] → 剪贴板/显示串（协议白名单后仅存内串）。
+pub(crate) fn safe_url_string(url: &SafeUrl) -> String {
+    match url {
+        SafeUrl::Http(u) | SafeUrl::Mailto(u) => u.clone(),
+    }
+}
+
+/// 文本/链接右键菜单 builder（flush_text_group 的 context_menu 挂接）。
+/// 读 [`HtmlSelection::right_click_link`] 分流：链接命中 → 打开/复制链接；
+/// 纯文本 → 复制（无选区禁用）/全选。构建发生在 defer 的下一帧，读的是
+/// 右键按下时写入的命中。
+pub(crate) fn build_text_menu(
+    selection: HtmlSelection,
+    on_link: Arc<dyn Fn(&SafeUrl) + Send + Sync + 'static>,
+) -> impl Fn(PopupMenu, &mut Window, &mut gpui_kit::Context<PopupMenu>) -> PopupMenu + 'static {
+    move |menu, _window, _cx| match selection.right_click_link() {
+        Some(url) => {
+            let open_url = url.clone();
+            let open_cb = Arc::clone(&on_link);
+            let copy_url = url.clone();
+            menu.item(
+                PopupMenuItem::new(t("mailMenu.openLink"))
+                    .icon(IconName::ExternalLink)
+                    .on_click(move |_, _, _| open_cb(&open_url)),
+            )
+            .item(
+                PopupMenuItem::new(t("mailMenu.copyLink"))
+                    .icon(IconName::Link)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(safe_url_string(
+                            &copy_url,
+                        )));
+                        crate::notify::toast(t("mailMenu.linkCopied"));
+                    }),
+            )
+        }
+        None => {
+            let copy_sel = selection.clone();
+            let select_all_sel = selection.clone();
+            menu.item(
+                PopupMenuItem::new(t("mailMenu.copy"))
+                    .icon(IconName::Copy)
+                    .disabled(!selection.is_selecting())
+                    .on_click(move |_, _, cx| {
+                        if let Some(text) = copy_sel.selected_text() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            crate::notify::toast(t("email.selectionCopied"));
+                        }
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(t("mailMenu.selectAll"))
+                    .icon(IconName::ClipboardCopy)
+                    .on_click(move |_, window, _| {
+                        select_all_sel.select_all();
+                        window.refresh();
+                    }),
+            )
+        }
+    }
+}
+
+/// 图片右键菜单的数据载荷（元素构造期廉价捕获，编码留给点击时）。
+#[derive(Clone)]
+pub(crate) enum ImagePayload {
+    /// DataUri：原始字节直通（零重编码，格式随 mime）。
+    Raw {
+        fmt: ImageFormat,
+        ext: &'static str,
+        bytes: Arc<[u8]>,
+    },
+    /// Cid / Remote：仅手头 `RenderImage`（BGRA）→ 点击时重编码 PNG。
+    Rendered { image: Arc<RenderImage> },
+}
+
+/// 按图片源构造菜单载荷。
+pub(crate) fn image_payload_for(src: &ImageRef, image: &Arc<RenderImage>) -> ImagePayload {
+    match src {
+        ImageRef::DataUri { mime, bytes } => {
+            let (fmt, ext) = match mime.as_str() {
+                "image/png" => (ImageFormat::Png, "png"),
+                "image/jpeg" => (ImageFormat::Jpeg, "jpg"),
+                "image/gif" => (ImageFormat::Gif, "gif"),
+                "image/webp" => (ImageFormat::Webp, "webp"),
+                _ => (ImageFormat::Png, "png"),
+            };
+            ImagePayload::Raw {
+                fmt,
+                ext,
+                bytes: Arc::clone(bytes),
+            }
+        }
+        // 已解析才有本函数调用：Cid/Remote 皆持 RenderImage
+        _ => ImagePayload::Rendered {
+            image: Arc::clone(image),
+        },
+    }
+}
+
+/// 载荷 → 剪贴板/落盘字节（点击时一次性执行：Raw 直通；Rendered 走
+/// BGRA→RGBA→PNG 重编码，`image` crate png feature 已启用）。
+fn image_payload_bytes(payload: &ImagePayload) -> Option<(ImageFormat, Vec<u8>)> {
+    match payload {
+        ImagePayload::Raw { fmt, bytes, .. } => Some((*fmt, bytes.to_vec())),
+        ImagePayload::Rendered { image } => {
+            render_image_png_bytes(image).map(|b| (ImageFormat::Png, b))
+        }
+    }
+}
+
+/// `RenderImage`（首帧 BGRA）→ PNG 字节。解码的逆路径（decode_render_image
+/// 曾做 RGBA→BGRA 交换，此处换回）。
+pub(crate) fn render_image_png_bytes(image: &RenderImage) -> Option<Vec<u8>> {
+    let size = image.size(0);
+    let (w, h) = (u32::try_from(size.width.0).ok()?, u32::try_from(size.height.0).ok()?);
+    let bgra = image.as_bytes(0)?;
+    let mut rgba = bgra.to_vec();
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+    let buffer = image::RgbaImage::from_raw(w, h, rgba)?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    buffer
+        .write_to(&mut out, image::ImageFormat::Png)
+        .ok()
+        .map(|_| out.into_inner())
+}
+
+/// 另存为默认文件名：alt 净化（去路径分隔/控制字符/Windows 保留字符、
+/// 限长）+ 扩展名。
+pub(crate) fn image_save_file_name(alt: &str, payload: &ImagePayload) -> String {
+    let ext = match payload {
+        ImagePayload::Raw { ext, .. } => *ext,
+        ImagePayload::Rendered { .. } => "png",
+    };
+    let base: String = alt
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let base = base.trim().chars().take(48).collect::<String>();
+    let base = if base.is_empty() { "image".to_string() } else { base };
+    format!("{base}.{ext}")
+}
+
+/// 图片右键菜单（render_loaded_image 的 context_menu 挂接）。
+/// 另存为全流程在后台线程（rfd 对话框 + 编码 + 写盘；toast 走全局 channel，
+/// 线程安全）——UI 线程零阻塞，复用 attachments 保存的线程纪律。
+pub(crate) fn build_image_menu(
+    menu: PopupMenu,
+    payload: ImagePayload,
+    alt: String,
+) -> PopupMenu {
+    let copy_payload = payload.clone();
+    menu.item(
+        PopupMenuItem::new(t("mailMenu.copyImage"))
+            .icon(IconName::Image)
+            .on_click(move |_, _, cx| {
+                if let Some((fmt, bytes)) = image_payload_bytes(&copy_payload) {
+                    let image = Image::from_bytes(fmt, bytes);
+                    cx.write_to_clipboard(ClipboardItem::new_image(&image));
+                    crate::notify::toast(t("mailMenu.imageCopied"));
+                }
+            }),
+    )
+    .item(
+        PopupMenuItem::new(t("mailMenu.saveImageAs"))
+            .icon(IconName::Save)
+            .on_click(move |_, _, _| {
+                let default_name = image_save_file_name(&alt, &payload);
+                let save_payload = payload.clone();
+                std::thread::spawn(move || {
+                    let Some(path) = rfd::FileDialog::new()
+                        .set_file_name(&default_name)
+                        .save_file()
+                    else {
+                        return;
+                    };
+                    let ok = image_payload_bytes(&save_payload)
+                        .and_then(|(_, bytes)| std::fs::write(&path, bytes).ok());
+                    match ok {
+                        Some(()) => crate::notify::toast(t("mailMenu.imageSaved")),
+                        None => crate::notify::toast(t("mailMenu.imageSaveFailed")),
+                    }
+                });
+            }),
+    )
 }
 
 #[cfg(test)]
