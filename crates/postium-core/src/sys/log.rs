@@ -6,9 +6,12 @@
 /// 已知无害噪音（按源文件路径压制）：
 /// - `directx_devices.rs`：无 D3D 调试层机器上的 DXGI debug 探测失败
 ///   （log 宏桥接记录，EnvFilter 的 target 过滤对其不生效，故按 file 判定）
+/// - gpui-pre `window.rs`：窗口 remove 后平台激活回调仍到达（"window not
+///   found" ERROR）——关闭到托盘（窗口销毁、应用驻留）的必经噪音，实机
+///   复现验证进程驻留正常（线上反馈⑨）
 fn is_known_noise(file: Option<&str>) -> bool {
     match file {
-        Some(f) => f.contains("directx_devices.rs"),
+        Some(f) => f.contains("directx_devices.rs") || (f.contains("gpui-pre") && f.contains("window.rs")),
         None => false,
     }
 }
