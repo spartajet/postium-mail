@@ -26,7 +26,11 @@ pub fn setup_logging() {
             // - gpui_pre(_windows)：每帧的无障碍树更新、渲染器/剪贴板内部调试
             // - tao：窗口系统事件；globset：构建 glob 集合
             // - html5ever/markup5ever：HTML 解析器逐 tag 的 tree_builder 调试
-            //   （邮件正文解析时每封上千行）
+            //   （邮件正文解析时每封上千行）；html5ever 提到 error——其
+            //   RcDom 参考实现未实现规范的 foster parenting（错位内容移位，
+            //   如 <table> 内直接夹文本——Outlook 系邮件常见），每封打一次
+            //   WARN。树仍完整构建，错位内容由 builder 防御性兜底（表格行
+            //   只认 td/th），无害噪音（线上反馈④）
             // - selectors：css-inline 类名匹配的 DEBUG 会把整个文档 DOM
             //   Debug 转储进单条日志（MB 级/条 × 每元素每选择器）——渲染线程
             //   同步写终端直接卡死应用（日志目标文件 selectors/matching.rs）
@@ -35,12 +39,14 @@ pub fn setup_logging() {
             //   （hyper_util::client::…），写成连字符 hyper-util 永不匹配
             //   （线上反馈③：同步日志刷屏的漏网真因）
             EnvFilter::new(
-                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
+                "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=error,markup5ever=warn,selectors=warn",
             )
         }
         #[cfg(not(debug_assertions))]
         {
-            EnvFilter::new("warn")
+            // release 默认 WARN；同样压制 html5ever 的 RcDom 局限告警
+            // （foster parenting，线上反馈④——见 dev 分支注释）
+            EnvFilter::new("warn,html5ever=error")
         }
     });
 
@@ -86,7 +92,7 @@ mod tests {
         }
 
         let filter = tracing_subscriber::EnvFilter::new(
-            "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=warn,markup5ever=warn,selectors=warn",
+            "debug,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=error,markup5ever=warn,selectors=warn",
         );
         let captured = Arc::new(Mutex::new(Vec::new()));
         let subscriber = tracing_subscriber::fmt()
@@ -110,10 +116,16 @@ mod tests {
             noise!("reqwest::connect::connector");
             noise!("tao::platform_impl::platform::event_loop");
             tracing::debug!(target: "postium_core::infrastructure::protocols::imap::fetch", "business-line");
+            // foster parenting 告警是 WARN 级（线上反馈④）：error 阈值下必须压住
+            tracing::warn!(target: "html5ever::tree_builder", "foster parenting not implemented");
         });
 
         let out = String::from_utf8(captured.lock().unwrap().clone()).unwrap();
         assert!(!out.contains("noise-line"), "依赖噪音应全部被压制:\n{out}");
+        assert!(
+            !out.contains("foster parenting"),
+            "html5ever WARN（RcDom foster parenting 局限）应被压制:\n{out}"
+        );
         assert!(out.contains("business-line"), "业务 DEBUG 不应被误压制:\n{out}");
     }
 }
