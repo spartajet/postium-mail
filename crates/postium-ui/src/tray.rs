@@ -10,16 +10,21 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 
 use crate::stores::sync::SyncStore;
 
-#[allow(dead_code)]
-struct TrayActions {
-    #[allow(dead_code)]
-    show: u32,
-    compose: u32,
-    sync: u32,
-    quit: u32,
+
+thread_local! {
+    /// 托盘图标**进程级持有**（线上反馈⑨续）：此前图标挂在 AppShell 的
+    /// `_tray` 字段上——「最小化到托盘」销毁主窗口时 AppShell 实体一并
+    /// drop，TrayIcon::Drop 即 Shell_NotifyIcon(NIM_DELETE)，图标随之消失
+    /// （进程与轮询任务是 App 级的所以活着）。thread_local 而非 static：
+    /// Windows TrayIcon 含裸 HWND 非 Send/Sync，且须与消息泵同线程；随
+    /// 主线程终结（进程退出）析构，跨主窗口重建幂等复用。
+    static TRAY_HOLD: std::cell::RefCell<Option<TrayIcon>> = const { std::cell::RefCell::new(None) };
 }
 
-static ACTIONS_ID: u32 = 1;
+/// 事件轮询任务只启动一次（主窗口重建时 setup_tray 幂等复用图标，轮询
+/// 不得重复 spawn——静态 channel 单消费者语义）。
+static TRAY_CONSUMER_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// 托盘「显示窗口」/左键单击共享：主窗口存活 → 激活置前；已关闭（关闭到
 /// 托盘）→ 重建主窗口。
@@ -42,7 +47,11 @@ fn show_main_window(api: &Arc<CoreApi>, cx: &mut App) {
     }
 }
 
-/// 装配托盘并启动事件消费循环。
+/// 装配托盘并启动事件消费循环（幂等：图标已持有则直接复用——主窗口
+/// 重建路径反复调用）。
+///
+/// 返回托盘是否可用（供关闭行为判定：无托盘环境真关闭，否则程序退出
+/// 只能走托盘菜单）。
 ///
 /// 托盘是可选能力：Linux 无 appindicator/无会话总线等环境下
 /// tray-icon 内部会 panic（毒化其全局 Lazy），此处兜底捕获，
@@ -51,15 +60,22 @@ pub fn setup_tray(
     api: Arc<CoreApi>,
     sync_store: gpui_kit::Entity<SyncStore>,
     cx: &mut App,
-) -> Option<TrayIcon> {
+) -> bool {
+    if TRAY_HOLD.with(|t| t.borrow().is_some()) {
+        return true;
+    }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         setup_tray_inner(api, sync_store, cx)
     }));
     match result {
-        Ok(tray) => tray,
+        Ok(Some(tray)) => {
+            TRAY_HOLD.with(|t| *t.borrow_mut() = Some(tray));
+            true
+        }
+        Ok(None) => false,
         Err(payload) => {
             tracing::warn!("托盘初始化失败（无托盘环境属预期）：{payload:?}");
-            None
+            false
         }
     }
 }
@@ -86,8 +102,41 @@ fn setup_tray_inner(
         .with_icon(icon)
         .build();
 
-    // 事件消费：UI 线程轮询（菜单事件量极小，250ms 足够）
-    let api = api.clone();
+    // 事件消费：UI 线程轮询（菜单事件量极小，250ms 足够）。幂等：图标
+    // 进程级复用后 setup_tray 可能再次到达，轮询任务只启动一次。
+    if TRAY_CONSUMER_STARTED
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        tracing::debug!("托盘事件轮询已启动，跳过重复 spawn");
+    } else {
+        spawn_tray_consumer(api.clone(), sync_store, cx);
+    }
+
+    match tray {
+        Ok(t) => {
+            tracing::info!("系统托盘已就绪");
+            Some(t)
+        }
+        Err(e) => {
+            tracing::warn!("托盘构建失败：{e}");
+            None
+        }
+    }
+}
+
+/// 托盘菜单/点击事件轮询（App 级任务：不随主窗口生灭——关闭到托盘后
+/// 依然消费事件）。
+fn spawn_tray_consumer(
+    api: Arc<CoreApi>,
+    sync_store: gpui_kit::Entity<SyncStore>,
+    cx: &mut App,
+) {
     cx.spawn(async move |cx| {
         let menu_rx = MenuEvent::receiver();
         let tray_rx = tray_icon::TrayIconEvent::receiver();
@@ -152,10 +201,6 @@ fn setup_tray_inner(
         }
     })
     .detach();
-
-    let _ = ACTIONS_ID;
-    tracing::info!("系统托盘已就绪");
-    tray.ok()
 }
 
 /// 加载托盘图标：Windows 用 ICO 多尺寸路径；其他平台解码内嵌 PNG 为 RGBA。

@@ -208,8 +208,6 @@ pub struct AppShell {
     pub nav: NavTarget,
     /// 系统外观观察订阅（保持存活）
     _appearance_sub: Option<gpui_kit::Subscription>,
-    /// 托盘句柄（保持存活）
-    _tray: Option<tray_icon::TrayIcon>,
     pub(crate) calendar_view: Option<gpui_kit::Entity<crate::views::calendar::CalendarView>>,
     pub(crate) contacts_view: Option<gpui_kit::Entity<crate::views::contacts::ContactsView>>,
     workflow_view: Option<gpui_kit::Entity<crate::views::workflow::WorkflowView>>,
@@ -502,8 +500,10 @@ impl AppShell {
         })
         .detach();
 
-        let _tray = crate::tray::setup_tray(api.clone(), sync_store.clone(), cx);
-        if _tray.is_some() {
+        // 托盘图标由 tray 模块进程级持有（线上反馈⑨续：此前挂在本实体
+        // 字段上，主窗口销毁即随实体 drop → 图标消失）；此处只装配并
+        // 记录可用性（关闭行为判定用）
+        if crate::tray::setup_tray(api.clone(), sync_store.clone(), cx) {
             TRAY_ALIVE.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -524,7 +524,6 @@ impl AppShell {
             search_gen: 0,
             nav: NavTarget::AllInbox,
             _appearance_sub: appearance_sub,
-            _tray,
             calendar_view: None,
             contacts_view: None,
             workflow_view: None,
