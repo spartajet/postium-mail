@@ -13,6 +13,7 @@ mod i18n;
 mod nav;
 mod notify;
 mod runtime;
+mod single_instance;
 mod screenshot;
 mod sound;
 mod ui_state;
@@ -51,6 +52,12 @@ fn main() {
     let screenshot = screenshot::init_from_args();
     let screenshot_mode = screenshot.is_some();
 
+    // 单实例（线上反馈⑪）：第二实例唤醒既有实例后退出——不碰数据库/引擎
+    let show_listener = match single_instance::acquire() {
+        single_instance::Role::Primary(listener) => Some(listener),
+        single_instance::Role::Secondary => return,
+    };
+
     let e2e = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
     let e2e_truth = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
 
@@ -75,7 +82,11 @@ fn main() {
             // 关闭行为=退出）。
             cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
             cx.set_global(i18n::I18nGlobal { lang: i18n::Lang::Zh });
-            app::open_main_window(api, Some(sync_rx), cx);
+            app::open_main_window(api.clone(), Some(sync_rx), cx);
+            // 单实例唤醒消费：第二实例握手 → 显示/重建主窗口
+            if let Some(listener) = show_listener {
+                app::spawn_show_listener(listener, api, cx);
+            }
             // 截图模式：不激活应用（不抢用户焦点）
             if screenshot_mode {
                 cx.activate(false);

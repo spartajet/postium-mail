@@ -29,22 +29,7 @@ static TRAY_CONSUMER_STARTED: std::sync::atomic::AtomicBool =
 /// 托盘「显示窗口」/左键单击共享：主窗口存活 → 激活置前；已关闭（关闭到
 /// 托盘）→ 重建主窗口。
 fn show_main_window(api: &Arc<CoreApi>, cx: &mut App) {
-    let shell_alive = cx
-        .try_global::<crate::app::MainShell>()
-        .and_then(|main| main.0.upgrade())
-        .is_some();
-    if shell_alive {
-        if let Some(handle) = cx.active_window() {
-            let _ = handle.update(cx, |_, window, _| {
-                window.activate_window();
-            });
-        }
-    } else {
-        let api = api.clone();
-        cx.defer(move |cx| {
-            crate::app::open_main_window(api, None, cx);
-        });
-    }
+    crate::app::show_main_window(api, cx);
 }
 
 /// 装配托盘并启动事件消费循环（幂等：图标已持有则直接复用——主窗口

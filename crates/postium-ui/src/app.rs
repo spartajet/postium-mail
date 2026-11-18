@@ -224,6 +224,61 @@ pub struct AppShell {
     status_bar: Option<gpui_kit::Entity<crate::views::status_bar::StatusBar>>,
 }
 
+/// 显示主窗口（共享出口：托盘「显示窗口」/左键单击/单实例唤醒）：主窗口
+/// 存活 → 激活置前；已关闭（关闭到托盘）→ 重建主窗口。
+pub(crate) fn show_main_window(api: &Arc<CoreApi>, cx: &mut App) {
+    let shell_alive = cx
+        .try_global::<MainShell>()
+        .and_then(|main| main.0.upgrade())
+        .is_some();
+    if shell_alive {
+        if let Some(handle) = cx.active_window() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.activate_window();
+            });
+        }
+    } else {
+        let api = api.clone();
+        cx.defer(move |cx| {
+            open_main_window(api, None, cx);
+        });
+    }
+}
+
+/// 单实例 Primary 消费循环（main 接线）：tokio 侧 accept+握手应答（阻塞 IO
+/// 不进 gpui 执行器），gpui 侧消费握手事件 → 显示/重建主窗口（跨进程唤醒）。
+pub(crate) fn spawn_show_listener(
+    mut listener: std::net::TcpListener,
+    api: Arc<CoreApi>,
+    cx: &mut App,
+) {
+    let (tx, rx) = smol::channel::unbounded::<()>();
+    crate::runtime::runtime().spawn(async move {
+        use std::io::{Read as _, Write as _};
+        loop {
+            let Ok((mut sock, _)) = listener.accept() else {
+                break; // listener 失效（理论不发生：进程级持有）
+            };
+            let _ = sock.set_read_timeout(Some(std::time::Duration::from_millis(800)));
+            let _ = sock.set_write_timeout(Some(std::time::Duration::from_millis(800)));
+            let mut buf = [0u8; crate::single_instance::MAGIC.len()];
+            if sock.read_exact(&mut buf).is_err() || &buf != crate::single_instance::MAGIC {
+                continue;
+            }
+            let _ = sock.write_all(crate::single_instance::ACK);
+            // 不 shutdown(Both)：立即 RST 会吞掉客户端未读的 ACK；让连接
+            // 随 socket drop 正常关闭（FIN，客户端已读缓冲仍可取）
+            let _ = tx.send(()).await;
+        }
+    });
+    cx.spawn(async move |cx| {
+        while let Ok(()) = rx.recv().await {
+            let _ = cx.update(|app| show_main_window(&api, app));
+        }
+    })
+    .detach();
+}
+
 impl AppShell {
     pub(crate) fn new(
         api: Arc<CoreApi>,
