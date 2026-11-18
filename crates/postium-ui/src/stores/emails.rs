@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use gpui_kit::{Context, EventEmitter};
 use postium_core::api::CoreApi;
-use postium_core::service::email_service::{EmailCategory, EmailDto};
+use postium_core::service::email_service::{EmailCategory, EmailDto, EmailListResponse};
 
 use crate::nav::NavTarget;
 use crate::runtime::spawn_tokio;
@@ -63,6 +63,26 @@ impl EmailsStore {
             selected_version: 0,
             list_version: 0,
             nav_version: 0,
+            unread_only: false,
+            search_query: None,
+            load_gen: 0,
+        }
+    }
+
+    /// 启动预载种子构造（线上反馈⑥）：AllInbox 首页已在主窗口打开前取好
+    /// ——首帧列表即有数据，免「窗口空白两秒等查询回填」。版本号从 1 起
+    /// （宿主初始 0 → 首帧即按新数据构建列表视图）。
+    pub fn seeded_inbox(resp: EmailListResponse) -> Self {
+        Self {
+            nav: NavTarget::AllInbox,
+            emails: resp.emails,
+            total: resp.total,
+            page: 0,
+            loading: false,
+            selected: None,
+            selected_version: 0,
+            list_version: 1,
+            nav_version: 1,
             unread_only: false,
             search_query: None,
             load_gen: 0,

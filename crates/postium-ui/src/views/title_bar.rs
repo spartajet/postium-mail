@@ -54,6 +54,8 @@ pub fn render(
     let muted_fg = theme.muted_foreground;
     let secondary_hover = theme.secondary_hover;
     let maximized = window.is_maximized();
+    // 关闭按钮分流需要主壳实体（弹窗询问态挂在 AppShell 上）
+    let shell_handle = cx.entity();
     // 选中邮件时标题栏居中显示邮件主题；无选中时中间留空
     let subject = shell
         .detail
@@ -127,8 +129,9 @@ pub fn render(
             secondary_hover,
             cx,
         ))
-        // 关闭：保存窗口状态后销毁窗口（程序驻留托盘，「显示窗口」重建主窗口；
-        // 退出走托盘菜单）。销毁需异步（事件分发栈上同步移除自身窗口不安全）。
+        // 关闭：按关闭行为分流（线上反馈⑤）——托盘驻留（销毁窗口、应用
+        // 驻留，「显示窗口」重建）/ 退出程序 / 每次询问（弹窗，勾选记住后
+        // 不再问）。销毁需异步（事件分发栈上同步移除自身窗口不安全）。
         .child(
             div()
                 .id("win-close")
@@ -140,13 +143,13 @@ pub fn render(
                 .justify_center()
                 .text_color(theme.foreground)
                 .hover(move |s| s.bg(theme.danger).text_color(theme.danger_foreground))
-                .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                    crate::window_state::save(window);
-                    let handle = window.window_handle();
-                    cx.spawn(async move |cx| {
-                        let _ = handle.update(cx, |_, window, _| window.remove_window());
-                    })
-                    .detach();
+                .on_mouse_down(MouseButton::Left, {
+                    let shell = shell_handle.clone();
+                    move |_, window, cx| {
+                        let _ = shell.update(cx, |shell, cx| {
+                            shell.request_close(window, cx);
+                        });
+                    }
                 })
                 .child(gpui_kit::component::Icon::new(IconName::WindowClose).size_3p5()),
         )

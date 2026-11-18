@@ -989,6 +989,7 @@ impl Render for SettingsView {
                 )
                 .child(render_theme_row(self, cx))
                 .child(render_language_row(cx))
+                .child(render_close_behavior_row(cx))
                 .into_any_element(),
             SettingsSection::Accounts => v_flex()
                 .p_5()
@@ -1929,6 +1930,53 @@ fn render_language_row(cx: &mut Context<SettingsView>) -> impl IntoElement {
                 .flex_1()
                 .child(gpui_kit::component::Icon::new(IconName::Globe).size_4().text_color(theme.muted_foreground))
                 .child(div().text_size(px(13.)).child(t("settings.language"))),
+        )
+        .child(seg)
+}
+
+/// 关闭窗口行为行（线上反馈⑤）：Power 图标 + 三段（每次询问/最小化到托盘/
+/// 退出程序），点击即持久化 ui-state.json。
+fn render_close_behavior_row(cx: &mut Context<SettingsView>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let current = crate::ui_state::close_behavior();
+    let mut seg = h_flex().gap_1().p(px(2.)).rounded(px(8.)).border_1().border_color(theme.border);
+    for (key, behavior, label) in [
+        ("close-ask", crate::ui_state::CloseBehavior::Ask, t("settings.closeAsk")),
+        ("close-tray", crate::ui_state::CloseBehavior::ToTray, t("settings.closeTray")),
+        ("close-quit", crate::ui_state::CloseBehavior::Quit, t("settings.closeQuit")),
+    ] {
+        let sel = current == behavior;
+        let selector = key.to_string();
+        seg = seg.child(
+            div()
+                .id(key)
+                .debug_selector(move || selector.clone())
+                .px(px(10.))
+                .py(px(4.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .when(sel, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                .when(!sel, |d| {
+                    d.text_color(theme.muted_foreground)
+                        .hover(|s| s.bg(theme.accent.opacity(0.12)))
+                })
+                .child(label)
+                .on_click(cx.listener(move |_: &mut SettingsView, _: &ClickEvent, _: &mut Window, cx: &mut Context<SettingsView>| {
+                    crate::ui_state::set_close_behavior(behavior);
+                    cx.notify();
+                })),
+        );
+    }
+    h_flex()
+        .items_center()
+        .child(
+            h_flex()
+                .items_center()
+                .gap_2()
+                .flex_1()
+                .child(gpui_kit::component::Icon::new(IconName::Power).size_4().text_color(theme.muted_foreground))
+                .child(div().text_size(px(13.)).child(t("settings.closeBehavior"))),
         )
         .child(seg)
 }

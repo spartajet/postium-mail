@@ -18,6 +18,41 @@ pub struct UiState {
     /// 侧 reducer 初始值为 !0（true），其 native 存储默认未证实，此处
     /// 取保守拦截默认。
     pub auto_download_mail_images: Option<bool>,
+    /// 关闭主窗口行为（线上反馈⑤）：`"tray"` = 最小化到托盘（窗口销毁、
+    /// 应用驻留），`"quit"` = 退出程序；缺省 None = 每次关闭时弹窗询问
+    /// （弹窗勾选「记住我的选择」或设置页切换后写入）。
+    pub close_behavior: Option<String>,
+}
+
+/// 关闭主窗口行为（线上反馈⑤）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CloseBehavior {
+    /// 每次关闭时弹窗询问（缺省；持久化形态为字段缺省 None）。
+    Ask,
+    /// 最小化到托盘：窗口销毁、应用驻留（QuitMode::Explicit 下无窗口
+    /// 不退出），托盘「显示窗口」重建。
+    ToTray,
+    /// 退出程序（保存窗口状态后 cx.quit）。
+    Quit,
+}
+
+impl CloseBehavior {
+    /// 持久化串 ↔ 枚举（未知串按 Ask 容错）。
+    pub fn from_persisted(s: &str) -> Self {
+        match s {
+            "tray" => CloseBehavior::ToTray,
+            "quit" => CloseBehavior::Quit,
+            _ => CloseBehavior::Ask,
+        }
+    }
+
+    fn as_persisted(self) -> Option<&'static str> {
+        match self {
+            CloseBehavior::Ask => None,
+            CloseBehavior::ToTray => Some("tray"),
+            CloseBehavior::Quit => Some("quit"),
+        }
+    }
 }
 
 impl UiState {
@@ -60,6 +95,23 @@ pub fn normalize_sender(sender: &str) -> String {
         None => s,
     };
     email.trim().to_ascii_lowercase()
+}
+
+/// 读当前关闭主窗口行为（缺省 Ask；未知串容错为 Ask）。
+pub fn close_behavior() -> CloseBehavior {
+    CloseBehavior::from_persisted(
+        &load().close_behavior.unwrap_or_default(),
+    )
+}
+
+/// 写关闭主窗口行为（读改写整份 ui-state.json，Ask 清除记忆）。
+pub fn set_close_behavior(behavior: CloseBehavior) {
+    let mut state = load();
+    let next = behavior.as_persisted().map(str::to_string);
+    if state.close_behavior != next {
+        state.close_behavior = next;
+        save(&state);
+    }
 }
 
 /// 记住发件人已放行远程图片（读改写整份 ui-state.json——theme/lang 等其余

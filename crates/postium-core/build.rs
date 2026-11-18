@@ -5,7 +5,6 @@
 //! `.env` 不进版本库（见 .gitignore）；模板见 `.env.example`。
 
 use std::path::PathBuf;
-use std::process::exit;
 
 fn main() {
     // 从本 crate 目录向上逐级查找 .env（约定放工作区根）
@@ -34,12 +33,14 @@ fn main() {
     println!("cargo:rerun-if-changed={}", env_file.display());
     println!("cargo:rerun-if-changed=build.rs");
 
-    let Ok(content) = std::fs::read_to_string(&env_file) else {
-        // 没有 .env 不视为错误：编译可继续，OAuth2 启动时由
-        // ensure_credentials 给出带指引的明确错误
-        eprintln!("build.rs: 未找到 .env（从 {} 向上查找）", manifest_dir.display());
-        return;
-    };
+    // 文件已注入的凭据键（进程 env 回退的去重 + 缺失告警判定依据）
+    let mut injected_keys = std::collections::HashSet::new();
+    // 没有 .env 不视为错误（编译可继续，OAuth2 启动时由 ensure_credentials
+    // 给出带指引的明确错误）——空内容继续走进程 env 回退（CI 路径）
+    let content = std::fs::read_to_string(&env_file).unwrap_or_else(|_| {
+        eprintln!("build.rs: 未找到 .env（从 {} 向上查找），尝试进程环境变量", manifest_dir.display());
+        String::new()
+    });
 
     for (line_no, raw) in content.lines().enumerate() {
         let line = raw.trim();
@@ -68,23 +69,38 @@ fn main() {
         // 仅注入凭据类键，避免 .env 里的无关变量泄漏进构建环境
         if key.ends_with("_CLIENT_ID") || key.ends_with("_CLIENT_SECRET") {
             println!("cargo:rustc-env={key}={value}");
+            injected_keys.insert(key.to_string());
+        }
+    }
+
+    // 进程环境变量回退（CI 路径，线上反馈⑦）：无 .env 文件的构建环境
+    // （GitHub Actions 等）经 secrets 注入的 env 变量兜底——文件值优先，
+    // 文件未提供的凭据键查进程 env。凭据不回显日志。
+    for key in [
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "MICROSOFT_CLIENT_ID",
+        "MICROSOFT_CLIENT_SECRET",
+    ] {
+        if !injected_keys.contains(key)
+            && let Ok(value) = std::env::var(key)
+            && !value.is_empty()
+        {
+            println!("cargo:rustc-env={key}={value}");
+            injected_keys.insert(key.to_string());
         }
     }
 
     // 编译期静默凭据是易错点：没有注入任何 *_CLIENT_ID 时给出醒目提示
-    let injected_any = [
-        "MICROSOFT_CLIENT_ID",
-        "GOOGLE_CLIENT_ID",
-    ]
-    .iter()
-    .any(|k| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false));
+    // （查注入结果集合——原实现查进程 env，.env 注入成功也误报告警）
+    let injected_any = ["MICROSOFT_CLIENT_ID", "GOOGLE_CLIENT_ID"]
+        .iter()
+        .any(|k| injected_keys.contains(*k));
     if !injected_any {
-        eprintln!(
-            "build.rs: 工作区根 .env 中未找到有效的 OAuth2 客户端 ID\n\
-             （需要 MICROSOFT_CLIENT_ID / GOOGLE_CLIENT_ID）。\n\
-             OAuth2 登录将在启动授权时返回明确错误；密码型登录不受影响。"
+        // cargo:warning：进编译日志（CI 可观测「凭据未注入」——值不回显）。
+        // 不视为构建失败：保持其他功能可构建/可测试。
+        println!(
+            "cargo:warning=build.rs: 未注入任何 OAuth2 客户端 ID（需要 MICROSOFT_CLIENT_ID / GOOGLE_CLIENT_ID，来源 .env 文件或环境变量）。OAuth2 登录将在启动授权时报错；密码型登录不受影响"
         );
-        // 不 exit(1)：保持其他功能可构建/可测试
-        let _ = exit;
     }
 }

@@ -15,7 +15,7 @@ use postium_core::api::CoreApi;
 use crate::app::AppShell;
 use crate::nav::NavTarget;
 
-fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx) {
+pub(crate) fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx) {
     let (sync_tx, sync_rx) = smol::channel::bounded(256);
     let api = crate::runtime::runtime()
         .block_on(async { CoreApi::init(dir, true, false, sync_tx).await })
@@ -32,7 +32,7 @@ fn boot(dir: &std::path::Path) -> (Arc<CoreApi>, postium_core::api::SyncEventRx)
 /// （theme/lang 与 remote_image_senders 不重叠，读改写交错最坏丢一次对方
 /// 字段写入，不破坏各自断言）。目录句柄泄漏持有——进程存活期间不得回收。
 static E2E_DATA_DIR: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-fn force_e2e_data_dir() {
+pub(crate) fn force_e2e_data_dir() {
     E2E_DATA_DIR.get_or_init(|| {
         let dir = tempfile::tempdir().expect("E2E 数据目录创建失败");
         let path = dir.path().to_path_buf();
@@ -49,12 +49,23 @@ fn force_e2e_data_dir() {
 /// 文件写）。锁只在这两个测试体内持有，测试结束随 guard 释放。
 static UI_STATE_FILE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn with_app<R>(cx: &mut VisualTestContext, f: impl FnOnce(&gpui_pre::App) -> R) -> R {
+/// ui-state.json 写者串行锁的进程外取用（e2e_mail_menu_tests 等新增写者
+/// 测试纳入同一串行域，防并行交错丢写）。
+pub(crate) fn ui_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    UI_STATE_FILE_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn with_app<R>(cx: &mut VisualTestContext, f: impl FnOnce(&gpui_pre::App) -> R) -> R {
     cx.update(|_, app| f(app))
 }
 
 /// 在 &mut App 上执行（实体更新需要可变上下文）。
-fn with_app_mut<R>(cx: &mut VisualTestContext, f: impl FnOnce(&mut gpui_pre::App) -> R) -> R {
+pub(crate) fn with_app_mut<R>(
+    cx: &mut VisualTestContext,
+    f: impl FnOnce(&mut gpui_pre::App) -> R,
+) -> R {
     cx.update(|_, app| f(app))
 }
 
@@ -67,7 +78,7 @@ fn with_window_mut<R>(
 }
 
 #[track_caller]
-fn wait_for<T>(
+pub(crate) fn wait_for<T>(
     cx: &mut VisualTestContext,
     mut f: impl FnMut(&mut VisualTestContext) -> Option<T>,
 ) -> T {
@@ -81,7 +92,7 @@ fn wait_for<T>(
     panic!("等待条件超时");
 }
 
-fn setup(cx: &mut gpui_pre::App) {
+pub(crate) fn setup(cx: &mut gpui_pre::App) {
     gpui_kit::init(cx);
     postium_editor::init(cx);
     cx.set_global(crate::i18n::I18nGlobal {
@@ -1931,7 +1942,8 @@ fn dav_config_modal_opens_and_closes_on_escape(cx: &mut TestAppContext) {
 struct HtmlRenderProbe {
     doc: postium_html::HtmlDocument,
     /// 链接点击回调（Task 10：e2e 注入捕获闭包断言 SafeUrl 通路）。
-    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + 'static>,
+    /// `Send + Sync`：渲染管线回调口径（MailView 渲染闭包跨线程句柄，S1）。
+    on_link: Arc<dyn Fn(&postium_html::SafeUrl) + Send + Sync + 'static>,
 }
 
 impl gpui_kit::Render for HtmlRenderProbe {

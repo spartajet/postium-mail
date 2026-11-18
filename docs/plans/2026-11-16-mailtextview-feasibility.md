@@ -105,3 +105,26 @@ crates/postium-ui/src/views/mail_text_view.rs（新文件，约 900-1200 行）
 `on_link_click`（链接点击回调）。缺的仍是 IR 注入与富样式 run。若将来走
 TextView 路线，正确姿势是 fork/上游扩展其 run 注入，而非 `html()` 直喂
 原文——即 P1 自研 MailTextView 的理由依旧成立。
+
+## 七、实施结论（2026-11-17，feat/mailview-renderer 已落地）
+
+§六的分析在 0.10 复核后被实施推翻并升级为**混合自定义块架构**——TextView
+当块流宿主，全部视觉与交互由自有渲染内核接管：
+
+- **补丁**（spartajet/gpui-kit `mailview-ext`，上游 PR #4005）：新增
+  `html_block_parser` / `html_block_renderer`（对称复制 markdown 已有模式）
+  + `html_with_extensions`（扩展参与首次解析，免二次重解析/首帧闪）+ 形状
+  比较放宽（每帧重建闭包零重解析）。上游 1735 测试零扰动。
+- **数据通道**：IR 顶层块 → `serialize_marker_html` 索引占位
+  （`<div data-mb="i">`）→ 认领解析器 → 自定义块 → 块渲染器回读 IR。
+  正文内容不进标记 HTML——绕开 §六"绕过 sanitize"论据（内容只走 IR），
+  富样式/表格/折叠零降级（推翻 §六论据 ③ 的取舍前提）。
+- **路由**：email_detail.html_body 分流，全类型已迁入（S2/S3 放开），
+  e2e 66 项 × 3 并发模式全绿裁决（含 aliyun 真实模板、colspan 比例、
+  引用折叠、图片门控）。
+- **状态**：TextViewState 按 (email_id, content hash) 缓存于 DetailStore
+  （容量 8，深浅通道共用——标记与通道无关）。
+- **遗留 v2 项**：scrollable 虚拟滚动（需预计算划选组表配套）、
+  `link_tooltip` 悬停反钓鱼、上游 PR 合入后移除 [patch]。
+
+§五的 P0（右键菜单/图片另存为）与本路线正交，仍待立项。

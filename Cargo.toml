@@ -3,6 +3,13 @@ resolver = "2"
 members = ["crates/postium-core", "crates/postium-editor", "crates/postium-ui", "crates/postium-html"]
 exclude = ["src-tauri", "e2e"]
 
+# MailView 扩展补丁：gpui-base 0.10 增加 html_block_parser/html_block_renderer
+# （HTML 格式的自定义块扩展点，对称复制其 markdown 已有模式）。
+# 上游 PR 合入后删除本段即可回归官方版本。
+# fork 维护纪律：单 commit 补丁，基于 v0.10.0 tag 的 mailview-ext 分支。
+[patch.crates-io]
+gpui-base = { git = "https://github.com/spartajet/gpui-kit", branch = "mailview-ext" }
+
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
@@ -19,4 +26,5 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "fmt", "ansi"] }
+tracing-appender = "0.2"
 async-trait = "0.1"

@@ -37,10 +37,22 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
+      # OAuth2 凭据经 secrets 注入构建期（线上反馈⑦：build.rs 进程 env
+      # 回退——无 .env 文件的 CI 也能编译出带凭据的二进制）
       - name: Build workspace
         run: cargo build --workspace
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
 
       # 单独跑应用二进制构建产物检查（可选发布前置）
       # 全部测试（含 postium-ui 的 GPUI E2E，headless 无需显示服务器）
       - name: Run all tests
         run: cargo test --workspace
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
