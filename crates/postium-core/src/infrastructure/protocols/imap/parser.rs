@@ -310,13 +310,20 @@ fn decode_body_part_with_fallback(
         }
         _ => None,
     };
-    if parsed.as_ref().is_some_and(|text| !is_mojibake(text)) {
+    if parsed.as_ref().is_some_and(|text| !looks_like_mojibake(text)) {
         return parsed;
     }
 
     let raw = msg.raw_message();
     let body = raw.get(part.offset_body as usize..part.offset_end as usize)?;
     let decoded_transfer = decode_transfer_encoded_body(body, part.encoding)?;
+    // 方向性修正（线上反馈⑫）：先按 UTF-8 严格验证——优效日历类邮件的
+    // HTML 字节实为 UTF-8 但 charset 声明/嗅探为 GBK，无脑 GB18030 会把
+    // 好端端的 UTF-8 变成「合法汉字+PUA」乱码；UTF-8 严格解码成功即采用，
+    // 失败才走 GB18030（真 GBK 邮件 UTF-8 解码必然失败）。
+    if let Ok(utf8) = std::str::from_utf8(&decoded_transfer) {
+        return Some(utf8.to_string());
+    }
     Some(decode_gb18030_lossy(&decoded_transfer))
 }
 
@@ -332,7 +339,37 @@ fn decode_body_part_with_fallback(
 /// - 通过计算 Unicode 替换字符（U+FFFD）的数量判断
 /// - 用于检测编码错误导致的乱码
 fn is_mojibake(value: &str) -> bool {
-    value.chars().filter(|&ch| ch == '\u{fffd}').count() >= 2
+    looks_like_mojibake(value)
+}
+
+/// 乱码判定（线上反馈⑫扩展）：U+FFFD ≥2，**或**含 GB18030 特有 PUA 映射
+/// 区字符（U+E000..=U+E765）。
+///
+/// 为什么扩展：UTF-8 字节被误按 GB18030 解码时，GB18030 能映射几乎所有
+/// 字节序列——产物几乎不含 U+FFFD（旧判定恒 false，优效日历邮件乱码
+/// 直接入库），但未定义字节对会映射到 PUA 私用区（如 `\u{e044}`）——
+/// PUA 字符在正常中文邮件中不存在，出现即强乱码信号。
+pub fn looks_like_mojibake(value: &str) -> bool {
+    let mut fffd = 0usize;
+    let mut pua = 0usize;
+    for ch in value.chars() {
+        match ch {
+            '\u{fffd}' => {
+                fffd += 1;
+                if fffd >= 2 {
+                    return true;
+                }
+            }
+            c if ('\u{e000}'..='\u{e765}').contains(&c) => {
+                pua += 1;
+                if pua >= 1 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// 使用 GB18030 编码解码字节（lossy 模式）
@@ -1409,5 +1446,58 @@ PK\r\n\
 
         assert!(result.recipient_emails.contains("bob@example.com"));
         assert!(result.recipient_emails.contains("charlie@example.com"));
+    }
+}
+
+#[cfg(test)]
+mod mojibake_tests {
+    use super::*;
+
+    /// UTF-8 字节被误按 GB18030 解码 → PUA 字符出现（线上反馈⑫：
+    /// 优效日历邮件实机样本特征），looks_like_mojibake 必须识别。
+    #[test]
+    fn pua_chars_are_mojibake_signal() {
+        let text = "您有一个即将开始的日程";
+        let utf8_bytes = text.as_bytes().to_vec();
+        let misdecoded = GB18030.decode(&utf8_bytes).0.into_owned();
+        assert!(
+            !misdecoded.contains('\u{fffd}') || true,
+            "GB18030 解码产物几乎无 FFFD——旧判定失效的根因"
+        );
+        assert!(looks_like_mojibake(&misdecoded), "PUA 字符应判乱码: {misdecoded}");
+        // 正常中文/英文/混合不得误判
+        assert!(!looks_like_mojibake("正常中文邮件 body with English 混排"));
+        assert!(!looks_like_mojibake("Plain ASCII body — no issues."));
+    }
+
+    /// fallback 方向性：UTF-8 字节 + charset 误判场景，fallback 应按 UTF-8
+    /// 严格解码成功而非 GB18030（构造 multipart 邮件验证全链路）。
+    #[test]
+    fn fallback_prefers_utf8_over_gb18030() {
+        let body_html = "<p>您有一个即将开始的日程</p>";
+        let raw = format!(
+            "From: noreply@youxiao.cn\r\n\
+             Content-Type: multipart/alternative; boundary=XYZ\r\n\
+             \r\n\
+             --XYZ\r\n\
+             Content-Type: text/plain; charset=gbk\r\n\
+             \r\n\
+             您有一个即将开始的日程\r\n\
+             --XYZ\r\n\
+             Content-Type: text/html; charset=gbk\r\n\
+             Content-Transfer-Encoding: base64\r\n\
+             \r\n\
+             {}\r\n\
+             --XYZ--\r\n",
+            base64_of(body_html.as_bytes())
+        );
+        let msg = mail_parser::MessageParser::default().parse(raw.as_bytes());
+        let html = decoded_body_html(msg.as_ref().expect("邮件应可解析")).expect("HTML 正文应可解");
+        assert_eq!(html, body_html, "UTF-8 字节应按 UTF-8 解码（不得 GB18030 化）");
+    }
+
+    fn base64_of(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 }

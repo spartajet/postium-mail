@@ -155,8 +155,18 @@ impl DetailStore {
                                 ui_state::normalize_sender(&detail.email.sender_email);
                             let sender_allowed = !sender.is_empty()
                                 && ui_state::load().allows_remote_images_from(&sender);
-                            // 正文 HTML 原文透传（图片三源由渲染层按 ImageRef 消费）
-                            store.html = Some(detail.body_html.clone().unwrap_or_default());
+                            // 正文 HTML 原文透传（图片三源由渲染层按 ImageRef 消费）。
+                            // 乱码兜底（线上反馈⑫）：解析器 charset 误判漏网的
+                            // 乱码 HTML（优效日历类：UTF-8 字节被按 GBK 解码，
+                            // 产物含 GB18030-PUA 字符）→ 弃用 HTML 走纯文本
+                            // 渲染（body_text 声明路径正常，内容完好）——
+                            // 已入库的乱码存量由此恢复可读。
+                            let html = detail.body_html.clone().unwrap_or_default();
+                            if html.is_empty()
+                                || !postium_core::infrastructure::protocols::imap::parser::looks_like_mojibake(&html)
+                            {
+                                store.html = Some(html);
+                            }
                             store.detail = Some(detail);
                             store.images.attachments = attachments;
                             let auto_allow =
