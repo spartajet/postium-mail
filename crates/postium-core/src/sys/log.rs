@@ -16,7 +16,9 @@ fn is_known_noise(file: Option<&str>) -> bool {
     }
 }
 
-pub fn setup_logging() {
+/// 初始化日志。返回 non-blocking writer 的 [`WorkerGuard`]——**调用方必须
+/// 在整个进程生命周期持有**（drop 即停 flush worker，缓冲区日志丢失）。
+pub fn setup_logging(logs_dir: std::path::PathBuf) -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::Layer as _;
     use tracing_subscriber::layer::SubscriberExt;
@@ -47,9 +49,12 @@ pub fn setup_logging() {
         }
         #[cfg(not(debug_assertions))]
         {
-            // release 默认 WARN；同样压制 html5ever 的 RcDom 局限告警
-            // （foster parenting，线上反馈④——见 dev 分支注释）
-            EnvFilter::new("warn,html5ever=error")
+            // release：无控制台（windows_subsystem），日志只落文件——文件
+            // 无刷屏负担，级别放宽到 INFO（启动迁移/预载耗时等运维日志
+            // 可查）；依赖噪音压制与 dev 分支同口径
+            EnvFilter::new(
+                "info,gpui_pre=warn,gpui_pre_windows=warn,tao=warn,globset=warn,reqwest=warn,hyper_util=warn,html5ever=error,markup5ever=warn,selectors=warn",
+            )
         }
     });
 
@@ -61,10 +66,31 @@ pub fn setup_logging() {
         .with_ansi(true)
         .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
             !is_known_noise(meta.file())
-        }));
+        }))
+        .with_filter(filter.clone());
 
-    let layered = fmt_layer.with_filter(filter);
-    tracing_subscriber::registry().with(layered).init();
+    // 文件日志（线上反馈⑩）：release 构建无控制台（windows_subsystem），
+    // 日志必须落盘才可查——`~/.postium/logs/postium.log`（单文件追加，
+    // tracing-appender 非阻塞 writer：写盘不拖慢 UI 线程；guard 返回调用
+    // 方持有，进程退出时 flush 缓冲）。debug 双写（控制台 + 文件），release
+    // 仅文件。文件无 ANSI 色彩。
+    let (file_writer, guard) = tracing_appender::non_blocking(
+        tracing_appender::rolling::never(logs_dir, "postium.log"),
+    );
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_ansi(false)
+        .with_writer(file_writer)
+        .with_filter(tracing_subscriber::filter::filter_fn(|meta| {
+            !is_known_noise(meta.file())
+        }))
+        .with_filter(filter);
+
+    tracing_subscriber::registry().with(fmt_layer).with(file_layer).init();
+    guard
 }
 
 #[cfg(test)]

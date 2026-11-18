@@ -1,4 +1,12 @@
 //! Postium Mail 应用入口：数据目录 → 核心服务装配 → GPUI 主窗口。
+//!
+//! Windows 子系统（线上反馈⑩）：release 构建设为 `windows`——不分配控制台
+//! 窗口（GUI 应用默认 console 子系统会随启动弹黑窗）。debug 保留控制台
+//! 便于开发期看 stderr 日志；两配置的日志都同时落
+//! `~/.postium/logs/postium.log`（滚动文件，见 sys/log.rs）。
+
+// 位置必须在所有 items 之前（crate 级内部属性）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod i18n;
@@ -34,14 +42,15 @@ pub fn resolve_data_dir() -> PathBuf {
 }
 
 fn main() {
-    postium_core::setup_logging();
+    let data_dir = resolve_data_dir();
+    // 日志 flush worker 的 guard 必须全程持有（drop 即停 flush，缓冲丢失）
+    let _log_guard = postium_core::setup_logging(data_dir.join("logs"));
     tracing::info!("Postium Mail (GPUI) 启动中...");
 
     // --screenshot <file.png>：为 Craft Anything 构建检查输出截图后退出
     let screenshot = screenshot::init_from_args();
     let screenshot_mode = screenshot.is_some();
 
-    let data_dir = resolve_data_dir();
     let e2e = std::env::var("POSTIUM_E2E").ok().as_deref() == Some("1");
     let e2e_truth = std::env::var("POSTIUM_E2E_TRUTH").ok().as_deref() == Some("1");
 
